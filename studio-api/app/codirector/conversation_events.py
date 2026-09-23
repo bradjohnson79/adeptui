@@ -105,6 +105,12 @@ def event_to_message(event: CoDirectorConversationEvent) -> dict[str, Any]:
         msg["messageType"] = event.message_type
     if event.status:
         msg["status"] = event.status
+    for item in attachments:
+        if isinstance(item, dict) and item.get("kind") == "execution":
+            payload = item.get("execution")
+            if isinstance(payload, dict) and payload.get("execution_id"):
+                msg["execution"] = payload
+            break
     return msg
 
 
@@ -147,12 +153,7 @@ def _should_skip_compacted(row: CoDirectorConversationEvent, cutoff: int) -> boo
 def fold_events(db: Session, project_id: str) -> list[dict[str, Any]]:
     """Return the ordered message list for a project from the event log."""
 
-    rows = (
-        db.query(CoDirectorConversationEvent)
-        .filter(CoDirectorConversationEvent.project_id == project_id)
-        .order_by(CoDirectorConversationEvent.sequence.asc(), CoDirectorConversationEvent.created_at.asc())
-        .all()
-    )
+    rows = _load_event_rows(db, project_id)
     cutoff = _compaction_cutoff(rows)
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -162,10 +163,74 @@ def fold_events(db: Session, project_id: str) -> list[dict[str, Any]]:
     return out
 
 
+# Message kinds that are EXECUTION/WORKFLOW state, never conversational memory.
+# They are stored durably (for UI cards / reload recovery) but must never be
+# replayed into the LLM as if they were the assistant's conversational thought.
+EXECUTION_MESSAGE_TYPES: frozenset[str] = frozenset({"execution_status", "completion", "error"})
+
+
+def _is_llm_visible_event(row: CoDirectorConversationEvent) -> bool:
+    """True when an event row belongs in the LLM's conversational memory window.
+
+    LLM-visible: user/assistant conversational message rows (any non-execution
+    message_type, including legacy rows without one) and compaction summaries.
+    NOT LLM-visible: tool_call/tool_result rows (machine state; production
+    results reach the model through dedicated context blocks), operator_* rows,
+    and execution_status/completion/error assistant rows (machine/workflow
+    state — Co-Director Intelligence Law: execution status is not the
+    assistant's conversational memory).
+    """
+
+    event_type = row.event_type or "message"
+    if event_type in ("tool_call", "tool_result"):
+        return False
+    if event_type.startswith("operator_"):
+        return False
+    if event_type == "summary":
+        return True
+    if event_type != "message":
+        return False
+    if row.role not in ("user", "assistant"):
+        return False
+    message_type = (row.message_type or "").strip()
+    return message_type not in EXECUTION_MESSAGE_TYPES
+
+
+def _load_event_rows(db: Session, project_id: str) -> list[CoDirectorConversationEvent]:
+    return (
+        db.query(CoDirectorConversationEvent)
+        .filter(CoDirectorConversationEvent.project_id == project_id)
+        .order_by(CoDirectorConversationEvent.sequence.asc(), CoDirectorConversationEvent.created_at.asc())
+        .all()
+    )
+
+
+def fold_events_for_llm(db: Session, project_id: str) -> list[dict[str, Any]]:
+    """Return the LLM-visible conversational memory for a project.
+
+    This is the server-authoritative history for Co-Director turns: user and
+    assistant conversation only. Execution status, tool traffic, and operator
+    events are durable (the UI fold keeps them) but excluded here so they can
+    never masquerade as the assistant's prior conversational thought.
+    """
+
+    rows = _load_event_rows(db, project_id)
+    cutoff = _compaction_cutoff(rows)
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if _should_skip_compacted(row, cutoff):
+            continue
+        if not _is_llm_visible_event(row):
+            continue
+        out.append(event_to_message(row))
+    return out
+
+
 def conversation_to_dict(db: Session, row: CoDirectorConversation) -> dict[str, Any]:
     """Build the legacy `GET /conversations/{project_id}` shape from events."""
 
     messages = fold_events(db, row.project_id)
+    messages = hydrate_execution_messages(db, row.project_id, messages)
     return {
         "projectId": row.project_id,
         "messages": messages,
@@ -174,6 +239,64 @@ def conversation_to_dict(db: Session, row: CoDirectorConversation) -> dict[str, 
         "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
         "revision": row.revision,
     }
+
+
+def hydrate_execution_messages(
+    db: Session,
+    project_id: str,
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Overlay durable execution packs onto chat cards. Pack is the authority."""
+    try:
+        from .execution.advance import advance_execution_pack
+        from .execution.pack_store import list_packs_raw, load_pack
+        from .execution.status_messenger import (
+            _build_execution_status_text,
+            _message_kind_for_status,
+            _serialize_plan_summary,
+        )
+    except Exception:
+        return messages
+
+    used: set[str] = set()
+
+    def apply_pack(msg: dict[str, Any], execution_id: str) -> None:
+        plan = advance_execution_pack(db, project_id, execution_id) or load_pack(
+            db, project_id, execution_id
+        )
+        if plan is None:
+            return
+        summary = _serialize_plan_summary(plan)
+        msg["execution"] = summary
+        msg["content"] = _build_execution_status_text(summary)
+        msg["messageType"] = _message_kind_for_status(summary.get("status") or "")
+        used.add(execution_id)
+
+    for msg in messages:
+        raw = msg.get("execution") if isinstance(msg.get("execution"), dict) else {}
+        execution_id = str((raw or {}).get("execution_id") or "").strip()
+        if execution_id:
+            apply_pack(msg, execution_id)
+
+    orphans = [
+        msg
+        for msg in messages
+        if str(msg.get("messageType") or "") in {"execution_status", "completion", "error"}
+        and not str((msg.get("execution") or {}).get("execution_id") or "").strip()
+    ]
+    if not orphans:
+        return messages
+    try:
+        packs = [
+            pack
+            for pack in list_packs_raw(db, project_id)
+            if pack.execution_id not in used
+        ]
+    except Exception:
+        return messages
+    for msg, pack in zip(reversed(orphans), packs):
+        apply_pack(msg, pack.execution_id)
+    return messages
 
 
 # -----------------------------------------------------------------------
@@ -411,6 +534,7 @@ __all__ = [
     "AppendBatchResult",
     "AppendResult",
     "EventInput",
+    "EXECUTION_MESSAGE_TYPES",
     "append_events",
     "append_single",
     "conversation_to_dict",
@@ -418,4 +542,5 @@ __all__ = [
     "delete_all_events",
     "event_to_message",
     "fold_events",
+    "fold_events_for_llm",
 ]

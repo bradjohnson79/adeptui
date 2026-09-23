@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from typing import Any
@@ -14,6 +15,7 @@ from .constants import (
     COMFY_PORT,
     COMFY_QUEUE_PATH,
     COMFY_STATS_PATH,
+    DEFAULT_LOCAL_LLM_MODEL,
     OLLAMA_PORT,
     OLLAMA_TAGS_PATH,
 )
@@ -61,6 +63,60 @@ def comfy_queue_running(host: str = API_HOST, port: int = COMFY_PORT) -> int:
 
 def ollama_healthy(host: str = API_HOST, port: int = OLLAMA_PORT) -> bool:
     return http_ok(f"http://{host}:{port}{OLLAMA_TAGS_PATH}", timeout=5.0)
+
+
+def required_local_llm_model() -> str:
+    env = (os.environ.get("ADEPT_OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL") or "").strip()
+    if env:
+        return env
+    try:
+        from pathlib import Path
+
+        cfg_path = Path(__file__).resolve().parents[2] / "data" / "codirector_config.json"
+        if cfg_path.is_file():
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            selected = str(data.get("selectedModel") or data.get("primaryModel") or "").strip()
+            if selected:
+                return selected
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return DEFAULT_LOCAL_LLM_MODEL
+
+
+def ollama_model_names(tags: dict[str, Any] | None) -> list[str]:
+    if not tags:
+        return []
+    models = tags.get("models")
+    if not isinstance(models, list):
+        return []
+    names: list[str] = []
+    for item in models:
+        if isinstance(item, dict):
+            name = item.get("name") or item.get("model")
+            if name:
+                names.append(str(name))
+        elif isinstance(item, str) and item.strip():
+            names.append(item.strip())
+    return names
+
+
+def ollama_model_ready(
+    required: str | None = None,
+    *,
+    tags: dict[str, Any] | None = None,
+    host: str = API_HOST,
+    port: int = OLLAMA_PORT,
+) -> bool:
+    """Daemon /api/tags ≠ required model loadable. Match exact or :latest suffix."""
+    wanted = (required or required_local_llm_model()).strip().lower()
+    if not wanted:
+        return False
+    payload = tags if tags is not None else fetch_json(f"http://{host}:{port}{OLLAMA_TAGS_PATH}", timeout=5.0)
+    names = [n.lower() for n in ollama_model_names(payload)]
+    for name in names:
+        if name == wanted or name.startswith(wanted + ":") or wanted.startswith(name + ":"):
+            return True
+    return False
 
 
 def tunnel_process_healthy(state: SupervisorState) -> bool:

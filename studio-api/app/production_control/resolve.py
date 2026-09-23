@@ -335,17 +335,6 @@ def resolve_modality(project_id: str, modality: Modality) -> ResolvedSelection:
     elif descriptor and getattr(descriptor, "executionClass", None) == "docker_local":
         # W47: Docker Local — no silent substitute; start/repair required
         selection = _refresh_docker_executable(selection, descriptor)
-    elif modality == "video" and selection.activeModelId in (
-        "hunyuan-video-1.5-local",
-        "hunyuan-video-13b-local",
-    ):
-        from ..video_runtime.hunyuan_providers import describe_provider
-
-        hy = describe_provider(selection.activeModelId)
-        selection.executable = hy.executable
-        selection.gpu = "Ready" if hy.executable else "Unknown"
-        selection.blockedReason = None if hy.executable else "Hunyuan provider requires Setup install/verify"
-        selection.runtime = hy.engine
 
     if not selection.executable and not selection.blockedReason:
         if modality == "audio":

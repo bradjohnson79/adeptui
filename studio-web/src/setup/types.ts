@@ -341,6 +341,12 @@ export interface SetupSummaryCounts {
   not_installed: number;
   needs_attention: number;
   update_available?: number;
+  required_ready?: number;
+  required_not_installed?: number;
+  required_needs_attention?: number;
+  optional_ready?: number;
+  optional_not_installed?: number;
+  optional_needs_attention?: number;
 }
 
 export type SetupOverallStatus =

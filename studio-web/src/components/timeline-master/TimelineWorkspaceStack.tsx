@@ -3,13 +3,23 @@ import {
   DEFAULT_LEFT_WIDTH,
   DEFAULT_RIGHT_WIDTH,
   DEFAULT_VIEWER_PRESET,
+  MAGI_DEFAULT_VIEWER_RATIO,
+  MAGI_LAYOUT_EVENT,
   TIMELINE_LAYOUT_EVENT,
+  clampMagiViewerHeight,
   clampViewerHeight,
   createTimelineViewerSnapshot,
   getPresetViewerRatio,
+  loadMagiCenterSplit,
+  loadMagiProjectPreviewHeightRatio,
   loadProjectPreviewHeightRatio,
   loadTimelineWorkspaceLayout,
+  magiViewerHeightBounds,
+  resetMagiCenterSplit,
+  resolveMagiViewerHeight,
   resolveViewerHeight,
+  saveMagiCenterSplit,
+  saveMagiProjectPreviewHeightRatio,
   saveProjectPreviewHeightRatio,
   saveTimelineWorkspaceLayout,
   viewerHeightBounds,
@@ -28,15 +38,29 @@ export function TimelineWorkspaceStack({
   timeline,
   extraControls,
   projectId,
+  splitProfile = "timeline",
+  expanded = false,
 }: {
   monitor: ReactNode;
   timeline: ReactNode;
   extraControls?: ReactNode;
   projectId?: string | null;
+  splitProfile?: "timeline" | "magi";
+  expanded?: boolean;
 }) {
+  const isMagi = splitProfile === "magi";
   const rootRef = useRef<HTMLDivElement>(null);
   const dividerRef = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(() => {
+    if (isMagi) {
+      const magi = loadMagiCenterSplit();
+      const projectRatio = loadMagiProjectPreviewHeightRatio(projectId);
+      return {
+        ...loadTimelineWorkspaceLayout(),
+        viewerPreset: "balanced" as TimelineViewerPreset,
+        viewerHeight: projectRatio ?? magi.viewerHeight,
+      };
+    }
     const base = loadTimelineWorkspaceLayout();
     const projectRatio = loadProjectPreviewHeightRatio(projectId);
     if (projectRatio != null) {
@@ -58,12 +82,14 @@ export function TimelineWorkspaceStack({
   layoutRef.current = layout;
 
   useEffect(() => {
-    const projectRatio = loadProjectPreviewHeightRatio(projectId);
+    const projectRatio = isMagi
+      ? loadMagiProjectPreviewHeightRatio(projectId)
+      : loadProjectPreviewHeightRatio(projectId);
     if (projectRatio == null) return;
     setLayout((prev) =>
       prev.viewerHeight === projectRatio ? prev : { ...prev, viewerHeight: projectRatio },
     );
-  }, [projectId]);
+  }, [isMagi, projectId]);
 
   useEffect(() => {
     const node = rootRef.current;
@@ -88,39 +114,63 @@ export function TimelineWorkspaceStack({
   }, []);
 
   const bounds = useMemo(
-    () => viewerHeightBounds(containerSize.height, containerSize.width),
-    [containerSize.height, containerSize.width],
+    () =>
+      isMagi
+        ? magiViewerHeightBounds(containerSize.height)
+        : viewerHeightBounds(containerSize.height, containerSize.width),
+    [containerSize.height, containerSize.width, isMagi],
   );
 
-  const resolvedHeightPx = useMemo(
-    () => resolveViewerHeight(layout, containerSize.height, containerSize.width),
-    [containerSize.height, containerSize.width, layout],
-  );
+  const resolvedHeightPx = useMemo(() => {
+    if (isMagi) {
+      const ratio = expanded ? 0.62 : layout.viewerHeight;
+      return resolveMagiViewerHeight(ratio, containerSize.height);
+    }
+    return resolveViewerHeight(layout, containerSize.height, containerSize.width);
+  }, [containerSize.height, containerSize.width, expanded, isMagi, layout]);
 
   const viewerHeightPx = liveHeightPx ?? resolvedHeightPx;
 
   const persistLayout = useCallback((patch: Parameters<typeof saveTimelineWorkspaceLayout>[0]) => {
+    if (isMagi) {
+      const saved = saveMagiCenterSplit({
+        viewerHeight: typeof patch.viewerHeight === "number" ? patch.viewerHeight : undefined,
+        monitorHeightPx: typeof patch.monitorHeightPx === "number" ? patch.monitorHeightPx : undefined,
+      });
+      setLayout((prev) => ({ ...prev, viewerHeight: saved.viewerHeight, viewerPreset: "balanced" }));
+      return { ...layoutRef.current, viewerHeight: saved.viewerHeight, viewerPreset: "balanced" as TimelineViewerPreset };
+    }
     const next = saveTimelineWorkspaceLayout(patch);
     setLayout(next);
     return next;
-  }, []);
+  }, [isMagi]);
 
   const commitHeight = useCallback(
     (px: number, options?: { persistProject?: boolean }) => {
       if (fullscreenViewer) return resolvedHeightPx;
-      const next = clampViewerHeight(px, containerSize.height, containerSize.width);
+      const next = isMagi
+        ? clampMagiViewerHeight(px, containerSize.height)
+        : clampViewerHeight(px, containerSize.height, containerSize.width);
       const ratio = Number((next / Math.max(containerSize.height, 1)).toFixed(4));
       persistLayout({ viewerHeight: ratio, monitorHeightPx: next });
       if (options?.persistProject !== false) {
-        saveProjectPreviewHeightRatio(projectId, ratio);
+        if (isMagi) saveMagiProjectPreviewHeightRatio(projectId, ratio);
+        else saveProjectPreviewHeightRatio(projectId, ratio);
       }
       return next;
     },
-    [containerSize.height, containerSize.width, fullscreenViewer, persistLayout, projectId, resolvedHeightPx],
+    [containerSize.height, containerSize.width, fullscreenViewer, isMagi, persistLayout, projectId, resolvedHeightPx],
   );
 
   useEffect(() => {
+    const eventName = isMagi ? MAGI_LAYOUT_EVENT : TIMELINE_LAYOUT_EVENT;
     const onLayout = (event: Event) => {
+      if (isMagi) {
+        const detail = (event as CustomEvent<{ viewerHeight?: number }>).detail;
+        const viewerHeight = detail?.viewerHeight ?? loadMagiCenterSplit().viewerHeight;
+        setLayout((prev) => (prev.viewerHeight === viewerHeight ? prev : { ...prev, viewerHeight }));
+        return;
+      }
       const detail = (event as CustomEvent<TimelineWorkspaceLayout>).detail;
       const next = detail || loadTimelineWorkspaceLayout();
       setLayout((prev) => {
@@ -136,23 +186,27 @@ export function TimelineWorkspaceStack({
         return next;
       });
     };
-    window.addEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
-    return () => window.removeEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
-  }, []);
+    window.addEventListener(eventName, onLayout as EventListener);
+    return () => window.removeEventListener(eventName, onLayout as EventListener);
+  }, [isMagi]);
 
   // Clamp stored height when the workspace shrinks (inspector open, window resize, etc.).
   useEffect(() => {
     if (fullscreenViewer || liveHeightPx != null) return;
-    const clamped = clampViewerHeight(resolvedHeightPx, containerSize.height, containerSize.width);
+    const clamped = isMagi
+      ? clampMagiViewerHeight(resolvedHeightPx, containerSize.height)
+      : clampViewerHeight(resolvedHeightPx, containerSize.height, containerSize.width);
     if (clamped !== resolvedHeightPx) {
       const ratio = Number((clamped / Math.max(containerSize.height, 1)).toFixed(4));
       persistLayout({ viewerHeight: ratio, monitorHeightPx: clamped });
-      saveProjectPreviewHeightRatio(projectId, ratio);
+      if (isMagi) saveMagiProjectPreviewHeightRatio(projectId, ratio);
+      else saveProjectPreviewHeightRatio(projectId, ratio);
     }
   }, [
     containerSize.height,
     containerSize.width,
     fullscreenViewer,
+    isMagi,
     liveHeightPx,
     persistLayout,
     projectId,
@@ -164,38 +218,55 @@ export function TimelineWorkspaceStack({
       if (fullscreenViewer) {
         setFullscreenViewer(false);
       }
-      const targetRatio = Number(getPresetViewerRatio(preset, containerSize.width).toFixed(4));
-      const resolved = clampViewerHeight(
-        targetRatio * Math.max(containerSize.height, 1),
-        containerSize.height,
-        containerSize.width,
-      );
+      const targetRatio = isMagi
+        ? MAGI_DEFAULT_VIEWER_RATIO
+        : Number(getPresetViewerRatio(preset, containerSize.width).toFixed(4));
+      const resolved = isMagi
+        ? clampMagiViewerHeight(targetRatio * Math.max(containerSize.height, 1), containerSize.height)
+        : clampViewerHeight(
+            targetRatio * Math.max(containerSize.height, 1),
+            containerSize.height,
+            containerSize.width,
+          );
       const ratio = Number((resolved / Math.max(containerSize.height, 1)).toFixed(4));
       persistLayout({
-        viewerPreset: preset,
+        viewerPreset: isMagi ? "balanced" : preset,
         viewerHeight: ratio,
         monitorHeightPx: resolved,
       });
-      saveProjectPreviewHeightRatio(projectId, ratio);
+      if (isMagi) saveMagiProjectPreviewHeightRatio(projectId, ratio);
+      else saveProjectPreviewHeightRatio(projectId, ratio);
     },
-    [containerSize.height, containerSize.width, fullscreenViewer, persistLayout, projectId],
+    [containerSize.height, containerSize.width, fullscreenViewer, isMagi, persistLayout, projectId],
   );
 
   const fitToPreset = useCallback(() => {
-    const next = resolveViewerHeight(
-      {
-        ...layoutRef.current,
-        viewerHeight: 0,
-      },
-      containerSize.height,
-      containerSize.width,
-    );
+    const next = isMagi
+      ? resolveMagiViewerHeight(MAGI_DEFAULT_VIEWER_RATIO, containerSize.height)
+      : resolveViewerHeight(
+          {
+            ...layoutRef.current,
+            viewerHeight: 0,
+          },
+          containerSize.height,
+          containerSize.width,
+        );
     commitHeight(next);
-  }, [commitHeight, containerSize.height, containerSize.width]);
+  }, [commitHeight, containerSize.height, containerSize.width, isMagi]);
 
   const resetLayout = useCallback(() => {
     setFullscreenViewer(false);
     setLiveHeightPx(null);
+    if (isMagi) {
+      const saved = resetMagiCenterSplit(projectId);
+      const resolved = clampMagiViewerHeight(
+        saved.viewerHeight * Math.max(containerSize.height, 1),
+        containerSize.height,
+      );
+      setLayout((prev) => ({ ...prev, viewerPreset: "balanced", viewerHeight: saved.viewerHeight }));
+      saveMagiProjectPreviewHeightRatio(projectId, saved.viewerHeight);
+      return resolved;
+    }
     const targetRatio = Number(getPresetViewerRatio(DEFAULT_VIEWER_PRESET, containerSize.width).toFixed(4));
     const resolved = clampViewerHeight(
       targetRatio * Math.max(containerSize.height, 1),
@@ -214,9 +285,10 @@ export function TimelineWorkspaceStack({
       rightWidth: DEFAULT_RIGHT_WIDTH,
       leftDrawerOpen: false,
       rightDrawerOpen: false,
+      previewPublishBarVisible: true,
     });
     saveProjectPreviewHeightRatio(projectId, ratio);
-  }, [containerSize.height, containerSize.width, persistLayout, projectId]);
+  }, [containerSize.height, containerSize.width, isMagi, persistLayout, projectId]);
 
   const exitFullscreen = useCallback(() => {
     const latest = loadTimelineWorkspaceLayout();
@@ -230,11 +302,16 @@ export function TimelineWorkspaceStack({
         trackDensity: snapshot.trackDensity,
         zoom: snapshot.zoom,
       });
-      saveProjectPreviewHeightRatio(projectId, snapshot.viewerHeight <= 1 ? snapshot.viewerHeight : Number((snapshot.viewerHeight / Math.max(containerSize.height, 1)).toFixed(4)));
+      const ratio =
+        snapshot.viewerHeight <= 1
+          ? snapshot.viewerHeight
+          : Number((snapshot.viewerHeight / Math.max(containerSize.height, 1)).toFixed(4));
+      if (isMagi) saveMagiProjectPreviewHeightRatio(projectId, ratio);
+      else saveProjectPreviewHeightRatio(projectId, ratio);
       return;
     }
     fitToPreset();
-  }, [containerSize.height, fitToPreset, persistLayout, projectId]);
+  }, [containerSize.height, fitToPreset, isMagi, persistLayout, projectId]);
 
   const enterFullscreen = useCallback(() => {
     persistLayout({ lastNonFullscreenLayout: createTimelineViewerSnapshot(layoutRef.current) });
@@ -243,6 +320,7 @@ export function TimelineWorkspaceStack({
   }, [persistLayout]);
 
   useEffect(() => {
+    if (isMagi) return;
     const onFocus = (event: Event) => {
       const detail = (event as CustomEvent<TimelineFocusRequest>).detail;
       if (!detail) return;
@@ -267,7 +345,7 @@ export function TimelineWorkspaceStack({
     };
     window.addEventListener(TIMELINE_FOCUS_EVENT, onFocus as EventListener);
     return () => window.removeEventListener(TIMELINE_FOCUS_EVENT, onFocus as EventListener);
-  }, [applyPreset, enterFullscreen, exitFullscreen, fitToPreset, fullscreenViewer, persistLayout, resetLayout]);
+  }, [applyPreset, enterFullscreen, exitFullscreen, fitToPreset, fullscreenViewer, isMagi, persistLayout, resetLayout]);
 
   useEffect(() => {
     if (!fullscreenViewer) return;
@@ -328,11 +406,13 @@ export function TimelineWorkspaceStack({
     const state = dragRef.current;
     if (!state.active || state.pointerId !== e.pointerId) return;
     // Natural top-pane math: pointer down enlarges preview; pointer up shrinks it.
-    const next = clampViewerHeight(
-      state.startHeight + (e.clientY - state.startY),
-      containerSize.height,
-      containerSize.width,
-    );
+    const next = isMagi
+      ? clampMagiViewerHeight(state.startHeight + (e.clientY - state.startY), containerSize.height)
+      : clampViewerHeight(
+          state.startHeight + (e.clientY - state.startY),
+          containerSize.height,
+          containerSize.width,
+        );
     setLiveHeightPx(next);
   };
 

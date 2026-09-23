@@ -28,6 +28,8 @@ CAPABILITY_KEYS = (
     "upscaling",
     "background_removal",
     "relighting",
+    "elevenlabs.voice",
+    "elevenlabs.sfx",
 )
 
 # Status reflects Adept UI certified execution paths — not vendor marketing pages.
@@ -54,6 +56,8 @@ _MATRIX: dict[str, dict[str, CapabilityStatus]] = {
         "upscaling": "Available but Uncertified",
         "background_removal": "Available but Uncertified",
         "relighting": "Unsupported",
+        "elevenlabs.voice": "Testing",
+        "elevenlabs.sfx": "Testing",
     },
     "wavespeed": {
         "text_to_image": "Testing",
@@ -77,6 +81,8 @@ _MATRIX: dict[str, dict[str, CapabilityStatus]] = {
         "upscaling": "Available but Uncertified",
         "background_removal": "Available but Uncertified",
         "relighting": "Unsupported",
+        "elevenlabs.voice": "Testing",
+        "elevenlabs.sfx": "Unsupported",
     },
     # fal: existing Adept queue adapters certify video engines; image inventory is not yet executable.
     "fal": {
@@ -101,6 +107,8 @@ _MATRIX: dict[str, dict[str, CapabilityStatus]] = {
         "upscaling": "Available but Uncertified",
         "background_removal": "Unsupported",
         "relighting": "Unsupported",
+        "elevenlabs.voice": "Testing",
+        "elevenlabs.sfx": "Testing",
     },
 }
 

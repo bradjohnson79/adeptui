@@ -54,7 +54,7 @@ test.describe("@critical @isolated codirector status cross-check", () => {
       await page.getByTestId("codirector-overflow-panel").getByRole("button", { name: "Status" }).click();
       await expect(page.getByTestId("codirector-status-panel")).toBeVisible();
       await expect(page.getByText("Production Assurance")).toBeVisible();
-      await expect(page.getByRole("button", { name: "Run Cross-Check" })).toBeVisible();
+      await expect(page.getByTestId("codirector-status-recheck")).toBeVisible();
       await expect(page.getByText("Recent Checks")).toBeVisible();
 
       const panelText = await page.getByTestId("codirector-status-panel").textContent();

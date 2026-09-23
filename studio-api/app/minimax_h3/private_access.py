@@ -10,6 +10,10 @@ from ..feature_flags import feature_flags
 
 
 ALLOWED_RUNTIME_HOSTS = frozenset({"127.0.0.1", "localhost"})
+# MiniMax H3 runs on its isolated Route A :8192 runtime (Master Program Phase 29
+# isolation — separate from production Comfy :8188 to prevent GPU contention).
+# The certified SageAttention accelerator (comfyui-speed-minimaxH3) must be
+# installed on this :8192 instance. See MINIMAX_H3_ACCELERATION_AUTHORITY.md.
 DEFAULT_RUNTIME_PORT = 8192
 
 

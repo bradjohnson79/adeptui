@@ -269,6 +269,22 @@ export function GeneratorPlanPanel({
         ) : null}
       </div>
 
+      <div className="character-core__generator-row">
+        <label className="character-core__checkbox">
+          <input
+            type="checkbox"
+            data-testid="generator-api-enable"
+            checked={value.apiEnabled}
+            disabled={disabled}
+            onChange={(e) => patch({ ...value, apiEnabled: e.target.checked })}
+          />
+          <span>Cloud Generators (uses credits)</span>
+        </label>
+      </div>
+
+      <details data-testid="generator-advanced-settings" className="character-core__generator-advanced">
+        <summary>Advanced Generation Settings</summary>
+
       {identityList.map((opt) => {
         const row = value.localFamilies.find((r) => r.family === opt.id) || {
           family: opt.id,
@@ -355,19 +371,6 @@ export function GeneratorPlanPanel({
           </p>
         </div>
       ) : null}
-
-      <div className="character-core__generator-row">
-        <label className="character-core__checkbox">
-          <input
-            type="checkbox"
-            data-testid="generator-api-enable"
-            checked={value.apiEnabled}
-            disabled={disabled}
-            onChange={(e) => patch({ ...value, apiEnabled: e.target.checked })}
-          />
-          <span>Cloud Generators (uses credits)</span>
-        </label>
-      </div>
 
       {apiModels.length === 0 ? (
         <p className="character-core__hint" data-testid="generator-api-empty">
@@ -457,6 +460,7 @@ export function GeneratorPlanPanel({
           </div>
         ))
       )}
+      </details>
 
       <div className="character-core__generation-plan" data-testid="generator-generation-plan">
         <div className="character-core__generation-plan-title">Generation Plan</div>

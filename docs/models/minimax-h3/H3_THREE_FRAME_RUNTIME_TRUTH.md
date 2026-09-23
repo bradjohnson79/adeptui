@@ -1,30 +1,25 @@
-## MiniMax H3 Three-Frame Runtime Truth
+﻿## MiniMax H3 Three-Frame Runtime Truth
 
-Official MiniMax H3 Base support is limited to:
+**Updated:** 2026-09-09 (PT) — Adept CREATE 3 Frame integrate
 
-- text only
-- one image
-- first image plus last image
+### Proven local CREATE path (authority)
 
-There is no native three temporally anchored frame mode in the surfaced MiniMax H3 path.
+Local MiniMax H3 on Route A:
 
-### Adept strategy
+- **First + Last (empty middle):** `MiniMaxH3ImageToVideo(first_frame, last_frame)` — **no** `MiniMaxH3AddGuide`, **no** third `LoadImage`.
+- **First + Middle + Last:** same base + `MiniMaxH3AddGuide(image=middle, frame_idx=length//2)`; guider consumes AddGuide; sampler latent stays on I2V.
+- **Forbidden:** duplicate first/last as fake middle; partner Hailuo FLF for middle; Ref2V-as-middle; Timeline/CRS/Co-Director for this surface.
 
-Adept uses Strategy A segmented assembly as the default truthful path:
+Proofs: `theme_walk/h3_3frame/PROOF_A_LOCAL_2FRAME_GRAPH.json`, `PROOF_B_LOCAL_3FRAME_GRAPH.json`.
 
-1. Generate `Start -> Middle`
-2. Generate `Middle -> End`
-3. Assemble the two approved intervals on the timeline
+### Honesty
 
-### What this means for the UI
+- `threeFrameNative=True` for the local AddGuide path only.
+- Default CREATE strategy: `middle-guidance-b` (optional middle).
+- Legacy `segmented-a` remains in code for historical plans but is **not** the CREATE execute path.
+- Partner `MinimaxHailuo03FirstLastFrameNode` has **no** middle socket and is **not** used for Adept 3 Frame.
 
-- Never describe MiniMax H3 as supporting native three-keyframe video.
-- Always disclose that three-frame requests are assembled as two guided segments.
-- Keep creator messaging simple: Start, Middle, End, assembly plan, and fallback choice.
-- Never expose ComfyUI jargon as the primary explanation.
+### UI
 
-### What this implementation does not do
-
-- It does not pretend three-frame support exists natively.
-- It does not auto-switch to LTX.
-- It does not claim that local MiniMax H3 execution is certified.
+- Generate enabled when First + Last present (Middle optional).
+- Preview Monitor uses the same Route A poll + preview_bus path as 1 Frame.

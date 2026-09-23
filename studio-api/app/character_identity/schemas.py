@@ -277,10 +277,14 @@ class CharacterProfileCreate(BaseModel):
     cultural_background: str = ""
     height_description: str = ""
     body_type: str = ""
+    is_global: bool = False
+    isGlobal: Optional[bool] = None
 
 
 class CharacterProfileUpdate(BaseModel):
     name: Optional[str] = None
+    is_global: Optional[bool] = None
+    isGlobal: Optional[bool] = None
     role: Optional[str] = None
     description: Optional[str] = None
     visual_description: Optional[str] = None
@@ -468,5 +472,7 @@ class CharacterProfileOut(BaseModel):
     relationships: list[dict[str, Any]] = Field(default_factory=list)
     prompt_package: dict[str, Any] = Field(default_factory=dict)
     coverage: Optional[CoverageReport] = None
+    is_global: bool = False
+    isGlobal: bool = False
     created_at: str
     updated_at: str

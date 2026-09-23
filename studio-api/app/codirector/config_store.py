@@ -43,7 +43,7 @@ def _defaults() -> dict[str, Any]:
         "endpoint": settings.ollama_url,
         "selectedModel": primary,
         "primaryModel": primary,
-        "fallbackModel": "gemma4:12b",
+        "fallbackModel": "qwen3.8:27b",
         "allowAutomaticModelDownload": False,
         # c2/D17: mock provider is opt-in by config key (default False). The
         # service-layer guard additionally requires STUDIO_E2E, so the mock
@@ -67,7 +67,7 @@ def _normalize(cfg: dict[str, Any]) -> dict[str, Any]:
         # Prefer explicit primaryModel as source of truth for M2.10b.
         cfg["selectedModel"] = primary
     if "fallbackModel" not in cfg or cfg.get("fallbackModel") is None:
-        cfg["fallbackModel"] = "gemma4:12b"
+        cfg["fallbackModel"] = "qwen3.8:27b"
     cfg["allowAutomaticModelDownload"] = bool(cfg.get("allowAutomaticModelDownload", False))
     cfg["allowMockProvider"] = bool(cfg.get("allowMockProvider", False))
     return cfg

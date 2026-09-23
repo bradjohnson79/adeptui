@@ -32,7 +32,7 @@ def export_contact_sheet_html(project_id: str, document_id: str | None = None) -
     for p in panels:
         aid = p.get("assetId") or ""
         img = (
-            f'<img src="/api/assets/{aid}/file" alt="" />'
+            f'<img src="/api/projects/{project_id}/assets/{aid}/file" alt="" />'
             if aid
             else '<div class="empty">Empty</div>'
         )

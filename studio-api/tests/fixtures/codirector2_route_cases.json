@@ -106,7 +106,9 @@
     "stage": "IMAGE_PLANNING",
     "workspace": "chat",
     "focus": "review proposals",
-    "pendingProposals": ["proposal-1"],
+    "pendingProposals": [
+      "proposal-1"
+    ],
     "expectedActionClass": "APPROVE",
     "expectedTarget": "proposal-1",
     "expectedWriteAllowed": true,
@@ -120,7 +122,9 @@
     "stage": "SCRIPT",
     "workspace": "chat",
     "focus": "review proposals",
-    "pendingProposals": ["proposal-2"],
+    "pendingProposals": [
+      "proposal-2"
+    ],
     "expectedActionClass": "REJECT",
     "expectedTarget": "proposal-2",
     "expectedWriteAllowed": true,
@@ -184,13 +188,14 @@
     "stage": "SCRIPT",
     "workspace": "chat",
     "focus": "workspace navigation",
-    "expectedActionClass": null,
+    "expectedActionClass": "NAVIGATE",
     "expectedWriteAllowed": false,
     "expectedDestructive": false,
     "capabilityAvailable": false,
-    "expectedReturnNone": true,
+    "expectedReturnNone": false,
     "negation": false,
-    "note": "SceneCraft is not a known navigation target — deterministic pattern does not match."
+    "note": "v1.1 spatial/3D shelf law: stale SceneCraft navigation redirects to Image Generator (deterministic shelf routing).",
+    "expectedTarget": "imagegen"
   },
   {
     "id": "case-16",
@@ -204,5 +209,97 @@
     "expectedReturnNone": true,
     "negation": false,
     "note": "conversationFocus overrides stage default — deterministic classifier does not handle focus-based routing."
+  },
+  {
+    "id": "case-17-intel-p1-opinion-with-scene-noun",
+    "message": "Before we do anything else, what do you think of the Schnick Coffee scene?",
+    "stage": "PRODUCTION",
+    "workspace": "chat",
+    "focus": "creative conversation",
+    "expectedActionClass": "DISCUSS",
+    "expectedWriteAllowed": false,
+    "expectedDestructive": false,
+    "expectedReturnNone": false,
+    "negation": false,
+    "note": "Intelligence mission Probe 1 (RC2): opinion/feedback beats READ_INSPECT even when a production noun appears."
+  },
+  {
+    "id": "case-18-intel-p2-timed-prompt-authoring",
+    "message": "Now create the timed prompt for this scene in Timeline.",
+    "stage": "PRODUCTION",
+    "workspace": "timeline",
+    "focus": "scene production",
+    "expectedActionClass": "DISCUSS",
+    "expectedWriteAllowed": false,
+    "expectedDestructive": false,
+    "expectedReturnNone": false,
+    "negation": false,
+    "note": "Intelligence mission Probe 2 (RC1/Phase 5): WRITE TIMED PROMPT is LLM authorship — never asset placement."
+  },
+  {
+    "id": "case-19-intel-add-asset-control",
+    "message": "Add this image to the Timeline.",
+    "stage": "PRODUCTION",
+    "workspace": "timeline",
+    "focus": "scene production",
+    "expectedActionClass": "EXECUTE_PRODUCTION",
+    "expectedWriteAllowed": true,
+    "expectedDestructive": false,
+    "expectedReturnNone": false,
+    "negation": false,
+    "note": "Control for case-18: real add-to-Timeline stays an execution."
+  },
+  {
+    "id": "case-20-intel-okay-prepare-it-not-approve",
+    "message": "Okay, prepare it.",
+    "stage": "PRODUCTION",
+    "workspace": "timeline",
+    "focus": "scene production",
+    "pendingProposals": ["proposal-1"],
+    "expectedActionClass": null,
+    "expectedWriteAllowed": false,
+    "expectedDestructive": false,
+    "expectedReturnNone": true,
+    "negation": false,
+    "note": "Intelligence mission Probe 5B (RC6): a new imperative riding on an affirmation is an instruction — never an APPROVE hijack."
+  },
+  {
+    "id": "case-21-intel-forget-timeline-switch",
+    "message": "Forget Timeline for a second. I want to talk about Korri's dialogue.",
+    "stage": "PRODUCTION",
+    "workspace": "timeline",
+    "focus": "character dialogue",
+    "expectedActionClass": null,
+    "expectedWriteAllowed": false,
+    "expectedDestructive": false,
+    "expectedReturnNone": true,
+    "negation": false,
+    "note": "Intelligence mission Probe 8 (RC7): the word 'Timeline' inside a topic switch must not re-anchor production routing; falls to the semantic classifier."
+  },
+  {
+    "id": "case-22-intel-bare-aspect-not-execution",
+    "message": "9:16.",
+    "stage": "PRODUCTION",
+    "workspace": "timeline",
+    "focus": "scene production",
+    "expectedActionClass": null,
+    "expectedWriteAllowed": false,
+    "expectedDestructive": false,
+    "expectedReturnNone": true,
+    "negation": false,
+    "note": "Intelligence mission RC1: a bare aspect ratio is a format hint, never an operation."
+  },
+  {
+    "id": "case-23-intel-timed-prompt-placement",
+    "message": "Add the timed prompt to the timeline.",
+    "stage": "PRODUCTION",
+    "workspace": "timeline",
+    "focus": "scene production",
+    "expectedActionClass": "EXECUTE_PRODUCTION",
+    "expectedWriteAllowed": true,
+    "expectedDestructive": false,
+    "expectedReturnNone": false,
+    "negation": false,
+    "note": "Intelligence mission Phase 5: timed-prompt PLACEMENT (existing propose_add_prompt_segment tool) stays an execution — distinct from authorship."
   }
 ]

@@ -9,9 +9,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from ..character_identity.models import VoiceProfileRow
+from ..character_identity.models import CharacterProfileRow, VoiceProfileRow
+from ..character_identity.spoken_pronunciation import apply_spoken_pronunciations, entries_from_voice
+from ..character_identity.voice_runtime import (
+    generate_approved_voice_speech,
+    qwen_speech_compatible,
+    _register_asset,
+)
 from ..db import Asset, Job, Project, Scene
 from ..scriptwriter.store import load_document
 from .emotion_presets import SUPPORTED_VECTORS, get_preset, list_presets, normalize_mix
@@ -142,6 +149,12 @@ def _record_out(db: Session, row: VoicePerformanceRecordRow, *, include_takes: b
     )
 
 
+def _profile_visible_in_project(profile: CharacterProfileRow | None, project_id: str) -> bool:
+    if profile is None:
+        return False
+    return profile.project_id == project_id or bool(getattr(profile, "is_global", False))
+
+
 def require_approved_voice_identity(
     db: Session,
     *,
@@ -149,12 +162,145 @@ def require_approved_voice_identity(
     character_id: str,
     voice_identity_id: str,
 ) -> VoiceProfileRow:
+    profile = db.get(CharacterProfileRow, character_id)
     voice = db.get(VoiceProfileRow, voice_identity_id)
-    if not voice or voice.project_id != project_id or voice.character_profile_id != character_id:
+    if (
+        not voice
+        or not _profile_visible_in_project(profile, project_id)
+        or voice.character_profile_id != character_id
+    ):
         raise raise_http_error(M410ErrorCode.VOICE_IDENTITY_REQUIRED)
     if (voice.approval_status or "").lower() != "approved":
         raise raise_http_error(M410ErrorCode.VOICE_IDENTITY_REQUIRED)
     return voice
+
+
+def resolve_canonical_approved_voice(
+    db: Session,
+    *,
+    project_id: str,
+    character_id: str,
+    voice_identity_id: str | None = None,
+) -> VoiceProfileRow:
+    profile = db.get(CharacterProfileRow, character_id)
+    active_id = str(getattr(profile, "active_voice_profile_id", "") or "").strip() if profile else ""
+    chosen_id = active_id or str(voice_identity_id or "").strip()
+    if not chosen_id:
+        raise raise_http_error(M410ErrorCode.VOICE_IDENTITY_REQUIRED)
+    return require_approved_voice_identity(
+        db,
+        project_id=project_id,
+        character_id=character_id,
+        voice_identity_id=chosen_id,
+    )
+
+
+def _performance_instruct(plan: dict[str, Any] | None) -> str:
+    plan = plan or {}
+    return " ".join(
+        str(plan.get(key) or "").strip()
+        for key in ("summary", "delivery", "notes")
+        if str(plan.get(key) or "").strip()
+    ).strip()
+
+
+def _wav_duration_ms(path: str) -> int | None:
+    import wave
+
+    try:
+        with wave.open(path, "rb") as wav:
+            frames = wav.getnframes()
+            rate = wav.getframerate() or 1
+            return int(1000 * frames / rate)
+    except Exception:
+        return None
+
+
+def _generate_qwen_take(
+    db: Session,
+    *,
+    project_id: str,
+    scene_id: str | None,
+    record_id: str,
+    take_id: str,
+    voice: VoiceProfileRow,
+    dialogue_text: str,
+    performance_plan: dict[str, Any],
+    take_number: int,
+    label: str,
+) -> dict[str, Any]:
+    produced = generate_approved_voice_speech(
+        db,
+        project_id=project_id,
+        voice=voice,
+        text=dialogue_text,
+        seed=take_number,
+        performance_instruct=_performance_instruct(performance_plan),
+    )
+    output_path = str(produced.get("path") or "")
+    duration_ms = _wav_duration_ms(output_path) if output_path else None
+    audio_asset_id = _register_asset(
+        db,
+        project_id,
+        Path(output_path),
+        kind="audio",
+        name=label or f"Take {take_number}",
+        tag="dialogue",
+        extra_meta={
+            "source": "voice_performance.m410.qwen3-tts",
+            "voiceProfileId": voice.id,
+            "recordId": record_id,
+            "takeId": take_id,
+            "engine": "qwen3-tts",
+            "warmWorker": True,
+        },
+    )
+    job = Job(
+        id=take_id,
+        project_id=project_id,
+        scene_id=scene_id,
+        kind="voice_performance.qwen3-tts",
+        status="completed",
+        progress=1.0,
+        message="completed",
+        preview_json=json.dumps(
+            {
+                "audioAssetId": audio_asset_id,
+                "durationMs": duration_ms,
+                "outputPath": output_path,
+                "voiceProfileId": voice.id,
+                "engine": "qwen3-tts",
+                "warmWorker": True,
+                "completeMs": produced.get("complete_ms"),
+            }
+        ),
+        params_json=json.dumps(
+            {
+                "voiceProfileId": voice.id,
+                "recordId": record_id,
+                "takeId": take_id,
+                "engine": "qwen3-tts",
+            }
+        ),
+        output_path=output_path,
+        updated_at=_now(),
+    )
+    db.merge(job)
+    db.commit()
+    return {
+        "ok": True,
+        "jobId": take_id,
+        "status": "completed",
+        "audioAssetId": audio_asset_id,
+        "durationMs": duration_ms,
+        "providerId": "qwen3-tts",
+        "providerVersion": voice.model_id or "Qwen3-TTS-1.7B",
+        "modelRevision": voice.model_id,
+        "engine": "qwen3-tts",
+        "warmWorker": True,
+        "voiceProfileId": voice.id,
+        "completeMs": produced.get("complete_ms"),
+    }
 
 
 def _keyword_mix(dialogue: str, cues: str) -> dict[str, float]:
@@ -249,7 +395,7 @@ def build_codirector_performance_plan(dialogue: str, context: dict[str, Any] | N
 
 def create_record(db: Session, body: VoicePerformanceRecordCreate) -> VoicePerformanceRecordOut:
     _project_or_404(db, body.projectId)
-    voice = require_approved_voice_identity(
+    voice = resolve_canonical_approved_voice(
         db,
         project_id=body.projectId,
         character_id=body.characterId,
@@ -285,7 +431,7 @@ def create_record(db: Session, body: VoicePerformanceRecordCreate) -> VoicePerfo
         script_document_id=body.scriptDocumentId,
         script_element_id=body.scriptElementId,
         character_id=body.characterId,
-        voice_identity_id=body.voiceIdentityId,
+        voice_identity_id=voice.id,
         voice_identity_version=body.voiceIdentityVersion or str(voice.version_number),
         dialogue_text=body.dialogueText,
         language=body.language,
@@ -295,7 +441,7 @@ def create_record(db: Session, body: VoicePerformanceRecordCreate) -> VoicePerfo
         emotion_vector_json=body.emotionVector or _loads(codirector_plan.get("emotionVector"), {}),
         emotional_reference_asset_id=body.emotionalReferenceAssetId,
         emotional_reference_strength=body.emotionalReferenceStrength,
-        provider_id=body.providerId,
+        provider_id="qwen3-tts" if qwen_speech_compatible(voice) else body.providerId,
         provider_version=body.providerVersion,
         model_revision=body.modelRevision,
         approved_take_id=body.approvedTakeId,
@@ -386,15 +532,178 @@ def set_direction_mode(
     return _record_out(db, row)
 
 
+def _apply_generated_take(
+    take: VoicePerformanceTakeRow,
+    row: VoicePerformanceRecordRow,
+    queued: dict[str, Any],
+    runtime: dict[str, Any],
+    *,
+    use_qwen: bool,
+) -> None:
+    take.job_id = queued.get("jobId")
+    take.status = queued.get("status") or "queued"
+    take.error_code = queued.get("errorCode")
+    take.error_message = queued.get("errorMessage")
+    if queued.get("audioAssetId"):
+        take.audio_asset_id = queued["audioAssetId"]
+    if queued.get("durationMs") is not None:
+        take.duration_ms = int(queued["durationMs"])
+    if take.status in ("completed", "failed", "cancelled"):
+        take.generated_at = _now()
+    take.updated_at = _now()
+    row.provider_id = queued.get("providerId") or ("qwen3-tts" if use_qwen else row.provider_id)
+    row.provider_version = queued.get("providerVersion") or runtime.get("providerVersion")
+    row.model_revision = queued.get("modelRevision") or runtime.get("modelRevision")
+
+
 def create_takes(db: Session, record_id: str, body: GenerateTakesBody) -> dict[str, Any]:
+    preferred = getattr(body, "preferredProvider", None)
+    if (preferred or "").strip().lower() in ("elevenlabs", "eleven_labs", "el"):
+        from ..hosted_providers.elevenlabs_gate import gate_preferred_provider
+        gate_preferred_provider(preferred, surface="voice-performance.generate-takes", capability="elevenlabs.voice")
     row = _record_or_404(db, record_id)
-    voice = require_approved_voice_identity(
+    voice = resolve_canonical_approved_voice(
         db,
         project_id=row.project_id,
         character_id=row.character_id,
         voice_identity_id=row.voice_identity_id,
     )
-    runtime = index_tts2.runtime_status()
+    if row.voice_identity_id != voice.id:
+        row.voice_identity_id = voice.id
+        row.voice_identity_version = str(voice.version_number)
+    preferred = getattr(body, "preferredProvider", None)
+    pref = (preferred or "").strip().lower()
+    if pref in ("elevenlabs", "eleven_labs", "el"):
+        from ..hosted_providers.adapters.elevenlabs_routed import generate_tts_routed
+        from ..generation_tools.lineage import register_derived_asset
+        from pathlib import Path as _Path
+        import tempfile as _tempfile
+        voice_id = (
+            getattr(body, "voiceId", None)
+            or getattr(voice, "elevenlabs_voice_id", None)
+            or (getattr(voice, "provider_voice_id", None) if getattr(voice, "provider_id", "") == "elevenlabs" else None)
+            or None
+        )
+        if not voice_id:
+            # try meta json
+            meta = {}
+            raw_meta = getattr(voice, "metadata_json", None) or getattr(voice, "meta_json", None)
+            if isinstance(raw_meta, str) and raw_meta.strip():
+                try:
+                    meta = _loads(raw_meta, {})
+                except Exception:
+                    meta = {}
+            elif isinstance(raw_meta, dict):
+                meta = raw_meta
+            voice_id = meta.get("elevenlabsVoiceId") or meta.get("voiceId") or meta.get("elevenlabs_voice_id")
+        if not voice_id:
+            from fastapi import HTTPException as _HTTPException
+            raise _HTTPException(
+                status_code=400,
+                detail={
+                    "code": "ELEVENLABS_VALIDATION",
+                    "error": "ELEVENLABS_VALIDATION",
+                    "message": "voiceId is required for ElevenLabs TTS (pass body.voiceId or map on voice identity).",
+                    "silentFallback": False,
+                    "mock": False,
+                },
+            )
+        model_id = getattr(body, "modelId", None) or "eleven_multilingual_v2"
+        existing = (
+            db.query(VoicePerformanceTakeRow)
+            .filter(VoicePerformanceTakeRow.record_id == record_id)
+            .order_by(VoicePerformanceTakeRow.take_number.desc())
+            .first()
+        )
+        next_take_number = (existing.take_number if existing else 0) + 1
+        created: list[VoicePerformanceTakeRow] = []
+        for offset in range(body.count):
+            take_number = next_take_number + offset
+            label = body.labels[offset] if offset < len(body.labels) else f"Take {take_number}"
+            take = VoicePerformanceTakeRow(
+                id=str(uuid.uuid4()),
+                record_id=row.id,
+                take_number=take_number,
+                label=label,
+                status="queued",
+                direction_snapshot_json=_loads(row.performance_plan_json, {}),
+                created_at=_now(),
+                updated_at=_now(),
+            )
+            db.add(take)
+            db.flush()
+            try:
+                dest = _Path(_tempfile.mkstemp(prefix="el_tts_", suffix=".mp3")[1])
+                el = generate_tts_routed(
+                    voice_id=str(voice_id),
+                    text=str(row.dialogue_text or ""),
+                    dest=dest,
+                    surface="voice-performance.generate-takes",
+                )
+                asset = register_derived_asset(
+                    db,
+                    project_id=row.project_id,
+                    source_path=el["path"],
+                    kind="audio",
+                    tag="vp_el_tts",
+                    parent_asset_id=None,
+                    op="voice_generate_elevenlabs",
+                    model=str(el.get("model") or model_id),
+                    prompt_meta={
+                        "prompt": row.dialogue_text,
+                        "provider": "elevenlabs",
+                        "model": el.get("model"),
+                        "voiceId": voice_id,
+                        "order15": True,
+                    },
+                    library_key="audio.dialogue",
+                )
+                queued = {
+                    "jobId": take.id,
+                    "status": "completed",
+                    "audioAssetId": asset.id,
+                    "providerId": "elevenlabs",
+                    "providerVersion": "elevenlabs.1",
+                    "modelRevision": str(el.get("model") or model_id),
+                    "errorCode": None,
+                    "errorMessage": None,
+                }
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                queued = {
+                    "jobId": take.id,
+                    "status": "failed",
+                    "errorCode": detail.get("code") or "ELEVENLABS_UPSTREAM_ERROR",
+                    "errorMessage": detail.get("message") or str(exc.detail) or "ElevenLabs TTS failed.",
+                    "providerId": "elevenlabs",
+                }
+            except Exception as exc:
+                queued = {
+                    "jobId": take.id,
+                    "status": "failed",
+                    "errorCode": "ELEVENLABS_UPSTREAM_ERROR",
+                    "errorMessage": str(exc) or "ElevenLabs TTS failed.",
+                    "providerId": "elevenlabs",
+                }
+            _apply_generated_take(take, row, queued, {"runtime": "ElevenLabs"}, use_qwen=False)
+            created.append(take)
+            db.commit()
+        row.provider_id = "elevenlabs"
+        row.provider_version = "elevenlabs.1"
+        row.model_revision = str(model_id)
+        row.updated_at = _now()
+        db.commit()
+        return {
+            "ok": True,
+            "recordId": row.id,
+            "providerId": "elevenlabs",
+            "providerVersion": "elevenlabs.1",
+            "modelRevision": str(model_id),
+            "takes": [_take_out(t).model_dump() for t in created],
+            "mock": False,
+        }
+    use_qwen = qwen_speech_compatible(voice)
+    runtime = {} if use_qwen else index_tts2.runtime_status()
     existing = (
         db.query(VoicePerformanceTakeRow)
         .filter(VoicePerformanceTakeRow.record_id == record_id)
@@ -423,38 +732,62 @@ def create_takes(db: Session, record_id: str, body: GenerateTakesBody) -> dict[s
             emo_asset = db.get(Asset, row.emotional_reference_asset_id)
             if emo_asset and emo_asset.path and Path(emo_asset.path).is_file():
                 emotion_ref_path = str(emo_asset.path)
-        queued = index_tts2.generate_take(
-            db,
-            project_id=row.project_id,
-            scene_id=row.scene_id,
-            record_id=row.id,
-            take_id=take.id,
-            dialogue_text=row.dialogue_text,
-            language=row.language,
-            voice_identity_id=voice.id,
-            performance_plan=_loads(row.performance_plan_json, {}),
-            direction_snapshot=_loads(row.performance_plan_json, {}),
-            take_number=take_number,
-            label=label,
-            emotion_source=row.emotion_source,
-            emotion_vector=_loads(row.emotion_vector_json, {}),
-            emotion_audio_path=emotion_ref_path or None,
-            emotional_reference_strength=row.emotional_reference_strength,
-        )
-        take.job_id = queued.get("jobId")
-        take.status = queued.get("status") or "queued"
-        take.error_code = queued.get("errorCode")
-        take.error_message = queued.get("errorMessage")
-        if queued.get("audioAssetId"):
-            take.audio_asset_id = queued["audioAssetId"]
-        if queued.get("durationMs") is not None:
-            take.duration_ms = int(queued["durationMs"])
-        if take.status in ("completed", "failed", "cancelled"):
-            take.generated_at = _now()
-        take.updated_at = _now()
-        row.provider_version = queued.get("providerVersion") or runtime.get("providerVersion")
-        row.model_revision = queued.get("modelRevision") or runtime.get("modelRevision")
+        try:
+            if use_qwen:
+                queued = _generate_qwen_take(
+                    db,
+                    project_id=row.project_id,
+                    scene_id=row.scene_id,
+                    record_id=row.id,
+                    take_id=take.id,
+                    voice=voice,
+                    dialogue_text=row.dialogue_text,
+                    performance_plan=_loads(row.performance_plan_json, {}),
+                    take_number=take_number,
+                    label=label,
+                )
+            else:
+                spoken_dialogue, _applied = apply_spoken_pronunciations(
+                    row.dialogue_text, entries_from_voice(voice)
+                )
+                queued = index_tts2.generate_take(
+                    db,
+                    project_id=row.project_id,
+                    scene_id=row.scene_id,
+                    record_id=row.id,
+                    take_id=take.id,
+                    dialogue_text=spoken_dialogue,
+                    language=row.language,
+                    voice_identity_id=voice.id,
+                    performance_plan=_loads(row.performance_plan_json, {}),
+                    direction_snapshot=_loads(row.performance_plan_json, {}),
+                    take_number=take_number,
+                    label=label,
+                    emotion_source=row.emotion_source,
+                    emotion_vector=_loads(row.emotion_vector_json, {}),
+                    emotion_audio_path=emotion_ref_path or None,
+                    emotional_reference_strength=row.emotional_reference_strength,
+                )
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            queued = {
+                "jobId": take.id,
+                "status": "failed",
+                "errorCode": detail.get("code") or "GENERATION_FAILURE",
+                "errorMessage": detail.get("message") or str(exc.detail) or "Voice generation failed.",
+                "providerId": "qwen3-tts" if use_qwen else row.provider_id,
+            }
+        except Exception as exc:
+            queued = {
+                "jobId": take.id,
+                "status": "failed",
+                "errorCode": "GENERATION_FAILURE",
+                "errorMessage": str(exc) or "Voice generation failed.",
+                "providerId": "qwen3-tts" if use_qwen else row.provider_id,
+            }
+        _apply_generated_take(take, row, queued, runtime, use_qwen=use_qwen)
         created.append(take)
+        db.commit()
     row.updated_at = _now()
     db.commit()
     return {
@@ -826,7 +1159,23 @@ def verify_runtime() -> dict[str, Any]:
 
 
 def get_capabilities() -> dict[str, Any]:
+    from ..character_identity.voice import provider_readiness
+
     runtime = index_tts2.runtime_status()
+    readiness = provider_readiness()
+    qwen_clone = readiness.get("qwenVoiceClone") or {}
+    qwen_design = readiness.get("qwenVoiceDesign") or {}
+    qwen_ready = bool(qwen_clone.get("ready") or qwen_design.get("ready"))
+    index_ready = bool(runtime.get("ready"))
+    ready = qwen_ready or index_ready
+    provider_id = "qwen3-tts" if qwen_ready else runtime.get("providerId")
+    if qwen_ready:
+        message = (
+            "Approved Qwen voices generate on the shared warm local voice worker. "
+            "IndexTTS2 stays available for voices that were built on that engine."
+        )
+    else:
+        message = runtime.get("message") or "Voice Performance runtime is not ready yet."
     try:
         capability_metadata = index_tts2.get_index_tts2_runtime().capability_metadata()
     except Exception:
@@ -840,22 +1189,25 @@ def get_capabilities() -> dict[str, Any]:
             "performance": {"emotion": "strong", "voice_cloning": "strong"},
         }
     language = capability_metadata.get("language") or {}
-    status = "available" if runtime.get("ready") else "requires_setup"
+    status = "available" if ready else "requires_setup"
     return {
         "ok": True,
-        "providerId": runtime["providerId"],
-        "providerVersion": runtime["providerVersion"],
+        "providerId": provider_id,
+        "providerVersion": runtime.get("providerVersion"),
         "status": status,
-        "installed": bool(runtime.get("installed")),
-        "ready": bool(runtime.get("ready")),
-        "supportsLiveGeneration": bool(runtime.get("ready")),
-        "supportsEmotionVectors": True,
+        "installed": bool(qwen_ready or runtime.get("installed")),
+        "ready": ready,
+        "supportsLiveGeneration": ready,
+        "supportsEmotionVectors": index_ready,
         "supportedEmotionVectors": list(SUPPORTED_VECTORS),
         "directionModes": ["codirector", "manual"],
         "presetsAvailable": len(list_presets()),
-        "message": runtime["message"],
+        "message": message,
         "language": language,
         "capabilityMetadata": capability_metadata,
+        "qwenReady": qwen_ready,
+        "indexTts2Ready": index_ready,
+        "sharedWarmWorker": qwen_ready,
         "mock": False,
     }
 

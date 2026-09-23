@@ -13,6 +13,8 @@ from .scene_creator_mini import (
     MiniTakeCreateBody,
 )
 from .schemas import (
+    MovementCreateBody,
+    MovementUpdateBody,
     SpatialAssignSceneBody,
     SpatialCameraCreateBody,
     SpatialCameraUpdateBody,
@@ -31,6 +33,7 @@ from .schemas import (
     SpatialVariantCreateBody,
 )
 from .service import (
+    activate_movement,
     build_reference_bundle,
     commit_document,
     consistency_check,
@@ -38,15 +41,18 @@ from .service import (
     create_capture_plan,
     create_collage,
     create_document,
+    create_movement,
     create_path,
     create_variant,
     get_document,
     list_documents,
     attach_prop,
+    movement_arrows,
     place_character,
     place_prop,
     remove_camera,
     remove_character,
+    remove_movement,
     remove_prop,
     assign_to_scene,
     detach_prop,
@@ -54,11 +60,43 @@ from .service import (
     update_character,
     update_collage_view,
     update_document,
+    update_movement,
     update_prop,
     update_prop_relationship,
 )
 
 router = APIRouter(prefix="/spatial-map", tags=["spatial-map-m411"])
+
+
+class AtlasClassifyBody(BaseModel):
+    assetId: str
+    intendedRoute: str = "assign"
+
+
+@router.post("/projects/{project_id}/atlas-source/classify")
+def api_classify_atlas_source(
+    project_id: str,
+    body: AtlasClassifyBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Inspect an uploaded image. Never generates or replaces pixels."""
+    from ..codirector.routing.atlas_classify import classify_atlas_asset
+
+    classification = classify_atlas_asset(
+        db,
+        project_id,
+        body.assetId,
+        intended_route=body.intendedRoute or "assign",
+    )
+    return {
+        "kind": classification.kind,
+        "action": classification.action,
+        "confidence": classification.confidence,
+        "message": classification.message,
+        "pixelsRead": classification.pixels_read,
+        "width": classification.width,
+        "height": classification.height,
+    }
 
 
 @router.get("/projects/{project_id}/maps")
@@ -94,10 +132,61 @@ def api_commit_map(
 ) -> dict[str, Any]:
     """Explicit Save Spatial Map commit. Stamps savedAt + savedVersion.
 
-    The frontend gates 'Use in Scene Creator' on savedVersion == version, so
+    The frontend gates 'Use in Image Generator' on savedVersion == version, so
     this is the authoritative commit boundary; it is never called implicitly.
     """
     return {"document": commit_document(db, project_id, document_id).model_dump()}
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/movements")
+def api_create_movement(
+    project_id: str,
+    document_id: str,
+    body: MovementCreateBody | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return {"document": create_movement(db, project_id, document_id, body).model_dump()}
+
+
+@router.patch("/projects/{project_id}/maps/{document_id}/movements/{segment_id}")
+def api_update_movement(
+    project_id: str,
+    document_id: str,
+    segment_id: str,
+    body: MovementUpdateBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return {"document": update_movement(db, project_id, document_id, segment_id, body).model_dump()}
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/movements/{segment_id}/activate")
+def api_activate_movement(
+    project_id: str,
+    document_id: str,
+    segment_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return {"document": activate_movement(db, project_id, document_id, segment_id).model_dump()}
+
+
+@router.delete("/projects/{project_id}/maps/{document_id}/movements/{segment_id}")
+def api_remove_movement(
+    project_id: str,
+    document_id: str,
+    segment_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return {"document": remove_movement(db, project_id, document_id, segment_id).model_dump()}
+
+
+@router.get("/projects/{project_id}/maps/{document_id}/movement-arrows")
+def api_movement_arrows(
+    project_id: str,
+    document_id: str,
+    characterId: str = "",
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return {"arrows": movement_arrows(db, project_id, document_id, characterId)}
 
 
 @router.post("/projects/{project_id}/maps/{document_id}/characters")
@@ -448,3 +537,134 @@ def api_generate_camera_reference(
     generator = (body.generator if body is not None else "qwen2512") or "qwen2512"
     record = enqueue_camera_ref(db, project_id, document, camera, generator)
     return {"reference": record}
+
+
+class SpinCameraPutBody(BaseModel):
+    x: float
+    z: float
+    sceneId: str | None = None
+
+
+class SpinPackageCreateBody(BaseModel):
+    provider: str
+    confirmPaidCloud: bool = False
+
+
+class SpinDirectionRegenerateBody(BaseModel):
+    confirmPaidCloud: bool = False
+
+
+@router.put("/projects/{project_id}/maps/{document_id}/spin-camera")
+def api_put_spin_camera(
+    project_id: str,
+    document_id: str,
+    body: SpinCameraPutBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from . import spin_camera
+
+    return spin_camera.set_placement(
+        db,
+        project_id,
+        document_id,
+        body.x,
+        body.z,
+        scene_id=body.sceneId,
+    )
+
+
+@router.get("/projects/{project_id}/maps/{document_id}/spin-camera")
+def api_get_spin_camera(
+    project_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from . import spin_camera
+
+    return spin_camera.get_placement(db, project_id, document_id)
+
+
+@router.delete("/projects/{project_id}/maps/{document_id}/spin-camera")
+def api_delete_spin_camera(
+    project_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from . import spin_camera
+
+    return spin_camera.delete_placement(db, project_id, document_id)
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/spin-packages")
+def api_create_spin_package(
+    project_id: str,
+    document_id: str,
+    body: SpinPackageCreateBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from . import spin_camera
+    from .service import get_document
+
+    document = get_document(db, project_id, document_id)
+    return spin_camera.create_package(
+        db,
+        project_id,
+        document,
+        body.provider,
+        confirm_paid=body.confirmPaidCloud,
+    )
+
+
+@router.get("/projects/{project_id}/maps/{document_id}/spin-packages")
+def api_list_spin_packages(
+    project_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from . import spin_camera
+
+    return {"packages": spin_camera.list_packages(db, project_id, document_id)}
+
+
+@router.get("/projects/{project_id}/maps/{document_id}/spin-packages/{package_id}")
+def api_get_spin_package(
+    project_id: str,
+    document_id: str,
+    package_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from . import spin_camera
+
+    return spin_camera.get_package(db, project_id, document_id, package_id)
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/spin-packages/{package_id}/views/{direction}/regenerate")
+def api_regenerate_spin_direction(
+    project_id: str,
+    document_id: str,
+    package_id: str,
+    direction: str,
+    body: SpinDirectionRegenerateBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from . import spin_camera
+
+    return spin_camera.regenerate_direction(
+        db,
+        project_id,
+        package_id,
+        direction,
+        confirm_paid=body.confirmPaidCloud,
+    )
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/spin-packages/{package_id}/build-ers")
+def api_build_spin_ers(
+    project_id: str,
+    document_id: str,
+    package_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from . import spin_camera
+
+    return spin_camera.build_ers(db, project_id, package_id)

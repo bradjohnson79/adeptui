@@ -9,6 +9,7 @@ import {
   monitorProjectCreatePosts,
   openCoDirectorFullScreen,
 } from "./helpers/autonomousCert";
+import { openCoDirectorContentTab } from "./helpers/audit";
 
 type ProposalSummary = {
   id: string;
@@ -142,12 +143,12 @@ async function approveProposalFromUi(
   projectId: string,
   proposalId: string,
 ) {
-  await page.getByTestId("codirector-content-tab-approvals").click();
+  await openCoDirectorContentTab(page, "approvals");
   let card = page.getByTestId("codirector-approvals-panel").getByTestId(`codirector-proposal-card-${proposalId}`);
   if (!(await card.isVisible().catch(() => false))) {
     await page.reload();
     await expect(page.getByTestId("codirector-composer-input")).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId("codirector-content-tab-approvals").click();
+    await openCoDirectorContentTab(page, "approvals");
     card = page.getByTestId("codirector-approvals-panel").getByTestId(`codirector-proposal-card-${proposalId}`);
   }
   await expect(card).toBeVisible({ timeout: 30_000 });
@@ -259,7 +260,7 @@ async function settleProjectJobsForCleanup(request: APIRequestContext, projectId
 }
 
 async function openErsPlansPanel(page: Page) {
-  await page.getByTestId("codirector-content-tab-plans").click();
+  await openCoDirectorContentTab(page, "plans");
   const panel = page.getByTestId("codirector-ers-panel").or(page.getByTestId("codirector-ers-empty")).first();
   await expect(panel).toBeVisible({ timeout: 30_000 });
   return panel;

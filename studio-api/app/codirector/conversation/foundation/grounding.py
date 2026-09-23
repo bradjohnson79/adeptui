@@ -68,7 +68,11 @@ _UNINVITED_CRITIQUE_RE = re.compile(
 )
 
 
-def reply_violates_dialogue_plan(reply: str, plan: DialoguePlan) -> list[str]:
+def reply_violates_dialogue_plan(
+    reply: str,
+    plan: DialoguePlan,
+    intent: "IntentAnalysis | None" = None,
+) -> list[str]:
     """Return violation notes if reply contradicts DialoguePlan."""
 
     notes: list[str] = []
@@ -95,7 +99,17 @@ def reply_violates_dialogue_plan(reply: str, plan: DialoguePlan) -> list[str]:
             notes.append("NO_GENERIC_PRAISE")
         if "automatic agreement" in key and _AUTO_AGREE_RE.search(text):
             notes.append("NO_AUTOMATIC_AGREEMENT")
-    if plan.tool_policy == "NONE" and re.search(r"\b(?:i (?:have )?run|tool|queued generation)\b", text, re.I):
+    # Intelligence mission 2026-09-19: a PROMPT_AUTHORING reply may legitimately
+    # contain words like "run"/"tool" inside the prompt text itself — that is
+    # authored content, not a claimed tool execution. The tool-claim gate still
+    # applies to every other tool_policy=NONE turn.
+    primary = getattr(intent, "primary_intent", None)
+    is_prompt_authoring = getattr(primary, "value", "") == "PROMPT_AUTHORING"
+    if (
+        plan.tool_policy == "NONE"
+        and not is_prompt_authoring
+        and re.search(r"\b(?:i (?:have )?run|tool|queued generation)\b", text, re.I)
+    ):
         notes.append("Claimed tool use under tool_policy=NONE")
     return notes
 
@@ -113,7 +127,7 @@ def evaluate_grounding(
     text = reply or ""
     lowered = text.lower()
     companion = companion or {}
-    violations = reply_violates_dialogue_plan(text, plan)
+    violations = reply_violates_dialogue_plan(text, plan, intent=intent)
 
     addresses = len(text.strip()) >= 24
     reflects = True

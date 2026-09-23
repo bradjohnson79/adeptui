@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { Button } from "./ui";
 import { ProviderCatalogAdmin } from "./ProviderCatalogAdmin";
@@ -67,13 +67,13 @@ export function HostedProvidersPanel() {
     <div className="settings-panel" data-testid="hosted-providers-panel">
       <h3>Hosted AI Providers</h3>
       <p className="muted">
-        Equally supported integrations, recommended in this order: Kie.ai → WaveSpeed.ai → fal.ai. Product surfaces
-        never call a provider directly — requests flow through Canonical Intent → Capability Resolver → Certified
-        Provider Resolver → Canonical Queue → Asset Library → Timeline → Provenance.
+        Equally supported integrations, recommended in this order: Kie.ai â†’ WaveSpeed.ai â†’ fal.ai. Product surfaces
+        never call a provider directly â€” requests flow through Canonical Intent â†’ Capability Resolver â†’ Certified
+        Provider Resolver â†’ Canonical Queue â†’ Asset Library â†’ Timeline â†’ Provenance.
       </p>
       {catalog?.mock === true && (
         <p className="error" role="alert">
-          Unexpected mock catalog — refuse to continue.
+          Unexpected mock catalog â€” refuse to continue.
         </p>
       )}
 
@@ -97,7 +97,7 @@ export function HostedProvidersPanel() {
         </div>
         <p className="muted" style={{ marginTop: "0.5rem" }}>
           Automatic Recommendation evaluates certified capability, availability, budget preference, estimated cost,
-          queue time, and model availability — never silently switches after a job is submitted.
+          queue time, and model availability â€” never silently switches after a job is submitted.
         </p>
       </section>
 
@@ -112,28 +112,28 @@ export function HostedProvidersPanel() {
             <header style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap" }}>
               <div>
                 <strong>
-                  {p.recommended ? "⭐ " : ""}
+                  {p.recommended ? "â­ " : ""}
                   {p.displayName}
                 </strong>
-                <span className="muted"> · {p.recommended ? "Recommended" : "Alternative"} · priority {p.priority}</span>
+                <span className="muted"> Â· {p.recommended ? "Recommended" : "Alternative"} Â· priority {p.priority}</span>
               </div>
-              <span data-testid={`hosted-health-${p.providerId}`}>Health: {p.healthStatus || "—"}</span>
+              <span data-testid={`hosted-health-${p.providerId}`}>Health: {p.healthStatus || "â€”"}</span>
             </header>
             <ul className="muted" style={{ fontSize: "0.9rem", margin: "0.5rem 0" }}>
               <li>Connection: {p.connectionStatus}</li>
               <li>
                 API key: {p.apiKeyStatus?.configured ? p.apiKeyStatus.hint || "configured" : "not configured"}
-                {p.apiKeyStatus?.verifiedAt ? ` · checked ${p.apiKeyStatus.verifiedAt}` : ""}
+                {p.apiKeyStatus?.verifiedAt ? ` Â· checked ${p.apiKeyStatus.verifiedAt}` : ""}
               </li>
               <li>
                 Balance:{" "}
-                {p.availableBalance != null ? String(p.availableBalance) : "— (shown when provider supports live balance)"}
+                {p.availableBalance != null ? String(p.availableBalance) : "â€” (shown when provider supports live balance)"}
               </li>
-              <li>Modalities: {(p.supportedModalities || []).join(", ") || "—"}</li>
-              <li>Certified models: {(p.certifiedModels || []).join(", ") || "—"}</li>
-              <li>Pricing: {p.estimatedPricing || "—"}</li>
-              <li>Last successful execution: {p.lastSuccessfulExecution || "—"}</li>
-              <li>Version: {p.currentVersion || "—"}</li>
+              <li>Modalities: {(p.supportedModalities || []).join(", ") || "â€”"}</li>
+              <li>Certified models: {(p.certifiedModels || []).join(", ") || "â€”"}</li>
+              <li>Pricing: {p.estimatedPricing || "â€”"}</li>
+              <li>Last successful execution: {p.lastSuccessfulExecution || "â€”"}</li>
+              <li>Version: {p.currentVersion || "â€”"}</li>
             </ul>
             {p.apiKeyStatus?.message && <p className="muted">{p.apiKeyStatus.message}</p>}
             <div className="field">
@@ -145,7 +145,7 @@ export function HostedProvidersPanel() {
                 autoComplete="off"
                 value={keys[p.providerId] || ""}
                 onChange={(e) => setKeys((k) => ({ ...k, [p.providerId]: e.target.value }))}
-                placeholder={p.apiKeyStatus?.configured ? "Paste to replace…" : "Paste API key…"}
+                placeholder={p.apiKeyStatus?.configured ? "Paste to replaceâ€¦" : "Paste API keyâ€¦"}
               />
             </div>
             <div className="row-actions" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
@@ -156,7 +156,7 @@ export function HostedProvidersPanel() {
                   void run(p.providerId, () => api.hostedProvidersConnect(p.providerId, keys[p.providerId] || ""))
                 }
               >
-                {busy === p.providerId ? "Checking…" : "Connect"}
+                {busy === p.providerId ? "Checkingâ€¦" : "Connect"}
               </Button>
               <Button
                 data-testid={`hosted-test-${p.providerId}`}
@@ -202,10 +202,11 @@ export function HostedProvidersPanel() {
 
       <details data-testid="hosted-providers-advanced" style={{ marginTop: "1.5rem" }}>
         <summary>
-          <strong>Advanced — Provider Catalog (developer)</strong>
+          <strong>Advanced â€” Provider Catalog (developer)</strong>
         </summary>
         <ProviderCatalogAdmin />
       </details>
     </div>
   );
 }
+

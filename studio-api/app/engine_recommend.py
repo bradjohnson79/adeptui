@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from .fal_catalog import is_fal_engine
+from .hosted_providers.video_registry import is_retired_local_video
 from .secrets_store import secret_status
 from .vram_profiles import get_profile, normalize_vram_tier
 
@@ -57,7 +58,7 @@ def recommend_engine(
         if motion and duration >= 6:
             engine = "minimax-h3"
             confidence = 0.8
-            reasons.append("Longer clip with motion — MiniMax H3 default (WAN remains selectable)")
+            reasons.append("Longer clip with motion — MiniMax H3 default")
         else:
             engine = "minimax-h3"
             confidence = 0.85
@@ -70,13 +71,6 @@ def recommend_engine(
             local = True
             confidence = min(confidence, 0.6)
             warnings.append("Cloud engines skipped because lip sync is enabled")
-
-    if not has_start and engine in ("ltx", "wan"):
-        warnings.append(
-            "Local LTX/WAN need a start frame — generate a local still first "
-            "(do not silently route to fal)"
-        )
-        reasons.append("Local-first I2V chain: ImageGen still → LTX/WAN")
 
     # Soft cloud alternatives only — never auto-select fal for recommend/auto.
     if fal_ok and not lipsync:
@@ -112,12 +106,14 @@ def recommend_engine(
             provider_health={"fal.api": 0.9 if fal_ok else 0.2, "comfy.local": 0.95},
         )
         binding = BINDINGS.get(mil.recommendedModel)
-        # Local-first: only accept MIL recommendations that stay on comfy.local.
+        _frozen_local = frozenset({"minimax-h3", "ltx-2.5"})
+        # Local-first: only accept frozen v1.1 video families. Never image models or fal.
         if (
             binding
             and binding.engineId
             and binding.capabilityIds
             and binding.providerId == "comfy.local"
+            and binding.engineId in _frozen_local
             and not is_fal_engine(binding.engineId)
         ):
             engine = binding.engineId
@@ -143,12 +139,18 @@ def recommend_engine(
     except Exception:
         mil_meta = {}
 
-    # Hard guard: auto recommendation must never return fal.
-    if is_fal_engine(engine):
+    # Hard guard: auto recommendation must never return fal or retired locals.
+    if (
+        is_fal_engine(engine)
+        or is_retired_local_video(engine)
+        or str(engine).startswith("seedance")
+        or engine not in {"minimax-h3", "ltx-2.5"}
+    ):
+        previous = engine
         engine = "minimax-h3"
         local = True
         confidence = 0.7
-        reasons.append(f"Local-first guard remapped auto away from fal → {engine}")
+        reasons.append(f"Local-first guard remapped auto away from {previous} → MiniMax H3")
 
     out = {
         "engineId": engine,
@@ -158,7 +160,7 @@ def recommend_engine(
         "local": local,
         "vram_tier": vram,
         "profile_engine": profile.recommended_engine,
-        "requiresStartFrame": engine in ("ltx", "wan") and not has_start,
+        "requiresStartFrame": engine in ("ltx-2.5",) and not has_start,
         "paidFallbackAvailable": fal_ok,
     }
     if mil_meta:

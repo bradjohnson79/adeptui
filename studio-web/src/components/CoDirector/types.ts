@@ -38,6 +38,10 @@ export interface CoDirectorUIContext {
   activeContentTab?: string | null;
   /** Navigate to a project workspace tab. */
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
+  /** Live Environment Creator Express/Standard planning snapshot for CD awareness. */
+  environmentCreatorPlanning?: Record<string, unknown> | null;
+  /** Live Cinematic Image Generator composer snapshot for CD awareness. */
+  imageGeneratorPlanning?: Record<string, unknown> | null;
 }
 
 /** M41 Wave 1 canonical session-context contract (composed; not a second store). */
@@ -65,7 +69,7 @@ export type LastBoundProjectSuggestion = {
   projectName?: string;
 };
 
-export type CoDirectorMessageStatus = "streaming" | "cancelled" | "interrupted";
+export type CoDirectorMessageStatus = "streaming" | "cancelled" | "interrupted" | "degraded";
 
 /** M2.4 assistant message kinds — user-safe labels, not internal agent names. */
 export type CoDirectorAssistantMessageType =
@@ -161,7 +165,7 @@ export interface CoDirectorActivityState {
   processingStages?: string[];
   conversationActions?: { id: string; label: string }[];
   onboardingNeeded?: boolean;
-  /** Soft next-step invitations for the latest assistant turn (≤4). */
+  /** Soft next-step invitations for the latest assistant turn (â‰¤4). */
   nextStepOptions?: CoDirectorNextStepOption[];
   nextStepIntro?: string | null;
   /** Background Wiki enrichment after tokens began streaming. */
@@ -251,19 +255,35 @@ export interface GenerationOutputPlan {
 }
 
 export interface GenerationPlan {
-  output_count: number;
-  output_mode: string;
-  outputs: GenerationOutputPlan[];
-  references: {
+  output_count?: number;
+  output_mode?: string;
+  outputs?: GenerationOutputPlan[];
+  references?: {
     character_refs: { id: string; name: string }[];
     reference_asset_ids: string[];
   };
-  style_context: string;
-  scene_context: {
+  style_context?: string;
+  scene_context?: {
     location: string;
     action: string;
     dialogue: string;
   };
+  sceneProduction?: boolean;
+  preparationReady?: boolean;
+  sceneId?: string;
+  shotId?: string;
+  compiledPrompt?: string;
+  events?: Array<{ type?: string; message?: string; payload?: Record<string, unknown> }>;
+  generatorId?: string;
+  durationSeconds?: number;
+  aspectRatio?: string;
+  quality?: string;
+  megapixels?: number | null;
+  batchCount?: number;
+  generationJobId?: string;
+  submitted?: boolean;
+  timelineHandoff?: boolean;
+  creatorAck?: string;
 }
 
 export interface CoDirectorMessageExecution {

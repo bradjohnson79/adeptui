@@ -21,7 +21,8 @@ import {
 import "@babylonjs/loaders/OBJ";
 import "@babylonjs/loaders/glTF";
 import { clampRotation, getArchetypeSpec, getColorSpec } from "./state";
-import { apiUrl } from "../runtime/apiBase";
+import { pluginExtensionForAsset } from "./meshLoader";
+import { api } from "../api";
 import {
   BODY_REGIONS,
   REGION_TO_JOINT,
@@ -38,7 +39,8 @@ import {
   v4AssetSource,
   type VisualState,
 } from "./v4FigureLoader";
-import type { FigureInstance, JointName, PoseCraftScene } from "./types";
+import type { FigureInstance, JointName, PoseCraftObject, PoseCraftScene } from "./types";
+import { sanitizePersistedCamera } from "./cameraPlausibility";
 
 type RendererKind = "webgl" | "webgpu";
 
@@ -74,6 +76,11 @@ type FigureRig = {
 };
 
 type PrimitiveRig = {
+  root: TransformNode;
+  material: StandardMaterial;
+};
+
+type ObjectRig = {
   root: TransformNode;
   material: StandardMaterial;
 };
@@ -415,7 +422,7 @@ function createFigureRig(
   // parented to the figure root and tagged as body meshes for picking. Load
   // is async; the rig is returned immediately and the mesh attaches when ready.
   if (figure.kind === "custom" && figure.customAssetId) {
-    const assetUrl = apiUrl(`/api/assets/${figure.customAssetId}/file`);
+    const assetUrl = api.assetUrl(figure.customAssetId);
     const rootTransform = root;
     let cancelled = false;
     const finishImport = (meshes: import("@babylonjs/core").AbstractMesh[]) => {
@@ -431,9 +438,18 @@ function createFigureRig(
         bodyMeshes.push(mesh as Mesh);
       }
     };
-    SceneLoader.ImportMesh("", "", assetUrl, scene, finishImport, undefined, (_scene, message) => {
-      console.error(`PoseCraft custom figure import failed for ${figure.customAssetId}: ${message}`);
-    });
+    SceneLoader.ImportMesh(
+      "",
+      "",
+      assetUrl,
+      scene,
+      finishImport,
+      undefined,
+      (_scene, message) => {
+        console.error(`PoseCraft custom figure import failed for ${figure.customAssetId}: ${message}`);
+      },
+      pluginExtensionForAsset(figure.customAssetName, "mesh-3d"),
+    );
     // The returned bodyMeshes array is captured by the closure so late-loaded
     // meshes still register for disposal via the rig.
     void cancelled;
@@ -625,6 +641,39 @@ function createPrimitiveRig(scene: Scene, primitive: PoseCraftScene["primitives"
   return { root, material };
 }
 
+function createObjectRig(scene: Scene, obj: PoseCraftObject): ObjectRig {
+  const fallback = {
+    id: obj.id,
+    name: obj.name,
+    kind: (obj.primitiveKind || "block-medium") as PoseCraftScene["primitives"][number]["kind"],
+    position: { x: obj.position.x, z: obj.position.z },
+    rotationY: obj.rotation?.y ?? 0,
+    scale: typeof obj.scale === "number" ? obj.scale : obj.scale?.x ?? 1,
+    size: obj.size || { x: 0.6, y: 0.5, z: 0.4 },
+    color: obj.color || "#94a3b8",
+  };
+  const rig = createPrimitiveRig(scene, fallback);
+  const meshId = obj.meshAssetId || obj.assetId;
+  if (meshId) {
+    const assetUrl = api.assetUrl(meshId);
+    SceneLoader.ImportMesh(
+      "",
+      "",
+      assetUrl,
+      scene,
+      (meshes) => {
+        for (const mesh of meshes) {
+          mesh.parent = rig.root;
+        }
+      },
+      undefined,
+      undefined,
+      pluginExtensionForAsset(obj.detectedLabel || obj.name, "mesh-3d"),
+    );
+  }
+  return rig;
+}
+
 export class PoseCraftViewportController {
   private readonly canvas: HTMLCanvasElement;
 
@@ -639,6 +688,10 @@ export class PoseCraftViewportController {
   private readonly figureRigs = new Map<string, FigureRig>();
 
   private readonly primitiveRigs = new Map<string, PrimitiveRig>();
+
+  private readonly objectRigs = new Map<string, ObjectRig>();
+
+  private environmentRig: ObjectRig | null = null;
 
   /** Gate F — visible on-canvas gizmos. */
   private readonly moveGizmo: AxisGizmo;
@@ -756,10 +809,11 @@ export class PoseCraftViewportController {
       scene,
     );
     camera.attachControl(canvas, true);
-    camera.lowerRadiusLimit = 2.2;
-    camera.upperRadiusLimit = 16;
+    camera.minZ = 0.05;
+    camera.lowerRadiusLimit = 0.35;
+    camera.upperRadiusLimit = 24;
     camera.wheelDeltaPercentage = 0.01;
-    camera.panningSensibility = 70;
+    camera.panningSensibility = 320;
 
     const hemi = new HemisphericLight("posecraft-hemi", new Vector3(0.35, 1, 0.2), scene);
     hemi.intensity = 0.95;
@@ -1500,15 +1554,29 @@ export class PoseCraftViewportController {
     // sync (preset click, reload, snapshot restore). Re-applying an unchanged
     // stored camera on every scene edit used to snap away the creator's live
     // orbit because interactive orbiting never wrote back to state.
+    //
+    // HYDRATION-BOUNDARY PLAUSIBILITY (root-cause repair): a stale/corrupt
+    // persisted camera that frames NO meaningful stage content used to be
+    // accepted verbatim here and re-applied on every load, bricking the
+    // viewport (figure rendered as a tiny off-frame speck). When a NEW camera
+    // arrives (a genuine load/restore — not an in-session orbit, which echoes
+    // the live camera and so is always plausible), validate it against the
+    // authoritative figure bounds. Valid framing is restored EXACTLY; an
+    // implausible camera is replaced (camera fields ONLY — never figures) with
+    // a figure-aware safe default, then committed back so the corrupt values do
+    // not return on the next reload. The lastSyncedCamera guard stays intact.
     const cameraKey = JSON.stringify(sceneDoc.camera);
     if (this.lastSyncedCamera !== cameraKey) {
-      this.lastSyncedCamera = cameraKey;
-      this.camera.alpha = sceneDoc.camera.alpha;
-      this.camera.beta = sceneDoc.camera.beta;
-      this.camera.radius = sceneDoc.camera.radius;
-      this.camera.target.copyFrom(
-        new Vector3(sceneDoc.camera.target.x, sceneDoc.camera.target.y, sceneDoc.camera.target.z),
-      );
+      const { camera: applied, sanitized } = sanitizePersistedCamera(sceneDoc.camera, sceneDoc.figures);
+      this.lastSyncedCamera = JSON.stringify(applied);
+      this.camera.alpha = applied.alpha;
+      this.camera.beta = applied.beta;
+      this.camera.radius = applied.radius;
+      this.camera.target.copyFrom(new Vector3(applied.target.x, applied.target.y, applied.target.z));
+      if (sanitized) {
+        // Persist the repaired camera so the corrupt state does not return.
+        this.emitCameraCommit();
+      }
     }
     this.camera.fov = lensToFov(sceneDoc.camera.lensMm);
 
@@ -1542,6 +1610,7 @@ export class PoseCraftViewportController {
       const dragging = this.drag?.figureId === figure.id;
       if (!dragging) {
         rig.root.position.x = figure.position.x;
+        rig.root.position.y = figure.position.y ?? 0;
         rig.root.position.z = figure.position.z;
         rig.root.rotation = new Vector3(0, degreesToRadians(figure.rotationY), 0);
         for (const [joint, jointNode] of Object.entries(rig.joints) as [JointName, TransformNode][]) {
@@ -1577,6 +1646,50 @@ export class PoseCraftViewportController {
       const s = primitive.scale ?? 1;
       rig.root.scaling.set(s, s, s);
       rig.material.diffuseColor = colorFromHex(primitive.color);
+    }
+
+    const objects = sceneDoc.objects ?? [];
+    const objectIds = new Set(objects.map((item) => item.id));
+    for (const [id, rig] of this.objectRigs.entries()) {
+      if (!objectIds.has(id)) {
+        rig.root.dispose(false, true);
+        this.objectRigs.delete(id);
+      }
+    }
+    for (const obj of objects) {
+      let rig = this.objectRigs.get(obj.id);
+      if (!rig) {
+        rig = createObjectRig(this.scene, obj);
+        this.objectRigs.set(obj.id, rig);
+      }
+      rig.root.setEnabled(obj.visible !== false);
+      rig.root.position.x = obj.position.x;
+      rig.root.position.y = obj.position.y ?? 0;
+      rig.root.position.z = obj.position.z;
+      const rot = obj.rotation || { x: 0, y: 0, z: 0 };
+      rig.root.rotation = new Vector3(degreesToRadians(rot.x), degreesToRadians(rot.y), degreesToRadians(rot.z));
+      if (typeof obj.scale === "number") {
+        rig.root.scaling.setAll(obj.scale);
+      } else {
+        const scale = obj.scale || { x: 1, y: 1, z: 1 };
+        rig.root.scaling.set(scale.x, scale.y, scale.z);
+      }
+    }
+
+    const env = sceneDoc.environment;
+    if (env?.meshAssetId && env.visible !== false) {
+      if (!this.environmentRig) {
+        this.environmentRig = createObjectRig(this.scene, {
+          id: env.id || "environment",
+          name: env.name || "Stage",
+          source: "reconstructed",
+          meshAssetId: env.meshAssetId,
+          position: { x: 0, y: 0, z: 0 },
+        });
+      }
+      this.environmentRig.root.setEnabled(true);
+    } else if (this.environmentRig) {
+      this.environmentRig.root.setEnabled(false);
     }
     this.updateGizmoPlacement();
   }

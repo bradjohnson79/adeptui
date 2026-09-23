@@ -9,8 +9,6 @@ const FAMILY_LABELS: Record<string, string> = {
   zimage: "Z-Image",
   krea2: "Krea 2",
   ltx: "LTX Video",
-  wan: "WAN",
-  hunyuan: "Hunyuan",
   unassigned: "Unassigned",
 };
 

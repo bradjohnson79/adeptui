@@ -10,12 +10,15 @@ from __future__ import annotations
 import math
 from typing import Any
 
-MIN_GRID_SCALE = -5
-MAX_GRID_SCALE = 5
+MIN_GRID_SCALE = -8
+MAX_GRID_SCALE = 8
 DEFAULT_GRID_SCALE = 0
 PLACEMENT_GRID_CARTESIAN = "cartesian-v1"
 
 GRID_DENSITY: dict[int, int] = {
+    -8: 2,
+    -7: 3,
+    -6: 4,
     -5: 5,
     -4: 6,
     -3: 7,
@@ -27,6 +30,9 @@ GRID_DENSITY: dict[int, int] = {
     3: 16,
     4: 18,
     5: 20,
+    6: 22,
+    7: 24,
+    8: 26,
 }
 
 CIRCLE_RADIUS = 1.0

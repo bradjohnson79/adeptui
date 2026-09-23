@@ -30,7 +30,11 @@ const isMac = () =>
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
 
 export const DEFAULT_HOTKEYS: TimelineHotkeyBinding[] = [
-  { actionId: "playPause", label: "Play / Pause Viewer", category: "Playback", defaultShortcut: { key: " " }, userShortcut: null, enabled: true },
+  { actionId: "playPause", label: "Play / Pause Timeline", category: "Playback", defaultShortcut: { key: " " }, userShortcut: null, enabled: true },
+  { actionId: "goToSceneStart", label: "Go to Scene Start", category: "Playback", defaultShortcut: { key: "Home", shift: true }, userShortcut: null, enabled: true },
+  { actionId: "goToBatchIn", label: "Go to Batch In", category: "Playback", defaultShortcut: { key: "Home" }, userShortcut: null, enabled: true },
+  { actionId: "goToBatchOut", label: "Go to Batch Out", category: "Playback", defaultShortcut: { key: "End" }, userShortcut: null, enabled: true },
+  { actionId: "goToSceneEnd", label: "Go to Scene End", category: "Playback", defaultShortcut: { key: "End", shift: true }, userShortcut: null, enabled: true },
   { actionId: "playheadLeft", label: "Playhead step back", category: "Playback", defaultShortcut: { key: "ArrowLeft" }, userShortcut: null, enabled: true },
   { actionId: "playheadRight", label: "Playhead step forward", category: "Playback", defaultShortcut: { key: "ArrowRight" }, userShortcut: null, enabled: true },
   { actionId: "playheadLeftLarge", label: "Playhead jump back", category: "Playback", defaultShortcut: { key: "ArrowLeft", shift: true }, userShortcut: null, enabled: true },
@@ -55,7 +59,6 @@ export const DEFAULT_HOTKEYS: TimelineHotkeyBinding[] = [
   { actionId: "toggleRightDrawer", label: "Toggle Inspector & Co-Director", category: "Editing", defaultShortcut: { key: "" }, userShortcut: null, enabled: true },
   { actionId: "focusTimeline", label: "Focus Timeline", category: "Editing", defaultShortcut: { key: "" }, userShortcut: null, enabled: true },
   { actionId: "addPrompt", label: "Prompt clip", category: "Clips & Tracks", defaultShortcut: { key: "t" }, userShortcut: null, enabled: true },
-  { actionId: "addLipSync", label: "Lip Sync clip", category: "Clips & Tracks", defaultShortcut: { key: "l" }, userShortcut: null, enabled: true },
 ];
 
 export function normalizeChord(chord: ShortcutChord): ShortcutChord {

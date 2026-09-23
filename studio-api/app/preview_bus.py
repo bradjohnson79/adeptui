@@ -47,12 +47,17 @@ class EngineCapabilities:
 
 
 ENGINE_CAPS: dict[str, EngineCapabilities] = {
-    "ltx": EngineCapabilities(True, "frames", True, True),
-    "wan": EngineCapabilities(True, "frames", True, True),
-    "fal_seedance": EngineCapabilities(False, "provider-thumbnail", True, False),
-    "fal_kling": EngineCapabilities(False, "provider-thumbnail", True, False),
-    "fal_veo": EngineCapabilities(False, "provider-thumbnail", True, False),
-    "fal_runway": EngineCapabilities(False, "provider-thumbnail", True, False),
+    "ltx-2.5": EngineCapabilities(True, "frames", True, True),
+    "ltx-2.5-distilled": EngineCapabilities(True, "frames", True, True),
+    "ltx-2.5-full": EngineCapabilities(True, "frames", True, True),
+    "ltx-2.5-comfy": EngineCapabilities(True, "frames", True, True),
+    "minimax-h3": EngineCapabilities(True, "frames", True, True),
+    # Hosted fal engines: no live preview, no honest progress, no thumbnail fetch.
+    # Do not claim provider-thumbnail until a real fetcher exists.
+    "fal_seedance": EngineCapabilities(False, None, False, False),
+    "fal_kling": EngineCapabilities(False, None, False, False),
+    "fal_veo": EngineCapabilities(False, None, False, False),
+    "fal_runway": EngineCapabilities(False, None, False, False),
     "auto": EngineCapabilities(False, None, False, False),
 }
 
@@ -64,8 +69,15 @@ class PreviewBus:
         self._lock = asyncio.Lock()
 
     def capabilities_for(self, engine: str) -> dict[str, Any]:
-        caps = ENGINE_CAPS.get(engine, EngineCapabilities())
-        return asdict(caps)
+        token = str(engine or "").strip().lower()
+        caps = ENGINE_CAPS.get(token)
+        if caps is None:
+            # Family fallback: ltx-2.5-distilled → ltx-2.5, minimax-h3-i2v → minimax-h3
+            for prefix in ("ltx-2.5", "minimax-h3"):
+                if token.startswith(prefix):
+                    caps = ENGINE_CAPS.get(prefix)
+                    break
+        return asdict(caps or EngineCapabilities())
 
     async def publish(self, event: str, preview: GenerationPreview | None, extra: dict | None = None) -> None:
         payload = {
@@ -93,6 +105,29 @@ class PreviewBus:
         q: asyncio.Queue = asyncio.Queue(maxsize=64)
         self._subscribers.append(q)
         return q
+
+    def publish_sync(self, event: str, preview: GenerationPreview | None, extra: dict | None = None) -> None:
+        """Thread-safe publish from sync code (queue worker threads, Route A poll)."""
+        payload = {
+            "event": event,
+            "preview": asdict(preview) if preview else None,
+            "extra": extra or {},
+            "ts": time.time(),
+        }
+        if preview:
+            prev = self._latest.get(preview.jobId)
+            if prev and prev.sequenceNumber > preview.sequenceNumber:
+                return
+            self._latest[preview.jobId] = preview
+        dead: list[asyncio.Queue] = []
+        for q in self._subscribers:
+            try:
+                q.put_nowait(payload)
+            except Exception:
+                dead.append(q)
+        for q in dead:
+            if q in self._subscribers:
+                self._subscribers.remove(q)
 
     def unsubscribe(self, q: asyncio.Queue) -> None:
         if q in self._subscribers:

@@ -28,6 +28,8 @@ export type CharacterProfile = {
   personality?: Record<string, unknown>;
   updated_at?: string;
   created_at?: string;
+  is_global?: boolean;
+  isGlobal?: boolean;
 };
 
 export type CharacterReference = {

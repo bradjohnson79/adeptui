@@ -19,7 +19,6 @@
 
 .timeline-v2__board {
   position: relative;
-  min-width: 100%;
   background: linear-gradient(180deg, #0c121b, #090e16);
   border: 1px solid rgba(124, 156, 188, 0.14);
 }
@@ -28,7 +27,7 @@
 .timeline-v2__playhead-rail,
 .timeline-v2__track-row {
   display: grid;
-  grid-template-columns: var(--timeline-track-label-width, 132px) minmax(0, 1fr);
+  grid-template-columns: var(--timeline-track-label-width, 220px) var(--timeline-lane-width, minmax(0, 1fr));
   min-height: var(--track-row-height, 56px);
   direction: ltr;
 }
@@ -46,7 +45,7 @@
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: var(--timeline-track-label-width, 132px) minmax(0, 1fr);
+  grid-template-columns: var(--timeline-track-label-width, 220px) var(--timeline-lane-width, minmax(0, 1fr));
   min-height: 0;
   pointer-events: none;
   z-index: 5;
@@ -80,6 +79,9 @@
 .timeline-v2 .timeline-v2__track-label {
   display: flex;
   align-items: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  max-width: 100%;
   padding-inline: 12px;
   font-size: 12px;
   font-weight: 600;
@@ -107,6 +109,11 @@
 }
 
 .timeline-v2__track-label-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   opacity: 1;
   transform: none;
   filter: none;
@@ -115,8 +122,12 @@
 .timeline-v2__track-label-tools {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 0.25rem;
   margin-inline-start: auto;
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .timeline-v2 .timeline-v2__track-label-icon,
@@ -127,6 +138,34 @@
   stroke: currentColor;
   opacity: 1;
   display: inline-flex;
+}
+
+button.timeline-v2__track-label-icon {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0.2rem;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  pointer-events: auto;
+  position: relative;
+  z-index: 3;
+}
+
+button.timeline-v2__track-label-icon.is-pressed {
+  background: rgba(45, 212, 191, 0.18);
+  color: var(--timeline-v2-track-label-color, #e1e8f2);
+}
+
+button.timeline-v2__track-label-icon:hover,
+button.timeline-v2__track-label-icon:focus-visible {
+  background: rgba(26, 51, 88, 0.75);
+  outline: none;
 }
 
 .timeline-v2__track-label-add {
@@ -241,34 +280,41 @@
   transform: none;
 }
 
-.timeline-v2__track-row--batch {
-  --track-row-height: 48px;
+.timeline-v2__sequence-end {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed rgba(232, 196, 120, 0.42);
+  pointer-events: none;
+  transform: translateX(-50%);
 }
 
+/* P3: Batch track row removed — dead CSS deleted. */
 .timeline-v2__track-row--prompt {
   --track-row-height: 48px;
   height: var(--track-row-height);
 }
+
+.timeline-v2__track-row--batch {
+  --track-row-height: 48px;
+}
+
 
 .timeline-v2__track-row--prompt .timeline-v2__track-content {
   height: var(--track-row-height);
   overflow: hidden;
 }
 
-.timeline-v2__track-row--camera {
-  --track-row-height: 48px;
-}
+/* Phase 0: .timeline-v2__track-row--camera lane styles removed (lane unmounted) */
 
-.timeline-v2__track-row--camera .track-clip,
-.timeline-v2__track-row--camera .track-clip--interactive,
 .timeline-v2__track-row--prompt .track-clip,
 .timeline-v2__track-row--prompt .track-clip--interactive {
   top: 4px;
   bottom: 4px;
-  overflow: hidden;
+  overflow: visible;
 }
 
-.timeline-v2__track-row--camera .track-clip__body,
 .timeline-v2__track-row--prompt .track-clip__body {
   gap: 0;
   padding: 0.1rem 0.35rem;
@@ -290,4 +336,22 @@
 
 .timeline-v2__clip-instruction {
   color: var(--timeline-v2-track-label-muted, #c5d0dc);
+}
+
+.timeline-v2__retake-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 8;
+  cursor: col-resize;
+}
+
+.timeline-v2__retake-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: rgba(56, 189, 248, 0.22);
+  border-left: 2px solid #38bdf8;
+  border-right: 2px solid #38bdf8;
 }

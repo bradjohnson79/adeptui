@@ -52,7 +52,9 @@ def binding_to_dict(row: SceneReferenceBinding) -> dict[str, Any]:
         "alias": getattr(row, "alias", None),
         "media_kind": getattr(row, "media_kind", None),
         "asset_name": getattr(asset, "tag", None) or getattr(asset, "filename", None),
-        "thumbnail_url": f"/api/assets/{row.asset_id}/file" if row.asset_id else None,
+        "thumbnail_url": (
+            f"/api/projects/{row.project_id}/assets/{row.asset_id}/file" if row.asset_id and row.project_id else None
+        ),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "inherited_from": None,
@@ -85,6 +87,71 @@ def get_binding(db: Session, project_id: str, binding_id: str) -> SceneReference
     if not row or row.project_id != project_id or row.deleted_at is not None:
         return None
     return row
+
+
+def find_live_binding_by_identity(
+    db: Session,
+    project_id: str,
+    *,
+    scope_type: str,
+    scope_id: str,
+    identity_id: str,
+    reference_type: str | None = None,
+) -> SceneReferenceBinding | None:
+    token = str(identity_id or "").strip()
+    if not token:
+        return None
+    q = select(SceneReferenceBinding).where(
+        SceneReferenceBinding.project_id == project_id,
+        SceneReferenceBinding.scope_type == scope_type,
+        SceneReferenceBinding.scope_id == scope_id,
+        SceneReferenceBinding.identity_id == token,
+        SceneReferenceBinding.deleted_at.is_(None),
+    )
+    if reference_type:
+        q = q.where(SceneReferenceBinding.reference_type == reference_type)
+    return db.scalars(q).first()
+
+
+def find_live_binding_by_alias(
+    db: Session,
+    project_id: str,
+    *,
+    scope_type: str,
+    scope_id: str,
+    alias: str,
+) -> SceneReferenceBinding | None:
+    token = str(alias or "").strip()
+    if not token:
+        return None
+    q = select(SceneReferenceBinding).where(
+        SceneReferenceBinding.project_id == project_id,
+        SceneReferenceBinding.scope_type == scope_type,
+        SceneReferenceBinding.scope_id == scope_id,
+        SceneReferenceBinding.alias == token,
+        SceneReferenceBinding.deleted_at.is_(None),
+    )
+    return db.scalars(q).first()
+
+
+def find_live_binding(
+    db: Session,
+    project_id: str,
+    *,
+    scope_type: str,
+    scope_id: str,
+    asset_id: str,
+    reference_type: str,
+) -> SceneReferenceBinding | None:
+    q = select(SceneReferenceBinding).where(
+        SceneReferenceBinding.project_id == project_id,
+        SceneReferenceBinding.scope_type == scope_type,
+        SceneReferenceBinding.scope_id == scope_id,
+        SceneReferenceBinding.asset_id == asset_id,
+        SceneReferenceBinding.reference_type == reference_type,
+        SceneReferenceBinding.deleted_at.is_(None),
+    )
+    return db.scalars(q).first()
 
 
 def find_soft_deleted_binding(

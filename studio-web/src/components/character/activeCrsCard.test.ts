@@ -111,6 +111,8 @@ describe("Approve / Reject confirm (shared card, no candidate grid)", () => {
     expect(card).toContain("character-active-crs-reject");
     expect(card).toContain("onReject");
     expect(card).toMatch(/status !== "approved" && onReject/);
+    expect(card).toContain("character-active-crs-open-library");
+    expect(card).toContain("character-active-crs-use-imagegen");
     expect(card).not.toContain("CharacterCandidateGrid");
   });
 

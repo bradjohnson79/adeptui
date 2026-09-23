@@ -54,17 +54,15 @@ export function VisualReferencesPanel({
   useEffect(() => {
     refresh().catch((e) => setMsg(String(e)));
     // Restore method from director timeline if present
-    api.getDirector(project.id, scene.id).then((d) => {
-      const ref = d?.reference || d?.ic_lora;
-      if (ref?.method === "ingredients_ic_lora" || ref?.reference_method === "ingredients_ic_lora") {
-        setMethod("ingredients_ic_lora");
-        if (ref.strength_preset) setStrengthPreset(ref.strength_preset);
-        if (typeof ref.strength === "number") setStrengthValue(ref.strength);
-        if (ref.sheet_id) {
-          api.getReferenceSheet(project.id, ref.sheet_id).then(setSheet).catch(() => undefined);
-        }
+    const ref = (scene as { reference?: Record<string, unknown> }).reference;
+    if (ref && (ref.method === "ingredients_ic_lora" || ref.reference_method === "ingredients_ic_lora")) {
+      setMethod("ingredients_ic_lora");
+      if (typeof ref.strength_preset === "string") setStrengthPreset(ref.strength_preset as typeof strengthPreset);
+      if (typeof ref.strength === "number") setStrengthValue(ref.strength);
+      if (typeof ref.sheet_id === "string") {
+        api.getReferenceSheet(project.id, ref.sheet_id).then(setSheet).catch(() => undefined);
       }
-    }).catch(() => undefined);
+    }
   }, [project.id, scene.id]);
 
   useEffect(() => {
@@ -72,11 +70,11 @@ export function VisualReferencesPanel({
   }, [strengthPreset]);
 
   const persistDirectorRef = async (patch: Record<string, unknown>) => {
-    const d = await api.getDirector(project.id, scene.id);
-    const next = {
-      ...d,
+    // SINGLE-STORE: PUT /director is retired (410 Gone). Reference method /
+    // sheet selection is project-scoped scene-reference state, not a legacy
+    // DirectorTimeline write. Persist via scene update so it survives reload.
+    await api.updateScene(project.id, scene.id, {
       reference: {
-        ...(d.reference || {}),
         method,
         reference_method: method,
         enabled: method === "ingredients_ic_lora",
@@ -86,8 +84,7 @@ export function VisualReferencesPanel({
         sheet_id: sheet?.id,
         ...patch,
       },
-    };
-    await api.putDirector(project.id, scene.id, next);
+    } as any);
   };
 
   const addIngredient = async () => {

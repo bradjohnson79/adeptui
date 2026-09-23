@@ -96,13 +96,31 @@ def export_batch_workflow(
         snapshot = create_execution_snapshot(batch)
         snapshot_origin = "ephemeral"
 
-    request = build_timeline_generation_request(
-        project_id=project_id, scene_id=scene_id, batch=batch, snapshot=snapshot
+    from .generation.direct_reference import build_direct_reference_payload, delivery_error
+
+    direct_refs = build_direct_reference_payload(
+        db,
+        project_id=project_id,
+        scene_id=scene_id,
+        batch=batch,
+        generator_id=batch.generatorId or "",
     )
-    if request.generatorId != "ltx-local":
+    blocked = delivery_error(direct_refs)
+    if blocked is not None:
+        raise WorkflowExportError("REFERENCE_DELIVERY_FAILED", str(blocked.get("message") or "reference delivery failed"))
+    request = build_timeline_generation_request(
+        project_id=project_id,
+        scene_id=scene_id,
+        batch=batch,
+        snapshot=snapshot,
+        direct_references=direct_refs,
+    )
+    from ..video_runtime.workflow_resolver import is_ltx_25_generator
+
+    if not is_ltx_25_generator(request.generatorId):
         raise WorkflowExportError(
             "EXPORT_UNSUPPORTED_PROVIDER",
-            f"Workflow export currently supports the local Comfy LTX path only "
+            f"Workflow export currently supports the local Comfy LTX 2.5 path only "
             f"(batch generator={request.generatorId!r}). MiniMax H3 uses its own "
             "adapter and has no ComfyUI graph.",
         )
@@ -110,23 +128,43 @@ def export_batch_workflow(
     # --- Mirror queue_worker._build_and_run_scene param mapping exactly ---
     from ..aspect_fps import resolve_scene_dims, resolve_scene_fps
     from ..engine_recommend import resolve_engine_id
-    from ..vram_profiles import clamp_frames, resolve_render_plan
+    from ..video_runtime.legal_canvas import SpecFidelityError, assert_legal_canvas, assert_legal_duration
+    from ..vram_profiles import resolve_render_plan
 
     negative = request.negativePrompt or project.negative_prompt or ""
     seed = scene.seed if scene.seed >= 0 else project.seed
     plan = resolve_render_plan(project)
     sw, sh = resolve_scene_dims(project, scene)
     sfps = resolve_scene_fps(project, scene)
-    if plan.vram_gb < 32:
-        width, height, plan_fps = min(sw, plan.width), min(sh, plan.height), min(sfps, plan.fps)
-    else:
-        width, height, plan_fps = sw, sh, sfps
+    width, height, plan_fps = sw, sh, sfps
     steps = plan.steps
     resolved_engine = resolve_engine_id(scene.engine, project, scene)
+    try:
+        width, height = assert_legal_canvas(str(resolved_engine), width, height)
+        # MiniMax H3: use legalFrameCount from providerOptions if available (set
+        # by request_builder.py). Fall back to frames_for_duration which snaps
+        # UP to legal 17k+5. Other engines use assert_legal_duration as before.
+        po = request.providerOptions or {}
+        legal_frame_count = int(po.get("legalFrameCount") or 0)
+        from ..video_runtime.legal_canvas import is_minimax_h3_generator
 
-    frames = max(9, int(round(float(request.duration) * plan_fps)))
-    length = max(9, ((frames - 1) // 8) * 8 + 1)
-    length, frame_clamped = clamp_frames(length, plan)
+        if is_minimax_h3_generator(str(resolved_engine)):
+            if legal_frame_count > 0:
+                length = legal_frame_count
+            else:
+                from ..workflows.h3_ref2v_builder import frames_for_duration
+
+                length = frames_for_duration(float(request.duration))
+        else:
+            length = assert_legal_duration(
+                str(resolved_engine),
+                float(request.duration),
+                int(plan_fps),
+                surface="r2v",
+            )
+    except SpecFidelityError as exc:
+        raise WorkflowExportError("SPEC_FIDELITY", str(exc)) from exc
+    frame_clamped = False
 
     contract = resolve_from_scene_params(
         engine=resolved_engine,
@@ -140,10 +178,10 @@ def export_batch_workflow(
     )
 
     start_name = _intended_comfy_image_name(db, project_id, request.startImageAssetId)
-    if contract.leaf_workflow_key in {"ltx.simple_i2v", "ltx.scene"} and not start_name:
+    if contract.leaf_workflow_key == "ltx_25.i2v" and not start_name:
         raise WorkflowExportError(
             "START_FRAME_REQUIRED",
-            "Local LTX requires a start frame (I2V only). Attach a start image to the batch.",
+            "Local LTX 2.5 image-to-video requires a start frame. Attach a start image to the batch.",
         )
     end_name = _intended_comfy_image_name(db, project_id, request.endImageAssetId)
 

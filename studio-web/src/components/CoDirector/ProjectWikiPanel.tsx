@@ -3,6 +3,8 @@ import { api, type CoDirectorProjectWiki, type ProjectWikiEntry, type ProjectWik
 import { Button } from "../ui";
 import { CoDirectorEmptyState, CoDirectorErrorState } from "./cards";
 import { CompiledWikiReader } from "./wiki/CompiledWikiReader";
+import { sanitizeHtml } from "../scriptwriter/sanitizeHtml";
+
 function stripHtml(text: string): string {
   return text.replace(/<[^>]+>/g, "").trim();
 }
@@ -926,7 +928,10 @@ export function ProjectWikiPanel({
                   {entry.longSummary && (
                     <div className="wiki-story-entry__section">
                       <strong>Long Summary</strong>
-                      <p>{stripHtml(entry.longSummary)}</p>
+                      <div
+                        style={{ lineHeight: 1.55 }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(entry.longSummary) }}
+                      />
                     </div>
                   )}
                 </details>
@@ -946,7 +951,7 @@ export function ProjectWikiPanel({
                     <div className="wiki-character-card__header">
                       {char.approvedCastingImageAssetId ? (
                         <img
-                          src={`/api/assets/${char.approvedCastingImageAssetId}/file`}
+                          src={api.assetUrl(char.approvedCastingImageAssetId, null, projectId)}
                           alt={char.name}
                           className="wiki-character-card__image"
                           onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
@@ -979,7 +984,7 @@ export function ProjectWikiPanel({
                     ) : null}
                     <div className="wiki-character-card__actions">
                       <button type="button" className="ghost" onClick={() => onGoTab?.("characters", { characterId: char.profileId })}>
-                        Open Character
+                        Open in Character Creator
                       </button>
                     </div>
                   </div>
@@ -1308,7 +1313,10 @@ export function ProjectWikiPanel({
               {entry.longSummary && (
                 <div className="wiki-story-entry__section">
                   <strong>Long Summary</strong>
-                  <p>{entry.longSummary}</p>
+                  <div
+                    style={{ lineHeight: 1.55 }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(entry.longSummary) }}
+                  />
                 </div>
               )}
             </details>
@@ -1324,7 +1332,7 @@ export function ProjectWikiPanel({
                 <div className="wiki-character-card__header">
                   {char.approvedCastingImageAssetId ? (
                     <img
-                      src={`/api/assets/${char.approvedCastingImageAssetId}/file`}
+                      src={api.assetUrl(char.approvedCastingImageAssetId, null, projectId)}
                       alt={char.name}
                       className="wiki-character-card__image"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
@@ -1357,7 +1365,7 @@ export function ProjectWikiPanel({
                 ) : null}
                 <div className="wiki-character-card__actions">
                   <button type="button" className="ghost" onClick={() => onGoTab?.("characters", { characterId: char.profileId })}>
-                    Open Character
+                    Open in Character Creator
                   </button>
                 </div>
               </div>

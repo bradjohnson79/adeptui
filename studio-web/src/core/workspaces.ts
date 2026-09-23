@@ -1,3 +1,4 @@
+import { isPoseCraftEnabled, isSpatialMapEnabled } from "./featureFlags";
 export type WorkspaceGroup =
   | "project"
   | "create"
@@ -126,7 +127,8 @@ export const WORKSPACES = {
     compatibilityAliases: ["text-to-video", "text2video", "txt2vid"],
     menuGroup: "generate",
     order: 20,
-    description: "Create video directly from a written scene.",
+    description:
+      "Text-to-video from a prompt alone. Local MiniMax H3 and LTX 2.5 can do Text to Video when those workflows are Ready. Use 1 Frame or Timeline for picture-guided shots.",
     capabilityBadges: ["Video"],
     commandPalette: true,
   },
@@ -170,21 +172,9 @@ export const WORKSPACES = {
     commandPalette: false,
     menuHidden: true,
   },
-  profiles: {
-    label: "Project Profile",
-    labelKey: "profiles",
-    group: "organize",
-    futureDestination: "profiles",
-    compatibilityAliases: [],
-    menuGroup: "characters",
-    order: 30,
-    description: "Shared visual, tonal, technical, and production identity.",
-    capabilityBadges: ["Profiles"],
-    commandPalette: true,
-  },
   tools: {
     label: "Character / Angles",
-    labelKey: "profiles",
+    labelKey: "tools",
     group: "legacy",
     futureDestination: "profiles",
     compatibilityAliases: ["image-tools"],
@@ -200,12 +190,13 @@ export const WORKSPACES = {
     labelKey: "spatialMap",
     group: "create",
     futureDestination: "sceneSheets",
-    compatibilityAliases: ["blocking", "spatial-map", "spatialmap"],
+    compatibilityAliases: ["blocking", "spatial-map", "spatialmap", "spatial_map"],
     menuGroup: "production",
     order: 40,
     description: "Artist-facing blocking canvas, 360 collage planning, and camera staging.",
     capabilityBadges: ["Spatial", "360"],
-    commandPalette: true,
+    commandPalette: isSpatialMapEnabled(),
+    menuHidden: !isSpatialMapEnabled(),
   },
   posecraft: {
     label: "PoseCraft",
@@ -218,7 +209,8 @@ export const WORKSPACES = {
     description:
       "Pose characters on a 3D stage with camera, lenses, and guides — pre-production staging for shots and storyboards.",
     capabilityBadges: ["Pose", "Staging", "3D"],
-    commandPalette: true,
+    commandPalette: isPoseCraftEnabled(),
+    menuHidden: !isPoseCraftEnabled(),
   },
   script: {
     label: "Storyboard Studio",
@@ -283,29 +275,16 @@ export const WORKSPACES = {
     capabilityBadges: ["Resources"],
     commandPalette: true,
   },
-  mastersheet: {
-    label: "Scene Master Sheet",
-    labelKey: "mastersheet",
+  environmentcreator: {
+    label: "Environment Creator",
+    labelKey: "environmentCreator",
     group: "create",
     futureDestination: "sceneSheets",
-    compatibilityAliases: ["scene-sheets", "sceneSheets"],
+    compatibilityAliases: ["environment-creator", "environmentCreator", "ers", "environment_creator"],
     menuGroup: "production",
-    order: 30,
-    description: "Scene continuity master sheet.",
-    capabilityBadges: ["Scenes"],
-    commandPalette: false,
-    menuHidden: true,
-  },
-  scenecreator: {
-    label: "Scene Creator",
-    labelKey: "sceneCreator",
-    group: "create",
-    futureDestination: "sceneSheets",
-    compatibilityAliases: ["scene-creator", "sceneCreator", "scene_creator"],
-    menuGroup: "production",
-    order: 30,
-    description: "Create scene shots from an Environment Reference Sheet and send approved takes to the Timeline.",
-    capabilityBadges: ["Scenes"],
+    order: 28,
+    description: "Plan and create Environment Reference Sheets (ERS) — the environment identity production builds from.",
+    capabilityBadges: ["Environments"],
     commandPalette: true,
   },
   propcreator: {
@@ -316,7 +295,7 @@ export const WORKSPACES = {
     compatibilityAliases: ["prop-creator", "propCreator"],
     menuGroup: "characters",
     order: 12,
-    description: "Create project Prop identities, approve a look, and use them on the Spatial Map and in Scene Creator.",
+    description: "Create project Prop identities, approve a look, and use them in the Image Generator.",
     capabilityBadges: ["Props"],
     commandPalette: true,
   },
@@ -328,9 +307,10 @@ export const WORKSPACES = {
     compatibilityAliases: ["avatar-studio"],
     menuGroup: "characters",
     order: 20,
-    description: "Speaking portraits and avatar generation.",
+    description: "Temporarily retired from current Adept UI — not an active product surface.",
     capabilityBadges: ["Avatar", "Lip Sync"],
-    commandPalette: true,
+    commandPalette: false,
+    menuHidden: true,
   },
   voicestudio: {
     label: "Voice Studio",
@@ -464,19 +444,27 @@ export const WORKSPACES = {
     capabilityBadges: ["Writing", "Screenplay"],
     commandPalette: true,
   },
-  brandstudio: {
-    label: "Brand Studio",
-    labelKey: "brandStudio",
-    group: "create",
-    futureDestination: "generate",
-    compatibilityAliases: ["brand", "branding", "promo"],
-    menuGroup: "generate",
-    order: 70,
-    description: "Create brand identities, visual systems, campaign assets, and reusable production styling.",
-    capabilityBadges: ["Brand"],
-    commandPalette: true,
-  },
 } as const satisfies Record<string, WorkspaceDefinition>;
+
+/** Retired from Adept UI v1.1. Must not remount. See docs/architecture/BRAND_STUDIO_V1_1_RETIREMENT.md
+ * Scene Creator Standard retired with the Image Generator v1.1 triad — stale
+ * scenecreator/mastersheet links land on the Image Generator (resolveWorkspace). */
+export const RETIRED_WORKSPACE_IDS = Object.freeze([
+  "brandstudio",
+  "brand",
+  "branding",
+  "promo",
+  "scenecreator",
+  "mastersheet",
+  "avatar",
+  "avatar-studio",
+  "avatar_studio",
+]);
+
+export function isRetiredWorkspace(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return (RETIRED_WORKSPACE_IDS as readonly string[]).includes(value.trim().toLowerCase());
+}
 
 export type EditorTab = keyof typeof WORKSPACES;
 
@@ -507,15 +495,40 @@ const WORKSPACE_ALIASES: ReadonlyMap<string, EditorTab> = (() => {
 export function resolveWorkspace(value: unknown): EditorTab | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
+  // Scene Creator Standard retired (Image Generator v1.1 triad) — ALL its
+  // ids/aliases (including former compatibility aliases not in the retired
+  // tombstone list) land on the Image Generator, its production successor.
+  if (
+    normalized === "scenecreator" ||
+    normalized === "mastersheet" ||
+    normalized === "scene-creator" ||
+    normalized === "scene_creator"
+  ) {
+    return "imagegen";
+  }
+  // Avatar Studio temporarily retired from current Adept UI (voice/avatar runtime unsuitable).
+  // Stale ?workspace=avatar deep links land on project home — never remount Avatar Studio.
+  // Future: cloud Avatar for Adept UI v1.2 (non-routing). See docs/architecture/AVATAR_STUDIO_RETIREMENT.md
+  if (
+    normalized === "avatar" ||
+    normalized === "avatar-studio" ||
+    normalized === "avatar_studio"
+  ) {
+    return "home";
+  }
+  if (isRetiredWorkspace(normalized)) return null;
   const resolved = normalized ? WORKSPACE_ALIASES.get(normalized) ?? null : null;
   // Legacy finishing Editor is retired — MAGI Editor is the sole production editor.
   if (resolved === "editor") return "magi";
   // Wave 4C: Director product renamed Timeline — never surface two products.
   if (resolved === "director") return "timeline";
-  if (resolved === "mastersheet") return "scenecreator";
   // M4.7: writing entry points resolve to Scriptwriter Studio.
   // Storyboard remains available via workspace=storyboard / script-storyboard.
   if (normalized === "script-writer" || normalized === "writer") return "scriptwriter";
+  // Project Profile is retired from Adept UI — stale ?workspace=profiles
+  // deep links land on project home (never a blank page). The generic
+  // profiles API stays (shared with historical Avatar Studio / director tracks).
+  if (normalized === "profiles") return "home";
   return resolved;
 }
 
@@ -539,6 +552,13 @@ export function commandPaletteWorkspaces(): EditorTab[] {
     const def = WORKSPACES[tab] as WorkspaceDefinition;
     return def.commandPalette !== false && !isMenuHidden(tab);
   }).sort((a, b) => WORKSPACES[a].label.localeCompare(WORKSPACES[b].label));
+}
+
+/** Silent v1.1 fallback: shelved spatial/3D workspaces never mount as destinations. */
+export function resolveShelvedCreatorWorkspace(tab: EditorTab): EditorTab {
+  if (tab === "spatial" && !isSpatialMapEnabled()) return "environmentcreator";
+  if (tab === "posecraft" && !isPoseCraftEnabled()) return "imagegen";
+  return tab;
 }
 
 /** Standalone Production Bible page is internal memory — send creators to Co-Director. */

@@ -3,11 +3,12 @@
  *
  * Lifecycle:
  *   empty state (no document or no backgroundAssetId)
- *     → creator picks Atlas Shot / Library image / Upload
- *     → POST /api/spatial-map/projects/{pid}/maps with backgroundAssetId
+ *     → Express (Co-Director): SpatialMapExpressForm (GPT Image 2 API)
+ *     → Standard (Production): SpatialMapStartChooser (design / reconstruct / assign)
+ *     → then POST /api/spatial-map/projects/{pid}/maps with backgroundAssetId
  *   map view (document with backgroundAssetId)
- *     → circular working area + Cartesian square grid,
- *       character/prop/camera slots (ADD ≠ PLACE),
+ *     → rectangular native-aspect workspace + Cartesian square grid,
+ *       character/prop/camera slots (ADD â‰  PLACE),
  *       click-to-place, mini-prompts, ERS generation/display.
  *
  * Reuses (Law #17): api.spatialMap, api.listCharacterProfiles, api.library,
@@ -27,6 +28,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
+import { HelpTip } from "../../HelpTip";
 import { CoDirectorEmptyState } from "../cards";
 import { useCoDirectorSession } from "../CoDirectorSession";
 import { isTerminal } from "../AgentWorkSurface/types";
@@ -34,11 +36,35 @@ import { EntityPicker } from "./EntityPicker";
 import { CameraReferenceStrip } from "./CameraReferenceStrip";
 import { ERSGenerationMonitor } from "./ERSGenerationMonitor";
 import { SceneCreatorMini } from "./SceneCreatorMini";
+import {
+  MOVEMENT_MAX,
+  activeMovement,
+  movementAlias,
+  computeClientArrows,
+  listMovements,
+  movementLabel,
+} from "./movementSegments";
+import { SpatialMapExpressForm, type ExpressReference } from "./SpatialMapExpressForm";
+import { DIRECT_USE_NOT_ATLAS } from "./expressReadiness";
+import { SpatialMapStartChooser } from "./SpatialMapStartChooser";
 import { SpatialMapSaveControls } from "./SpatialMapSaveControls";
-import { ERS_GENERATOR_OPTIONS, ersGeneratorOptionDisabled } from "./ersGenerator";
+import { CorrectAreaPanel } from "./CorrectAreaPanel";
+import {
+  ALIGNMENT_DISPLAY_SIZE,
+  alignmentFromPixelPair,
+  displayPixels,
+  hydrateAlignment,
+  parseAlignmentInput,
+  withSource,
+  ZERO_ALIGNMENT,
+  type BackgroundAlignment,
+} from "./backgroundAlignment";
+import { isGptImage2Ready } from "./ersGenerator";
+import { normalizeJobProgress, type NormalizedJobProgress } from "./normalizeJobProgress";
 import { useErsGeneration } from "./useErsGeneration";
 import { useSpatialMapSaveHooks } from "./useSpatialMapSave";
 import { persistThenOpenSceneCreator } from "../SceneCreator/persistThenOpenSceneCreator";
+import { openExpressStandardWorkspace } from "../../../navigation/projectWorkspaceNavigation";
 import { CharacterInspector } from "./CharacterInspector";
 import { PlacementSlot } from "./PlacementSlot";
 import { PropAttachmentEditor, type PropAttachmentApply } from "./PropAttachmentEditor";
@@ -46,6 +72,9 @@ import { SpatialGrid, toGridPlacements } from "./SpatialGrid";
 import { spatialMapApi } from "./spatialMapApi";
 import { CdSceneReview } from "./CdSceneReview";
 import { CameraInspector } from "./CameraInspector";
+import { SpinCameraPanel } from "./SpinCameraPanel";
+import { useSpinCamera } from "./useSpinCamera";
+import { cellToWorldMeters, formatMeters } from "./spinCameraGeometry";
 import {
   assignedSpatialMapCharacters,
   attachedPropsForCharacter,
@@ -60,6 +89,13 @@ import {
   placementSwitchAriaLabel,
   slotPlacementBadge,
 } from "./placementArm";
+import {
+  camerasNeedingSubjectFallback,
+  primarySubjectOptions,
+  resolvePrimarySubjectValue,
+} from "./primarySubjectOptions";
+import { computeCameraMovementArrows } from "./cameraMovementPath";
+
 import {
   cellLabel,
   cellToNormalized,
@@ -94,6 +130,21 @@ import "./spatialMap.css";
 type Props = {
   projectId: string;
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
+  /** Co-Director tab is Express. Production spatial workspace is Standard. */
+  variant?: "express" | "standard";
+};
+
+type EmptyPickerRole = "express-ref" | "express-atlas" | "standard-style" | "standard-location" | "standard-atlas";
+
+const IDLE_ATLAS_PROGRESS: NormalizedJobProgress = {
+  status: "idle",
+  progressPercent: null,
+  stage: "",
+  message: "",
+  indeterminate: true,
+  previewUrl: null,
+  finalAssetId: null,
+  genuineSampler: false,
 };
 
 type BusyState = { loading: boolean; error: string | null };
@@ -101,7 +152,7 @@ type PendingCoDirectorOp = "atlas" | "ers" | null;
 type ActiveSlot = { kind: "character" | "prop" | "camera"; index: number } | null;
 type PlacementMode = {
   action: "place" | "move";
-  kind: "character" | "prop" | "camera";
+  kind: "character" | "prop" | "camera" | "spin";
   id: string;
   label: string;
 } | null;
@@ -150,22 +201,41 @@ export function isAtlasGenerateExecution(execution: unknown): boolean {
   const e = execution as { capability?: unknown; surface_type?: unknown; surfaceType?: unknown };
   const capability = String(e.capability || "");
   const surface = String(e.surface_type ?? e.surfaceType ?? "");
+  if (capability === "atlas.assign" || surface === "atlas_assign") return false;
   return capability === "atlas.generate" || surface === "atlas_shot_generation";
 }
 
-export function SpatialMapPanel({ projectId, onGoTab }: Props) {
+export function isAtlasAssignExecution(execution: unknown): boolean {
+  if (!execution || typeof execution !== "object") return false;
+  const e = execution as { capability?: unknown; surface_type?: unknown; surfaceType?: unknown };
+  const capability = String(e.capability || "");
+  const surface = String(e.surface_type ?? e.surfaceType ?? "");
+  return capability === "atlas.assign" || surface === "atlas_assign";
+}
+
+export function SpatialMapPanel({ projectId, onGoTab, variant = "express" }: Props) {
   const { t } = useTranslation(["spatialMap", "common"]);
   const { activeExecution, setActiveExecution } = useCoDirectorSession();
   const [document, setDocument] = useState<SpatialMapDocument | null>(null);
   const [busy, setBusy] = useState<BusyState>({ loading: true, error: null });
   const [activeSlot, setActiveSlot] = useState<ActiveSlot>(null);
   const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null);
+  const [openMovementId, setOpenMovementId] = useState<string | null>(null);
+  /** In-flight movement activate; placement waits so poses write to the intended segment. */
+  const movementSwitchRef = useRef<Promise<void> | null>(null);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+  const [selectedSpinCamera, setSelectedSpinCamera] = useState(false);
   const [placementMode, setPlacementMode] = useState<PlacementMode>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [showCircles, setShowCircles] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [zoom, setZoom] = useState(1);
+  const [handActive, setHandActive] = useState(false);
+  const [resizeActive, setResizeActive] = useState(false);
+  const [alignDraft, setAlignDraft] = useState<BackgroundAlignment | null>(null);
+  const [alignXText, setAlignXText] = useState<string | null>(null);
+  const [alignYText, setAlignYText] = useState<string | null>(null);
+  const [alignScaleText, setAlignScaleText] = useState<string | null>(null);
   const [occupiedMessage, setOccupiedMessage] = useState<string | null>(null);
   const [attachmentEditor, setAttachmentEditor] = useState<
     | { source: "prop"; propId: string }
@@ -177,8 +247,15 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const [busyOp, setBusyOp] = useState<PendingCoDirectorOp>(null);
   const [opMsg, setOpMsg] = useState<string | null>(null);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [emptyPickerRole, setEmptyPickerRole] = useState<EmptyPickerRole | null>(null);
   const [replacePickerOpen, setReplacePickerOpen] = useState(false);
   const [sceneDescription, setSceneDescription] = useState("");
+  const [gptConfigured, setGptConfigured] = useState<boolean | null>(null);
+  const [expressRef, setExpressRef] = useState<ExpressReference | null>(null);
+  const [useAsAtlas, setUseAsAtlas] = useState(false);
+  const [styleRef, setStyleRef] = useState<ExpressReference | null>(null);
+  const [atlasStartedAt, setAtlasStartedAt] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState(0);
   // CDX-020: multi-document map selector + explicit scene binding.
   const [maps, setMaps] = useState<SpatialMapDocument[]>([]);
   const [sceneOptions, setSceneOptions] = useState<Array<{ sceneId: string; name: string; status: string }>>([]);
@@ -187,6 +264,11 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const [sceneDetailsOpen, setSceneDetailsOpen] = useState(false);
   const [sceneEditOpen, setSceneEditOpen] = useState(false);
   const [sceneEditText, setSceneEditText] = useState("");
+  /** Map | Inpaint workspace tab — Inpaint overlays tools on the SAME SpatialGrid (no stacked accordion, single viewport authority). */
+  const [workspaceTab, setWorkspaceTab] = useState<"map" | "inpaint">("map");
+  /** Correct Area mask bridge — SpatialGrid owns the shared source-pixel canvas. */
+  const maskHandleRef = useRef<import("./SpatialGrid").SpatialMaskHandle | null>(null);
+  const [maskConfig, setMaskConfig] = useState<import("./SpatialGrid").MaskEditorOverlayProps | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
   const ers = useErsGeneration({
@@ -195,6 +277,11 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     document,
     activeExecution,
     setActiveExecution,
+  });
+
+  const spin = useSpinCamera({
+    projectId,
+    mapId: document?.id || null,
   });
 
   // Explicit Save commit boundary (Spatial Map Save Gate). "Use in Scene
@@ -206,11 +293,27 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   });
 
 
-  // ── Load most recent map on mount / project change ───────────────────────
-  const loadMap = useCallback(async () => {
+  // â”€â”€ Load most recent map on mount / project change â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const documentRef = useRef<SpatialMapDocument | null>(null);
+  documentRef.current = document;
+  const [autosaveToast, setAutosaveToast] = useState<string | null>(null);
+  const autosaveToastTimerRef = useRef<number | null>(null);
+  const showAutosaveToast = useCallback((kind: "camera" | "character" | "prop") => {
+    setAutosaveToast("Spatial Map auto-saved");
+    if (autosaveToastTimerRef.current) window.clearTimeout(autosaveToastTimerRef.current);
+    autosaveToastTimerRef.current = window.setTimeout(() => setAutosaveToast(null), 2800);
+    void kind;
+  }, []);
+
+  const loadMap = useCallback(async (opts?: { force?: boolean }) => {
     setBusy({ loading: true, error: null });
     try {
       const doc = await spatialMapApi.getMostRecentMap(projectId);
+      const current = documentRef.current;
+      if (!opts?.force && current && doc && current.id !== doc.id) {
+        setBusy({ loading: false, error: null });
+        return;
+      }
       setDocument(doc ? normalizeMapDocumentProps(doc) : null);
     } catch (err) {
       setBusy({ loading: false, error: err instanceof Error ? err.message : String(err) });
@@ -245,10 +348,11 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     }
   }, [projectId]);
 
-  // CDX-037: hand the ERS sheetId + spatial map into Scene Creator so the
-  // production handoff never picks a wrong environment's sheet. CDX-020: when
-  // several scenes exist or the map is unbound, the creator picks the scene
-  // first (explicit binding) before the handoff runs.
+  // CDX-037: hand the ERS sheetId + spatial map into production (Image
+  // Generator after the Scene Creator retirement) so the production handoff
+  // never picks a wrong environment's sheet. CDX-020: when several scenes
+  // exist or the map is unbound, the creator picks the scene first (explicit
+  // binding) before the handoff runs.
   const doSceneCreatorHandoff = useCallback(async () => {
     setOpMsg(null);
     try {
@@ -260,7 +364,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         onGoTab,
       });
     } catch (err) {
-      setOpMsg(err instanceof Error ? err.message : "Could not continue to Scene Creator.");
+      setOpMsg(err instanceof Error ? err.message : "Could not continue to the Image Generator.");
     }
   }, [projectId, selectedSceneId, document?.sceneId, document?.id, ers.sheetId, onGoTab]);
 
@@ -268,7 +372,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     // Save Gate: never hand off an unsaved revision. The button is disabled
     // when dirty; this guard is defense in depth against any stale path.
     if (saveState.isDirty) {
-      setOpMsg("Save Spatial Map before using it in Scene Creator.");
+      setOpMsg("Save Spatial Map before using it in the Image Generator.");
       return;
     }
     const needsChoice = sceneOptions.length > 1 || !document?.sceneId;
@@ -281,14 +385,22 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
 
   // CDX-020: switching maps loads the chosen document (never the most-recent).
   const handleSelectMap = useCallback((documentId: string) => {
-    const doc = maps.find((m) => m.id === documentId);
-    if (!doc) return;
-    setDocument(doc);
+    const listed = maps.find((m) => m.id === documentId);
     setSelectedPlacementId(null);
     setSelectedCameraId(null);
     setPlacementMode(null);
     setSelectedSceneId(null);
-  }, [maps]);
+    if (listed) {
+      setDocument(listed);
+      return;
+    }
+    void spatialMapApi.getMap(projectId, documentId).then((doc) => {
+      if (!doc) return;
+      setDocument(normalizeMapDocumentProps(doc));
+    }).catch(() => {
+      /* keep the current map if the chosen id cannot be loaded */
+    });
+  }, [maps, projectId]);
 
   // CDX-020: bind the map to a project scene (best-effort) and remember the
   // creator's choice so the handoff passes it explicitly.
@@ -320,6 +432,28 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     void loadMaps();
     void loadScenes();
   }, [loadMap, loadMaps, loadScenes]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const listed = await api.imageStudio.listProviders(true);
+        const providers = Array.isArray(listed?.providers) ? listed.providers : [];
+        if (!cancelled) setGptConfigured(isGptImage2Ready(providers));
+      } catch {
+        if (!cancelled) setGptConfigured(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (busyOp !== "atlas") return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [busyOp]);
 
   useEffect(() => {
     let cancelled = false;
@@ -400,7 +534,9 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     : null;
 
   const ghostColor = (() => {
-    if (!placementMode || !activeSlot) return undefined;
+    if (!placementMode) return undefined;
+    if (placementMode.kind === "spin") return "#22d3ee";
+    if (!activeSlot) return undefined;
     if (activeSlot.kind === "character") return SLOT_COLORS[CHARACTER_SLOTS[activeSlot.index]?.colorKey || "red"];
     if (activeSlot.kind === "prop") return SLOT_COLORS[PROP_SLOTS[activeSlot.index]?.colorKey || "purple"];
     return SLOT_COLORS.gray;
@@ -430,12 +566,34 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         sceneDescription?: string;
         sceneIntent?: SpatialMapDocument["sceneIntent"];
         originalEnvironmentReferenceAssetId?: string;
+        geometrySource?: string | null;
       },
     ) => {
-      if (document && atlasReuseDecision(document) === "reuse") {
-        const updated = await spatialMapApi.updateMap(projectId, document.id, {
+      const safeLineage = {
+        ...lineage,
+        sceneDescription:
+          lineage.sceneDescription && !sceneDescriptionError(lineage.sceneDescription)
+            ? lineage.sceneDescription
+            : undefined,
+      };
+      // Overlay / background-only law (CDX-021): prefer in-memory document, else
+      // the most recent server map. Never createMap when a map already exists —
+      // that orphans placements / movements / enabled state onto a blank doc.
+      // Matches backend assign_existing_atlas (list_documents → update_document).
+      let targetId: string | null =
+        document && atlasReuseDecision(document) === "reuse" ? document.id : null;
+      if (!targetId) {
+        try {
+          const latest = await spatialMapApi.getMostRecentMap(projectId);
+          targetId = latest?.id || null;
+        } catch {
+          targetId = null;
+        }
+      }
+      if (targetId) {
+        const updated = await spatialMapApi.updateMap(projectId, targetId, {
           backgroundAssetId,
-          ...lineage,
+          ...safeLineage,
         });
         setDocument(updated);
         return updated;
@@ -443,7 +601,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       const doc = await spatialMapApi.createMap(projectId, {
         title: "Spatial Map",
         backgroundAssetId,
-        ...lineage,
+        ...safeLineage,
       });
       setDocument(doc);
       return doc;
@@ -451,13 +609,27 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     [document, projectId],
   );
 
-  // ── Track active Co-Director execution for atlas / ERS results ──────────
+  // â”€â”€ Track active Co-Director execution for atlas / ERS results â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!activeExecution) return;
     if (activeExecution.project_id && activeExecution.project_id !== projectId) return;
     if (isTerminal(activeExecution)) {
       const resultIds = activeExecution.result_asset_ids || [];
       if (resultIds.length > 0) {
+        if (isAtlasAssignExecution(activeExecution)) {
+          void (async () => {
+            try {
+              const latest = await spatialMapApi.getMostRecentMap(projectId);
+              if (latest) setDocument(normalizeMapDocumentProps(latest));
+              setOpMsg("Using the uploaded Spatial Map. No image was generated.");
+            } catch (err) {
+              setOpMsg(err instanceof Error ? err.message : "Could not open that Spatial Map.");
+            } finally {
+              setBusyOp(null);
+            }
+          })();
+          return;
+        }
         // CDX-029: only an atlas.generate execution may populate the map
         // background. The session execution is shared, so a foreign execution
         // completing first must never become the environment authority.
@@ -505,27 +677,48 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     }
   }, [activeExecution?.status, activeExecution?.execution_id, activeExecution?.result_asset_ids?.length, applyAtlasToMap, projectId, busyOp, document, sceneDescription]);
 
-  // ── Atlas Shot / ERS generation ────────────────────────────────────────
-  const startAtlasGeneration = useCallback(async () => {
+  // â”€â”€ Atlas Shot / ERS generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const startAtlasGeneration = useCallback(async (opts?: {
+    route?: "design" | "reconstruct";
+    sourceAssetId?: string;
+  }) => {
     setOpMsg(null);
-    const descError = sceneDescriptionError(sceneDescription);
-    if (descError) {
-      setOpMsg(descError);
+    const description = sceneDescription.trim();
+    const route = opts?.route || "design";
+    const sourceId = String(opts?.sourceAssetId || "").trim();
+    if (route === "design") {
+      const descError = sceneDescriptionError(description);
+      if (descError && variant === "standard" && !sourceId) {
+        setOpMsg(descError);
+        return;
+      }
+    } else if (!sourceId) {
+      setOpMsg("Choose a location image to reconstruct.");
       return;
     }
-    const description = sceneDescription.trim();
     setBusyOp("atlas");
+    setAtlasStartedAt(Date.now());
     try {
-      const sourceId =
-        document?.originalEnvironmentReferenceAssetId ||
-        document?.backgroundAssetId ||
-        "";
+      const designed = route === "design";
       const res = await api.startExecution(projectId, {
         capability: "atlas.generate",
         context: {
           scene_description: description,
           prompt: description,
-          ...(sourceId ? { attachment_asset_ids: [sourceId] } : {}),
+          mode: variant,
+          generation_route: designed ? (sourceId ? "designed_with_reference" : "designed") : "reconstruct",
+          generationRoute: designed ? (sourceId ? "designed_with_reference" : "designed") : "reconstruct",
+          require_source: !designed,
+          ...(sourceId ? { attachment_asset_ids: [sourceId], attachmentAssetIds: [sourceId] } : {}),
+          ...(designed
+            ? {
+                generationMethod: "api",
+                generation_method: "api",
+                hostedModelId: "gpt-image-2-kie",
+                hosted_model_id: "gpt-image-2-kie",
+                source: "api",
+              }
+            : {}),
         },
       });
       const exec = normalizeExecution(res);
@@ -534,41 +727,35 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       setOpMsg(err instanceof Error ? err.message : "Failed to start Atlas Shot generation.");
       setBusyOp(null);
     }
-  }, [projectId, document, sceneDescription, setActiveExecution]);
+  }, [projectId, sceneDescription, setActiveExecution, variant]);
 
   const startErsGeneration = useCallback(() => {
     void ers.start();
   }, [ers.start]);
 
-  // ── Library / upload / replace / remove atlas ──────────────────────────
-  const handleChooseFromLibrary = () => setLibraryPickerOpen(true);
+  // â”€â”€ Library / upload / replace / remove atlas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleReplaceFromLibrary = () => setReplacePickerOpen(true);
 
   const handleReplaceUpload = useCallback(async (file: File) => {
     if (!document) return;
     setOpMsg(null);
     const description = sceneDescription.trim() || document.sceneIntent?.summary || "";
-    const descError = sceneDescriptionError(description);
-    if (descError) {
-      setOpMsg(descError);
-      return;
-    }
     setBusyOp("atlas");
     try {
       const asset = await api.uploadAsset(projectId, file, "atlas_shot", "image");
-      const updated = await spatialMapApi.updateMap(projectId, document.id, {
-        backgroundAssetId: asset.id,
+      const updated = await applyAtlasToMap(asset.id, {
         sceneDescription: description,
         originalEnvironmentReferenceAssetId: asset.id,
+        geometrySource: "supplied",
       });
       setDocument(updated);
-      setOpMsg("Atlas Shot replaced.");
+      setOpMsg("Spatial Map replaced. The uploaded image was used as-is.");
     } catch (err) {
       setOpMsg(err instanceof Error ? err.message : "Replace failed.");
     } finally {
       setBusyOp(null);
     }
-  }, [projectId, document, sceneDescription]);
+  }, [applyAtlasToMap, projectId, document, sceneDescription]);
 
   const handleSaveSceneDescription = useCallback(async () => {
     if (!document) return;
@@ -611,7 +798,13 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         context: {
           scene_description: description,
           prompt: description,
-          ...(sourceId ? { attachment_asset_ids: [sourceId] } : {}),
+          mode: variant,
+          generationMethod: "api",
+          generation_method: "api",
+          hostedModelId: "gpt-image-2-kie",
+          hosted_model_id: "gpt-image-2-kie",
+          source: "api",
+          ...(sourceId ? { attachment_asset_ids: [sourceId], attachmentAssetIds: [sourceId] } : {}),
         },
       });
       const exec = normalizeExecution(res);
@@ -620,7 +813,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       setOpMsg(err instanceof Error ? err.message : "Failed to start Atlas Shot generation.");
       setBusyOp(null);
     }
-  }, [projectId, document, sceneDescription, setActiveExecution]);
+  }, [projectId, document, sceneDescription, setActiveExecution, variant]);
 
   const handleRemoveAtlas = useCallback(async () => {
     if (!document?.backgroundAssetId) return;
@@ -638,11 +831,6 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
 
   const handleUploadImage = useCallback(async (file: File) => {
     setOpMsg(null);
-    const descError = sceneDescriptionError(sceneDescription);
-    if (descError) {
-      setOpMsg(descError);
-      return;
-    }
     const description = sceneDescription.trim();
     setBusyOp("atlas");
     try {
@@ -650,6 +838,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       await applyAtlasToMap(asset.id, {
         sceneDescription: description,
         originalEnvironmentReferenceAssetId: asset.id,
+        geometrySource: "supplied",
       });
       setOpMsg(document ? "Image uploaded and applied to the Spatial Map." : "Image uploaded and Spatial Map created.");
     } catch (err) {
@@ -659,12 +848,133 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     }
   }, [applyAtlasToMap, document, projectId, sceneDescription]);
 
-  // ── Placements ───────────────────────────────────────────────────────
+  const handleEmptyFile = useCallback(async (file: File, role: EmptyPickerRole) => {
+    setOpMsg(null);
+    try {
+      const asset = await api.uploadAsset(
+        projectId,
+        file,
+        role === "standard-atlas" || role === "express-atlas" ? "atlas_shot" : "environment_reference",
+        "image",
+      );
+      const row = { assetId: asset.id, name: file.name || "Uploaded image" };
+      if (role === "express-ref") {
+        setExpressRef(row);
+        return;
+      }
+      if (role === "standard-style") {
+        setStyleRef(row);
+        return;
+      }
+      if (role === "standard-location") {
+        await startAtlasGeneration({ route: "reconstruct", sourceAssetId: asset.id });
+        return;
+      }
+      await applyAtlasToMap(asset.id, {
+        sceneDescription: sceneDescription.trim() || undefined,
+        originalEnvironmentReferenceAssetId: asset.id,
+        geometrySource: "supplied",
+      });
+      setOpMsg("Using the uploaded Spatial Map. No image was generated.");
+    } catch (err) {
+      setOpMsg(err instanceof Error ? err.message : "Upload failed.");
+    }
+  }, [applyAtlasToMap, projectId, sceneDescription, startAtlasGeneration]);
+
+  const handleEmptyLibraryPick = useCallback(async (assetId: string) => {
+    const role = emptyPickerRole;
+    setLibraryPickerOpen(false);
+    setEmptyPickerRole(null);
+    if (!role) return;
+    const row = { assetId, name: "Library image" };
+    if (role === "express-ref") {
+      setExpressRef(row);
+      return;
+    }
+    if (role === "standard-style") {
+      setStyleRef(row);
+      return;
+    }
+    if (role === "standard-location") {
+      await startAtlasGeneration({ route: "reconstruct", sourceAssetId: assetId });
+      return;
+    }
+    await applyAtlasToMap(assetId, {
+      sceneDescription: sceneDescription.trim() || undefined,
+      originalEnvironmentReferenceAssetId: assetId,
+      geometrySource: "supplied",
+    });
+    setOpMsg("Using the selected Spatial Map. No image was generated.");
+  }, [applyAtlasToMap, emptyPickerRole, sceneDescription, startAtlasGeneration]);
+
+  const handleExpressPrimary = useCallback(async () => {
+    if (useAsAtlas && expressRef?.assetId) {
+      setOpMsg(null);
+      try {
+        const verdict = await spatialMapApi.classifyAtlasSource(projectId, expressRef.assetId, "assign");
+        if (verdict.action !== "assign") {
+          setOpMsg(verdict.message || DIRECT_USE_NOT_ATLAS);
+          return;
+        }
+        await applyAtlasToMap(expressRef.assetId, {
+          sceneDescription: sceneDescription.trim() || undefined,
+          originalEnvironmentReferenceAssetId: expressRef.assetId,
+          geometrySource: "supplied",
+        });
+        setOpMsg("Using the uploaded Spatial Map. No image was generated.");
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Could not open that Spatial Map.");
+      }
+      return;
+    }
+    await startAtlasGeneration({
+      route: "design",
+      sourceAssetId: expressRef?.assetId,
+    });
+  }, [applyAtlasToMap, expressRef, projectId, sceneDescription, startAtlasGeneration, useAsAtlas]);
+
+  // â”€â”€ Placements â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const placements = useMemo(() => (document ? toGridPlacements(document.characters, document.props) : []), [document]);
+  const movements = useMemo(() => listMovements(document), [document]);
+  const currentMovement = useMemo(() => activeMovement(document), [document]);
+  const movementArrows = useMemo(() => {
+    const focus = selectedPlacementId
+      ? document?.characters.find((c) => c.id === selectedPlacementId)?.characterId || selectedPlacementId
+      : null;
+    // Full consecutive sequence for overlay (lower index → higher). Focus isolates one character.
+    return computeClientArrows(document, focus, { fullSequence: true });
+  }, [document, selectedPlacementId]);
+  const cameraSubjectOptions = useMemo(
+    () => primarySubjectOptions(document?.characters || []),
+    [document?.characters],
+  );
   const gridScale: GridScale = useMemo(() => {
     const s = document?.gridScale ?? DEFAULT_GRID_SCALE;
     return Math.max(MIN_GRID_SCALE, Math.min(MAX_GRID_SCALE, s)) as GridScale;
   }, [document?.gridScale]);
+  const cameraMovementArrows = useMemo(
+    () =>
+      computeCameraMovementArrows(
+        document?.movementSegments,
+        document?.cameras || [],
+        movementArrows,
+        {
+          metersPerCell: document?.metersPerCell ?? 1,
+          density: densityForScale(gridScale),
+        },
+      ),
+    // Green path from camera own segment poses; character arrows only offset vicinity.
+    [movementArrows, document?.movementSegments, document?.cameras, document?.metersPerCell, gridScale],
+  );
+
+  const persistedAlignment = useMemo(
+    () => hydrateAlignment(document?.backgroundAlignment),
+    [document?.backgroundAlignment],
+  );
+  const alignment = alignDraft ?? persistedAlignment;
+  const alignmentPixels = displayPixels(alignment, ALIGNMENT_DISPLAY_SIZE);
+  const alignDraftRef = useRef(alignDraft);
+  alignDraftRef.current = alignDraft;
 
   const findPlacement = useCallback(
     (placementId: string | null): SpatialCharacterPlacement | SpatialPropPlacement | null => {
@@ -699,7 +1009,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     [document],
   );
 
-  // ── Grid scale ───────────────────────────────────────────────────────
+  // â”€â”€ Grid scale â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleGridScale = useCallback(
     async (delta: number) => {
       if (!document) return;
@@ -715,10 +1025,133 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     [projectId, document, gridScale],
   );
 
+  const persistAlignment = useCallback(
+    async (next: BackgroundAlignment) => {
+      if (!document) return;
+      const current = hydrateAlignment(document.backgroundAlignment);
+      const incoming = hydrateAlignment(next);
+      const clamped =
+        incoming.sourceWidth > 0 && incoming.sourceHeight > 0
+          ? incoming
+          : {
+              ...incoming,
+              sourceWidth: current.sourceWidth,
+              sourceHeight: current.sourceHeight,
+              sourceAspectRatio: current.sourceAspectRatio,
+            };
+      try {
+        const updated = await spatialMapApi.updateMap(projectId, document.id, {
+          backgroundAlignment: clamped,
+        });
+        setDocument(updated);
+        setAlignDraft(null);
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Failed to update background alignment.");
+      }
+    },
+    [document, projectId],
+  );
+
+  const handleSourceMeasured = useCallback(
+    (width: number, height: number) => {
+      const current = hydrateAlignment(document?.backgroundAlignment);
+      if (current.sourceWidth === width && current.sourceHeight === height) return;
+      void persistAlignment(withSource(current, width, height));
+    },
+    [document?.backgroundAlignment, persistAlignment],
+  );
+
+  const handleAlignmentDraft = useCallback((next: BackgroundAlignment) => {
+    setAlignDraft(hydrateAlignment(next));
+  }, []);
+
+  const handleAlignmentCommit = useCallback(
+    (next?: BackgroundAlignment) => {
+      const value = hydrateAlignment(next ?? alignDraftRef.current ?? persistedAlignment);
+      void persistAlignment(value);
+    },
+    [persistAlignment, persistedAlignment],
+  );
+
+  const handleAlignmentInputBlur = useCallback(() => {
+    const next = alignmentFromPixelPair(
+      parseAlignmentInput(alignXText ?? "", alignmentPixels.x),
+      parseAlignmentInput(alignYText ?? "", alignmentPixels.y),
+      ALIGNMENT_DISPLAY_SIZE,
+      alignment.scale,
+      alignment,
+    );
+    setAlignXText(null);
+    setAlignYText(null);
+    void persistAlignment(next);
+  }, [alignXText, alignYText, alignment.scale, alignmentPixels.x, alignmentPixels.y, persistAlignment]);
+
+  const handleScaleInputCommit = useCallback(() => {
+    const percent = parseAlignmentInput(alignScaleText ?? "", alignment.scale * 100);
+    setAlignScaleText(null);
+    void persistAlignment({
+      ...alignment,
+      offsetX: alignment.offsetX,
+      offsetY: alignment.offsetY,
+      scale: percent / 100,
+    });
+  }, [alignScaleText, alignment.offsetX, alignment.offsetY, alignment.scale, persistAlignment]);
+
+  const handleResetAlignment = useCallback(() => {
+    setAlignXText(null);
+    setAlignYText(null);
+    setAlignScaleText(null);
+    void persistAlignment({
+      ...ZERO_ALIGNMENT,
+      sourceWidth: alignment.sourceWidth,
+      sourceHeight: alignment.sourceHeight,
+      sourceAspectRatio: alignment.sourceAspectRatio,
+    });
+  }, [alignment.sourceAspectRatio, alignment.sourceHeight, alignment.sourceWidth, persistAlignment]);
+
+  const handleToggleHand = useCallback(() => {
+    setHandActive((current) => {
+      const next = !current;
+      if (next) {
+        setResizeActive(false);
+        setPlacementMode(null);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleResize = useCallback(() => {
+    setResizeActive((current) => {
+      const next = !current;
+      if (next) {
+        setHandActive(false);
+        setPlacementMode(null);
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    setAlignDraft(null);
+    setAlignXText(null);
+    setAlignYText(null);
+    setAlignScaleText(null);
+  }, [document?.id]);
+
   const handleCellClick = useCallback(
     async (column: number, row: number) => {
       setOccupiedMessage(null);
-      if (!document || !placementMode) return;
+      // Wait for any in-flight movement switch so autosave targets the segment
+      // the user is actually editing (M1 vs M2), not the previous active one.
+      if (movementSwitchRef.current) {
+        try {
+          await movementSwitchRef.current;
+        } catch {
+          /* activate error already surfaced */
+        }
+      }
+      const liveDoc = documentRef.current;
+      if (!liveDoc || !placementMode) return;
 
       const occupied = placements.find(
         (p) => p.gridRow === row && p.gridColumn === column && p.id !== placementMode.id,
@@ -736,27 +1169,45 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         gridColumn: column,
         normalizedX: center.x,
         normalizedY: center.y,
+        movementSegmentId: liveDoc.activeMovementSegmentId || undefined,
       };
 
       try {
+        if (placementMode.kind === "spin") {
+          const widthMeters = liveDoc.widthMeters || 10;
+          const depthMeters = liveDoc.depthMeters || 10;
+          const world = cellToWorldMeters(column, row, gridScale, widthMeters, depthMeters);
+          await spin.placeSpinCamera({
+            x: world.x,
+            z: world.z,
+            sceneId: liveDoc.sceneId || null,
+          });
+          setSelectedSpinCamera(true);
+          setSelectedCameraId(null);
+          setSelectedPlacementId(null);
+          setPlacementMode({ ...placementMode, action: "move" });
+          showAutosaveToast("camera");
+          return;
+        }
         let updated: SpatialMapDocument;
         if (placementMode.kind === "camera") {
-          updated = await spatialMapApi.updateCamera(projectId, document.id, placementMode.id, coords);
+          updated = await spatialMapApi.updateCamera(projectId, liveDoc.id, placementMode.id, coords);
         } else if (placementMode.kind === "character") {
-          updated = await spatialMapApi.updateCharacter(projectId, document.id, placementMode.id, coords);
+          updated = await spatialMapApi.updateCharacter(projectId, liveDoc.id, placementMode.id, coords);
         } else {
-          updated = await spatialMapApi.updateProp(projectId, document.id, placementMode.id, {
+          updated = await spatialMapApi.updateProp(projectId, liveDoc.id, placementMode.id, {
             ...coords,
             ...INDEPENDENT_ATTACHMENT,
           });
         }
         setDocument(updated);
         setPlacementMode({ ...placementMode, action: "move" });
+        showAutosaveToast(placementMode.kind);
       } catch (err) {
         setOpMsg(err instanceof Error ? err.message : "Failed to place.");
       }
     },
-    [document, placementMode, placements, projectId, gridScale],
+    [placementMode, placements, projectId, gridScale, showAutosaveToast, spin],
   );
 
   const handleAddCharacter = useCallback(
@@ -888,13 +1339,32 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const handleToggleVisible = useCallback(
     async (kind: "character" | "prop" | "camera", id: string, next: boolean) => {
       if (!document) return;
+      const disabledCharacterEntityId =
+        kind === "character" && next === false
+          ? String(document.characters.find((c) => c.id === id)?.characterId || "").trim()
+          : "";
+      const camerasToFallback =
+        disabledCharacterEntityId
+          ? camerasNeedingSubjectFallback(document.cameras, disabledCharacterEntityId)
+          : [];
       setDocument((prev) => {
         if (!prev) return prev;
+        let cameras = prev.cameras;
         if (kind === "camera") {
-          return { ...prev, cameras: prev.cameras.map((c) => (c.id === id ? { ...c, visible: next } : c)) };
+          cameras = cameras.map((c) => (c.id === id ? { ...c, visible: next } : c));
+        } else if (camerasToFallback.length) {
+          const fallbackIds = new Set(camerasToFallback);
+          cameras = cameras.map((c) => (fallbackIds.has(c.id) ? { ...c, primarySubject: "auto" } : c));
         }
         if (kind === "character") {
-          return { ...prev, characters: prev.characters.map((c) => (c.id === id ? { ...c, visible: next } : c)) };
+          return {
+            ...prev,
+            cameras,
+            characters: prev.characters.map((c) => (c.id === id ? { ...c, visible: next } : c)),
+          };
+        }
+        if (kind === "camera") {
+          return { ...prev, cameras };
         }
         return { ...prev, props: prev.props.map((item) => (item.id === id ? { ...item, visible: next } : item)) };
       });
@@ -904,7 +1374,29 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           setDocument(applyVisible(updated, kind, id, next));
         } else if (kind === "character") {
           const updated = await spatialMapApi.updateCharacter(projectId, document.id, id, { visible: next } as never);
-          setDocument(applyVisible(updated, kind, id, next));
+          let nextDoc = applyVisible(updated, kind, id, next);
+          // Re-apply Auto fallback so character PATCH payload cannot restore a disabled primarySubject.
+          if (camerasToFallback.length) {
+            const fallbackIds = new Set(camerasToFallback);
+            nextDoc = {
+              ...nextDoc,
+              cameras: nextDoc.cameras.map((c) =>
+                fallbackIds.has(c.id) ? { ...c, primarySubject: "auto" } : c,
+              ),
+            };
+          }
+          for (const cameraId of camerasToFallback) {
+            try {
+              nextDoc = await spatialMapApi.updateCamera(projectId, document.id, cameraId, { primarySubject: "auto" });
+            } catch {
+              // keep optimistic Auto fallback if one camera PATCH fails
+              nextDoc = {
+                ...nextDoc,
+                cameras: nextDoc.cameras.map((c) => (c.id === cameraId ? { ...c, primarySubject: "auto" } : c)),
+              };
+            }
+          }
+          setDocument(nextDoc);
         } else {
           const updated = await spatialMapApi.updateProp(projectId, document.id, id, { visible: next } as never);
           setDocument(applyVisible(updated, kind, id, next));
@@ -917,6 +1409,8 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   );
 
   const beginPlacement = useCallback((action: "place" | "move", kind: "character" | "prop" | "camera", id: string, label: string, index: number) => {
+    setHandActive(false);
+    setResizeActive(false);
     setPlacementMode({ action, kind, id, label });
     setActiveSlot({ kind, index });
     setOccupiedMessage(null);
@@ -1009,7 +1503,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     didAutoArmDocId.current = document.id;
   }, [document, placementMode, beginPlacement]);
 
-  // ── Slot: remove ──────────────────────────────────────────────────────
+  // â”€â”€ Slot: remove â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleSlotRemove = useCallback(
     async (slot: SlotDef) => {
       if (!document) return;
@@ -1038,7 +1532,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     [document, placementForSlot, cameraForSlot, projectId, selectedPlacementId, selectedCameraId],
   );
 
-  // ── Slot: update mini-prompt ───────────────────────────────────────────
+  // â”€â”€ Slot: update mini-prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleUpdateMiniPrompt = useCallback(
     async (slot: SlotDef, text: string) => {
       if (!document || slot.kind === "camera") return;
@@ -1057,7 +1551,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     [document, placementForSlot, projectId],
   );
 
-  // ── Cameras ───────────────────────────────────────────────────────────
+  // â”€â”€ Cameras â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleAddCamera = useCallback(
     async (slot: SlotDef) => {
       if (!document || slot.kind !== "camera") return;
@@ -1134,15 +1628,16 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     async (cameraId: string, shotSize: string) => {
       if (!document) return;
       const next = String(shotSize || "auto").trim().toLowerCase().replace(/[ -]/g, "_") || "auto";
+      const attachMode = next === "pov" ? "pov" : "free";
       setDocument((prev) => {
         if (!prev) return prev;
         return {
           ...prev,
-          cameras: prev.cameras.map((c) => (c.id === cameraId ? { ...c, shotSize: next } : c)),
+          cameras: prev.cameras.map((c) => (c.id === cameraId ? { ...c, shotSize: next, attachMode } : c)),
         };
       });
       try {
-        const updated = await spatialMapApi.updateCamera(projectId, document.id, cameraId, { shotSize: next });
+        const updated = await spatialMapApi.updateCamera(projectId, document.id, cameraId, { shotSize: next, attachMode });
         setDocument(updated);
       } catch (err) {
         setDocument(document);
@@ -1194,7 +1689,75 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     [document, projectId, selectedCameraId],
   );
 
-  // ── Reset map ─────────────────────────────────────────────────────────
+  const handleAddMovement = useCallback(async () => {
+    if (!document) return;
+    if (movements.length >= MOVEMENT_MAX) return;
+    try {
+      const updated = await spatialMapApi.createMovement(projectId, document.id, {});
+      setDocument(normalizeMapDocumentProps(updated));
+      const created = listMovements(updated).at(-1);
+      if (created) setOpenMovementId(created.id);
+    } catch (err) {
+      setOpMsg(err instanceof Error ? err.message : "Could not add a movement.");
+    }
+  }, [document, movements.length, projectId]);
+
+  const handleActivateMovement = useCallback(
+    async (segmentId: string) => {
+      const live = documentRef.current;
+      if (!live) return;
+      setOpenMovementId(segmentId);
+      if (live.activeMovementSegmentId === segmentId) return;
+      // Cancel in-progress place/move: the grid target belongs to the prior
+      // movement until activate resolves. User re-clicks Move after switch.
+      setPlacementMode(null);
+      const run = (async () => {
+        const updated = await spatialMapApi.activateMovement(projectId, live.id, segmentId);
+        setDocument(normalizeMapDocumentProps(updated));
+      })();
+      movementSwitchRef.current = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      try {
+        await run;
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Could not switch movements.");
+      } finally {
+        movementSwitchRef.current = null;
+      }
+    },
+    [projectId],
+  );
+
+  const handleUpdateMovement = useCallback(
+    async (segmentId: string, body: Record<string, unknown>) => {
+      if (!document) return;
+      try {
+        const updated = await spatialMapApi.updateMovement(projectId, document.id, segmentId, body);
+        setDocument(normalizeMapDocumentProps(updated));
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Could not update this movement.");
+      }
+    },
+    [document, projectId],
+  );
+
+  const handleRemoveMovement = useCallback(
+    async (segmentId: string) => {
+      if (!document) return;
+      try {
+        const updated = await spatialMapApi.removeMovement(projectId, document.id, segmentId);
+        setDocument(normalizeMapDocumentProps(updated));
+        setOpenMovementId(updated.activeMovementSegmentId || null);
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Could not remove this movement.");
+      }
+    },
+    [document, projectId],
+  );
+
+  // â”€â”€ Reset map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleResetMap = useCallback(async () => {
     if (!document) return;
     const hasPlacements =
@@ -1218,9 +1781,23 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       for (const cam of doc.cameras) {
         doc = await spatialMapApi.updateCamera(projectId, doc.id, cam.id, { gridRow: -1, gridColumn: -1, normalizedX: null, normalizedY: null });
       }
-      // Reset grid scale to neutral.
-      doc = await spatialMapApi.updateMap(projectId, doc.id, { gridScale: DEFAULT_GRID_SCALE });
+      // Reset grid scale to neutral and alignment to {0,0,1}. Keep the Atlas.
+      doc = await spatialMapApi.updateMap(projectId, doc.id, {
+        gridScale: DEFAULT_GRID_SCALE,
+        backgroundAlignment: {
+          ...ZERO_ALIGNMENT,
+          sourceWidth: hydrateAlignment(document.backgroundAlignment).sourceWidth,
+          sourceHeight: hydrateAlignment(document.backgroundAlignment).sourceHeight,
+          sourceAspectRatio: hydrateAlignment(document.backgroundAlignment).sourceAspectRatio,
+        },
+      });
       setDocument(doc);
+      setAlignDraft(null);
+      setAlignXText(null);
+      setAlignYText(null);
+      setAlignScaleText(null);
+      setHandActive(false);
+      setResizeActive(false);
       setSelectedPlacementId(null);
       setSelectedCameraId(null);
       setPlacementMode(null);
@@ -1231,7 +1808,12 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     }
   }, [document, projectId]);
 
-  // ── Render ────────────────────────────────────────────────────────────
+  // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  useEffect(() => {
+    if (!currentMovement) return;
+    setOpenMovementId((prev) => prev || currentMovement.id);
+  }, [currentMovement]);
+
   if (busy.loading) {
     return <p className="spatial-map__busy" data-testid="spatial-map-loading">{t("spatialMap:loading")}</p>;
   }
@@ -1241,7 +1823,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         <CoDirectorEmptyState
           title="Spatial Map could not load"
           description={busy.error}
-          action={<button type="button" className="ui-btn ui-btn--secondary" onClick={() => void loadMap()}>Retry</button>}
+          action={<button type="button" className="ui-btn ui-btn--secondary" onClick={() => void loadMap({ force: true })}>Retry</button>}
         />
       </div>
     );
@@ -1251,6 +1833,11 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const bgUrl = document?.backgroundAssetId ? api.assetUrl(document.backgroundAssetId) : "";
   const ersExists = !!ers.compositeAssetId;
   const isGenerating = busyOp !== null || ers.busy;
+  const atlasElapsedSec =
+    atlasStartedAt && busyOp === "atlas"
+      ? Math.max(0, Math.floor(((nowTick || Date.now()) - atlasStartedAt) / 1000))
+      : 0;
+  const atlasProgress = busyOp === "atlas" ? normalizeJobProgress(activeExecution) : IDLE_ATLAS_PROGRESS;
   const selectedCamera = findCamera(selectedCameraId);
   const selectedCharacter = selectedPlacementId
     ? document?.characters.find((c) => c.id === selectedPlacementId) || null
@@ -1270,6 +1857,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     const verb = placementMode.action === 'move' ? 'Moving' : 'Placing';
     const slot = activePlacement ? activePlacement.slot : 0;
     const type = activePlacement ? activePlacement.type : placementMode.kind;
+    if (type === 'spin') return verb + ': Spin Camera';
     const slotName = type === 'character' ? ('Character ' + String(slot + 1)) : type === 'prop' ? ('Prop ' + String(slot + 1)) : ('C' + String(slot + 1));
     const raw = placementMode.label || '';
     const entity = raw.indexOf(' — ') >= 0 ? raw.split(' — ').slice(-1)[0] : raw;
@@ -1279,14 +1867,27 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
 
   return (
     <div className="spatial-map" data-testid="spatial-map-panel">
+      <div className="spatial-map__prefer-storyboard" data-testid="spatial-map-prefer-storyboard">
+        <span className="spatial-map__prefer-storyboard-label">Prefer Storyboard?</span>
+        <button
+          type="button"
+          className="ui-btn ui-btn--secondary spatial-map__prefer-storyboard-btn"
+          data-testid="spatial-map-open-storyboard"
+          onClick={() =>
+            openExpressStandardWorkspace(
+              onGoTab,
+              "script",
+              selectedSceneId || document?.sceneId || undefined,
+            )
+          }
+        >
+          Storyboard Studio
+        </button>
+      </div>
       {!hasBackground ? (
         <>
           <h3 className="spatial-map__heading">{t("spatialMap:title")}</h3>
           <p className="spatial-map__metric-hint" data-testid="spatial-metric-scale">1 square = 1 meter</p>
-          <p className="spatial-map__subtitle">Start with an environment reference.</p>
-          <p className="spatial-map__tip">
-            An Atlas Shot is a roofless, top-down reference view designed specifically for Spatial Map.
-          </p>
           <input
             ref={emptyFileInputRef}
             type="file"
@@ -1294,79 +1895,104 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             hidden
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) {
-                void handleUploadImage(f);
-              }
+              const role = emptyPickerRole;
+              if (f && role) void handleEmptyFile(f, role);
               e.target.value = "";
             }}
           />
-          <label className="spatial-map__scene-desc" data-testid="scene-description-block">
-            <span className="spatial-map__scene-desc-label">
-              Scene / Location Description
-              <span className="spatial-map__scene-desc-tip" title="A few words about the place (e.g. &quot;a warm neighborhood coffee shop for our commercial&quot;). This guides the Atlas Shot and the Environment Reference Sheet.">(?)</span>
-            </span>
-            <textarea
-              rows={2}
-              data-testid="scene-description-input"
-              placeholder="e.g. a warm neighborhood coffee shop for our commercial"
-              value={sceneDescription}
-              onChange={(e) => setSceneDescription(e.target.value)}
-              disabled={isGenerating}
+          {variant === "standard" ? (
+            <SpatialMapStartChooser
+              busy={isGenerating}
+              variant="standard"
+              gptConfigured={gptConfigured === true}
+              description={sceneDescription}
+              onDescriptionChange={setSceneDescription}
+              descriptionError={sceneDescription.trim() ? sceneDescriptionError(sceneDescription) : null}
+              onCreateAtlas={() => void startAtlasGeneration({ route: "design", sourceAssetId: styleRef?.assetId })}
+              onChooseStyleReference={() => {
+                setEmptyPickerRole("standard-style");
+                setLibraryPickerOpen(true);
+              }}
+              onUploadStyleReference={() => {
+                setEmptyPickerRole("standard-style");
+                emptyFileInputRef.current?.click();
+              }}
+              styleReferenceLabel={styleRef ? styleRef.name : undefined}
+              onChooseLocationLibrary={() => {
+                setEmptyPickerRole("standard-location");
+                setLibraryPickerOpen(true);
+              }}
+              onUploadLocation={() => {
+                setEmptyPickerRole("standard-location");
+                emptyFileInputRef.current?.click();
+              }}
+              onChooseAtlasLibrary={() => {
+                setEmptyPickerRole("standard-atlas");
+                setLibraryPickerOpen(true);
+              }}
+              onUploadAtlas={() => {
+                setEmptyPickerRole("standard-atlas");
+                emptyFileInputRef.current?.click();
+              }}
             />
-          </label>
-          <div className="spatial-map__empty-actions">
-            <button
-              type="button"
-              className="ui-btn ui-btn--primary"
-              onClick={() => void startAtlasGeneration()}
-              disabled={isGenerating || !!sceneDescriptionError(sceneDescription)}
-              aria-label="Create Atlas Shot with Co-Director (recommended)"
-            >
-              {busyOp === "atlas" ? "Generating Atlas Shot…" : "Create Atlas Shot with Co-Director"}
-            </button>
-            <button
-              type="button"
-              className="ui-btn ui-btn--secondary"
-              onClick={handleChooseFromLibrary}
-              disabled={isGenerating || !!sceneDescriptionError(sceneDescription)}
-              aria-label="Choose Atlas Shot from Library"
-            >
-              Choose from Library
-            </button>
-            <button
-              type="button"
-              className="ui-btn ui-btn--secondary"
-              onClick={() => emptyFileInputRef.current?.click()}
-              disabled={isGenerating || !!sceneDescriptionError(sceneDescription)}
-              aria-label="Upload an image as the Atlas Shot"
-            >
-              Upload Image
-            </button>
-          </div>
+          ) : (
+            <SpatialMapExpressForm
+              description={sceneDescription}
+              onDescriptionChange={setSceneDescription}
+              gptConfigured={gptConfigured}
+              reference={expressRef}
+              generating={isGenerating}
+              failed={Boolean(opMsg) && busyOp !== "atlas"}
+              failureMessage={opMsg}
+              onSelectFromLibrary={() => {
+                setEmptyPickerRole("express-ref");
+                setLibraryPickerOpen(true);
+              }}
+              onUploadReference={() => {
+                setEmptyPickerRole("express-ref");
+                emptyFileInputRef.current?.click();
+              }}
+              onUploadAtlas={() => {
+                setEmptyPickerRole("express-atlas");
+                emptyFileInputRef.current?.click();
+              }}
+              onReferenceFileSelected={(file) => void handleEmptyFile(file, "express-ref")}
+              onAtlasFileSelected={(file) => void handleEmptyFile(file, "express-atlas")}
+              onReplaceReference={() => {
+                setEmptyPickerRole("express-ref");
+                setLibraryPickerOpen(true);
+              }}
+              onRemoveReference={() => {
+                setExpressRef(null);
+                setUseAsAtlas(false);
+              }}
+              onGenerate={() => void handleExpressPrimary()}
+              useAsAtlas={useAsAtlas}
+              onUseAsAtlasChange={setUseAsAtlas}
+              onOpenSettings={() => onGoTab?.("setup")}
+              referenceThumbUrl={expressRef?.assetId ? api.assetUrl(expressRef.assetId) : undefined}
+              progress={atlasProgress}
+              progressLive={busyOp === "atlas"}
+              elapsedSec={atlasElapsedSec}
+            />
+          )}
           {opMsg ? <p className="spatial-map__hint">{opMsg}</p> : null}
           {libraryPickerOpen ? (
             <EntityPicker
               kind="environment"
               projectId={projectId}
-              title="Choose Atlas Shot from Library"
-              onClose={() => setLibraryPickerOpen(false)}
-              onConfirm={async (assetId) => {
+              title={
+                emptyPickerRole === "standard-atlas" || emptyPickerRole === "express-atlas"
+                  ? "Choose Spatial Map from Library"
+                  : emptyPickerRole === "standard-location"
+                    ? "Choose location image"
+                    : "Select from Library"
+              }
+              onClose={() => {
                 setLibraryPickerOpen(false);
-                const descError = sceneDescriptionError(sceneDescription);
-                if (descError) {
-                  setOpMsg(descError);
-                  return;
-                }
-                const description = sceneDescription.trim();
-                try {
-                  await applyAtlasToMap(assetId, {
-                    sceneDescription: description,
-                    originalEnvironmentReferenceAssetId: assetId,
-                  });
-                } catch (err) {
-                  setOpMsg(err instanceof Error ? err.message : "Failed to create map.");
-                }
+                setEmptyPickerRole(null);
               }}
+              onConfirm={(assetId) => void handleEmptyLibraryPick(assetId)}
             />
           ) : null}
         </>
@@ -1501,7 +2127,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               projectId={projectId}
               mapId={document.id}
               onAccepted={() => {
-                void loadMap();
+                void loadMap({ force: true });
                 void loadMaps();
               }}
             />
@@ -1547,6 +2173,8 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             }}
           />
 
+          {workspaceTab === "map" ? (
+            <>
           <div className="spatial-map__grid-scale" data-testid="placement-precision-control">
             <span className="spatial-map__grid-scale-label">Placement Precision</span>
             <button
@@ -1558,7 +2186,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               onClick={() => void handleGridScale(-1)}
               data-testid="grid-scale-minus"
             >
-              −
+              âˆ’
             </button>
             <span className="spatial-map__grid-scale-value" data-testid="grid-scale-value">
               {gridScaleLabel(gridScale)}
@@ -1577,15 +2205,135 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             <span className="spatial-map__grid-scale-label" data-testid="cell-size-label">1 square = 1 meter</span>
           </div>
 
+          <div className="spatial-map__alignment" data-testid="background-alignment">
+            <span className="spatial-map__alignment-label">Background Alignment</span>
+            <span data-testid="background-alignment-help">
+              <HelpTip text="Click the Spatial Map picture to select it. Drag a corner to enlarge or shrink it. Drag inside the picture to slide it under the fixed grid. The picture keeps its shape. Workspace zoom is just viewing closer or farther." />
+            </span>
+            <button
+              type="button"
+              className={`spatial-map__alignment-hand${handActive ? " is-active" : ""}`}
+              aria-label="Hand Tool"
+              aria-pressed={handActive}
+              title="Hand Tool"
+              onClick={handleToggleHand}
+              data-testid="background-alignment-hand"
+            >
+              <svg className="spatial-map__alignment-hand-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M7 11V6.5a1.5 1.5 0 0 1 3 0V11h1V4.5a1.5 1.5 0 0 1 3 0V11h1V5.5a1.5 1.5 0 0 1 3 0V14c0 3.3-2.2 6-5.5 6S7 17.3 7 14v-1.5A1.5 1.5 0 0 1 8.5 11H7z"
+                />
+              </svg>
+              Hand Tool
+            </button>
+            <button
+              type="button"
+              className={`spatial-map__alignment-hand${resizeActive ? " is-active" : ""}`}
+              aria-label="Resize"
+              aria-pressed={resizeActive}
+              title="Resize"
+              onClick={handleToggleResize}
+              data-testid="background-alignment-resize"
+            >
+              <svg className="spatial-map__alignment-hand-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="5" height="5" fill="currentColor" />
+                <rect x="16" y="3" width="5" height="5" fill="currentColor" />
+                <rect x="3" y="16" width="5" height="5" fill="currentColor" />
+                <rect x="16" y="16" width="5" height="5" fill="currentColor" />
+              </svg>
+              Resize
+            </button>
+            <label className="spatial-map__alignment-xy">
+              X
+              <input
+                className="spatial-map__alignment-input"
+                data-testid="background-alignment-x"
+                inputMode="numeric"
+                value={alignXText ?? String(alignmentPixels.x)}
+                onChange={(e) => setAlignXText(e.target.value)}
+                onBlur={() => void handleAlignmentInputBlur()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                aria-label="Background alignment X"
+              />
+            </label>
+            <label className="spatial-map__alignment-xy">
+              Y
+              <input
+                className="spatial-map__alignment-input"
+                data-testid="background-alignment-y"
+                inputMode="numeric"
+                value={alignYText ?? String(alignmentPixels.y)}
+                onChange={(e) => setAlignYText(e.target.value)}
+                onBlur={() => void handleAlignmentInputBlur()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                aria-label="Background alignment Y"
+              />
+            </label>
+            <label className="spatial-map__alignment-xy">
+              Size
+              <input
+                className="spatial-map__alignment-input spatial-map__alignment-input--scale"
+                data-testid="background-alignment-scale"
+                inputMode="numeric"
+                value={alignScaleText ?? String(Math.round(alignment.scale * 100))}
+                onChange={(e) => setAlignScaleText(e.target.value)}
+                onBlur={() => void handleScaleInputCommit()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                aria-label="Map size"
+              />
+            </label>
+            <button
+              type="button"
+              className="spatial-map__slot-action"
+              data-testid="background-alignment-reset"
+              onClick={() => void handleResetAlignment()}
+            >
+              Reset Alignment
+            </button>
+          </div>
+
           <div className="spatial-map__actions" data-testid="map-controls">
             <button type="button" className="spatial-map__slot-action" aria-label="Show grid" aria-pressed={showGrid} data-testid="map-toggle-grid" onClick={() => setShowGrid((v) => !v)}>Grid</button>
             <button type="button" className="spatial-map__slot-action" aria-label="Show circles" aria-pressed={showCircles} data-testid="map-toggle-circles" onClick={() => setShowCircles((v) => !v)}>Circles</button>
             <button type="button" className="spatial-map__slot-action" aria-label="Show labels" aria-pressed={showLabels} data-testid="map-toggle-labels" onClick={() => setShowLabels((v) => !v)}>Labels</button>
-            <button type="button" className="spatial-map__slot-action" data-testid="map-zoom-out" aria-label="Zoom out" disabled={zoom <= 0.75} onClick={() => setZoom((z) => Math.max(0.75, Math.round((z - 0.25) * 100) / 100))}>−</button>
+            <button type="button" className="spatial-map__slot-action" data-testid="map-zoom-out" aria-label="Zoom out" disabled={zoom <= 0.5} onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.25) * 100) / 100))}>âˆ’</button>
+            <span className="spatial-map__zoom-percent" data-testid="map-zoom-percent">{Math.round(zoom * 100)}%</span>
+            <input
+              type="range"
+              className="spatial-map__zoom-slider"
+              min={0.5}
+              max={1.5}
+              step={0.05}
+              value={zoom}
+              data-testid="map-zoom-slider"
+              aria-label="Workspace zoom"
+              onChange={(e) => setZoom(Number(e.target.value))}
+            />
             <button type="button" className="spatial-map__slot-action" data-testid="map-zoom-in" aria-label="Zoom in" disabled={zoom >= 1.5} onClick={() => setZoom((z) => Math.min(1.5, Math.round((z + 0.25) * 100) / 100))}>+</button>
           </div>
 
-          {placementMode ? (
+            </>
+          ) : null}
+
+          {autosaveToast ? (
+            <div
+              className="spatial-map__autosave-toast"
+              data-testid="spatial-map-autosave-toast"
+              role="status"
+              aria-live="polite"
+            >
+              {autosaveToast}
+            </div>
+          ) : null}
+
+          {workspaceTab === "map" && placementMode ? (
             <div className="spatial-map__placement-banner" data-testid="placement-mode-banner">
               <span>
                 {placementBannerText}
@@ -1601,25 +2349,71 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             </div>
           ) : null}
 
+          <div className="spatial-map__workspace-tabs" data-testid="spatial-map-workspace-tabs" role="tablist" aria-label="Spatial Map workspace">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspaceTab === "map"}
+              className={"spatial-map__workspace-tab" + (workspaceTab === "map" ? " is-active" : "")}
+              data-testid="spatial-map-tab-map"
+              onClick={() => setWorkspaceTab("map")}
+            >
+              Map
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspaceTab === "inpaint"}
+              className={"spatial-map__workspace-tab" + (workspaceTab === "inpaint" ? " is-active" : "")}
+              data-testid="spatial-map-tab-inpaint"
+              disabled={!document?.id || !document.backgroundAssetId || !bgUrl}
+              onClick={() => setWorkspaceTab("inpaint")}
+              title={!document?.backgroundAssetId ? "Needs an Active Atlas Shot" : "Correct Area / Inpaint on Atlas pixels"}
+            >
+              Inpaint
+            </button>
+          </div>
+
+          {(() => {
+            const inpaintActive =
+              workspaceTab === "inpaint" && !!document?.id && !!document.backgroundAssetId && !!bgUrl;
+            return (
+          <div className="spatial-map__viewport-host" data-testid="spatial-map-viewport-host" style={{ position: "relative" }}>
           <SpatialGrid
+            key={document!.id}
             backgroundAssetId={document!.backgroundAssetId!}
             imageUrl={bgUrl}
             placements={placements}
             cameras={document?.cameras || []}
+            movementArrows={movementArrows}
+            cameraMovementArrows={cameraMovementArrows}
+            activeMovementAlias={currentMovement ? movementAlias(currentMovement.segmentNumber) : null}
+            spinCamera={spin.spinCamera}
+            selectedSpinCamera={selectedSpinCamera}
+            widthMeters={document?.widthMeters || 10}
+            depthMeters={document?.depthMeters || 10}
             selectedPlacementId={selectedPlacementId}
             selectedCameraId={selectedCameraId}
             occupiedMessage={occupiedMessage}
             gridScale={gridScale}
-            placementActive={!!placementMode}
+            placementActive={inpaintActive ? false : !!placementMode}
             showGrid={showGrid}
             showCircles={showCircles}
             showLabels={showLabels}
             zoom={zoom}
             ghostColor={ghostColor}
+            alignment={alignment}
+            handActive={handActive}
+            resizeActive={resizeActive}
+            maskEditor={inpaintActive && maskConfig ? maskConfig : undefined}
+            onAlignmentChange={handleAlignmentDraft}
+            onAlignmentCommit={handleAlignmentCommit}
+            onSourceMeasured={handleSourceMeasured}
             onCellClick={handleCellClick}
             onSelectPlacement={(id) => {
               setSelectedPlacementId(id);
               setSelectedCameraId(null);
+              setSelectedSpinCamera(false);
               if (id) {
                 const p = findPlacement(id);
                 if (p && p.slotIndex >= 0) {
@@ -1630,6 +2424,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             onSelectCamera={(id) => {
               setSelectedCameraId(id);
               setSelectedPlacementId(null);
+              setSelectedSpinCamera(false);
               if (id) {
                 const c = findCamera(id);
                 if (c && c.cameraSlot >= 0) {
@@ -1637,11 +2432,41 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                 }
               }
             }}
+            onSelectSpinCamera={() => {
+              setSelectedSpinCamera(true);
+              setSelectedCameraId(null);
+              setSelectedPlacementId(null);
+              setActiveSlot(null);
+            }}
           />
+          {inpaintActive ? (
+            <div className="spatial-map__correct-overlay" data-testid="spatial-map-correct-overlay">
+              <CorrectAreaPanel
+                projectId={projectId}
+                documentId={document!.id}
+                backgroundAssetId={document!.backgroundAssetId!}
+                imageUrl={bgUrl}
+                maskHandleRef={maskHandleRef}
+                onMaskConfigChange={setMaskConfig}
+                onRequestClose={() => setWorkspaceTab("map")}
+                onDocumentChange={(doc) => {
+                  // OVERLAY_GUARD: Accept/Undo patches backgroundAssetId only.
+                  // Apply returned document in-place — never createMap, never
+                  // loadMap({ force }) (force remount drops session workspace zoom).
+                  setDocument(normalizeMapDocumentProps(doc as SpatialMapDocument));
+                }}
+              />
+            </div>
+          ) : null}
+          </div>
+            );
+          })()}
 
           {selectedCamera ? (
             <CameraInspector
               camera={selectedCamera}
+              subjectOptions={cameraSubjectOptions}
+              subjectValue={resolvePrimarySubjectValue(selectedCamera.primarySubject, document?.characters || [])}
               onRotate={(orientation) => void handleRotateCamera(selectedCamera.id, orientation)}
               onFovChange={(fovPreset) => void handleFovCamera(selectedCamera.id, fovPreset)}
               onShotSizeChange={(shotSize) => void handleShotSizeCamera(selectedCamera.id, shotSize)}
@@ -1683,6 +2508,138 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               }}
             />
           ) : null}
+
+          <div className="spatial-map__movements" data-testid="spatial-map-movements">
+            <div className="spatial-map__movements-head">
+              <p className="spatial-map__slot-group-title">Movements</p>
+              <button
+                type="button"
+                className="spatial-map__slot-action"
+                data-testid="spatial-map-add-movement"
+                aria-label="Add Movement"
+                disabled={movements.length >= MOVEMENT_MAX}
+                title={movements.length >= MOVEMENT_MAX ? "A scene can have at most five movements." : "Add Movement"}
+                onClick={() => void handleAddMovement()}
+              >
+                + Add Movement
+              </button>
+            </div>
+            {movements.length === 0 ? (
+              <p className="spatial-map__hint">Movement 1 is created when you place the first character or save the map.</p>
+            ) : (
+              movements.map((segment) => {
+                const isActive = currentMovement?.id === segment.id;
+                const isOpen = (openMovementId || currentMovement?.id) === segment.id;
+                return (
+                  <div
+                    key={segment.id}
+                    className={`spatial-map__movement-row${isActive ? " is-active" : ""}`}
+                    data-testid={`spatial-map-movement-${segment.segmentNumber}`}
+                  >
+                    <div className="spatial-map__movement-row-head">
+                      <button
+                        type="button"
+                        className="spatial-map__movement-select"
+                        aria-pressed={isActive}
+                        aria-expanded={isOpen}
+                        onClick={() => void handleActivateMovement(segment.id)}
+                      >
+                        {movementLabel(segment)}
+                        {isActive ? <span className="spatial-map__active-badge">Active</span> : null}
+                      </button>
+                      {segment.segmentNumber > 1 ? (
+                        <button
+                          type="button"
+                          className="spatial-map__slot-remove"
+                          aria-label={`Remove Movement ${segment.segmentNumber}`}
+                          data-testid={`spatial-map-remove-movement-${segment.segmentNumber}`}
+                          onClick={() => void handleRemoveMovement(segment.id)}
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+                    {isOpen ? (
+                      <div className="spatial-map__movement-body" data-testid={`spatial-map-movement-properties-${segment.segmentNumber}`}>
+                        <label className="spatial-map__movement-field">
+                          Beat name
+                          <input
+                            type="text"
+                            defaultValue={segment.beatName || ""}
+                            key={`${segment.id}-beat-${segment.revision || 1}`}
+                            aria-label={`Beat name for Movement ${segment.segmentNumber}`}
+                            data-testid={`spatial-map-movement-beat-${segment.segmentNumber}`}
+                            onBlur={(e) => {
+                              const next = e.target.value.trim();
+                              if (next !== (segment.beatName || "").trim()) {
+                                void handleUpdateMovement(segment.id, { beatName: next });
+                              }
+                            }}
+                          />
+                        </label>
+                        <label className="spatial-map__movement-field">
+                          Direction
+                          <textarea
+                            defaultValue={segment.userDirection || ""}
+                            key={`${segment.id}-dir-${segment.revision || 1}`}
+                            aria-label={`Direction for Movement ${segment.segmentNumber}`}
+                            data-testid={`spatial-map-movement-direction-${segment.segmentNumber}`}
+                            rows={2}
+                            onBlur={(e) => {
+                              const next = e.target.value;
+                              if (next !== (segment.userDirection || "")) {
+                                void handleUpdateMovement(segment.id, { userDirection: next });
+                              }
+                            }}
+                          />
+                        </label>
+                        <label className="spatial-map__movement-field">
+                          Speaker
+                          <input
+                            type="text"
+                            defaultValue={segment.dialogue?.[0]?.speaker || ""}
+                            key={`${segment.id}-speaker-${segment.revision || 1}`}
+                            aria-label={`Speaker for Movement ${segment.segmentNumber}`}
+                            data-testid={`spatial-map-movement-speaker-${segment.segmentNumber}`}
+                            onBlur={(e) => {
+                              const speaker = e.target.value;
+                              const text = segment.dialogue?.[0]?.text || "";
+                              const prev = segment.dialogue?.[0]?.speaker || "";
+                              if (speaker !== prev) {
+                                void handleUpdateMovement(segment.id, {
+                                  dialogue: text.trim() || speaker.trim() ? [{ speaker, text }] : [],
+                                });
+                              }
+                            }}
+                          />
+                        </label>
+                        <label className="spatial-map__movement-field">
+                          Line
+                          <input
+                            type="text"
+                            defaultValue={segment.dialogue?.[0]?.text || ""}
+                            key={`${segment.id}-line-${segment.revision || 1}`}
+                            aria-label={`Line for Movement ${segment.segmentNumber}`}
+                            data-testid={`spatial-map-movement-line-${segment.segmentNumber}`}
+                            onBlur={(e) => {
+                              const text = e.target.value;
+                              const speaker = segment.dialogue?.[0]?.speaker || "";
+                              const prev = segment.dialogue?.[0]?.text || "";
+                              if (text !== prev) {
+                                void handleUpdateMovement(segment.id, {
+                                  dialogue: text.trim() || speaker.trim() ? [{ speaker, text }] : [],
+                                });
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
+          </div>
 
           <div className="spatial-map__slots">
             <div className="spatial-map__slot-group">
@@ -1760,6 +2717,117 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                 );
               })}
             </div>
+
+            <div className="spatial-map__slot-group">
+              <p className="spatial-map__slot-group-title">Spin Camera</p>
+              <div
+                className={`spatial-map__entity-card spatial-map__spin-slot${selectedSpinCamera ? " is-active" : ""}${spin.spinCamera ? " is-placed" : ""}`}
+                role="button"
+                tabIndex={0}
+                aria-pressed={selectedSpinCamera}
+                aria-label={spin.spinCamera ? "Spin Camera placed" : "Spin Camera empty"}
+                onClick={() => {
+                  if (spin.spinCamera) {
+                    setSelectedSpinCamera(true);
+                    setSelectedCameraId(null);
+                    setSelectedPlacementId(null);
+                    setActiveSlot(null);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    if (spin.spinCamera) {
+                      setSelectedSpinCamera(true);
+                      setSelectedCameraId(null);
+                      setSelectedPlacementId(null);
+                      setActiveSlot(null);
+                    }
+                  }
+                }}
+                data-testid="spin-camera-slot"
+              >
+                <div className="spatial-map__entity-card-head spatial-map__slot-head">
+                  <span className="spatial-map__slot-label">Spin</span>
+                  {placementMode?.kind === "spin" ? (
+                    <span className="spatial-map__active-badge is-placement-active" data-testid="spin-slot-active-badge">
+                      {placementMode.action === "move" ? "Moving…" : "Placing…"}
+                    </span>
+                  ) : null}
+                </div>
+                {spin.spinCamera ? (
+                  <span className="spatial-map__entity-card-meta spatial-map__slot-status">
+                    X {formatMeters(spin.spinCamera.x)} m · Z {formatMeters(spin.spinCamera.z)} m
+                  </span>
+                ) : (
+                  <span className="spatial-map__entity-card-meta spatial-map__slot-status">Not placed</span>
+                )}
+                <div className="spatial-map__slot-actions">
+                  <button
+                    type="button"
+                    className="spatial-map__slot-action"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setHandActive(false);
+                      setResizeActive(false);
+                      setSelectedSpinCamera(true);
+                      setSelectedCameraId(null);
+                      setSelectedPlacementId(null);
+                      setActiveSlot(null);
+                      setPlacementMode({
+                        action: spin.spinCamera ? "move" : "place",
+                        kind: "spin",
+                        id: spin.spinCamera?.id || "spin-camera",
+                        label: "Spin Camera",
+                      });
+                      setOccupiedMessage(null);
+                    }}
+                    data-testid={spin.spinCamera ? "spin-camera-move" : "spin-camera-place"}
+                    aria-label={spin.spinCamera ? "Move Spin Camera" : "Place Spin Camera"}
+                  >
+                    {spin.spinCamera ? "Move" : "Place"}
+                  </button>
+                  {spin.spinCamera ? (
+                    <button
+                      type="button"
+                      className="spatial-map__slot-remove"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void spin.removeSpinCamera();
+                      }}
+                      disabled={spin.busy}
+                      data-testid="spin-camera-remove-slot"
+                      aria-label="Remove Spin Camera"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <SpinCameraPanel
+                projectId={projectId}
+                mapId={document.id}
+                spinCamera={spin.spinCamera}
+                centerStatus={spin.centerStatus}
+                packages={spin.packages}
+                activePackage={spin.activePackage}
+                activePackageId={spin.activePackageId}
+                onSelectPackage={(packageId) => spin.setActivePackageId(packageId)}
+                providerOptions={spin.providerOptions}
+                selectedProviderId={spin.selectedProviderId}
+                onChangeProvider={(next) => spin.setSelectedProviderId(next)}
+                ersAssetId={spin.ersAssetId}
+                hasBackgroundAssetId={hasBackground}
+                busy={spin.busy}
+                error={spin.error}
+                onCreatePackage={spin.createPackage}
+                onRegenerateDirection={spin.regenerateDirection}
+                onBuildErs={spin.buildErs}
+                onOpenInLibrary={() => onGoTab?.("library")}
+                onRemoveSpinCamera={() => void spin.removeSpinCamera()}
+              />
+            </div>
+
             <div className="spatial-map__slot-group">
               <p className="spatial-map__slot-group-title">Cameras</p>
               {CAMERA_SLOTS.map((slot) => {
@@ -1852,7 +2920,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                         <label className="spatial-map__camera-shot-field">
                           <span>Primary Subject</span>
                           <select
-                            value={camera.primarySubject || "auto"}
+                            value={resolvePrimarySubjectValue(camera.primarySubject, document?.characters || [])}
                             onChange={(e) => {
                               e.stopPropagation();
                               void handlePrimarySubjectCamera(camera.id, e.target.value);
@@ -1861,15 +2929,11 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                             data-testid={`camera-primary-subject-${slot.index}`}
                             aria-label={`Set ${slot.label} primary subject`}
                           >
-                            <option value="auto">Auto</option>
-                            <option value="environment">Environment</option>
-                            {(document?.characters || [])
-                              .filter((c) => c.visible !== false && (c.gridRow >= 0 || typeof c.normalizedX === "number"))
-                              .map((c) => (
-                                <option key={c.characterId} value={c.characterId}>
-                                  {c.label || c.tag || c.characterId}
-                                </option>
-                              ))}
+                            {cameraSubjectOptions.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
                           </select>
                         </label>
                       </div>
@@ -1951,31 +3015,15 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           </div>
 
           <div className="spatial-map__ers-generator" data-testid="ers-generator">
-            <label className="spatial-map__ers-generator-label" htmlFor="ers-generator-select">
-              ERS Generator
-            </label>
-            <select
-              id="ers-generator-select"
-              className="spatial-map__ers-generator-select"
-              data-testid="ers-generator-select"
-              aria-label="ERS Generator"
-              value={ers.selectedGenerator}
-              disabled={ers.busy}
-              onChange={(e) => ers.setSelectedGenerator(e.target.value as typeof ers.selectedGenerator)}
+            <span className="spatial-map__ers-generator-label">ERS Generator</span>
+            <p
+              className={`spatial-map__ers-generator-fixed${ers.gptReady === false || ers.gptI2IReady === false ? " is-setup" : ""}`}
+              data-testid="ers-generator-fixed"
             >
-              {ERS_GENERATOR_OPTIONS.map((opt) => {
-                const disabled = ersGeneratorOptionDisabled(
-                  opt.id,
-                  ers.qwenI2IReady,
-                  ers.gptI2IReady,
-                );
-                return (
-                  <option key={opt.id} value={opt.id} disabled={disabled}>
-                    {disabled ? opt.label + " (not ready for ERS)" : opt.label}
-                  </option>
-                );
-              })}
-            </select>
+              {ers.gptReady === false || ers.gptI2IReady === false
+                ? "GPT Image 2 — Requires Setup"
+                : "GPT Image 2 — API"}
+            </p>
             {ers.generatorBlockReason ? (
               <p className="spatial-map__ers-generator-hint" data-testid="ers-generator-reason" role="status">
                 {ers.generatorBlockReason}
@@ -2025,6 +3073,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             qwenI2IReady={ers.qwenI2IReady}
             gptI2IReady={ers.gptI2IReady}
             onOpenSceneCreator={() => void handleUseInSceneCreator()}
+            spinPackage={spin.activePackage}
           />
 
           {opMsg && ers.phase === "idle" ? <p className="spatial-map__hint">{opMsg}</p> : null}
@@ -2036,8 +3085,8 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           <p className="spatial-map__scene-chooser-title">Choose Scene</p>
           <p className="spatial-map__scene-chooser-text">
             {document?.sceneId
-              ? "This project has multiple scenes. Pick the scene this Spatial Map belongs to so Scene Creator writes its shots there."
-              : "This Spatial Map is not bound to a scene yet. Pick the project scene it belongs to so Scene Creator writes its shots there."}
+              ? "This project has multiple scenes. Pick the scene this Spatial Map belongs to so your production tools write there."
+              : "This Spatial Map is not bound to a scene yet. Pick the project scene it belongs to so your production tools write there."}
           </p>
           <div className="spatial-map__scene-chooser-options">
             {sceneOptions.map((s) => (

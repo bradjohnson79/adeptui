@@ -7,9 +7,10 @@ const ALLOWED_TAGS = [
   "blockquote", "hr",
   "span", "div",
   "pre", "code",
+  "a",
 ];
 
-const ALLOWED_ATTR = ["style", "align", "data-indent", "class"];
+const ALLOWED_ATTR = ["style", "align", "data-indent", "class", "href", "rel", "target"];
 
 const FORBID_TAGS = ["script", "iframe", "object", "embed", "form", "input", "style", "link", "meta"];
 

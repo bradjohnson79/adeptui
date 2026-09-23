@@ -37,7 +37,20 @@ def _adapter_caps(generator_id: str) -> Any:
 
 
 def per_batch_duration(spec: SceneProductionSpec) -> float:
-    """Total scene duration is split evenly across batches."""
+    """Longest planned batch window (capability plan), for generator validation.
+
+    REBUILD LAW: the planner runs before validation, so a prepared spec
+    carries ``batchWindows`` and the validator checks the PLANNED windows.
+    The even split remains only as the fallback for specs that never ran the
+    capability planner (single-window scenes, direct compiler callers).
+    """
+    windows = [
+        float(w.get("end", 0.0) or 0.0) - float(w.get("start", 0.0) or 0.0)
+        for w in (spec.batchWindows or [])
+    ]
+    windows = [w for w in windows if w > 0]
+    if windows:
+        return max(windows)
     count = max(int(spec.batch_count or 1), 1)
     return float(spec.duration_seconds or 0.0) / count
 
@@ -48,7 +61,11 @@ def validate_scene_spec_against_generator(spec: SceneProductionSpec) -> dict[str
     errors: list[str] = []
     if spec.duration_seconds <= 0:
         errors.append("Duration must be greater than zero.")
-    max_sec = float(getattr(caps, "maxDurationSec", 0) or 0)
+    from .generator_capability import certified_single_generation_seconds
+    try:
+        max_sec = float(certified_single_generation_seconds(caps))
+    except Exception:
+        max_sec = float(getattr(caps, "maxDurationSec", 0) or 0)
     per_batch = per_batch_duration(spec)
     if max_sec and per_batch > max_sec + 1e-6:
             errors.append(

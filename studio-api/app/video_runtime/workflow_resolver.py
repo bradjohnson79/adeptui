@@ -66,6 +66,7 @@ def _concurrency(wf: CertifiedWorkflow) -> ConcurrencyClass:
 
 
 LTX_25_GENERATOR_IDS = frozenset({
+    "ltx-2.5",
     "ltx-2.5-full",
     "ltx-2.5-distilled",
     "ltx-2.5-comfy",
@@ -80,19 +81,18 @@ def local_video_identity(
     *,
     requested_model: str | None,
     leaf_workflow_key: str,
-    ltx_23_checkpoint: str,
     ltx_25_checkpoint: str,
 ) -> dict[str, str]:
     """Requested Timeline id vs the checkpoint that will actually load.
 
     Never copies scene.engine (which defaults to minimax-h3) onto LTX jobs.
+    LTX 2.3 is retired: only the LTX 2.5 checkpoint resolves here; any other
+    requested id passes through as itself.
     """
     requested = (requested_model or "").strip()
     leaf = (leaf_workflow_key or "").strip()
     if is_ltx_25_generator(requested) or leaf.startswith("ltx_25"):
         resolved = ltx_25_checkpoint
-    elif requested.startswith("ltx") or leaf.startswith("ltx"):
-        resolved = ltx_23_checkpoint
     else:
         resolved = requested
     return {
@@ -104,10 +104,10 @@ def local_video_identity(
 
 
 def _require(key: str) -> CertifiedWorkflow:
-    """Resolve Certified workflows; Hunyuan/LTX 2.5 Built leaves allowed until cert."""
+    """Resolve Certified workflows; LTX 2.5 Built leaves allowed until cert."""
     from .certified_registry import assert_executable
 
-    allow = str(key).startswith("hunyuan") or str(key).startswith("ltx_25")
+    allow = str(key).startswith("ltx_25")
     return assert_executable(key, allow_non_certified=allow)
 
 
@@ -140,33 +140,39 @@ def _leaf_for_scene(
         }.get((fal_engine or eng).lower(), "fal.seedance")
         return key, disclosures
 
-    if wants_ingredients and eng != "wan":
-        return "ltx.ingredients_ic_lora", disclosures
+    if eng.startswith("minimax") or gen.startswith("minimax-h3"):
+        raise RuntimeError(
+            "MINIMAX_MODE_REQUIRED: MiniMax H3 does not use the LTX graph. "
+            "Text to Video uses MiniMax words-only. 1 Frame uses MiniMax with a start picture. "
+            "Timeline uses MiniMax reference-to-video."
+        )
 
-    if eng == "wan":
-        if has_middle and (has_start or has_end):
-            return "wan.three_frame", disclosures
-        if has_middle and not has_end:
-            disclosures.append("WAN three-frame: middle present without end; using three_frame builder.")
-            return "wan.three_frame", disclosures
-        return "wan.first_last_frame", disclosures
-
-    if eng in {"hunyuan15", "hunyuan13b"}:
-        prefix = "hunyuan15" if eng == "hunyuan15" else "hunyuan13b"
-        if has_start:
-            return f"{prefix}.i2v", disclosures
-        return f"{prefix}.t2v", disclosures
-
-    # LTX 2.5 — Timeline ids must not silently resolve to the 2.3 leaf.
+    # LTX 2.5 stays on its own leaf. Ingredients IC-LoRA was the LTX 2.3
+    # identity path and is retired — never swap checkpoint/workflow for it.
     if is_ltx_25_generator(gen) or eng in {"ltx-2.5", "ltx-2.5-distilled", "ltx-2.5-full", "ltx-2.5-comfy"}:
+        if wants_ingredients:
+            disclosures.append(
+                "Ingredients IC-LoRA (LTX 2.3) is retired. "
+                "LTX 2.5 keeps character and place references on the start frame."
+            )
         if has_start:
             return "ltx_25.i2v", disclosures
         return "ltx_25.t2v", disclosures
 
-    # LTX 2.3
-    if has_start and not has_middle and not has_end and not has_audio:
-        return "ltx.simple_i2v", disclosures
-    return "ltx.scene", disclosures
+    # Any other local engine is retired (WAN, HunyuanVideo, LTX 2.3) or unknown.
+    # Fail honestly — never silently substitute another generator family.
+    from ..hosted_providers.video_registry import is_retired_local_video
+
+    if is_retired_local_video(eng) or is_retired_local_video(gen):
+        raise RuntimeError(
+            f"RETIRED_LOCAL_GENERATOR: '{gen or eng}' is retired from Adept UI v1.1 "
+            "local video generation. Supported local video generators are MiniMax H3 "
+            "and LTX 2.5."
+        )
+    raise RuntimeError(
+        f"UNKNOWN_LOCAL_GENERATOR: '{gen or eng}' is not a supported local video "
+        "generator. Supported local video generators are MiniMax H3 and LTX 2.5."
+    )
 
 
 def resolve_workflow(
@@ -217,13 +223,8 @@ def resolve_workflow(
         orch_key = leaf_key
     elif intent_n == "extend":
         orch_key = "video.extend"
-        # Leaf is local I2V — prefer LTX simple unless engine=wan or Timeline 2.5
-        if engine == "wan":
-            leaf_key = "wan.first_last_frame"
-        elif is_ltx_25_generator(generator_id):
-            leaf_key = "ltx_25.i2v"
-        else:
-            leaf_key = "ltx.simple_i2v"
+        # Local extend leaf is LTX 2.5 I2V (WAN FLF and LTX 2.3 simple_i2v retired).
+        leaf_key = "ltx_25.i2v"
         disclosures.append("video.extend: last-frame → certified local I2V")
     elif intent_n == "timeline_render":
         orch_key = "director.timeline_render"
@@ -247,12 +248,15 @@ def resolve_workflow(
             )
             disclosures.extend(more)
         elif intent_n in {"txt2vid", "txt2vid_local"} and not has_start and not paid_fal_approved:
-            from .hunyuan_providers import allow_local_t2v
-
-            if not allow_local_t2v(engine):
+            # True local T2V runs on LTX 2.5 (ltx_25.t2v is a Built certified-registry
+            # leaf). MiniMax H3 T2V has its own Route A path and never resolves here;
+            # WAN / HunyuanVideo / LTX 2.3 local T2V are retired.
+            if not (is_ltx_25_generator(generator_id) or is_ltx_25_generator(engine)):
                 raise RuntimeError(
-                    "LOCAL_START_FRAME_REQUIRED: local video generation is I2V-only "
-                    "(Hunyuan true local T2V requires per-provider certification)"
+                    "LOCAL_T2V_UNSUPPORTED: local Text to Video runs on LTX 2.5. "
+                    f"'{generator_id or engine}' cannot run local Text to Video — "
+                    "use MiniMax H3 Text to Video, add a start picture (1 Frame / "
+                    "Timeline), or choose an approved hosted generator."
                 )
             leaf_key, more = _leaf_for_scene(
                 engine=engine,

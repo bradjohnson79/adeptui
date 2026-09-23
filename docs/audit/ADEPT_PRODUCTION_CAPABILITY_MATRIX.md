@@ -104,7 +104,8 @@ the Playwright fixture HTTP provider, and no test performs a real multi-GB downl
 | `codirector.vision.validate` | codirector | `locally_verified` | write | no | - | `POST /api/codirector/vision/validate` |
 | `codirector.vision.review` | codirector | `locally_verified` | write | yes | `codirector.vision.validate` | `POST /api/codirector/vision/approve` |
 | `codirector.video_intelligence.ready` | codirector | `partially_wired` | read | no | - | `GET /api/setup/lifecycle/video-intelligence` |
-| `codirector.tools` | codirector | `not_implemented` | write | no | - | `-` |
+| `codirector.media_intelligence.qwen_omni.ready` | codirector | `partially_wired` | read | no | - | `-` |
+| `codirector.tools` | codirector | `backend_only` | write | no | - | `-` |
 | `comfyui.health` | comfyui | `backend_only` | read | no | - | `GET /api/comfy/health` |
 | `comfyui.queue` | comfyui | `backend_only` | write | yes | `comfyui.health`, `workflows.validate` | `-` |
 | `comfyui.cancel` | comfyui | `partially_wired` | write | no | `comfyui.health` | `POST /api/jobs/{jobId}/cancel` |
@@ -176,9 +177,11 @@ runtime this reports `not_configured` with `MODEL_SOURCE_PENDING` and the action
 **`virtual_stage.render` — `not_implemented`.** Virtual Stage appears in architecture
 documentation. No route, service, table, or component implements it in this build.
 
-**`codirector.tools` — `not_implemented`.** Tool registry and dispatch belong to Co-Director
-M2.2. This branch publishes the capability truth source that M2.2 will read; it does not
-implement orchestration.
+**`codirector.tools` — `backend_only`.** Tool registry and dispatch are implemented under
+`app.codirector.tools` (definitions, registry, execution service, handlers). The live
+evaluator reads the registered catalog and reports `locally_verified` with the observed
+tool count, or `blocked` with `TOOL_REGISTRY_EMPTY` if the catalog ever comes back empty.
+There is no dedicated creator UI beyond Co-Director chat.
 
 **Generation (`generation.*`) — never better than `partially_wired` here.** Even with ComfyUI
 reachable, a ready workflow, and verified weights, the best status this branch will report is

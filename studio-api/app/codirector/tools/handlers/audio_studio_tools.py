@@ -10,6 +10,8 @@ from ....audio_studio.provider_resolver import resolve_execution
 from ....db import Asset, Scene
 from ...errors import TOOL_ARGUMENTS_INVALID, TOOL_TARGET_NOT_FOUND, CoDirectorError
 from ..definitions import ToolContext, ToolPreview
+from ...video_intelligence.media_packet import compose_audio_prompt_from_packet
+from ...video_intelligence import media_persist
 
 
 def _argument_error(message: str, **details: Any) -> CoDirectorError:
@@ -82,6 +84,94 @@ def _parse_mood(args: dict[str, Any]) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()][:6]
 
 
+
+def _truthy_flag(value: Any) -> bool | None:
+    """Return True/False for explicit flags, None when unset."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _load_media_intelligence_for_audio(
+    ctx: ToolContext,
+    args: dict[str, Any],
+):
+    """Load a ready Media Intelligence packet for this scene/project.
+
+    Preference order:
+    1. Scene playable video packet (analyze.video contract)
+    2. Project latest packet
+    """
+    from ...capabilities.handlers.analyze_video import _resolve_playable_video_asset_id
+
+    scene_id = _optional_text(args, "sceneId") or ctx.scene_id
+    packet = None
+    if scene_id:
+        video_asset_id = _resolve_playable_video_asset_id(ctx.db, ctx.project_id, scene_id)
+        if video_asset_id:
+            packet = media_persist.load_packet(ctx.db, ctx.project_id, video_asset_id)
+    if packet is None:
+        packet = media_persist.load_latest_packet(ctx.db, ctx.project_id)
+    if packet is None or not packet.is_ready():
+        return None
+    return packet
+
+
+def _enrich_brief_from_media_intelligence(
+    ctx: ToolContext,
+    args: dict[str, Any],
+    brief: dict[str, Any],
+    *,
+    kind: str,
+) -> dict[str, Any]:
+    """Closed loop: fold analyze.video / Omni packet into generate prompts.
+
+    Default: when a ready packet exists for the scene, enrich automatically so
+    Co-Director music/SFX generation is Omni-informed without a second manual paste.
+    Opt out with useMediaIntelligence=false.
+    """
+    flag = _truthy_flag(args.get("useMediaIntelligence"))
+    if flag is False:
+        brief["media_intelligence"] = {"used": False, "reason": "opt_out"}
+        return brief
+
+    packet = _load_media_intelligence_for_audio(ctx, args)
+    if packet is None:
+        brief["media_intelligence"] = {
+            "used": False,
+            "reason": "no_ready_packet",
+            "requested": bool(flag is True or _optional_text(args, "mediaIntelligencePacketId")),
+        }
+        return brief
+
+    base_prompt = str(brief.get("prompt") or "")
+    enriched = compose_audio_prompt_from_packet(
+        packet, kind=kind, base_prompt=base_prompt, max_len=2000
+    )
+    brief["prompt"] = enriched
+    brief["media_intelligence"] = {
+        "used": True,
+        "packetId": packet.packetId,
+        "assetId": packet.assetId,
+        "summaryExcerpt": (packet.summary or "")[:240],
+        "musicOpportunityCount": len(packet.musicOpportunities or []),
+        "cueOpportunityCount": len(packet.cueOpportunities or []),
+        "contactEventCount": len(packet.contactEvents or []),
+        "modelId": "qwen2-5-omni-7b",
+    }
+    notes = str(brief.get("notes") or "").strip()
+    mi_note = f"Omni packet {packet.packetId} informed this {kind} prompt."
+    brief["notes"] = f"{notes} {mi_note}".strip() if notes else mi_note
+    return brief
+
+
 def _build_brief(ctx: ToolContext, args: dict[str, Any], *, kind: str) -> dict[str, Any]:
     prompt = _require_text(args, "prompt")
     duration_default, _ = _kind_defaults(kind)
@@ -109,7 +199,7 @@ def _build_brief(ctx: ToolContext, args: dict[str, Any], *, kind: str) -> dict[s
         brief["loop_required"] = bool(loop_required)
     elif kind == "ambience":
         brief["loop_required"] = True
-    return brief
+    return _enrich_brief_from_media_intelligence(ctx, args, brief, kind=kind)
 
 
 def _candidate_count(args: dict[str, Any], *, kind: str) -> int:
@@ -243,6 +333,14 @@ def _preview_to_tool(ctx: ToolContext, args: dict[str, Any], *, kind: str) -> To
         "No silent CPU fallback.",
         "No automatic mix suggestions or auto-placement.",
     ]
+    mi = (payload.get("brief") or {}).get("media_intelligence") or {}
+    if mi.get("used"):
+        lines.insert(
+            2,
+            f"Omni-informed from packet {mi.get('packetId')} (Qwen 2.5 Omni watch).",
+        )
+    elif mi.get("requested") and mi.get("reason") == "no_ready_packet":
+        warnings.append("useMediaIntelligence requested but no ready Omni packet was found.")
     if mode == "blocked_cpu":
         warnings.append("Local runtime is CPU-only — approve will fail unless allowCpuFallback=true.")
     return ToolPreview(
@@ -280,8 +378,9 @@ def _start_async_generate(ctx: ToolContext, args: dict[str, Any], *, kind: str) 
         "status": "queued",
         "batchId": batch.get("id"),
         "batch": batch,
-        "workspaceUrl": f"/project/{ctx.project_id}?workspace=audiostudio",
+        "workspaceUrl": f"/project/{ctx.project_id}?workspace=audiostudio&audioTab={kind if kind != 'sfx' else 'sfx'}",
         "uiAction": "open_audio_studio",
+        "audioTab": kind if kind in {"music", "sfx", "ambience"} else "music",
         "projectId": ctx.project_id,
         "pollTool": "audio.compare_candidates",
         "cancelTool": "audio.cancel_batch",
@@ -477,11 +576,24 @@ async def get_batch(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def open_studio(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    raw = str(args.get("tab") or args.get("kind") or args.get("audioTab") or "music").strip().lower()
+    if raw in {"sound", "sound effects", "effect", "foley"}:
+        tab = "sfx"
+    elif raw in {"ambience", "ambient", "bed", "atmosphere"}:
+        tab = "ambience"
+    elif raw in {"library", "project audio", "shelf"}:
+        tab = "library"
+    elif raw in {"music", "score", "cue"}:
+        tab = "music"
+    else:
+        tab = "music"
     return {
         "ok": True,
         "projectId": ctx.project_id,
         "uiAction": "open_audio_studio",
-        "workspaceUrl": f"/project/{ctx.project_id}?workspace=audiostudio",
+        "audioTab": tab,
+        "contentTab": tab,
+        "workspaceUrl": f"/project/{ctx.project_id}?workspace=audiostudio&audioTab={tab}",
         "_evidence": {"source": "audio_studio.ui"},
     }
 
@@ -589,11 +701,18 @@ def preview_approve_candidate(ctx: ToolContext, args: dict[str, Any]) -> ToolPre
 def apply_approve_candidate(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     batch_id = _require_text(args, "batchId")
     candidate_id = _require_text(args, "candidateId")
+    approved = audio_service.approve_candidate(ctx.project_id, batch_id, candidate_id, db=ctx.db)
     return {
-        **audio_service.approve_candidate(ctx.project_id, batch_id, candidate_id),
+        **approved,
         "batchId": batch_id,
         "candidateId": candidate_id,
-        "_evidence": {"source": "audio_studio.service.approve_candidate"},
+        "libraryCount": approved.get("libraryCount"),
+        "approvedAssetInLibrary": approved.get("approvedAssetInLibrary"),
+        "_evidence": {
+            "source": "audio_studio.service.approve_candidate",
+            "assetId": approved.get("assetId"),
+            "ingested": approved.get("ingested"),
+        },
     }
 
 

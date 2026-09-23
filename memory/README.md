@@ -1,4 +1,4 @@
-# Co-Director 2.0 — Session Memory
+﻿# Co-Director 2.0 â€” Session Memory
 
 ## Project Overview
 
@@ -11,23 +11,28 @@ awareness, specialist crew, and professional conversation.
 
 ```
 Creator message
-  → Phase 3 RouteDecision (11 action classes)
-  → Phase 2 Verified Operator (NAVIGATE) | Proposal/approval (mutations) | Conversation (DISCUSS)
-  → Phase 4 Story Intelligence Compiler (Logline/Short/Long Summary)
-  → Phase 5 Script Writer + Wiki Integration
-  → Phase 6 Workflow Engine (format-aware, evidence-derived)
-  → Phase 7 Specialist Crew (RouteDecision-aware, MAX=3)
-  → Phase 8 Professional Conversation (known-fact suppression, goal tracking, no leakage)
+  â†’ Phase 3 RouteDecision (11 action classes)
+  â†’ Phase 2 Verified Operator (NAVIGATE) | Proposal/approval (mutations) | Conversation (DISCUSS)
+  â†’ Phase 4 Story Intelligence Compiler (Logline/Short/Long Summary)
+  â†’ Phase 5 Script Writer + Wiki Integration
+  â†’ Phase 6 Workflow Engine (format-aware, evidence-derived)
+  â†’ Phase 7 Specialist Crew (RouteDecision-aware, MAX=3)
+  â†’ Phase 8 Professional Conversation (known-fact suppression, goal tracking, no leakage)
 ```
 
 ## Current State
+
+- **Timeline Master Single-Stack (2026-09-20):** Dual-stack retirement Primary GO — Timed Prompt SoT = SceneTimelineMaster; Take-P rematerialize fence; put_director Master shim; FE Master-FIRST; speech Master-only; CD01 Env/Image nav live CERT on disposable project. Detail: `memory/session-2026-09-20-timeline-master-single-stack.md`. Law 65: post-task FE parse check mandatory.
 
 - **Beta running**: http://127.0.0.1:8760/ (web) + :8758/ (API) + https://adeptui.vercel.app (Vercel)
 - **Provider**: Ollama + qwen3.6:35b-a3b
 - **Regression baseline (core)**: 262/262 pass (Phases 2-11); Full suite: ~2173 tests
 - **Certification**: All phases + Hosted Beta Infrastructure GO. Final verdict: GO for creator manual Beta.
 - **Stability**: 2 uvicorn workers, /healthz fast endpoint, 5-failure hysteresis, TTL cache.
-- **Hosted Beta**: Cloudflare Tunnel (822658ce), api-beta.adeptui.org → localhost:8758, Aurora UI parity confirmed
+- **Hosted Beta**: Cloudflare Tunnel (822658ce), api-beta.adeptui.org â†’ localhost:8758, Aurora UI parity confirmed
+- **Avatar Studio (2026-09-13)**: Character dropdown wired to canonical project character authority (`character_identity_v1`); footer cards/tabs/buttons converged onto Adept design tokens; live E2E GO. Branch `feat/character-creator-final-closure` @ `99665cf7`.
+- **Timeline H3 (2026-09-13)**: Timeline = R2V only (FM4/FM5 3-ref Quality SHA `33fa6665â€¦`). Track Integrity in flight. Spatial Correct Area = zimage.inpaint only (Atlas stays GPT Image 2). NEW mission: Timeline Re-Take must be R2V not T2V â€” audit at `theme_walk/timeline_retake_r2v/AUDIT.md`.
+- **Timeline Batch Architecture (2026-09-18)**: Take N "15-second scene twice" regression root-caused (`reconcile._in_window` midpoint test) and fixed to start-containment (12B model). Batch architecture now owner-protected by a 4-layer safeguard (Cursor rule + Charter + 15 fence tests + in-code guard markers). Co-Director long-scene preparation (12B shape) audited as ALREADY IMPLEMENTED end-to-end â€” capability plan â†’ N distinct window-scoped prompts â†’ per-batch persistence â†’ additive Qwen weave. `NeedsDialogueRetake` = designed fail-closed `UNAUTHORIZED_BACKGROUND_SPEAKER` (Omni ASR `speaker: "unknown"`), same as 12B â€” not a regression. Final protection run 117 passed / 0 failed; live takes Kâ€“Q certified. Detail: `memory/session-2026-09-18-timeline-batch-architecture.md`.
 
 ## Phase History
 
@@ -60,17 +65,21 @@ Creator message
 
 ## Binding laws (read first)
 
-- `/memory/files/MODEL_INSTALL_ROOT.md` — new model/runtime installs land under `D:\01_Models` (Model Storage `preferredRoot`). Do not move `data_dir`; do not set `STUDIO_COMFY_MODELS_DIR` to that root. (2026-08-14)
-- `/memory/FULL_STACK_E2E_COMPLETION_LAW.md` — UI complete ≠ feature complete. Hosted defects require hosted verification. Independent verifier required. (2026-08-14)
+- `/memory/files/MODEL_INSTALL_ROOT.md` â€” new model/runtime installs land under `D:\01_Models` (Model Storage `preferredRoot`). Do not move `data_dir`; do not set `STUDIO_COMFY_MODELS_DIR` to that root. (2026-08-14)
+- `/memory/FULL_STACK_E2E_COMPLETION_LAW.md` â€” UI complete â‰  feature complete. Hosted defects require hosted verification. Independent verifier required. (2026-08-14)
 
 ## Fresh Start Reading Order
 
-1. `/memory/README.md` — this file
-2. `/memory/FULL_STACK_E2E_COMPLETION_LAW.md` — full-stack E2E completion law (binding)
-3. `/memory/phases/phase-spatial-map-ers-scene-creator.md` — Spatial Map + Atlas + ERS + Scene Creator (latest, 2026-08-11)
-3. `/memory/session-2026-08-11.md` — session memory for Spatial Map implementation day
-4. `/memory/phases/phase-10-11-final.md` — Co-Director 2.0 certification summary
-5. `/memory/project/state.md` — current project state
-6. `/memory/infrastructure/beta-server-stability.md` — if working on stability
-7. `/memory/infrastructure/knowledge-cards.md` — if working on Knowledge Cards
-8. Any phase-specific file as needed
+1. `/memory/README.md` â€” this file
+2. `/memory/FULL_STACK_E2E_COMPLETION_LAW.md` â€” full-stack E2E completion law (binding)
+3. `/memory/phases/phase-spatial-map-ers-scene-creator.md` â€” Spatial Map + Atlas + ERS + Scene Creator (latest, 2026-08-11)
+4. `/memory/session-2026-09-13-avatar.md` â€” Avatar Studio character propagation + UI style convergence (latest, 2026-09-13)
+4b. `/memory/session-2026-09-13-timeline.md` â€” Timeline H3 R2V law + Track Integrity + Correct Area + Re-Take R2V mission (2026-09-13)
+4c. `/memory/session-2026-09-18-timeline-batch-architecture.md` â€” Take N regression fix, batch-architecture Protection Charter, long-scene audit (2026-09-18)
+5. `/memory/session-2026-08-11.md` â€” session memory for Spatial Map implementation day
+6. `/memory/phases/phase-10-11-final.md` â€” Co-Director 2.0 certification summary
+7. `/memory/project/state.md` â€” current project state
+8. `/memory/infrastructure/beta-server-stability.md` â€” if working on stability
+9. `/memory/infrastructure/knowledge-cards.md` â€” if working on Knowledge Cards
+10. Any phase-specific file as needed
+

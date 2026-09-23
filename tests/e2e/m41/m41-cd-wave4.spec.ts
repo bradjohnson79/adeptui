@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { createTempProject, deleteProject, waitForAppReady } from "../helpers/app";
 import { AuditObserver } from "../helpers/observer";
+import { openCoDirectorContentTab } from "../codirector/helpers/audit";
 
 const ARTIFACT_DIR = path.join("artifacts", "m41", "wave4");
 
@@ -13,10 +14,7 @@ async function ensureArtifactDir() {
 async function openPlans(page: Page, projectId: string) {
   await page.goto(`/co-director?projectId=${encodeURIComponent(projectId)}`);
   await expect(page.getByTestId("codirector-shell")).toBeVisible({ timeout: 45_000 });
-  const plansTab = page.getByTestId("codirector-content-tab-plans");
-  if (await plansTab.count()) {
-    await plansTab.click();
-  }
+  await openCoDirectorContentTab(page, "plans");
 }
 
 async function createDraft(

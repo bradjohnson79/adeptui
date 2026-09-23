@@ -202,19 +202,28 @@ def test_director_to_editor_preserves_scene_and_order(client):
 
     loaded = client.get(f"/api/projects/{project_id}/editor")
     assert loaded.status_code < 400
-    loaded_tracks = (loaded.json().get("tracks") or {}).get("video") or []
-    assert any(c.get("source_director_sequence_id") == seq_id for c in loaded_tracks)
+    loaded_body = loaded.json()
+    assert loaded_body.get("authority") == "magi-sequence"
+    loaded_tracks = (loaded_body.get("tracks") or {}).get("video") or []
+    # Read-compat projection from sequence.json (clips may land under video from V1)
+    assert any(
+        c.get("id") == clip.get("id") or c.get("asset_id") == clip.get("asset_id")
+        for c in loaded_tracks
+    ) or any(
+        c.get("id") == clip.get("id")
+        for bucket in (loaded_body.get("tracks") or {}).values()
+        for c in (bucket or [])
+    )
 
-    # Editor mutation then reload
-    mutated = dict(loaded.json())
+    # Legacy editor writes are deprecated (P0) — MAGI sequence is sole authority
+    mutated = dict(loaded_body)
     video = list((mutated.get("tracks") or {}).get("video") or [])
     if video:
         video[0] = {**video[0], "label": "editor-edit"}
         mutated.setdefault("tracks", {})["video"] = video
     put = client.put(f"/api/projects/{project_id}/editor", json=mutated)
-    assert put.status_code < 400, put.text
-    again = client.get(f"/api/projects/{project_id}/editor")
-    assert any(
-        c.get("label") == "editor-edit"
-        for c in ((again.json().get("tracks") or {}).get("video") or [])
-    )
+    assert put.status_code == 409, put.text
+    detail = put.json().get("detail") or {}
+    if isinstance(detail, dict):
+        assert detail.get("code") == "LEGACY_EDITOR_WRITES_DEPRECATED"
+        assert "magi" in str(detail.get("magiSequencePath") or "").lower()

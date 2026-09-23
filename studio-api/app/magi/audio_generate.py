@@ -139,13 +139,16 @@ def run_audio_job(db: Session, job: Job) -> dict[str, Any]:
 def _place_on_sequence(project_id: str, kind: str, asset_id: str, params: dict[str, Any]) -> None:
     sequence = get_sequence(project_id)
     tracks = list(sequence.get("tracks") or [])
-    wanted = "A2" if kind == "music" else "A3"
-    track = next((t for t in tracks if t.get("label") == wanted), None)
+    wanted_kind = "music" if kind == "music" else "sfx"
+    wanted_labels = {"MUSIC", "A2"} if wanted_kind == "music" else {"SFX", "A3"}
+    track = next((t for t in tracks if str(t.get("kind") or "") == wanted_kind), None)
+    if track is None:
+        track = next((t for t in tracks if str(t.get("label") or "").upper() in wanted_labels), None)
     if track is None:
         track = {
-            "id": f"trk_{wanted.lower()}_{uuid.uuid4().hex[:6]}",
-            "kind": "audio",
-            "label": wanted,
+            "id": f"trk_{wanted_kind}_{uuid.uuid4().hex[:6]}",
+            "kind": wanted_kind,
+            "label": wanted_kind.upper(),
             "order": len(tracks),
         }
         tracks.append(track)
@@ -161,7 +164,17 @@ def _place_on_sequence(project_id: str, kind: str, asset_id: str, params: dict[s
         if host:
             start = int(host.get("startFrame") or 0)
             duration_frames = int(host.get("durationFrames") or duration_frames)
-    clips = list(sequence.get("clips") or [])
+    clips = [
+        clip
+        for clip in (sequence.get("clips") or [])
+        if not (clip.get("trackId") == track["id"] and clip.get("assetId") == asset_id)
+    ]
+    finishing = sequence.get("finishing") if isinstance(sequence.get("finishing"), dict) else {}
+    scene_id = str(
+        params.get("sceneId")
+        or (finishing.get("activeSceneId") if isinstance(finishing, dict) else "")
+        or ""
+    ).strip()
     clips.append(
         {
             "id": f"clip_audio_{uuid.uuid4().hex[:8]}",
@@ -172,6 +185,8 @@ def _place_on_sequence(project_id: str, kind: str, asset_id: str, params: dict[s
             "durationFrames": duration_frames,
             "inPoint": 0,
             "outPoint": duration_frames,
+            "ingestRole": wanted_kind,
+            **({"sceneId": scene_id} if scene_id else {}),
         }
     )
     sequence["clips"] = clips

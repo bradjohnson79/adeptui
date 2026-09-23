@@ -311,18 +311,17 @@ def _apply_h3_front_transport_packing(
     project_id: str,
     payload: DirectReferencePayload,
 ) -> None:
-    """FM3: pack creator-visible Front into H3 character sockets when Front exists.
+    """Keep a reference sheet whole on the H3 character socket.
 
-    When a checked character binding is a multi-panel CRS and Character Creator
-    Front / hero_identity is available, deliver the Front library asset (plain
-    copy) as ref_image_N instead of CRS-alone. Does not crop CRS. Does not invent
-    place refs or multi-ref companions. Timed Prompt text is untouched.
+    A multi-panel sheet stays the Load Image file. A front or side still is
+    replaced by the approved sheet when one exists. The sheet is not cropped
+    and is not swapped for a single Front still.
     """
     if db is None:
         return
     from .h3_front_identity import (
+        _approved_reference_sheet_id,
         is_multi_panel_crs_asset,
-        resolve_h3_front_character_asset,
     )
 
     for item in payload.characters:
@@ -330,37 +329,33 @@ def _apply_h3_front_transport_packing(
             checked_id = str(item.assetId or "").strip()
             if not checked_id:
                 continue
-            if not is_multi_panel_crs_asset(db, project_id, checked_id):
-                # Creator already attached Front / front-comparable — keep as-is.
-                if not item.identityForm:
-                    item.identityForm = "creator_attached"
+            if is_multi_panel_crs_asset(db, project_id, checked_id):
+                item.identityForm = "reference_sheet"
                 continue
-            hit = {
-                "character_id": str(item.identityId or "").strip(),
-                "name": item.canonicalTag,
-                "approved_reference_asset_id": checked_id,
-                "visual_reference": checked_id,
-            }
-            front_id, form = resolve_h3_front_character_asset(db, project_id, hit)
-            if not front_id or form != "front" or front_id == checked_id:
-                item.identityForm = "crs_sheet_only"
+            sheet_id = _approved_reference_sheet_id(db, str(item.identityId or ""))
+            if (
+                sheet_id
+                and sheet_id != checked_id
+                and is_multi_panel_crs_asset(db, project_id, sheet_id)
+            ):
+                sheet_asset = _asset_record(db, sheet_id)
+                if sheet_asset is None:
+                    item.identityForm = item.identityForm or "creator_attached"
+                    continue
+                try:
+                    sheet_path = str(resolve_library_source(sheet_asset))
+                except ComfyAssetMissing:
+                    item.identityForm = item.identityForm or "creator_attached"
+                    continue
+                item.checkedAssetId = checked_id
+                item.assetId = sheet_id
+                item.sourcePath = sheet_path
+                item.assetType = str(getattr(sheet_asset, "kind", "") or "image") or "image"
+                item.identityForm = "reference_sheet"
                 continue
-            front_asset = _asset_record(db, front_id)
-            if front_asset is None:
-                item.identityForm = "crs_sheet_only"
-                continue
-            try:
-                front_path = str(resolve_library_source(front_asset))
-            except ComfyAssetMissing:
-                item.identityForm = "crs_sheet_only"
-                continue
-            item.checkedAssetId = checked_id
-            item.assetId = front_id
-            item.sourcePath = front_path
-            item.assetType = str(getattr(front_asset, "kind", "") or "image") or "image"
-            item.identityForm = "front"
+            if not item.identityForm:
+                item.identityForm = "creator_attached"
         except Exception:
-            # Fail-open to checked asset — never block Direct Reference delivery.
             continue
 
 

@@ -65,13 +65,17 @@ describe("MAGI error taxonomy", () => {
     expect(info.message).toMatch(/unexpected error/);
   });
 
-  it("describeMagiError never returns a stack trace", () => {
+  it("describeMagiError never returns a stack trace or raw JSON", () => {
     const apiError = new MagiApiError(magiErrorInfo("CLIP_NOT_FOUND"));
     const msg = describeMagiError(apiError);
     expect(msg).toContain("does not contain the referenced clip");
     expect(msg).not.toMatch(/at /);
     expect(describeMagiError(new Error("plain message"))).toBe("plain message");
+    expect(describeMagiError(new Error('{"detail":{"error":{"code":"PUBLISHED_MASTER_REQUIRED"}}}'))).toMatch(
+      /unexpected error/,
+    );
     expect(describeMagiError({ some: "object" })).toMatch(/unexpected error/);
+    expect(describeMagiError({ code: "PUBLISHED_MASTER_REQUIRED" })).toMatch(/not been published from Timeline/);
   });
 
   it("every canonical backend code has a taxonomy entry", () => {
@@ -97,6 +101,7 @@ describe("MAGI error taxonomy", () => {
       "EXPORT_FAILED",
       "TIMELINE_HANDOFF_FAILED",
       "UNSUPPORTED_OPERATION",
+      "PUBLISHED_MASTER_REQUIRED",
     ]) {
       expect(MAGI_ERROR_TAXONOMY[code], code).toBeDefined();
     }

@@ -276,6 +276,10 @@ def should_offer_options(
 ) -> bool:
     text = (user_message or "").strip()
     lower = text.lower()
+    from app.codirector.conversation.foundation.visual_generation import is_executable_image_turn
+
+    if is_executable_image_turn(user_message):
+        return False
     if listen_only or (workflow_hold and "just listen" in lower):
         return False
     if re_narrow_factual(lower):

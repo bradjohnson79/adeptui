@@ -85,6 +85,14 @@ class PendingExecution(BaseModel):
     # The question Co-Director asked, if any (for context on the confirmation turn).
     confirmation_question: str = ""
 
+
+    # --- Production Planner pending brief fields (additive) ---
+    plan_id: str = ""
+    step_id: str = ""
+    summary: str = ""
+    expires_at: str = ""
+    invalidation_rules: list[str] = Field(default_factory=list)
+
     state: str = "IDLE"
 
     created_at: str = Field(default_factory=_now)

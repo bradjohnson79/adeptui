@@ -18,7 +18,7 @@ class Settings(BaseSettings):
         r"C:\Users\bradj\AppData\Local\Comfy-Desktop\ComfyUI-Shared\models"
     )
     default_width: int = 1280
-    default_height: int = 720
+    default_height: int = 704
     default_fps: int = 24
     ltx_checkpoint: str = "ltx-2.3-22b-distilled-fp8.safetensors"
     # LTX 2.3 CheckpointLoaderSimple returns CLIP=None; load Gemma/LTX text encoder separately.
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     poll_interval_sec: float = 1.5
     job_timeout_sec: float = 3600.0
     ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "gemma4:31b-it-qat"
+    ollama_model: str = "qwen3.6:35b-a3b"
     ollama_timeout_sec: float = 180.0
     zimage_unet: str = "z_image_turbo_bf16.safetensors"
     zimage_clip: str = "qwen_3_4b.safetensors"

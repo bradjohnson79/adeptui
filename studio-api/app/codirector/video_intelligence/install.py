@@ -10,12 +10,15 @@ from typing import Any, Callable
 from .paths import (
     INTERNVIDEO3_HF_ID,
     INTERNVIDEO3_REVISION,
+    QWEN_OMNI_HF_ID,
+    QWEN_OMNI_REVISION,
     VIDEOCHAT3_HF_ID,
     VIDEOCHAT3_REPO_FILES,
     VIDEOCHAT3_REVISION,
     VIDEOCHAT3_WEIGHT_BYTES,
     internvideo3_dir,
     model_present,
+    qwen_omni_dir,
     videochat3_dir,
 )
 
@@ -41,6 +44,15 @@ _SPECS = {
         "repo": INTERNVIDEO3_HF_ID,
         "revision": INTERNVIDEO3_REVISION,
         "dest": internvideo3_dir,
+        "markers": ("config.json", "model.safetensors.index.json"),
+    },
+    # Qwen2.5-Omni 7B — Adept Media Intelligence Service. Reuses the existing
+    # _download_repo_sequential path. No SHA verification: the repo does not
+    # publish a pinned-SHA manifest (see paths.QWEN_OMNI_REVISION note).
+    "qwen2_5_omni_7b": {
+        "repo": QWEN_OMNI_HF_ID,
+        "revision": QWEN_OMNI_REVISION,
+        "dest": qwen_omni_dir,
         "markers": ("config.json", "model.safetensors.index.json"),
     },
 }

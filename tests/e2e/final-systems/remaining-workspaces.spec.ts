@@ -25,14 +25,13 @@ const ARTIFACT_DIR = path.join(
 );
 
 const WORKSPACES: Array<{ workspace: string; shell?: string; probe?: RegExp }> = [
-  { workspace: "brandstudio", shell: "brand-studio" },
   { workspace: "one", shell: "one-frame-panel" },
   { workspace: "three", shell: "three-frame-panel" },
   { workspace: "txt2vid", probe: /Text.?to.?Video|MiniMax|Generate/i },
   { workspace: "avatar", shell: "avatar-studio-workspace" },
   { workspace: "library", probe: /Library|Assets|Upload/i },
   { workspace: "bible", probe: /Bible|Continuity|Production/i },
-  { workspace: "timeline", shell: "timeline-open-retake" },
+  { workspace: "timeline", shell: "timeline-v2-workspace" },
   { workspace: "magi", shell: "magi-viewer" },
   { workspace: "audiostudio", probe: /Audio|Music|Ambience|SFX/i },
   { workspace: "scriptwriter", shell: "scriptwriter-workspace" },

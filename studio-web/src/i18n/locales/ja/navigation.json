@@ -13,10 +13,9 @@
   "audioStudio": "Audio Studio",
   "imagegen": "ImageGen",
   "txt2vid": "Txt2Vid",
-  "profiles": "Profiles",
+  "tools": "Character / Angles",
   "script": "Script / Storyboard",
   "shotlist": "Shot List",
-  "mastersheet": "Scene Master Sheet",
   "marketplace": "Marketplace",
   "avatar": "Avatar Studio",
   "sourceManager": "Source Manager",
@@ -34,7 +33,6 @@
   "spatialMap": "空間マップ",
   "posecraft": "PoseCraft",
   "scriptwriter": "脚本",
-  "sceneCreator": "シーンクリエイター",
   "brandStudio": "Brand Studio",
   "generationTools": "Generation Tools"
 }

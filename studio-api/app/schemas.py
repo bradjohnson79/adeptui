@@ -3,17 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 EngineName = Literal[
     "auto",
     "minimax-h3",
     "ltx-2.5",
-    "ltx",
-    "wan",
-    "hunyuan15",
-    "hunyuan13b",
     "seedance-2.0",
     "seedance-2.5",
     "fal_seedance",
@@ -83,7 +79,7 @@ class EngineRecommendOut(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     local: bool = True
     vram_tier: int = 32
-    profile_engine: str = "ltx"
+    profile_engine: str = "minimax-h3"
 
 
 class TimelineSceneProposal(BaseModel):
@@ -165,6 +161,25 @@ class SceneOut(BaseModel):
     summary: str = ""
     engine: EngineName = "minimax-h3"
     prompt: str = ""
+
+    @field_validator("engine", mode="before")
+    @classmethod
+    def _retired_engine_reads_as_canonical(cls, v: object) -> object:
+        """Read-path tolerance for retired engines in persisted projects.
+
+        Pre-cleanup projects may store engine='wan' / 'ltx' (LTX 2.3) /
+        'hunyuan*'. The canonical contract (MiniMax H3 + LTX 2.5 local, hosted
+        API rows) must not crash loading that history. Stored rows are NOT
+        rewritten; only the serialized view maps retired values:
+        LTX 2.3 -> ltx-2.5 (family successor), WAN/Hunyuan -> auto (no
+        successor; product default applies). Write paths (SceneIn) stay strict.
+        """
+        token = str(v or "").strip().lower()
+        if token in {"ltx", "ltx-2.3", "ltx_2_3", "ltx-local"}:
+            return "ltx-2.5"
+        if token in {"wan", "wan-2.2", "wan_2_2", "wan-local", "hunyuan", "hanyuan", "hunyuan15", "hunyuan13b", "hunyuan-video-1.5-local", "hunyuan-video-13b-local"}:
+            return "auto"
+        return v
     duration_sec: float = 5.0
     start_asset_id: Optional[str] = None
     middle_asset_id: Optional[str] = None
@@ -183,6 +198,9 @@ class SceneOut(BaseModel):
     fps_mode: str = "auto"
     fps: int = 0
     output_path: Optional[str] = None
+    # DEPRECATED for Timeline Preview Visual/dialogue authority (Re-Take-only).
+    # Composed Visual = director timeline video_clips / replace_visual_range (rtclip_*).
+    # Field retained for MAGI/legacy provenance; FE must not prefer it over video_clips.
     lipsync_output_path: Optional[str] = None
 
     class Config:
@@ -350,9 +368,46 @@ class JobOut(BaseModel):
     output_path: Optional[str]
     created_at: datetime
     updated_at: datetime
+    phase: str = ""
+    phase_label: str = ""
+    progress_grounded: bool = False
+    last_progress_at: Optional[str] = None
+    last_runtime_event_at: Optional[str] = None
+    elapsed_active_time: Optional[float] = None
+    generation_stalled: bool = False
+    current_node: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode="after")
+    def _hydrate_progress_telemetry(self) -> "JobOut":
+        from .video_runtime.progress_telemetry import (
+            comfy_step_fraction,
+            creator_phase_label,
+            extract_progress_telemetry,
+            infer_creator_phase,
+            is_grounded_progress_message,
+        )
+
+        tel = extract_progress_telemetry(self.history_json)
+        phase = str(tel.get("phase") or infer_creator_phase(message=self.message, stage=self.stage, job_status=self.status) or "")
+        self.phase = phase
+        self.phase_label = str(tel.get("phaseLabel") or creator_phase_label(phase) or "")
+        grounded = bool(tel.get("progressGrounded")) or is_grounded_progress_message(self.message)
+        step = comfy_step_fraction(self.message)
+        if step is not None:
+            grounded = True
+            self.progress = max(0.0, min(1.0, step[0] / step[1]))
+        self.progress_grounded = grounded
+        self.last_progress_at = tel.get("lastProgressAt")
+        self.last_runtime_event_at = tel.get("lastRuntimeEventAt")
+        elapsed = tel.get("elapsedActiveTime")
+        self.elapsed_active_time = float(elapsed) if elapsed is not None else None
+        self.generation_stalled = bool(tel.get("stalled"))
+        node = tel.get("currentNode")
+        self.current_node = str(node) if node else None
+        return self
 
 class VramProfileOut(BaseModel):
     vram_gb: int
@@ -470,7 +525,7 @@ class RenderRequest(BaseModel):
       - shot: queue render_shot (shot-scoped; requires scene_id)
       - timeline: queue render_timeline (reuse existing scene outputs when present, then stitch)
       - batch_timeline: regenerate all scenes then stitch
-      - editor_mix: mux Editor music/sfx/dialogue/ambience onto a primary video
+      - editor_mix: DEPRECATED (P0) — refused; use MAGI /renders (finishing.audio)
         (optional primary_video_path; else latest timeline / editor video / scene output)
     """
 
@@ -598,19 +653,7 @@ class SetupSfxClipOut(BaseModel):
 class SceneSetupOut(BaseModel):
     summary: str = ""
     scene_name: Optional[str] = None
-    engine: Optional[
-        Literal[
-            "minimax-h3",
-            "ltx",
-            "wan",
-            "hunyuan15",
-            "hunyuan13b",
-            "fal_seedance",
-            "fal_kling",
-            "fal_veo",
-            "fal_runway",
-        ]
-    ] = None
+    engine: Optional[EngineName] = None
     duration_sec: Optional[float] = None
     media_mode: Optional[Literal["image", "video"]] = None
     global_prompt: Optional[str] = None

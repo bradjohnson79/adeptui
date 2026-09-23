@@ -353,6 +353,27 @@ DOCUMENTED_UNIFIED_DIVERGENCES: dict[str, tuple[str | None, str, str]] = {
     # CONVERSATION while the deterministic action class is APPROVE/REJECT.
     "case-9": ("APPROVE", "CONVERSATION", "approval lane handled outside execution dispatch"),
     "case-10": ("REJECT", "CONVERSATION", "rejection lane handled outside execution dispatch"),
+    # Intelligence mission 2026-09-19 (RC5/RC6): "Okay, prepare it." is a new
+    # INSTRUCTION riding on an affirmation — the deterministic classifier
+    # correctly declines the APPROVE hijack (returns None), and the contextual
+    # follow-up gate elevates the instruction to EXECUTION + CURATED_TOOLS so
+    # the LLM resolves the referent and selects the existing tool.
+    "case-20-intel-okay-prepare-it-not-approve": (
+        None,
+        "EXECUTION",
+        "contextual follow-up gate elevates an instruction-over-affirmation turn to LLM-curated execution (Intelligence mission RC5/RC6)",
+    ),
+}
+
+# Intelligence mission 2026-09-19: documented foundation-vs-unified
+# divergences. The contextual follow-up gate intentionally elevates short
+# referential imperatives to EXECUTION + CURATED_TOOLS even when the keyword
+# foundation classifier returned UNKNOWN — the LLM (not a regex) resolves the
+# referent (Phase 2 class C).
+DOCUMENTED_FOUNDATION_DIVERGENCES: dict[str, str] = {
+    "case-23-intel-timed-prompt-placement": (
+        "deterministic timeline-edit lane owns timed-prompt PLACEMENT; the keyword foundation classifier is inert (Intelligence mission Phase 5)"
+    ),
 }
 
 
@@ -376,7 +397,7 @@ def test_unified_agrees_with_deterministic_on_execution_except_documented() -> N
 
 
 def test_foundation_agrees_with_unified_on_execution_over_corpus() -> None:
-    divergences: list[str] = []
+    divergences: dict[str, str] = {}
     for case in _load_corpus():
         det = classify_deterministic(case["message"], **_classify_kwargs(case))
         foundation = analyze_intent(case["message"])
@@ -384,10 +405,12 @@ def test_foundation_agrees_with_unified_on_execution_over_corpus() -> None:
         f_exec = f_value in _EXECUTION_FOUNDATION_INTENTS
         unified = classify_intent(case["message"], {}, route_decision=det, foundation_intent=foundation)
         if f_exec != unified.is_execution:
-            divergences.append(f"{case['id']}: foundation={f_value} unified={unified.intent.value}")
-    assert divergences == [], (
+            divergences[case["id"]] = f"foundation={f_value} unified={unified.intent.value}"
+    expected = set(DOCUMENTED_FOUNDATION_DIVERGENCES)
+    assert set(divergences) == expected, (
         "Foundation classifier and unified classifier diverged on EXECUTION "
-        f"classification over the routing corpus: {divergences}"
+        f"classification over the routing corpus beyond the documented set: {divergences}. "
+        f"Documented exceptions: {DOCUMENTED_FOUNDATION_DIVERGENCES}"
     )
 
 

@@ -1,11 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
+import { StoryRichBody } from "./StoryRichBody";
+import { AdeptSelect } from "../ui/AdeptSelect";
+import {
+  emitStoryCanonicalChanged,
+  subscribeStoryCanonicalChanged,
+} from "./canonicalStory";
 import {
   loadPublishedSnapshots,
   persistPublishedSnapshots,
   type PublishedStorySnapshot,
 } from "./storyPublishMarker";
 import "./story-editor.css";
+
+const STORY_ENTRY_TYPE_OPTIONS = [
+  { value: "project_story", label: "Project Story" },
+  { value: "episode", label: "Episode" },
+  { value: "chapter", label: "Chapter" },
+  { value: "segment", label: "Segment" },
+  { value: "other", label: "Other" },
+];
 
 interface StoryEntry {
   id: string;
@@ -75,6 +89,22 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
     return () => { cancelled = true; };
   }, [projectId]);
 
+  useEffect(
+    () =>
+      subscribeStoryCanonicalChanged((detail) => {
+        if (detail.projectId !== projectId) return;
+        if (detail.source === "express") return;
+        setEntries((prev) =>
+          prev.map((e) =>
+            e.id === detail.entryId
+              ? { ...e, title: detail.title, longSummary: detail.longSummary }
+              : e,
+          ),
+        );
+      }),
+    [projectId],
+  );
+
   const selected = entries.find(e => e.id === selectedId);
 
   // Debounced autosave for a field update
@@ -83,8 +113,15 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
     setSaveState("saving");
     saveTimerRef.current = window.setTimeout(async () => {
       try {
-        await api.storyEntriesUpdate(projectId, entryId, { [field]: value });
+        const saved = await api.storyEntriesUpdate(projectId, entryId, { [field]: value });
         setSaveState("saved");
+        emitStoryCanonicalChanged({
+          projectId,
+          entryId,
+          title: String(saved?.title || ""),
+          longSummary: String(saved?.longSummary || ""),
+          source: "express",
+        });
         setTimeout(() => setSaveState("idle"), 2000);
       } catch {
         setSaveState("error");
@@ -252,17 +289,13 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
           {selected.entryType && (
             <div className="story-entry__field">
               <label>Type</label>
-              <select
+              <AdeptSelect
                 value={selected.entryType}
                 onChange={e => updateField(selected.id, "entryType", e.target.value)}
                 data-testid="story-entry-type"
-              >
-                <option value="project_story">Project Story</option>
-                <option value="episode">Episode</option>
-                <option value="chapter">Chapter</option>
-                <option value="segment">Segment</option>
-                <option value="other">Other</option>
-              </select>
+                options={STORY_ENTRY_TYPE_OPTIONS}
+                placeholder=""
+              />
             </div>
           )}
 
@@ -289,13 +322,13 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
           </div>
 
           <div className="story-entry__field">
-            <label>Long Summary</label>
-            <textarea
-              value={selected.longSummary}
-              onChange={e => updateField(selected.id, "longSummary", e.target.value)}
-              placeholder="A detailed story treatment — full narrative, character arcs, key scenes, and themes."
-              rows={12}
-              data-testid="story-entry-long-summary"
+            <label>Story document</label>
+            <StoryRichBody
+              html={selected.longSummary}
+              compact
+              testId="story-entry-long-summary"
+              placeholder="A detailed story treatment — narrative, character arcs, and themes. Same document as Script Writer Story."
+              onChange={(html) => updateField(selected.id, "longSummary", html)}
             />
           </div>
 

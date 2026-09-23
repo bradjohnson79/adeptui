@@ -182,11 +182,9 @@ class ToolProposalRequest(BaseModel):
 # --------------------------------------------------------------------------
 
 _ENGINE_CHOICES = (
-    "ltx",
-    "wan",
-    "hunyuan15",
-    "hunyuan13b",
     "auto",
+    "minimax-h3",
+    "ltx-2.5",
     "fal_seedance",
     "fal_kling",
     "fal_veo",
@@ -623,6 +621,14 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         parameters=(ToolParameter("characterId", "string", required=True, max_length=36),),
     ),
     ToolDefinition(
+        tool_id="character_creator.get_angles",
+        kind="read",
+        title="Character Creator: get angles",
+        description="Read this character's Side, 3/4, and Back slots, including source (uploaded or generated) and approval.",
+        capability="project",
+        parameters=(ToolParameter("characterId", "string", required=True, max_length=36),),
+    ),
+    ToolDefinition(
         tool_id="character_creator.get_visual_sheet_status",
         kind="read",
         title="Character Creator: visual sheet status",
@@ -634,9 +640,12 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         tool_id="character_creator.get_voice_status",
         kind="read",
         title="Character Creator: voice status",
-        description="Grounded Voice Creator status (providers, methods, approval) — no invented voice traits.",
+        description="Read the character's active approved default VoiceProfile. Answer 'what voice does X have?' from that profile only. If none exists, say they do not have an approved default voice yet and offer Voice Creator. Do not invent a voice or require Voice Performance / Environment / Takes first.",
         capability="project",
-        parameters=(ToolParameter("characterId", "string", required=True, max_length=36),),
+        parameters=(
+            ToolParameter("characterId", "string", required=False, max_length=36),
+            ToolParameter("characterName", "string", required=False, max_length=80),
+        ),
     ),
     ToolDefinition(
         tool_id="character_creator.get_voice_profile",
@@ -692,10 +701,14 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         tool_id="character_creator.open_voice_creator",
         kind="read",
-        title="Character Creator: open Voice Creator",
-        description="UI handoff hint to open Voice Creator on Character Profile.",
+        title="Voice Creator",
+        description="Open Co-Director Voice Creator (Voice Studio Express / Voice Identity) so the creator can create, clone, or assign the character's default voice without leaving Co-Director. Use for 'give X a voice', 'create a new voice', or 'clone this recording'. Do not send the creator to later Voice Studio stages first. Optional method: create, clone, existing.",
         capability="project",
-        parameters=(ToolParameter("characterId", "string", required=True, max_length=36),),
+        parameters=(
+            ToolParameter("characterId", "string", required=False, max_length=36),
+            ToolParameter("characterName", "string", required=False, max_length=80),
+            ToolParameter("method", "string", required=False, max_length=16),
+        ),
     ),
     # ---- M5.2 Phase 4 Voice Studio / Environment (read) ----
     ToolDefinition(
@@ -1255,6 +1268,15 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         ),
         result_char_budget=20000,
     ),
+    ToolDefinition(
+        tool_id="spatial.get_spin_camera",
+        kind="read",
+        title="Spatial: get spin camera",
+        description="Read the dedicated Spin Camera placement and center validation for a Spatial Map.",
+        capability="project",
+        parameters=(ToolParameter("documentId", "string", required=True, max_length=36),),
+        result_char_budget=8000,
+    ),
     # ---- M42 Phase 4.5 Audio Studio (read) ----
     ToolDefinition(
         tool_id="audio.status",
@@ -1349,6 +1371,10 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         title="Audio Studio: open studio",
         description="UI handoff to the Audio Studio workspace for the current project.",
         capability="project",
+        parameters=(
+            ToolParameter("tab", "string", required=False, max_length=32),
+            ToolParameter("kind", "string", required=False, max_length=32),
+        ),
     ),
     ToolDefinition(
         tool_id="audio.get_batch",
@@ -1661,6 +1687,33 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         description="Navigate the Co-Director to the Script Writer workspace for the current project.",
         capability="project",
     ),
+    ToolDefinition(
+        tool_id="workspace.open_scene_creator",
+        kind="read",
+        title="Workspace: open Environment Creator Express",
+        description=(
+            "Open Environment Creator Express (Co-Director contentTab scene_creator) for create-environment / "
+            "mess hall / ERS intents. Do NOT open Spatial Map (shelved in Adept UI v1.1). "
+            "Do NOT open Scene Creator Standard. Environment Creator plans ERS identity; it does not claim Spatial Map geometry."
+        ),
+        capability="project",
+        parameters=(
+            ToolParameter("mode", "string", required=False, max_length=32),
+            ToolParameter("movementSegmentId", "string", required=False, max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="workspace.open_image_generator",
+        kind="read",
+        title="Workspace: open Image Generator",
+        description=(
+            "Open the Cinematic Image Generator (FE workspaces.imagegen / contentTab imagegen) "
+            "for production stills. Not Environment Creator Express. Not Scene Creator Standard. Not Spatial Map."
+        ),
+        capability="project",
+        parameters=(),
+    ),
+
     # M42 W47 — Docker Runtime Extensions (Law 27)
     ToolDefinition(
         tool_id="runtime.list",
@@ -2476,6 +2529,18 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         parameters=(ToolParameter("sceneId", "string", required=True, max_length=36),),
     ),
     ToolDefinition(
+        tool_id="timeline.inspect_scene_takes",
+        kind="read",
+        title="Inspect scene takes",
+        description=(
+            "List whole-scene Timeline Takes (Take A, Take B, …) with current/published/status "
+            "from SceneTimelineMaster.sceneTakes. Use for 'which take is current/published' "
+            "and 'show me Take B'. Not a separate take database."
+        ),
+        capability="project",
+        parameters=(ToolParameter("sceneId", "string", required=True, max_length=36),),
+    ),
+    ToolDefinition(
         tool_id="timeline.preflight",
         kind="read",
         title="Preflight Director Timeline",
@@ -2520,6 +2585,8 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("playheadSec", "number"),
             ToolParameter("findingCode", "string", max_length=80),
             ToolParameter("jobId", "string", max_length=64),
+            ToolParameter("takeId", "string", max_length=64, description="Whole-scene Take id to preview."),
+            ToolParameter("takeLabel", "string", max_length=16, description="Take letter such as B or Z1."),
         ),
     ),
     ToolDefinition(
@@ -2815,6 +2882,21 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
 
 MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
+        tool_id="character.approve_candidate",
+        kind="mutating",
+        title="Approve character look",
+        description="Approve a generated picture as this character's locked look. Uses Character Creator approval, not a second pipeline.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("characterId", "string", required=True, max_length=64),
+            ToolParameter("assetId", "string", required=True, max_length=64),
+            ToolParameter("referenceRole", "string", max_length=64),
+            ToolParameter("notes", "string", max_length=4000),
+            ToolParameter("ownerConfirmed", "boolean"),
+        ),
+    ),
+    ToolDefinition(
         tool_id="create_draft_character_profile",
         kind="mutating",
         title="Create draft Character Profile",
@@ -3038,6 +3120,160 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         capability="project",
         pinned_resources=("project",),
         parameters=(ToolParameter("characterId", "string", required=True, max_length=36),),
+    ),
+    ToolDefinition(
+        tool_id="character_creator.delete_profile",
+        kind="mutating",
+        title="Character Creator: delete profile",
+        description="Delete the canonical Character Profile. Library images and voice assets are kept. Global profiles require cross-project confirmation when referenced elsewhere.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("characterId", "string", required=True, max_length=36),
+            ToolParameter("confirmCrossProject", "boolean", required=False),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="character_creator.adopt_angle",
+        kind="mutating",
+        title="Character Creator: use picture as angle",
+        description="Bind an uploaded or Library image as this character's Side, 3/4, or Back candidate. Does not approve and does not create a new character.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("characterId", "string", required=True, max_length=36),
+            ToolParameter("angle", "string", required=True, choices=("side", "three_quarter", "back")),
+            ToolParameter("assetId", "string", required=True, max_length=36),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="character_creator.approve_angle",
+        kind="mutating",
+        title="Character Creator: approve angle",
+        description="Approve the current Side, 3/4, or Back candidate. Works the same for uploaded and generated pictures.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("characterId", "string", required=True, max_length=36),
+            ToolParameter("angle", "string", required=True, choices=("side", "three_quarter", "back")),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="character_creator.generate_angles",
+        kind="mutating",
+        title="Character Creator: generate missing angles",
+        description="Generate missing Side / 3/4 / Back from approved Front using Qwen Image Edit. Skips uploaded and already approved angles. Optional angle regenerates one slot.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("characterId", "string", required=True, max_length=36),
+            ToolParameter("angle", "string", required=False, choices=("side", "three_quarter", "back")),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="prop_creator.get_views",
+        kind="read",
+        title="Prop Creator: get views",
+        description="Read this Prop's approved and candidate views (primary/identity and Advanced front/back/left/right/top/bottom/hero), including uploaded vs generated source.",
+        capability="project",
+        parameters=(
+            ToolParameter("propId", "string", required=False, max_length=36),
+            ToolParameter("propName", "string", required=False, max_length=120),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="prop_creator.adopt_view",
+        kind="mutating",
+        title="Prop Creator: use picture as view",
+        description="Bind an uploaded or Library image as this Prop's primary, front, back, left, right, top, bottom, or hero candidate. Does not approve and does not create a new Prop.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("propId", "string", required=False, max_length=36),
+            ToolParameter("propName", "string", required=False, max_length=120),
+            ToolParameter(
+                "view",
+                "string",
+                required=True,
+                choices=("primary", "front", "back", "left", "right", "top", "bottom", "hero"),
+            ),
+            ToolParameter("assetId", "string", required=True, max_length=36),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="prop_creator.approve_view",
+        kind="mutating",
+        title="Prop Creator: approve view",
+        description="Approve the current Prop view candidate. Works the same for uploaded and generated pictures.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("propId", "string", required=False, max_length=36),
+            ToolParameter("propName", "string", required=False, max_length=120),
+            ToolParameter(
+                "view",
+                "string",
+                required=True,
+                choices=("primary", "front", "back", "left", "right", "top", "bottom", "hero"),
+            ),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="prop_creator.generate_view",
+        kind="mutating",
+        title="Prop Creator: generate view",
+        description="Generate a missing Prop view on the same Prop entity. Optional view selects primary or one Advanced angle.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("propId", "string", required=False, max_length=36),
+            ToolParameter("propName", "string", required=False, max_length=120),
+            ToolParameter(
+                "view",
+                "string",
+                required=False,
+                choices=("primary", "front", "back", "left", "right", "top", "bottom", "hero"),
+            ),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="prop_creator.create_profile",
+        kind="mutating",
+        title="Prop Creator: create profile",
+        description="Create a Prop profile only when the canonical name is unique. If the name already exists, reuse that Prop — never create a duplicate or auto-suffix.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("name", "string", required=True, max_length=200),
+            ToolParameter("propName", "string", required=False, max_length=200),
+            ToolParameter("description", "string", required=False, max_length=4000),
+            ToolParameter("isGlobal", "boolean", required=False),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="prop_creator.generate_reference_sheet",
+        kind="mutating",
+        title="Prop Creator: create reference sheet",
+        description="Create the Prop Reference Sheet from approved Primary plus any approved optional views. Missing additional views are not blockers.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("propId", "string", required=False, max_length=36),
+            ToolParameter("propName", "string", required=False, max_length=120),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="prop_creator.delete_profile",
+        kind="mutating",
+        title="Prop Creator: delete profile",
+        description="Delete the canonical Prop Profile. Library images and the Prop Reference Sheet are kept. Global props require cross-project confirmation when referenced elsewhere.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("propId", "string", required=False, max_length=36),
+            ToolParameter("propName", "string", required=False, max_length=120),
+            ToolParameter("confirmCrossProject", "boolean", required=False),
+        ),
     ),
     # ---- M42 W44 Voice Performance (mutating — approval gated) ----
     ToolDefinition(
@@ -3918,6 +4154,63 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         result_char_budget=24000,
     ),
     ToolDefinition(
+        tool_id="spatial.place_spin_camera",
+        kind="mutating",
+        title="Spatial: place spin camera",
+        description="Place or update the dedicated Spin Camera origin on a Spatial Map.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("documentId", "string", required=True, max_length=36),
+            ToolParameter("x", "number", required=True),
+            ToolParameter("z", "number", required=True),
+            ToolParameter("sceneId", "string", required=False, max_length=36),
+        ),
+        result_char_budget=12000,
+    ),
+    ToolDefinition(
+        tool_id="spin.generate_package",
+        kind="mutating",
+        title="Spin: generate package",
+        description="Create a Spin Camera directional package (Center/N/E/S/W) using a hosted provider.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("documentId", "string", required=True, max_length=36),
+            ToolParameter("provider", "string", required=True, max_length=64),
+            ToolParameter("confirmPaidCloud", "boolean", required=True),
+        ),
+        result_char_budget=24000,
+    ),
+    ToolDefinition(
+        tool_id="spin.regenerate_direction",
+        kind="mutating",
+        title="Spin: regenerate direction",
+        description="Regenerate a single Spin Camera direction (center/north/east/south/west).",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("documentId", "string", required=True, max_length=36),
+            ToolParameter("packageId", "string", required=True, max_length=36),
+            ToolParameter("direction", "string", required=True, max_length=10),
+            ToolParameter("confirmPaidCloud", "boolean", required=True),
+        ),
+        result_char_budget=24000,
+    ),
+    ToolDefinition(
+        tool_id="spin.build_ers",
+        kind="mutating",
+        title="Spin: build ERS",
+        description="Assemble an Environment Reference Sheet from a completed Spin Camera package.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("documentId", "string", required=True, max_length=36),
+            ToolParameter("packageId", "string", required=True, max_length=36),
+        ),
+        result_char_budget=24000,
+    ),
+    ToolDefinition(
         tool_id="create_scene",
         kind="mutating",
         title="Create a scene",
@@ -3953,6 +4246,51 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         parameters=(
             ToolParameter("sceneId", "string", required=True, max_length=64),
             ToolParameter("prompt", "string", required=True, max_length=4000),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="list_scene_prompt_templates",
+        kind="read",
+        title="List Scene Prompt Templates",
+        description=(
+            "List project-scoped Scene Prompt Template library entries (named Timed Prompt text snapshots). "
+            "Independent of set_scene_prompt. Does not mutate the live Timed Prompt."
+        ),
+        capability="project",
+        parameters=(
+            ToolParameter("includeText", "boolean", description="If true, include exact promptText in each row."),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="save_scene_prompt_template",
+        kind="mutating",
+        title="Save Scene Prompt Template",
+        description=(
+            "Create a named Scene Prompt Template from exact Timed Prompt text (server library). "
+            "Does not change the live Timed Prompt working copy. Not set_scene_prompt."
+        ),
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("name", "string", required=True, max_length=200),
+            ToolParameter("promptText", "string", required=True, max_length=100000),
+            ToolParameter("generatorFamily", "string", max_length=64, description="Informational only. Alias: generatorFamilyUsed."),
+            ToolParameter("generatorFamilyUsed", "string", max_length=64, description="Alias for generatorFamily."),
+            ToolParameter("generatorId", "string", max_length=128, description="Informational only."),
+            ToolParameter("sourceSceneId", "string", max_length=36, description="Optional provenance scene id; not an FK; scene delete does not cascade."),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="load_scene_prompt_template",
+        kind="read",
+        title="Load Scene Prompt Template",
+        description=(
+            "Return a Scene Prompt Template's exact promptText plus an applyProposal. "
+            "NEVER silently applies into the scene / Timed Prompt. Operator must apply explicitly."
+        ),
+        capability="project",
+        parameters=(
+            ToolParameter("templateId", "string", required=True, max_length=64),
         ),
     ),
     ToolDefinition(
@@ -4213,8 +4551,9 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         tool_id="audio.generate_music",
         kind="mutating",
         title="Audio Studio: generate music",
-        description="Generate a music candidate batch in Audio Studio after approval (async, GPU-first, no silent provider/CPU switch).",
+        description="Generate a music candidate batch in Audio Studio (async, GPU-first, no silent provider/CPU switch). When a ready Media Intelligence packet exists for the scene (from analyze.video / Qwen 2.5 Omni), the prompt is enriched from that watch unless useMediaIntelligence=false.",
         capability="project",
+        requires_approval=False,
         pinned_resources=("project", "scene"),
         parameters=(
             ToolParameter("prompt", "string", required=True, max_length=2000),
@@ -4226,14 +4565,17 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("preferredProvider", "string", max_length=64),
             ToolParameter("allowProviderSwitch", "boolean"),
             ToolParameter("allowCpuFallback", "boolean"),
+            ToolParameter("useMediaIntelligence", "boolean"),
+            ToolParameter("mediaIntelligencePacketId", "string", max_length=64),
         ),
     ),
     ToolDefinition(
         tool_id="audio.generate_sfx",
         kind="mutating",
         title="Audio Studio: generate SFX",
-        description="Generate an approval-gated SFX candidate batch in Audio Studio (async, GPU-first).",
+        description="Generate an SFX candidate batch in Audio Studio (async, GPU-first). When a ready Media Intelligence packet exists for the scene (from analyze.video / Qwen 2.5 Omni), the prompt is enriched from cue/contact opportunities unless useMediaIntelligence=false.",
         capability="project",
+        requires_approval=False,
         pinned_resources=("project", "scene"),
         parameters=(
             ToolParameter("prompt", "string", required=True, max_length=2000),
@@ -4244,14 +4586,17 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("preferredProvider", "string", max_length=64),
             ToolParameter("allowProviderSwitch", "boolean"),
             ToolParameter("allowCpuFallback", "boolean"),
+            ToolParameter("useMediaIntelligence", "boolean"),
+            ToolParameter("mediaIntelligencePacketId", "string", max_length=64),
         ),
     ),
     ToolDefinition(
         tool_id="audio.generate_ambience",
         kind="mutating",
         title="Audio Studio: generate ambience",
-        description="Generate an approval-gated ambience bed batch in Audio Studio, separate from Foley (async, GPU-first).",
+        description="Generate an ambience bed batch in Audio Studio, separate from Foley (async, GPU-first).",
         capability="project",
+        requires_approval=False,
         pinned_resources=("project", "scene"),
         parameters=(
             ToolParameter("prompt", "string", required=True, max_length=2000),
@@ -4398,32 +4743,6 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("sourceAssetId", "string", required=True, max_length=64),
             ToolParameter("prompt", "string", max_length=2000),
             ToolParameter("durationSec", "number", minimum=1, maximum=12),
-        ),
-    ),
-    ToolDefinition(
-        tool_id="propose_brand_generate",
-        kind="mutating",
-        title="Propose Brand Studio generate",
-        description="Propose promotional generate with locked logos/product/brand wording.",
-        capability="comfyui",
-        pinned_resources=("project",),
-        parameters=(
-            ToolParameter("campaignName", "string", max_length=120),
-            ToolParameter("prompt", "string", required=True, max_length=2000),
-            ToolParameter("requiredWording", "string", max_length=500),
-            ToolParameter("campaignType", "string", max_length=64),
-            ToolParameter("visualDirection", "string", max_length=64),
-            ToolParameter("composition", "string", max_length=120),
-            ToolParameter("background", "string", max_length=120),
-            ToolParameter("format", "string", max_length=64),
-            ToolParameter("logoAssetId", "string", max_length=64),
-            ToolParameter("productAssetId", "string", max_length=64),
-            ToolParameter("brandColors", "string", max_length=256),
-            ToolParameter("typographyTemplate", "string", max_length=120),
-            ToolParameter("productName", "string", max_length=120),
-            ToolParameter("styleNotes", "string", max_length=1000),
-            ToolParameter("bibleSummary", "string", max_length=1000),
-            ToolParameter("resultLane", "string", max_length=32),
         ),
     ),
     ToolDefinition(
@@ -4632,7 +4951,7 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("prompt", "string", required=True, max_length=4000),
             ToolParameter("sceneId", "string", max_length=36),
             ToolParameter("startAssetId", "string", required=True, max_length=64),
-            ToolParameter("engine", "string", choices=("ltx", "wan")),
+            ToolParameter("engine", "string", choices=("minimax-h3", "ltx-2.5")),
             ToolParameter("durationSec", "number", minimum=0.5, maximum=30),
             ToolParameter("aspectRatio", "string", max_length=16),
             ToolParameter("qualityProfile", "string", choices=("draft", "standard", "high")),
@@ -4650,7 +4969,7 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("shotId", "string", max_length=64),
             ToolParameter("prompt", "string", max_length=4000),
             ToolParameter("startAssetId", "string", max_length=64),
-            ToolParameter("engine", "string", choices=("ltx", "wan")),
+            ToolParameter("engine", "string", choices=("minimax-h3", "ltx-2.5")),
         ),
     ),
     ToolDefinition(
@@ -4665,14 +4984,14 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("prompt", "string", max_length=4000),
             ToolParameter("startAssetId", "string", max_length=64),
             ToolParameter("endAssetId", "string", max_length=64),
-            ToolParameter("engine", "string", choices=("ltx", "wan")),
+            ToolParameter("engine", "string", choices=("minimax-h3", "ltx-2.5")),
         ),
     ),
     ToolDefinition(
         tool_id="propose_three_frame_generate",
         kind="mutating",
         title="Generate three-frame video",
-        description="WAN three-frame guided video via certified dual-segment + stitch path.",
+        description="Retired WAN three-frame path. Not a v1.1 creator destination — use Timeline MiniMax H3 or LTX 2.5.",
         capability="comfyui",
         pinned_resources=("scene",),
         parameters=(
@@ -4976,12 +5295,12 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         tool_id="timeline.propose_add_prompt_segment",
         kind="mutating",
         title="Add timed instruction",
-        description="Add a Timed Instruction (prompt segment) after approval. Same mutation surface as Timeline toolbar Prompt +.",
+        description="Add a Timed Instruction (prompt segment) after approval. Same mutation surface as Timeline toolbar Prompt +. Requires non-empty text (Inspector Prompt).",
         capability="project",
         pinned_resources=("scene",),
         parameters=(
             ToolParameter("sceneId", "string", required=True, max_length=36),
-            ToolParameter("text", "string", max_length=8000),
+            ToolParameter("text", "string", required=True, max_length=8000),
             ToolParameter("start", "number", minimum=0),
             ToolParameter("length", "number", minimum=0.1, maximum=20),
             ToolParameter("weight", "number", minimum=0, maximum=2),
@@ -5017,8 +5336,8 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         tool_id="timeline.propose_add_camera",
         kind="mutating",
-        title="Add timeline camera clip",
-        description="Add a camera direction clip after approval. Validates camera catalog motion and rig ids when provided.",
+        title="Add camera direction (Timed Prompt)",
+        description="DISABLED (Phase 0). Camera track removed. Write camera direction in Timed Prompt — do not add a Camera clip. Tool refuses apply.",
         capability="project",
         pinned_resources=("scene",),
         parameters=(
@@ -5048,8 +5367,8 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         tool_id="timeline.propose_update_camera",
         kind="mutating",
-        title="Update timeline camera clip",
-        description="Update timing or motion details for an existing camera clip after approval.",
+        title="Update camera direction (Timed Prompt)",
+        description="DISABLED (Phase 0). Camera track removed. Edit camera direction in Timed Prompt — do not update Camera clips. Tool refuses apply.",
         capability="project",
         pinned_resources=("scene",),
         parameters=(
@@ -5330,12 +5649,62 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         tool_id="timeline.propose_retake",
         kind="mutating",
         title="Retake timeline batch",
-        description="Directed retake — new generation job and immutable snapshot; prior snapshots preserved.",
+        description="Directed retake or bounded video Re-Take — new generation job and immutable snapshot; prior snapshots preserved.",
         capability="project",
         pinned_resources=("scene",),
         parameters=(
             ToolParameter("sceneId", "string", required=True, max_length=36),
             ToolParameter("batchBlockId", "string", required=True, max_length=64),
+            ToolParameter("start", "number", minimum=0, description="Scene-time Mark In for a bounded video Re-Take."),
+            ToolParameter("length", "number", minimum=0.15, description="Marked duration in seconds."),
+            ToolParameter("prompt", "string", max_length=2000, description="What should change in the marked range."),
+            ToolParameter("maskPngBase64", "string", description="Optional painted mask for the current Preview frame."),
+            ToolParameter("referenceFrameTime", "number", minimum=0),
+            ToolParameter("frameAssetId", "string", max_length=64),
+            ToolParameter("removeBackground", "boolean"),
+            ToolParameter("timelineRevision", "integer", minimum=1),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="timeline.propose_new_scene_take",
+        kind="mutating",
+        title="Create a new whole-scene take",
+        description=(
+            "Render a complete new Take of the CURRENT scene (all batches, sequential). "
+            "This is New Take, not Re-Take. Re-Take repairs only a marked part of the current Take."
+        ),
+        capability="project",
+        pinned_resources=("scene",),
+        parameters=(
+            ToolParameter("sceneId", "string", required=True, max_length=36),
+            ToolParameter("timelineRevision", "integer", minimum=1),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="timeline.propose_make_scene_take_current",
+        kind="mutating",
+        title="Make a scene take current",
+        description="Set the Timeline current whole-scene Take (Preview Monitor and Publish authority). Does not delete other Takes.",
+        capability="project",
+        pinned_resources=("scene",),
+        parameters=(
+            ToolParameter("sceneId", "string", required=True, max_length=36),
+            ToolParameter("takeId", "string", max_length=64),
+            ToolParameter("takeLabel", "string", max_length=16, description="Take letter such as B or Z1."),
+            ToolParameter("timelineRevision", "integer", minimum=1),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="timeline.propose_preview_scene_take",
+        kind="mutating",
+        title="Preview a scene take",
+        description="Load a whole-scene Take into the Timeline Preview Monitor without making it current.",
+        capability="project",
+        pinned_resources=("scene",),
+        parameters=(
+            ToolParameter("sceneId", "string", required=True, max_length=36),
+            ToolParameter("takeId", "string", max_length=64),
+            ToolParameter("takeLabel", "string", max_length=16),
             ToolParameter("timelineRevision", "integer", minimum=1),
         ),
     ),
@@ -5955,6 +6324,22 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         ),
     ),
     ToolDefinition(
+        tool_id="omni.deposit_video_to_timeline",
+        kind="mutating",
+        title="Omni: deposit completed video to Timeline Visual",
+        description="Deposit a completed 1F/3F Library VIDEO onto Timeline Visual (mediaType=video). Reuses Wave 2B export. No regenerate.",
+        capability="project",
+        pinned_resources=("project", "scene"),
+        parameters=(
+            ToolParameter("assetId", "string", max_length=64),
+            ToolParameter("sceneId", "string", max_length=64),
+            ToolParameter("label", "string", max_length=200),
+            ToolParameter("sourceSurface", "string", max_length=64),
+            ToolParameter("attachmentAssetIds", "array"),
+            ToolParameter("prompt", "string", max_length=4000),
+        ),
+    ),
+    ToolDefinition(
         tool_id="ers.create_sheet",
         kind="mutating",
         title="ERS: create sheet",
@@ -6052,6 +6437,18 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         ),
     ),
     ToolDefinition(
+        tool_id="ers.delete_sheet",
+        kind="mutating",
+        title="ERS: delete sheet",
+        description="Delete the canonical Environment Reference Sheet. Library composite and reference images are kept. Global sheets require cross-project confirmation when referenced elsewhere.",
+        capability="project",
+        pinned_resources=("project", "plan"),
+        parameters=(
+            ToolParameter("sheetId", "string", required=True, max_length=64),
+            ToolParameter("confirmCrossProject", "boolean", required=False),
+        ),
+    ),
+    ToolDefinition(
         tool_id="ers.export_sheet",
         kind="mutating",
         title="ERS: export sheet",
@@ -6105,6 +6502,7 @@ READ_TOOLS = READ_TOOLS + (
         title="PoseCraft: get status",
         description="Read the current PoseCraft scene for this project: figures, camera, revision, and whether the creator has modified it.",
         capability="project",
+        result_char_budget=48000,
     ),
     ToolDefinition(
         tool_id="posecraft.get_scene",
@@ -6112,6 +6510,7 @@ READ_TOOLS = READ_TOOLS + (
         title="PoseCraft: get scene",
         description="Load the live PoseCraft scene document for this project (figures, camera, primitives, versions).",
         capability="project",
+        result_char_budget=48000,
     ),
     ToolDefinition(
         tool_id="posecraft.export_reference",
@@ -6119,6 +6518,7 @@ READ_TOOLS = READ_TOOLS + (
         title="PoseCraft: export reference",
         description="Build an honesty-labelled PoseCraft visual staging reference preview for the Image Pipeline. Pass snapshotId to export a frozen Snapshot composition instead of the live scene.",
         capability="project",
+        result_char_budget=24000,
         parameters=(
             ToolParameter("snapshotId", "string", required=False, max_length=64),
         ),
@@ -6133,6 +6533,7 @@ READ_TOOLS = READ_TOOLS + (
             "Pass snapshotId to inspect a frozen Snapshot composition (PoseCraft Snapshot — Visual Staging Reference)."
         ),
         capability="project",
+        result_char_budget=48000,
         parameters=(
             ToolParameter("snapshotId", "string", required=False, max_length=64),
         ),
@@ -6432,7 +6833,7 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
             ToolParameter("aspect", "string", max_length=12),
             ToolParameter("alpha", "number", minimum=-6.28, maximum=6.28),
             ToolParameter("beta", "number", minimum=0.1, maximum=3.14),
-            ToolParameter("radius", "number", minimum=2.2, maximum=16),
+            ToolParameter("radius", "number", minimum=0.35, maximum=24),
         ),
     ),
     ToolDefinition(
@@ -6478,6 +6879,134 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
             ToolParameter("notes", "string", max_length=4000),
             ToolParameter("snapshotId", "string", required=False, max_length=64),
             ToolParameter("imageAssetId", "string", required=False, max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.add_object",
+        kind="mutating",
+        title="PoseCraft: add object",
+        description="Add a furniture or prop object to the PoseCraft stage. Objects are not figures.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("name", "string", max_length=120),
+            ToolParameter("kind", "string", max_length=40),
+            ToolParameter("x", "number", minimum=-40, maximum=40),
+            ToolParameter("z", "number", minimum=-40, maximum=40),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.move_object",
+        kind="mutating",
+        title="PoseCraft: move object",
+        description="Move, rotate, or scale a PoseCraft object.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("objectId", "string", required=True, max_length=64),
+            ToolParameter("x", "number", minimum=-40, maximum=40),
+            ToolParameter("y", "number", minimum=-10, maximum=10),
+            ToolParameter("z", "number", minimum=-40, maximum=40),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.place_figure",
+        kind="mutating",
+        title="PoseCraft: place figure",
+        description="Place a figure at a stage position.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("figureId", "string", required=True, max_length=64),
+            ToolParameter("x", "number", required=True, minimum=-40, maximum=40),
+            ToolParameter("z", "number", required=True, minimum=-40, maximum=40),
+            ToolParameter("y", "number", minimum=-2, maximum=4),
+            ToolParameter("rotationY", "number", minimum=-180, maximum=180),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.sit_on_object",
+        kind="mutating",
+        title="PoseCraft: sit on object",
+        description="Sit a figure on a selected object with an initial sitting pose. Not physically perfect IK.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("figureId", "string", required=True, max_length=64),
+            ToolParameter("objectId", "string", required=True, max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.look_at",
+        kind="mutating",
+        title="PoseCraft: look at",
+        description="Turn a figure to look at another figure or object.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("figureId", "string", required=True, max_length=64),
+            ToolParameter("targetFigureId", "string", max_length=64),
+            ToolParameter("targetObjectId", "string", max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.focus_figure",
+        kind="mutating",
+        title="PoseCraft: focus figure",
+        description="Move the PoseCraft camera to focus a figure, face, object, or the whole stage.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("figureId", "string", max_length=64),
+            ToolParameter("objectId", "string", max_length=64),
+            ToolParameter("kind", "string", choices=("stage", "figure", "torso", "head", "face", "object")),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.save_shot",
+        kind="mutating",
+        title="PoseCraft: save shot",
+        description="Save the current camera and optional transforms as a named shot.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("name", "string", max_length=200),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.capture_previz",
+        kind="mutating",
+        title="PoseCraft: capture previz",
+        description="Record a PoseCraft previz snapshot using a Library imageAssetId. sessionStorage is not authority.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("imageAssetId", "string", required=True, max_length=64),
+            ToolParameter("name", "string", max_length=200),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.propose_previz_plan",
+        kind="mutating",
+        title="PoseCraft: propose Auto Previz plan",
+        description="Propose a shot plan. Does not build the stage until the creator approves.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("description", "string", max_length=2000),
+            ToolParameter("shotCount", "number", minimum=2, maximum=8),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="posecraft.execute_previz_plan",
+        kind="mutating",
+        title="PoseCraft: execute Auto Previz plan",
+        description="Execute an approved Auto Previz plan using canonical PoseCraft actions only.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("planId", "string", required=True, max_length=80),
+            ToolParameter("approved", "boolean"),
         ),
     ),
 )
@@ -6554,6 +7083,81 @@ READ_TOOLS = READ_TOOLS + (
         capability="project",
     ),
     ToolDefinition(
+        tool_id="magi.inspect_post_context",
+        kind="read",
+        title="MAGI: inspect post-production context",
+        result_char_budget=16000,
+        description=(
+            "Assemble the PostProductionContextPackage from existing MAGI reads "
+            "(sequence, finishing, readiness; optional timeline publish via sceneId; "
+            "optional presets/jobs/receipts). Task-aware via domains. READ assembler only — "
+            "no second MAGI store."
+        ),
+        capability="project",
+        parameters=(
+            ToolParameter(
+                "domains",
+                "array",
+                required=False,
+                description="Task domains: color, sound, music, edit, finish, export, upscale, all.",
+            ),
+            ToolParameter("sceneId", "string", required=False, max_length=64),
+            ToolParameter("includeTimelinePublish", "boolean", required=False),
+            ToolParameter("includePresets", "boolean", required=False),
+            ToolParameter("includeJobs", "boolean", required=False),
+            ToolParameter("includeReceipts", "boolean", required=False),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.inspect_grade",
+        kind="read",
+        title="MAGI: inspect grade + presets",
+        result_char_budget=12000,
+        description=(
+            "Read clip grades from sequence.finishing and the MAGI color preset catalog "
+            "(magi.color_grading). READ-only."
+        ),
+        capability="project",
+        parameters=(
+            ToolParameter("clipId", "string", required=False, max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.inspect_job",
+        kind="read",
+        title="MAGI: inspect job",
+        result_char_budget=8000,
+        description=(
+            "Read MAGI job status (db.Job kind magi_*) for VERIFY. "
+            "Not Production Executive inspect_job."
+        ),
+        capability="project",
+        parameters=(
+            ToolParameter("jobId", "string", required=True, max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.verify_action",
+        kind="read",
+        title="MAGI: verify action",
+        result_char_budget=12000,
+        description=(
+            "Re-run MagiActionReceipt VERIFY checks by re-reading sequence/finishing/job. "
+            "No prose-only success. READ-only."
+        ),
+        capability="project",
+        parameters=(
+            ToolParameter("toolId", "string", required=True, max_length=64),
+            ToolParameter("jobId", "string", required=False, max_length=64),
+            ToolParameter("clipId", "string", required=False, max_length=64),
+            ToolParameter("presetId", "string", required=False, max_length=64),
+            ToolParameter("actionId", "string", required=False, max_length=64),
+            ToolParameter("assetIdsIn", "array", required=False),
+            ToolParameter("assetIdsOut", "array", required=False),
+        ),
+    ),
+
+    ToolDefinition(
         tool_id="project.read_context",
         kind="read",
         title="Read project context",
@@ -6619,7 +7223,7 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
         tool_id="magi.color.apply",
         kind="mutating",
         title="MAGI: apply color look",
-        description="Save a MAGI color look onto finishing state and optionally preview a derived grade. Source media is preserved.",
+        description="Apply MAGI color look (propose→approve→apply→verify MagiActionReceipt). Source media preserved. NOT_SUPPORTED: LUT import, interactive curves, scopes.",
         capability="project",
         pinned_resources=("project",),
         parameters=(
@@ -6629,10 +7233,34 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
         ),
     ),
     ToolDefinition(
+        tool_id="magi.graphics.apply",
+        kind="mutating",
+        title="MAGI: add objects overlay",
+        description="Add a text, lower-third, shape, or image object to MAGI Objects 1 or Objects 2. Titles and lower thirds use Objects 1; persistent logos, watermarks, and bugs use Objects 2.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("kind", "string", required=True, max_length=16, choices=("text", "lower_third", "shape", "image")),
+            ToolParameter("text", "string", required=False, max_length=500),
+            ToolParameter("primary", "string", required=False, max_length=120),
+            ToolParameter("secondary", "string", required=False, max_length=120),
+            ToolParameter("shape", "string", required=False, max_length=32),
+            ToolParameter("assetId", "string", required=False, max_length=64),
+            ToolParameter("startSeconds", "number", required=False),
+            ToolParameter("endSeconds", "number", required=False),
+            ToolParameter("x", "number", required=False),
+            ToolParameter("y", "number", required=False),
+            ToolParameter("width", "number", required=False),
+            ToolParameter("height", "number", required=False),
+            ToolParameter("objectsTrack", "number", required=False, minimum=1, maximum=2),
+            ToolParameter("name", "string", required=False, max_length=120),
+        ),
+    ),
+    ToolDefinition(
         tool_id="magi.upscale",
         kind="mutating",
         title="MAGI: upscale",
-        description="Queue MAGI upscale. GPU uses Real-ESRGAN when Ready; otherwise the request fails honestly.",
+        description="Queue MAGI asset-scoped upscale with MagiActionReceipt VERIFY. Does NOT persist Timeline scenePublish. GPU Real-ESRGAN when Ready; else honest fail.",
         capability="project",
         pinned_resources=("project",),
         parameters=(
@@ -6666,6 +7294,29 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
         parameters=(
             ToolParameter("profile", "string", required=False, max_length=16, choices=("preview", "final")),
             ToolParameter("range", "string", required=False, max_length=16),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.propose_finish",
+        kind="mutating",
+        title="MAGI: propose finish",
+        description=(
+            "Propose/apply MAGI finishing of the Timeline-published scene master "
+            "(color → optional music/SFX → upscale → optional render). "
+            "Never overwrites the published source. "
+            "NOT_SUPPORTED: EQ, 5.1/surround, frame interpolation."
+        ),
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("sceneId", "string", required=False, max_length=64),
+            ToolParameter("assetId", "string", required=False, max_length=64),
+            ToolParameter("intent", "string", required=False, max_length=2000),
+            ToolParameter("presetId", "string", required=False, max_length=64),
+            ToolParameter("upscaleTarget", "string", required=False, max_length=32),
+            ToolParameter("noMusic", "boolean", required=False),
+            ToolParameter("keepOriginalAudio", "boolean", required=False),
+            ToolParameter("finalRender", "boolean", required=False),
         ),
     ),
 )

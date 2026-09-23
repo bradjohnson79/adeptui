@@ -20,6 +20,15 @@ class IntentType(str, Enum):
     REQUEST_EDIT = "REQUEST_EDIT"
     REQUEST_RESEARCH = "REQUEST_RESEARCH"
     REQUEST_REVIEW = "REQUEST_REVIEW"
+    # Intelligence mission 2026-09-19 (Phase 5): the creator asks FOR prompt
+    # text (timed prompt / shot prompt / prompt draft). The LLM authors the
+    # prompt; this is never a generation job and never asset placement.
+    PROMPT_AUTHORING = "PROMPT_AUTHORING"
+    # Final-closure mission 2026-09-19 (Blockers 1+2): exact scene-state
+    # recall/summary requests ("Who is in this scene…", "Summarize the final
+    # scene exactly… don't add anything"). The answer must enumerate every
+    # established active fact and invent nothing.
+    RECALL_SCENE = "RECALL_SCENE"
     CORRECT_ASSISTANT = "CORRECT_ASSISTANT"
     EXPRESS_DISSATISFACTION = "EXPRESS_DISSATISFACTION"
     SEEK_REASSURANCE = "SEEK_REASSURANCE"

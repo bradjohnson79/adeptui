@@ -19,6 +19,9 @@ def production_surfaces() -> list[dict[str, Any]]:
         {"id": "magi_actions", "name": "MAGI Actions", "status": "Certified"},
         {"id": "magi_recipes", "name": "MAGI Recipes", "status": "Certified"},
         {"id": "compare_viewer", "name": "Compare Viewer", "status": "Certified"},
+        {"id": "preview_mix", "name": "MAGI preview mix", "status": "Certified"},
+        {"id": "library_drawer", "name": "Project Library drawer", "status": "Certified"},
+        {"id": "split_view", "name": "Old | New Split View", "status": "Certified"},
         {"id": "version_browser", "name": "Version Browser", "status": "Certified"},
         {"id": "edit_history", "name": "Edit History", "status": "Certified"},
         {"id": "workspace_layout", "name": "Workspace Layout", "status": "Certified"},
@@ -56,7 +59,7 @@ def deferred_surfaces() -> list[dict[str, Any]]:
             "name": "Audio tracks",
             "status": "Deferred",
             "executable": False,
-            "reason": "Audio track mix/edit deferred pending certified audio edit workflows.",
+            "reason": "Preview mix is real. EQ, compression, limiter, and 5.1/surround stay deferred.",
         },
         {
             "id": "ai_timeline_actions",
@@ -98,7 +101,21 @@ def deferred_surfaces() -> list[dict[str, Any]]:
             "name": "Audio Cleanup",
             "status": "Deferred",
             "executable": False,
-            "reason": "Audio cleanup not certified for MAGI production execute.",
+            "reason": "EQ / compression / limiter / de-ess are not MAGI engines.",
+        },
+        {
+            "id": "surround_5_1",
+            "name": "5.1 / spatial surround",
+            "status": "Deferred",
+            "executable": False,
+            "reason": "5.1 and spatial surround are not implemented.",
+        },
+        {
+            "id": "frame_interpolation",
+            "name": "Frame interpolation",
+            "status": "Deferred",
+            "executable": False,
+            "reason": "Frame interpolation and fps conversion are not implemented.",
         },
         {
             "id": "dialogue_cleanup",
@@ -225,4 +242,6 @@ def readiness_payload() -> dict[str, Any]:
         "korri": korri_policy(),
         "honestNonExecutableCount": sum(1 for s in deferred if not s.get("executable", False)),
         "noFakeExecution": True,
+        "previewMix": "real",
+        "notSupported": ["eq", "surround_5_1", "frame_interpolation"],
     }

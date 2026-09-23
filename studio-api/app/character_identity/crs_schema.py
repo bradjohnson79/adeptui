@@ -322,3 +322,49 @@ class GenerationConditioningPacket(BaseModel):
     
     # Provenance
     generated_at: str = ""
+
+
+FOUR_VIEW_REQUIRED_VIEWS: tuple[str, ...] = (
+    "front_full",
+    "side_full",
+    "back_full",
+    "face_closeup",
+)
+LAW_REQUIRED_VIEWS: tuple[str, ...] = FOUR_VIEW_REQUIRED_VIEWS
+DEFAULT_IDENTITY_INVARIANTS: tuple[str, ...] = (
+    "one_person",
+    "same_identity",
+    "no_collage",
+)
+ERS_AND_GENERATOR_PACKET_KEYS: tuple[str, ...] = (
+    "ers_id",
+    "ers_revision",
+    "environment_reference_assets",
+    "generator",
+    "sceneCanvas",
+    "environmentEditSource",
+)
+
+
+class CharacterIdentityPacket(BaseModel):
+    """Provider-neutral character identity packet used before a generator call."""
+
+    task: str = ""
+    characterId: str = ""
+    characterName: str = ""
+    identityAuthorityAssetId: Optional[str] = None
+    requiredViews: list[str] = Field(default_factory=list)
+    detailViews: list[str] = Field(default_factory=list)
+    invariants: list[str] = Field(default_factory=list)
+    outputType: str = ""
+    identityReference: Optional[str] = None
+    supportingIdentityViews: list[str] = Field(default_factory=list)
+    detailReference: Optional[str] = None
+
+
+def dump_identity_packet(packet: CharacterIdentityPacket | dict[str, Any] | None) -> dict[str, Any]:
+    if packet is None:
+        return {}
+    if isinstance(packet, dict):
+        return dict(packet)
+    return packet.model_dump()

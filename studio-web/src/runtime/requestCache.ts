@@ -35,7 +35,23 @@ function cacheKey(method: string, path: string): string {
 function getDefaultTtl(method: string, path: string): number {
   if (method !== "GET") return 0;
   const url = path.split("?")[0];
-  return GET_TTL_MS[url] ?? 0;
+  const exact = GET_TTL_MS[url];
+  if (exact !== undefined) return exact;
+  // Prefix-based matching for paths with variable segments (project IDs, etc.)
+  if (url.startsWith("/api/codirector/conversations/")) {
+    if (url.endsWith("/events")) {
+      return 0; // POST body — never cache
+    }
+    if (url.endsWith("/revision")) {
+      // /conversations/{projectId}/revision — polled every 5s;
+      // cache 30s to deduplicate overlapping interval/visibility/reconnect polls.
+      return 30_000;
+    }
+    // Full conversation GET (no trailing segment after project id) — cache 15s
+    // so reconciliation doesn't fire duplicate requests within the same tick.
+    return 15_000;
+  }
+  return 0;
 }
 
 export function clearCacheEntry(method: string, path: string): void {

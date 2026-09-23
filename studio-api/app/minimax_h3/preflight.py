@@ -6,7 +6,7 @@ from .capability import capability_snapshot
 from .contracts import AdeptMiniMaxH3Request, H3FallbackOffer, H3GenerationPlan, H3PreflightResult
 from .private_access import private_local_enabled
 from .route_a_adapter import RouteARuntimeAdapter
-from .three_frame import validate_three_distinct_asset_roles
+from .three_frame import validate_first_last_optional_middle
 
 
 def _frame_exists(request: AdeptMiniMaxH3Request, role: str) -> bool:
@@ -27,12 +27,9 @@ def _route_a_ready() -> bool:
 
 def _validate_request_inputs(request: AdeptMiniMaxH3Request) -> list[str]:
     blockers: list[str] = []
-    # The Experimental Private Profile uses a fixed 5-frame run; the 4–15s
-    # duration blocker only applies to the non-private (public/hosted) path.
+    # Route A ignores requested seconds and generates 5 frames at 24 fps.
+    # Hosted 4–15s is not certified — do not advertise that range as available.
     private_active = private_local_enabled() and request.deployment == "local_weights"
-    if not private_active:
-        if request.durationSec < 4 or request.durationSec > 15:
-            blockers.append("MiniMax H3 clips need a duration between 4 and 15 seconds.")
     if request.mode == "one-frame" and not _frame_exists(request, "start"):
         blockers.append("Add a starting frame before using one-frame MiniMax H3.")
     if request.mode == "first-last":
@@ -40,9 +37,9 @@ def _validate_request_inputs(request: AdeptMiniMaxH3Request) -> list[str]:
             blockers.append("Add a starting frame before using start-to-end MiniMax H3.")
         if not _frame_exists(request, "end"):
             blockers.append("Add an ending frame before using start-to-end MiniMax H3.")
-    if request.mode == "three-frame":
+    if request.mode in {"three-frame", "first-last"}:
         try:
-            validate_three_distinct_asset_roles(request.referenceAssignments)
+            validate_first_last_optional_middle(request.referenceAssignments)
         except ValueError as exc:
             blockers.append(str(exc))
     if request.mode == "reference" and not request.referenceAssignments:
@@ -62,10 +59,10 @@ def evaluate_request(request: AdeptMiniMaxH3Request) -> H3PreflightResult:
             # Private owner-only Route A: text-to-video and one-frame (I2V) are
             # executable. Other modes stay blocked with an explicit LTX offer
             # (never auto-switched / never silently downgraded I2V → T2V).
-            if request.mode not in {"text-to-video", "one-frame"}:
+            if request.mode not in {"text-to-video", "one-frame", "first-last", "three-frame"}:
                 blockers.append(
-                    "The Experimental Private Profile supports text-to-video and "
-                    "one-frame image-to-video. Three Frame and reference modes are not available yet."
+                    "The Experimental Private Profile supports text-to-video, "
+                    "one-frame image-to-video, and CREATE 3 Frame (first+last with optional middle)."
                 )
                 fallback_offer = _fallback_offer(
                     "Use LTX if you want to keep the same prompt and frames on a supported local path."
@@ -98,20 +95,8 @@ def evaluate_request(request: AdeptMiniMaxH3Request) -> H3PreflightResult:
                     capability=capability,
                 )
             if not _route_a_ready():
-                blockers.append("MiniMax H3 private runtime is not ready right now.")
-                fallback_offer = _fallback_offer(
-                    "Use LTX if you want to keep the same prompt on a supported local path while MiniMax H3 is unavailable."
-                )
-                return H3PreflightResult(
-                    status="blocked",
-                    territory=str(request.territory or "").strip().upper(),
-                    deployment=request.deployment,
-                    durationSec=request.durationSec,
-                    blockers=blockers,
-                    warnings=warnings,
-                    approvalRequired=False,
-                    fallbackOffer=fallback_offer,
-                    capability=capability,
+                warnings.append(
+                    "Video Runtime will start automatically when you Generate."
                 )
             if request.mode == "one-frame":
                 warnings.append(
@@ -121,7 +106,7 @@ def evaluate_request(request: AdeptMiniMaxH3Request) -> H3PreflightResult:
             else:
                 warnings.append(
                     "MiniMax H3 will run on the Experimental Private Profile (Private Local · Owner Only). "
-                    "Output is a short motion draft with native audio."
+                    "Output is 5 frames at 24 fps (~0.21s) with native audio — not a 5s or 15s clip."
                 )
             return H3PreflightResult(
                 status="ready",
@@ -164,6 +149,10 @@ def evaluate_request(request: AdeptMiniMaxH3Request) -> H3PreflightResult:
             capability=capability,
         )
 
+    warnings.append(
+        "Hosted MiniMax duration is not certified. "
+        "The only measured local profile is 5 frames at 24 fps (~0.21s), not 4–15 seconds."
+    )
     if not request.approvalId:
         warnings.append("Hosted MiniMax H3 needs explicit creator approval before anything is sent out of the project.")
         return H3PreflightResult(

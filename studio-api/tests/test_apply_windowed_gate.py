@@ -63,7 +63,8 @@ def test_scene_column_track_without_character_returns_speaker_required(client):
     assert "LIPSYNC_SPEAKER_REQUIRED" in res.text or "Assign a character" in res.text
 
 
-def test_bound_track_windowed_enqueues_media_retake(client):
+def test_bound_track_windowed_enqueues_media_retake(client, monkeypatch):
+    monkeypatch.setenv("ADEPT_LEGACY_LIPSYNC", "1")
     pid, sid = _setup_scene(client, character_id="char-korri")
     res = client.post(
         f"/api/projects/{pid}/scenes/{sid}/lipsync-tracks/apply",
@@ -77,15 +78,29 @@ def test_bound_track_windowed_enqueues_media_retake(client):
     assert message["scene_id"] == sid
 
 
-def test_bound_track_no_body_uses_legacy_dual_lipsync(client):
+def test_legacy_modes_are_410_without_the_legacy_flag(client):
+    pid, sid = _setup_scene(client, character_id="char-korri")
+    for mode in ("legacy", "windowed"):
+        res = client.post(
+            f"/api/projects/{pid}/scenes/{sid}/lipsync-tracks/apply",
+            json={"mode": mode},
+        )
+        assert res.status_code == 410, res.text
+        assert "Performance Retake" in res.text
+
+
+def test_bound_track_no_body_defaults_to_performance_retake(client):
+    """Default mode is now performance_retake; without a retake body the
+    derived spec has no character sheets, so validation fails with 400 —
+    never a silent legacy fallback."""
     pid, sid = _setup_scene(client, character_id="char-korri")
     res = client.post(f"/api/projects/{pid}/scenes/{sid}/lipsync-tracks/apply")
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert body["kind"] == "dual_lipsync"
+    assert res.status_code == 400, res.text
+    assert "character sheet" in res.text
 
 
-def test_windowed_room_tone_outside_scene_duration_returns_400(client):
+def test_windowed_room_tone_outside_scene_duration_returns_400(client, monkeypatch):
+    monkeypatch.setenv("ADEPT_LEGACY_LIPSYNC", "1")
     pid, sid = _setup_scene(client, character_id="char-korri", duration_sec=10.0)
     res = client.post(
         f"/api/projects/{pid}/scenes/{sid}/lipsync-tracks/apply",

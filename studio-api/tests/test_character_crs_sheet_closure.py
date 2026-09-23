@@ -207,6 +207,47 @@ def test_four_view_enqueue_requests_native_2k_square(db: Session, monkeypatch: p
     assert captured["resolutionOrigin"] == "native"
 
 
+def test_angle_enqueue_accepts_qwen_edit_sampler_kwargs(db: Session, monkeypatch: pytest.MonkeyPatch):
+    from app.character_identity.visual_sheet import _enqueue_txt2img
+
+    captured: dict = {}
+
+    class FakeJob:
+        id = "job-angle"
+        status = "queued"
+        message = ""
+        comfy_prompt_id = None
+
+    def fake_enqueue(_db, _project_id, body):
+        captured.update(body)
+        return FakeJob()
+
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", fake_enqueue)
+    project_id = _project(db)
+    job = _enqueue_txt2img(
+        db,
+        project_id,
+        character_id="char-angle",
+        prompt="side view",
+        negative_prompt="",
+        tag="angle",
+        role="SIDE",
+        model_family_preference="qwen_edit_2509",
+        force_workflow_key="qwen_edit_2509.edit",
+        steps=8,
+        cfg=1.0,
+        width=768,
+        height=768,
+        sheet_layout="cc_v2",
+    )
+    assert job.id == "job-angle"
+    assert captured["steps"] == 8
+    assert captured["cfg"] == 1.0
+    assert captured["width"] == 768
+    assert captured["height"] == 768
+    assert captured["forceWorkflowKey"] == "qwen_edit_2509.edit"
+
+
 def test_character_creator_crs_smoke(db: Session):
     """Named smoke: persist CRS, @Name resolve, Korri guard, disposable delete."""
     test_approve_persists_crs_revision_and_production_ready(db)

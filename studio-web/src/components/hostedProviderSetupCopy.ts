@@ -21,11 +21,16 @@ export const SETUP_PROVIDERS = [
     title: "fal.ai",
     blurb: "Hosted fal.ai key for certified cloud video and image routes (BYOK).",
   },
+  {
+    id: "elevenlabs" as const,
+    title: "ElevenLabs",
+    blurb: "BYOK for Voice Studio TTS + Audio Studio SFX (Browser → Adept API → ElevenLabs; key never leaves Adept secrets_store).",
+  },
 ];
 
 export const API_KEY_PROVIDER_IDS = SETUP_PROVIDERS.map((item) => item.id);
 export const API_KEY_PROVIDER_TITLES = SETUP_PROVIDERS.map((item) => item.title);
-export const API_KEY_CATALOG_IDS = ["fal_key", "kie_key", "wavespeed_key"] as const;
+export const API_KEY_CATALOG_IDS = ["fal_key", "kie_key", "wavespeed_key", "elevenlabs_key"] as const;
 
 const API_KEY_CLOUD_PROVIDER_ALIASES = new Set([
   "kie",
@@ -37,6 +42,10 @@ const API_KEY_CLOUD_PROVIDER_ALIASES = new Set([
   "wavespeed",
   "wavespeed.ai",
   "wavespeed_key",
+  "elevenlabs",
+  "elevenlabs.io",
+  "elevenlabs_key",
+  "elevenlabs_api_key",
 ]);
 
 export const STATUS = {
@@ -96,7 +105,8 @@ export function isApiKeyCloudProvider(id: string | undefined | null): boolean {
   const compact = raw.replace(/[._\s-]/g, "");
   return compact === "kie" || compact === "kieai" || compact === "kiekey"
     || compact === "fal" || compact === "falai" || compact === "falkey"
-    || compact === "wavespeed" || compact === "wavespeedai" || compact === "wavespeedkey";
+    || compact === "wavespeed" || compact === "wavespeedai" || compact === "wavespeedkey"
+    || compact === "elevenlabs" || compact === "elevenlabsio" || compact === "elevenlabskey" || compact === "elevenlabsapikey";
 }
 
 export function isApiKeyCatalogComponent(component: CatalogComponentLike): boolean {
@@ -108,7 +118,7 @@ export function isApiKeyCatalogComponent(component: CatalogComponentLike): boole
   ].map((value) => String(value || "").trim());
   if (surfaces.some((value) => value === "API Providers")) return true;
   const name = String(component.name || "").toLowerCase();
-  return name === "fal.ai api key" || name === "kie.ai api key" || name === "wavespeed.ai api key";
+  return name === "fal.ai api key" || name === "kie.ai api key" || name === "wavespeed.ai api key" || name === "elevenlabs api key";
 }
 
 export function filterCloudProviders<T extends { providerId?: string; id?: string }>(items: T[]): T[] {

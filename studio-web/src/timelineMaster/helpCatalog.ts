@@ -13,35 +13,35 @@ export type TimelineHelpEntry = {
 export const TIMELINE_HELP: Record<string, TimelineHelpEntry> = {
   add_batch: {
     id: "add_batch",
-    title: "Add Batch",
-    body: "Creates a new Batch Block as a stable production container on this scene. Does not start generation.",
+    title: "Execution windows",
+    body: "Creator Timeline no longer has a Batch track. Execution windows come from the Co-Director plan and rematerialize — they are not authored as batches.",
     scope: "scene",
   },
   preflight: {
     id: "preflight",
-    title: "Co-Director Preflight",
-    body: "Inspects prompts, references, duration, continuity, runtime readiness, and generator compatibility before generation.",
+    title: "Preflight",
+    body: "Checks this scene now — Cast, Location, References, Voice, generator, and prompts. You do not need to open Co-Director.",
     scope: "scene",
   },
   generate_full_scene: {
     id: "generate_full_scene",
     title: "Generate Full Scene",
-    body: "Runs all ready Batch Blocks through the selected scene generator and assembles the results in order.",
+    body: "Rematerializes execution windows from the Co-Director plan (minting a SceneTake on generator switch if required), then generates the full scene in order.",
     scope: "scene",
     approvalRequired: true,
   },
   generate_current: {
     id: "generate_current",
     title: "Generate Current",
-    body: "Generates only the currently selected Batch Block.",
-    scope: "batch",
+    body: "Per-batch generate was removed from creator Timeline. Use Generate Full Scene (rematerialize + generate).",
+    scope: "scene",
     approvalRequired: true,
   },
   generate_selected: {
     id: "generate_selected",
     title: "Generate Selected",
-    body: "Generates only the Batch Blocks currently selected in Timeline Master.",
-    scope: "selected",
+    body: "Selected-batch generate was removed from creator Timeline. Use Generate Full Scene (rematerialize + generate).",
+    scope: "scene",
     approvalRequired: true,
   },
   stop_remaining: {
@@ -53,7 +53,7 @@ export const TIMELINE_HELP: Record<string, TimelineHelpEntry> = {
   resume_incomplete: {
     id: "resume_incomplete",
     title: "Resume Incomplete Jobs",
-    body: "Continues only Batches that have not completed. Successful Batches are not regenerated.",
+    body: "Requeues batches that have not finished. This does not resume a generation that is already drawing frames. Successful batches are left alone. Hosted engines may still finish a remote job even after you cancel here.",
     scope: "scene",
   },
   mark_repair_range: {
@@ -65,15 +65,22 @@ export const TIMELINE_HELP: Record<string, TimelineHelpEntry> = {
   },
   edit_duration: {
     id: "edit_duration",
-    title: "Edit Batch Duration",
-    body: "Changes the planned duration of this Batch. Generator limits will be checked before saving.",
-    scope: "batch",
+    title: "Scene duration",
+    body: "Scene length is authored on the Timeline. Execution window lengths come from rematerialize against the Co-Director plan — not a creator Batch track.",
+    scope: "scene",
   },
   switch_video: {
     id: "switch_video",
     title: "Switch to Video Finishing",
     body: "Switches Timeline Master to Video Finishing Mode. Batch Blocks are preserved.",
     scope: "scene",
+  },
+  stitch_batches: {
+    id: "stitch_batches",
+    title: "Stitch",
+    body: "Joins every finished batch into one continuous clip you can play from start to finish. The original batches stay on the Timeline so you can keep reviewing and extending.",
+    scope: "scene",
+    approvalRequired: true,
   },
   switch_image: {
     id: "switch_image",
@@ -90,7 +97,7 @@ export const TIMELINE_HELP: Record<string, TimelineHelpEntry> = {
   guidance_priority: {
     id: "guidance_priority",
     title: "Guidance Priority",
-    body: "Controls how Visual Anchors, Timed Prompts, and Camera guidance are weighted when compiling generation intents. Recorded in provenance; does not rewrite past jobs.",
+    body: "Controls how Visual Anchors and Timed Prompt guidance (including camera direction written in Timed Prompt) are weighted when compiling generation intents. Timed Prompt is the sole camera authority. Recorded in provenance; does not rewrite past jobs.",
     scope: "scene",
   },
   remove_item: {
@@ -127,25 +134,25 @@ export const TIMELINE_HELP: Record<string, TimelineHelpEntry> = {
   camera_motion: {
     id: "camera_motion",
     title: "Camera Motion",
-    body: "Choose the movement the shot should feel. Search by film language, or use Custom to preserve your own phrase honestly.",
+    body: "Describe the movement the shot should feel in Timed Prompt. Film-language motion vocabulary remains available as knowledge; the Camera track lane is retired.",
     scope: "item",
   },
   camera_rig: {
     id: "camera_rig",
     title: "Camera Rig",
-    body: "Choose the support or capture setup for the shot. Use Custom when the setup needs your own wording.",
+    body: "Describe support or capture setup in Timed Prompt when needed. Rig vocabulary remains available as knowledge; the Camera track lane is retired.",
     scope: "item",
   },
   camera_execution_strategy: {
     id: "camera_execution_strategy",
     title: "Execution Strategy",
-    body: "Shows how honestly the selected camera note can be executed: native, workflow-mapped, prompt-guided, approximate, or unsupported.",
+    body: "Camera execution honesty (native / workflow-mapped / prompt-guided) remains a knowledge concern for Timed Prompt camera language. The Camera track lane is retired.",
     scope: "item",
   },
   draft_mode: {
     id: "draft_mode",
     title: "Draft Mode",
-    body: "Makes a cheaper preview first so you can check the motion before spending a full-quality generation. Promote starts a new Final generation from the same prompt and references.",
+    body: "Makes a cheaper preview first so you can check the motion before spending a full-quality generation. Promote starts a new Final generation from the same prompt and references. On LTX 2.5 this is Fast versus Quality at the same picture size.",
     scope: "batch",
   },
   video_reference: {
@@ -159,6 +166,27 @@ export const TIMELINE_HELP: Record<string, TimelineHelpEntry> = {
     title: "Picture Shape",
     body: "The production frame for this scene: square, classic, widescreen, or extra-wide. Draft and Final share this shape. The Viewer shows the real canvas — it does not fake a wider picture by cropping.",
     scope: "scene",
+  },
+  transport_in: {
+    id: "transport_in",
+    title: "Go to In",
+    body: "Moves the playhead to the beginning of the current Batch.",
+    scope: "scene",
+    shortcut: "Home",
+  },
+  transport_play: {
+    id: "transport_play",
+    title: "Play / Pause",
+    body: "Plays or pauses the Timeline from the current playhead.",
+    scope: "scene",
+    shortcut: "Space",
+  },
+  transport_out: {
+    id: "transport_out",
+    title: "Go to Out",
+    body: "Moves the playhead to the end of the current Batch.",
+    scope: "scene",
+    shortcut: "End",
   },
   promote_final: {
     id: "promote_final",

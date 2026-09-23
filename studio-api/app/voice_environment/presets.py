@@ -5,23 +5,24 @@ from __future__ import annotations
 from typing import Any
 
 SPACE_PRESETS: dict[str, dict[str, Any]] = {
-    "dry_booth": {"label": "Dry Recording Booth", "reverb_ms": 40, "wet": 0.02, "tail_ms": 20},
-    "small_room": {"label": "Small Room", "reverb_ms": 180, "wet": 0.12, "tail_ms": 120},
-    "bedroom": {"label": "Bedroom", "reverb_ms": 220, "wet": 0.14, "tail_ms": 160},
-    "office": {"label": "Office", "reverb_ms": 260, "wet": 0.16, "tail_ms": 180},
-    "living_room": {"label": "Living Room", "reverb_ms": 320, "wet": 0.18, "tail_ms": 220},
-    "classroom": {"label": "Classroom", "reverb_ms": 420, "wet": 0.22, "tail_ms": 280},
-    "large_hall": {"label": "Large Hall", "reverb_ms": 900, "wet": 0.35, "tail_ms": 700},
-    "warehouse": {"label": "Warehouse", "reverb_ms": 1100, "wet": 0.38, "tail_ms": 850},
-    "cathedral": {"label": "Cathedral", "reverb_ms": 1800, "wet": 0.48, "tail_ms": 1400},
-    "cavern": {"label": "Cavern", "reverb_ms": 1600, "wet": 0.45, "tail_ms": 1200},
-    "tunnel": {"label": "Tunnel", "reverb_ms": 700, "wet": 0.32, "tail_ms": 500},
-    "stadium": {"label": "Stadium", "reverb_ms": 2000, "wet": 0.42, "tail_ms": 1600},
-    "outdoor_open": {"label": "Outdoor Open Space", "reverb_ms": 80, "wet": 0.04, "tail_ms": 40},
-    "forest": {"label": "Forest", "reverb_ms": 250, "wet": 0.1, "tail_ms": 180},
-    "street": {"label": "Street", "reverb_ms": 150, "wet": 0.08, "tail_ms": 100},
-    "spaceship_corridor": {"label": "Spaceship Corridor", "reverb_ms": 500, "wet": 0.28, "tail_ms": 360},
-    "custom": {"label": "Custom", "reverb_ms": 300, "wet": 0.18, "tail_ms": 220},
+    # Retuned ORDER 4 (Owner CLEAR): believable location levels; cathedral especially less wet.
+    "dry_booth": {"label": "Dry Recording Booth", "reverb_ms": 30, "wet": 0.015, "tail_ms": 15},
+    "small_room": {"label": "Small Room", "reverb_ms": 150, "wet": 0.09, "tail_ms": 90},
+    "bedroom": {"label": "Bedroom", "reverb_ms": 180, "wet": 0.10, "tail_ms": 120},
+    "office": {"label": "Office", "reverb_ms": 200, "wet": 0.11, "tail_ms": 140},
+    "living_room": {"label": "Living Room", "reverb_ms": 260, "wet": 0.13, "tail_ms": 170},
+    "classroom": {"label": "Classroom", "reverb_ms": 340, "wet": 0.16, "tail_ms": 220},
+    "large_hall": {"label": "Large Hall", "reverb_ms": 650, "wet": 0.22, "tail_ms": 420},
+    "warehouse": {"label": "Warehouse", "reverb_ms": 750, "wet": 0.24, "tail_ms": 500},
+    "cathedral": {"label": "Cathedral", "reverb_ms": 950, "wet": 0.24, "tail_ms": 580},
+    "cavern": {"label": "Cavern", "reverb_ms": 850, "wet": 0.26, "tail_ms": 520},
+    "tunnel": {"label": "Tunnel", "reverb_ms": 550, "wet": 0.22, "tail_ms": 360},
+    "stadium": {"label": "Stadium", "reverb_ms": 1100, "wet": 0.26, "tail_ms": 700},
+    "outdoor_open": {"label": "Outdoor Open Space", "reverb_ms": 60, "wet": 0.03, "tail_ms": 30},
+    "forest": {"label": "Forest", "reverb_ms": 200, "wet": 0.08, "tail_ms": 140},
+    "street": {"label": "Street", "reverb_ms": 120, "wet": 0.06, "tail_ms": 80},
+    "spaceship_corridor": {"label": "Spaceship Corridor", "reverb_ms": 400, "wet": 0.20, "tail_ms": 280},
+    "custom": {"label": "Custom", "reverb_ms": 250, "wet": 0.14, "tail_ms": 180},
 }
 
 DISTANCE_PRESETS: dict[str, dict[str, Any]] = {

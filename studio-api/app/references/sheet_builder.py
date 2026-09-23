@@ -13,6 +13,7 @@ LAYOUTS = (
     "auto",
     "character_focus",
     "two_characters_environment",
+    "two_heroes_place",
     "character_props_environment",
     "environment_focus",
     "custom_grid",
@@ -84,6 +85,19 @@ def _slots_for(layout: str, panels: Sequence[SheetPanel]) -> list[tuple[float, f
         c2 = chars[1] if len(chars) > 1 else (props[0] if props else items[-1])
         slots.append((0.0, 0.4, 0.5, 0.6, c1))
         slots.append((0.5, 0.4, 0.5, 0.6, c2))
+    elif layout == "two_heroes_place":
+        # Identity join: heroes stay dominant. An empty place plate at full
+        # width becomes the generated shot and invents generic people.
+        c1 = chars[0] if chars else items[0]
+        c2 = chars[1] if len(chars) > 1 else (props[0] if props else items[-1])
+        env = envs[0] if envs else None
+        if env:
+            slots.append((0.0, 0.0, 0.5, 0.78, c1))
+            slots.append((0.5, 0.0, 0.5, 0.78, c2))
+            slots.append((0.0, 0.80, 1.0, 0.20, env))
+        else:
+            slots.append((0.0, 0.0, 0.5, 1.0, c1))
+            slots.append((0.5, 0.0, 0.5, 1.0, c2))
     elif layout == "character_props_environment":
         env = (envs or items)[0]
         slots.append((0.0, 0.0, 1.0, 0.34, env))

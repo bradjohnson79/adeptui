@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type CoDirectorProposal } from "../../api";
 import { Button } from "../ui";
-import type { ContentTab } from "./CoDirectorNavDrawer";
-import { CONTENT_NAV } from "./navEntries";
+import { isSpatialMapEnabled } from "../../core/featureFlags";
+import { CONTENT_NAV, type ContentTab } from "./navEntries";
 import { ProjectWikiPanel } from "./ProjectWikiPanel";
 import { NotesPanel } from "./NotesPanel";
 import { CastingPanel } from "./CastingPanel";
@@ -15,6 +15,7 @@ import { CoDirectorEmptyState } from "./cards";
 import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
 import { EnvironmentReferenceSheetPanel } from "./EnvironmentReferenceSheetPanel";
 import { SceneCreatorPanel } from "./SceneCreator/SceneCreatorPanel";
+import { TimelinePanel } from "./Timeline/TimelinePanel";
 import { PlanWorkspacePanel } from "./plans";
 import { ProjectRetrievalPanel, RETRIEVAL_TOOL_SETS } from "./retrieval";
 import { LibraryMediaGrid } from "./library/LibraryMediaGrid";
@@ -22,6 +23,7 @@ import { ScriptwriterInlineEditor } from "./scriptwriter/ScriptwriterInlineEdito
 import { CharacterCompactView } from "./characters/CharacterCompactView";
 import { SpatialMapPanel } from "./SpatialMap/SpatialMapPanel";
 import { PropCreatorPanel } from "./PropCreator/PropCreatorPanel";
+import { VoiceCreatorPanel } from "./VoiceCreator/VoiceCreatorPanel";
 import {
   CoDirectorDevelopmentPanel,
   CoDirectorPitchLaunchPanel,
@@ -304,6 +306,7 @@ function FoundationStatusBar({
               key={p.key}
               type="button"
               data-testid={`codirector-foundation-${p.key}`}
+              title={p.tab === "characters" ? "Opens the full Character Creator" : undefined}
               onClick={() => {
                 if (p.tab === "characters" && onGoTab) {
                   onGoTab("characters");
@@ -365,10 +368,20 @@ export function CoDirectorProjectContent({
         handleTabChange("scene_creator");
         return;
       }
+      if (next === "voice_creator") {
+        handleTabChange("voice_creator");
+        return;
+      }
       onGoTab?.(next, extra);
     },
     [handleTabChange, onGoTab],
   );
+
+  useEffect(() => {
+    if (tab === "spatial_map" && !isSpatialMapEnabled()) {
+      handleTabChange("scene_creator");
+    }
+  }, [tab, handleTabChange]);
 
   useEffect(() => {
     if (!openGroup) return;
@@ -564,6 +577,7 @@ export function CoDirectorProjectContent({
             {projectId ? (
               <CharacterCompactView
                 projectId={projectId}
+                onGoTab={onGoTab}
                 onOpenFull={(characterId) =>
                   onGoTab?.(
                     "characters",
@@ -576,6 +590,15 @@ export function CoDirectorProjectContent({
             )}
           </div>
         )}
+        {tab === "voice_creator" && (
+          <div data-testid="codirector-content-voice-creator">
+            {projectId ? (
+              <VoiceCreatorPanel projectId={projectId} onGoTab={onGoTab} />
+            ) : (
+              <p className="muted">Select a project to open Voice Creator.</p>
+            )}
+          </div>
+        )}
         {tab === "prop_creator" && (
           <div data-testid="codirector-content-prop-creator">
             {projectId ? (
@@ -585,15 +608,15 @@ export function CoDirectorProjectContent({
             )}
           </div>
         )}
-        {tab === "spatial_map" && (
+        {tab === "spatial_map" && isSpatialMapEnabled() && (
           <div data-testid="codirector-content-spatial-map">
             {projectId ? (
-              <SpatialMapPanel projectId={projectId} onGoTab={goTab} />
+              <SpatialMapPanel projectId={projectId} onGoTab={goTab} variant="express" />
             ) : (
               <CoDirectorEmptyState
                 testId="codirector-spatial-map-empty"
                 title="No Project Selected"
-                description="Select a project to open Spatial Map."
+                description="Select a project to continue."
               />
             )}
           </div>
@@ -603,7 +626,16 @@ export function CoDirectorProjectContent({
             {projectId ? (
               <SceneCreatorPanel projectId={projectId} onGoTab={onGoTab} />
             ) : (
-              <CoDirectorEmptyState title="No Project Selected" description="Select a project to open Scene Creator." />
+              <CoDirectorEmptyState title="No Project Selected" description="Select a project to open Environment Creator." />
+            )}
+          </div>
+        )}
+        {tab === "timeline" && (
+          <div data-testid="codirector-content-timeline">
+            {projectId ? (
+              <TimelinePanel projectId={projectId} onGoTab={onGoTab} />
+            ) : (
+              <CoDirectorEmptyState title="No Project Selected" description="Select a project to open Timeline." />
             )}
           </div>
         )}

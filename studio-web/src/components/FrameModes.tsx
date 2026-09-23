@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Project, Scene } from "../types";
 import { api } from "../api";
 import {
@@ -390,7 +390,7 @@ export function OneFramePanel({
               />
               <p className="muted" data-testid="one-frame-canvas">
                 {canvas.available
-                  ? `This generator will run ${canvas.width}Ã—${canvas.height}.`
+                  ? `This generator will run ${canvas.width}×${canvas.height}.`
                   : canvas.honestyLabel}
               </p>
             </div>
@@ -641,7 +641,7 @@ export function ThreeFramePanel({
               />
               <p className="muted" data-testid="three-frame-canvas">
                 {canvas.available
-                  ? `This generator will run ${canvas.width}Ã—${canvas.height}.`
+                  ? `This generator will run ${canvas.width}×${canvas.height}.`
                   : canvas.honestyLabel}
               </p>
             </div>

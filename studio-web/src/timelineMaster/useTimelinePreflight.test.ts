@@ -36,7 +36,7 @@ describe("buildPreflightSignature", () => {
     });
     const sig = buildPreflightSignature(base, null);
     const variants: Array<Record<string, unknown>> = [
-      { generatorId: "wan-t2v-local" },
+      { generatorId: "ltx-2.5-distilled" },
       { duration: { plannedDuration: 8 } },
       {
         promptSegments: [{ start: 0, length: 15, text: "b", role: "action", referenceBindingIds: [] }],
@@ -98,6 +98,18 @@ describe("summarizePreflightFindings", () => {
     expect(out.blockingCount).toBe(1);
     expect(out.summary).toContain("MISSING_REFERENCES");
     expect(out.summary).toContain("1 advisory");
+    expect(out.summary).not.toContain("additional info");
+  });
+
+  it("info notes are additional info, not advisories", () => {
+    const out = summarizePreflightFindings([
+      { severity: "info", message: "MiniMax H3 canvas: 1376×768 (1.0 MP · Manual)", code: "h3_canvas" },
+      { severity: "info", message: "MiniMax H3 canvas: 1376×768 (1.0 MP · Manual)", code: "h3_canvas" },
+      { severity: "info", message: "MiniMax H3 canvas: 1376×768 (1.0 MP · Manual)", code: "h3_canvas" },
+    ]);
+    expect(out.status).toBe("ready");
+    expect(out.blockingCount).toBe(0);
+    expect(out.summary).toBe("Ready with 3 additional info");
   });
 });
 

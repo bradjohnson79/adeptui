@@ -54,7 +54,7 @@ def _profile_from_description(name: str, description: str, creator_notes: str | 
 def _stages() -> list[ERSStage]:
     return [
         ERSStage(stageKey="profile", label="Environment profile", status="complete"),
-        ERSStage(stageKey="spatial", label="Spatial Map", status="pending"),
+        ERSStage(stageKey="spatial", label="Place layout", status="pending"),
         ERSStage(stageKey="directional_views", label="Directional views", status="pending"),
         ERSStage(stageKey="continuity", label="Continuity review", status="pending"),
         ERSStage(stageKey="composition", label="Sheet composition", status="pending"),
@@ -65,7 +65,7 @@ def _stages() -> list[ERSStage]:
 
 def _preview(name: str, description: str) -> str:
     return (
-        f"{name}: build one environment profile, lock north from the Spatial Map, "
+        f"{name}: build one environment profile, lock north for the place, "
         "prepare north/east/south/west views, validate continuity, and package the sheet for project reuse."
     )
 
@@ -77,14 +77,16 @@ def create_sheet(
     description: str,
     scene_id: str | None = None,
     creator_notes: str | None = None,
+    is_global: bool = False,
 ) -> EnvironmentReferenceSheet:
     summary = _preview(name, description)
     stages = _stages()
     approval_requirements = [
         ERSApprovalRequirement(
-            kind="ers-create",
-            status="approved",
-            reason="Creation already happened through an approved Co-Director tool proposal.",
+            kind="ers-sheet-approve",
+            status="required",
+            reason="Creator must Approve this ERS sheet before it becomes downstream canonical.",
+            creatorTip="After the composite is ready, use Approve to promote this sheet for Timeline / Image Gen / Storyboard / Co-Director.",
         )
     ]
     sheet = EnvironmentReferenceSheet(
@@ -97,13 +99,17 @@ def create_sheet(
             summary=summary,
             creatorPreview=summary,
             readiness="warning",
-            readinessReasons=["Attach a Spatial Map before directional view planning can proceed."],
+            readinessReasons=["Attach a place layout before directional view planning can proceed."],
             stages=stages,
             approvalRequirements=approval_requirements,
         ),
         composition=ERSCompositionRecord(sheetTitle=name, subtitle="Environment Reference Sheet"),
         optionalThreeD=OptionalThreeDRecord(truthLabel="illustrative", status="not_requested"),
+        isGlobal=bool(is_global),
     )
+    sheet.rootSheetId = sheet.sheetId
+    sheet.versionNumber = 1
+    sheet.parentSheetId = None
     sheet.continuity = validate_sheet(sheet)
     return sheet
 
@@ -162,10 +168,13 @@ def attach_spatial_map(db: Any, sheet: EnvironmentReferenceSheet, *, spatial_map
     for stage in sheet.creationPlan.stages:
         if stage.stageKey == "spatial":
             stage.status = "complete"
-            stage.summary = "Spatial Map attached with north lock."
+            stage.summary = "Place layout attached with north lock."
         if stage.stageKey == "directional_views":
             stage.status = "ready"
-            stage.summary = "Directional prompts prepared from the Spatial Map."
+            stage.summary = "Directional prompts prepared from the place layout."
+    sheet.rootSheetId = sheet.sheetId
+    sheet.versionNumber = 1
+    sheet.parentSheetId = None
     sheet.continuity = validate_sheet(sheet)
     return sheet
 
@@ -203,7 +212,7 @@ def build_directional_view_image_plan(
         },
         continuityNotes=[
             "Same environment, same materials, same time of day.",
-            f"North lock established from Spatial Map {sheet.spatialMap.mapId}.",
+            f"North lock established from place layout {sheet.spatialMap.mapId}.",
         ],
         creatorNotes=sheet.description,
     )

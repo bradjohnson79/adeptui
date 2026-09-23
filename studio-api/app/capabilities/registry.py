@@ -213,7 +213,11 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
             "Uses Ollama when reachable and falls back to a heuristic sentence split otherwise, "
             "so the capability always answers but proposal quality varies with provider health. "
             "Deliberately not declared as depending on codirector.chat: a missing provider "
-            "degrades quality, it does not block the call."
+            "degrades quality, it does not block the call. "
+            "Consumer audit 2026-09-14: the only caller is the menu-hidden legacy Generate "
+            "Timeline panel (studio-web workspace 'generate', menuHidden). Co-Director "
+            "chat/tools and Timeline H3 generate do not consume this endpoint, so v1.1 "
+            "policy classifies it OPTIONAL; the DEGRADED baseline stays honest."
         ),
         scope="project",
     ),
@@ -270,7 +274,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         subsystem="assets",
         baseline_status=S.LOCALLY_VERIFIED,
         summary="Stream a stored asset file for previews.",
-        http_ref="GET /api/assets/{assetId}/file",
+        http_ref="GET /api/projects/{projectId}/assets/{assetId}/file",
         scope="project",
     ),
     # ------------------------------------------------------------- references
@@ -353,7 +357,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         summary="Dedicated thumbnail generation for references.",
         baseline_reason=(
             "No thumbnail pipeline exists. Previews reuse the full-size file via "
-            "GET /api/assets/{assetId}/file."
+            "GET /api/projects/{projectId}/assets/{assetId}/file."
         ),
         scope="project",
     ),
@@ -376,11 +380,14 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         display_name="Ingredients IC-LoRA readiness",
         subsystem="references",
         baseline_status=S.BACKEND_ONLY,
-        summary="Whether the gated LTX 2.3 Ingredients IC-LoRA and its ComfyUI nodes are usable.",
+        summary="Retired LTX 2.3 Ingredients IC-LoRA path. Not a v1.1 production video generator or blocker.",
         dependencies=("comfyui.health",),
-        component_ids=("ltx23_ic_lora_ingredients", "comfyui"),
+        component_ids=(),
         http_ref="GET /api/projects/{projectId}/references/capabilities",
-        baseline_reason="Probe-driven: reports blocked/not_configured until the model file and nodes exist.",
+        baseline_reason=(
+            "Consumers are leftover LTX 2.3 Ingredients / Visual References UI. "
+            "v1.1 production video is MiniMax H3 + LTX 2.5; this row stays OPTIONAL."
+        ),
         scope="project",
     ),
     _d(
@@ -392,7 +399,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         read_only=False,
         requires_approval=False,
         dependencies=("director.timeline.read",),
-        http_ref="GET/POST /api/projects/{projectId}/scenes/{sceneId}/director/items/{itemId}/references",
+        http_ref="GET/POST /api/director-timeline/projects/{projectId}/scenes/{sceneId}/items/{itemId}/references",
         baseline_reason="UI+persist when STUDIO_FEATURE_TIMELINE_REFERENCES_V1 is on; item-specific only.",
         scope="scene",
     ),
@@ -473,8 +480,8 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         subsystem="references",
         baseline_status=S.PARTIALLY_WIRED,
         summary="Semantic influence levels (locked..inspiration); IC-LoRA strength only when ready.",
-        dependencies=("references.timeline_bindings", "references.ic_lora.ready"),
-        baseline_reason="Influence always stored; strength presets applied only if references.ic_lora.ready.",
+        dependencies=("references.timeline_bindings",),
+        baseline_reason="Influence always stored; IC-LoRA strength presets apply only when that optional model is present.",
         scope="scene",
     ),
     # -------------------------------------------------- co-director / bible
@@ -535,10 +542,16 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         id="codirector.tools",
         display_name="Co-Director tool orchestration",
         subsystem="codirector",
-        baseline_status=S.NOT_IMPLEMENTED,
+        baseline_status=S.BACKEND_ONLY,
         summary="Autonomous tool registry / dispatch.",
         read_only=False,
-        baseline_reason="Owned by Co-Director M2.2. This branch only publishes the capability truth source.",
+        service_ref="app.codirector.tools.registry:catalog",
+        baseline_reason=(
+            "Tool registry and dispatch are implemented under app.codirector.tools "
+            "(definitions, registry, execution service, handlers). The live evaluator "
+            "verifies the registered catalog is non-empty; there is no dedicated "
+            "creator UI beyond Co-Director chat."
+        ),
     ),
     # ---------------------------------------------------------------- comfyui
     _d(
@@ -637,8 +650,8 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         baseline_status=S.BACKEND_ONLY,
         summary="A video-modality workflow has all required nodes and models present.",
         dependencies=("workflows.validate", "comfyui.health"),
-        component_ids=("comfyui", "ltx_checkpoint", "ltx_2_5_checkpoint"),
-        baseline_reason="Probe-driven.",
+        component_ids=("comfyui", "ltx_2_5_checkpoint"),
+        baseline_reason="Probe-driven. LTX 2.5 is the v1.1 local video leaf.",
     ),
     # ----------------------------------------------------------------- models
     _d(
@@ -678,18 +691,31 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         display_name="Co-Director Temporal Continuity",
         subsystem="codirector",
         baseline_status=S.PARTIALLY_WIRED,
-        summary="VideoChat3 is installed so Co-Director can review generated Timeline batches.",
+        summary="VideoChat3 reviews generated Timeline batches. InternVideo3 8B is optional deep-review.",
         component_ids=("videochat3_4b",),
-        baseline_reason="Required Setup essential for Co-Director Continuity; independent of models.video.ready.",
+        baseline_reason="Required Setup essential for Co-Director Continuity; InternVideo3 is optional and does not gate this row.",
+    ),
+    _d(
+        id="codirector.media_intelligence.qwen_omni.ready",
+        display_name="Co-Director Media Intelligence (Qwen2.5-Omni)",
+        subsystem="codirector",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Qwen2.5-Omni 7B installed for Co-Director Media Intelligence (multimodal perception).",
+        component_ids=("qwen2_5_omni_7b",),
+        baseline_reason=(
+            "Recommended media intelligence; optional — core Adept stays usable if absent "
+            "(not a boot blocker). Worker model routing is a separate task; this row tracks "
+            "Setup/Source Manager install readiness only."
+        ),
     ),
     _d(
         id="models.video.ready",
         display_name="Video model installed",
         subsystem="models",
         baseline_status=S.BACKEND_ONLY,
-        summary="LTX (and optionally WAN) weights verified on disk.",
-        component_ids=("ltx_checkpoint", "ltx_2_5_checkpoint", "wan_models"),
-        baseline_reason="Derived from Setup component verification; blocked when absent.",
+        summary="LTX 2.5 weights verified on disk. MiniMax H3 is the other local video path.",
+        component_ids=("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),
+        baseline_reason="Derived from Setup LTX 2.5 verification only. Local video is MiniMax H3 + LTX 2.5.",
     ),
     _d(
         id="extensions.comfyui.ready",
@@ -828,9 +854,9 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         read_only=False,
         requires_approval=True,
         dependencies=("comfyui.queue", "workflows.video.ready", "models.video.ready"),
-        component_ids=("comfyui", "ltx_checkpoint", "ltx_2_5_checkpoint", "wan_models"),
+        component_ids=("comfyui", "ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),
         http_ref="POST /api/projects/{projectId}/render",
-        baseline_reason="No verified render in this environment; probe reports blocked when models are absent.",
+        baseline_reason="v1.1 local video uses LTX 2.5. Retired LTX 2.3 is not a queue gate.",
         scope="project",
     ),
     _d(
@@ -953,7 +979,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         subsystem="virtual_stage",
         baseline_status=S.DEFERRED_VERSION_1_2,
         summary="Native Virtual Stage / 3D camera stage deferred to Version 1.2. "
-        "Version 1.1 uses Spatial Map camera direction.",
+        "Version 1.1 uses Environment Creator / Image Generator / PoseCraft; Spatial Map is shelved.",
         read_only=False,
         http_ref="POST /api/codirector/m28/virtual-stage",
         scope="project",
@@ -1452,7 +1478,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         subsystem="virtual_environment",
         baseline_status=S.DEFERRED_VERSION_1_2,
         summary="Environment Studio blocking canvas deferred to Version 1.2. "
-        "Version 1.1 uses Spatial Map character blocking.",
+        "Version 1.1 uses Environment Creator Express for place identity; Spatial Map blocking is shelved.",
         read_only=False,
         requires_approval=True,
         http_ref="POST /api/codirector/m213/blocking",
@@ -1463,7 +1489,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         subsystem="virtual_environment",
         baseline_status=S.DEFERRED_VERSION_1_2,
         summary="Environment Studio camera state deferred to Version 1.2. "
-        "Version 1.1 uses Spatial Map / Director camera direction.",
+        "Version 1.1 uses Image Generator / PoseCraft for production framing; Spatial Map camera direction is shelved.",
         read_only=False,
         requires_approval=True,
         http_ref="POST /api/codirector/m213/scene-state",
@@ -1474,7 +1500,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         subsystem="virtual_environment",
         baseline_status=S.DEFERRED_VERSION_1_2,
         summary="Environment Studio lighting state deferred to Version 1.2. "
-        "Version 1.1 uses Spatial Map lighting direction.",
+        "Version 1.1 uses Environment Creator / Image Generator lighting intent; Spatial Map lighting is shelved.",
         read_only=False,
         requires_approval=True,
         http_ref="POST /api/codirector/m213/scene-state",

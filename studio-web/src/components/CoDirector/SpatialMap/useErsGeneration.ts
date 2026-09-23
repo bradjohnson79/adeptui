@@ -1,6 +1,7 @@
-/**
- * Shared ERS generation hook for Spatial Map Express + Standard.
- * One path: Spatial Map -> ers.generate -> Image Core -> persist composite.
+﻿/**
+ * Shared ERS generation hook for Environment Creator Express + Standard (and Spatial Map when present).
+ * One path: project (+ optional Spatial Map) -> ers.generate -> Image Core -> persist composite.
+ * Spatial Map is optional enrichment; ERS package/sheet/composite is the environment authority.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../api";
@@ -8,8 +9,9 @@ import { isTerminal, type WorkSurfaceState } from "../AgentWorkSurface/types";
 import { normalizeErsError, stripHandlerError } from "./ersErrorMessage";
 import {
   ERS_GENERATOR_DEFAULT,
+  ERS_GPT_OFFICIAL_ID,
+  ERS_GPT_T2I_ID,
   buildErsStartContext,
-  ersGeneratorOptionDisabled,
   formatErsProvenance,
   generatorBlockReason,
   hasAuthoritativeEnvironmentSource,
@@ -24,6 +26,24 @@ import {
 import { normalizeJobProgress, type NormalizedJobProgress } from "./normalizeJobProgress";
 import type { SpatialMapDocument } from "./types";
 
+
+/** Planning fields from Environment Creator (optional; Spatial Map ignores). */
+export type ErsPlanningContext = {
+  name?: string;
+  isGlobal?: boolean;
+  environmentPrompt?: string;
+  referenceImageAssetId?: string;
+  storyTheme?: string;
+  aspectRatio?: string;
+  generator?: string;
+  characters?: Array<{ characterId: string; crsAssetId?: string }>;
+  props?: Array<{
+    propId: string;
+    prsAssetId?: string;
+    assignment?: string;
+    characterId?: string;
+  }>;
+};
 export type ErsPhase = "idle" | "queued" | "generating" | "complete" | "failed";
 
 export type ErsModelLine = {
@@ -97,7 +117,10 @@ export function readStoredGenerator(
   if (!projectId || typeof window === "undefined") return fallback;
   try {
     const raw = window.localStorage.getItem(ersGeneratorStorageKey(projectId));
-    if (raw != null && ERS_GENERATOR_IDS.has(raw as ErsGeneratorId)) return raw as ErsGeneratorId;
+    if (raw != null && ERS_GENERATOR_IDS.has(raw as ErsGeneratorId)) {
+      const stored = raw as ErsGeneratorId;
+      return stored === "qwen2512" ? ERS_GENERATOR_DEFAULT : stored;
+    }
   } catch {
     // storage unavailable — fall back to the default
   }
@@ -107,7 +130,8 @@ export function readStoredGenerator(
 export function writeStoredGenerator(projectId: string, id: ErsGeneratorId): void {
   if (!projectId || typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(ersGeneratorStorageKey(projectId), id);
+    const stored = id === "qwen2512" ? ERS_GENERATOR_DEFAULT : id;
+    window.localStorage.setItem(ersGeneratorStorageKey(projectId), stored);
   } catch {
     // storage unavailable — in-memory only
   }
@@ -192,6 +216,23 @@ function countsFromDocument(document: SpatialMapDocument | null | undefined): Er
   };
 }
 
+/** Spatial Map counts when a document exists. Otherwise the Environment Creator plan. */
+export function countsForErsSurface(
+  document: SpatialMapDocument | null | undefined,
+  planning?: { environmentPrompt?: string | null; characters?: unknown[] | null; props?: unknown[] | null } | null,
+  sourceAssetId?: string | null,
+): ErsContextCounts {
+  if (document) return countsFromDocument(document);
+  const prompt = String(planning?.environmentPrompt || "").trim();
+  const source = String(sourceAssetId || "").trim();
+  return {
+    environment: prompt || source ? 1 : 0,
+    characters: Array.isArray(planning?.characters) ? planning.characters.length : 0,
+    props: Array.isArray(planning?.props) ? planning.props.length : 0,
+    cameras: 0,
+  };
+}
+
 function executionSpatialMapId(res: any): string {
   const plan = asRecord(res);
   const planData = asRecord(plan.plan_data);
@@ -209,6 +250,16 @@ function childJobId(exec: WorkSurfaceState | null): string | null {
   return id ? String(id) : null;
 }
 
+/** Optional Env Creator Express planning fields merged into ers.generate context. */
+export type ErsPlanningFields = {
+  environmentPrompt?: string | null;
+  storyTheme?: string | null;
+  aspectRatio?: string | null;
+  generator?: ErsGeneratorId | null;
+  characters?: unknown[] | null;
+  props?: unknown[] | null;
+};
+
 type Args = {
   projectId: string;
   spatialMapId: string | null;
@@ -216,6 +267,12 @@ type Args = {
   activeExecution: WorkSurfaceState | null | undefined;
   setActiveExecution: (next: WorkSurfaceState | null) => void;
   attachOnly?: boolean;
+  /** When false (Environment Creator), do not auto-load an existing project ERS into the surface. */
+  hydrateExistingSheets?: boolean;
+  /** Authoritative environment image for GPT I2I when no Spatial Map is attached. */
+  sourceAssetId?: string | null;
+  /** Planning fields (prompt/aspect/etc). Source optional when environmentPrompt set. */
+  planning?: ErsPlanningFields | ErsPlanningContext | null;
 };
 
 const IDLE_PROGRESS: NormalizedJobProgress = {
@@ -258,6 +315,75 @@ export const ERS_MAP_SCOPED_STATE_KEYS = [
  * Default values for the map-scoped slice of ERS state. Used to reset the hook
  * when the active Spatial Map document changes.
  */
+/** Pure startExecution payload for ers.generate. Map id optional (Env Creator). */
+export function buildErsGenerateStartPayload(
+  spatialMapId?: string | null,
+  sourceAssetId?: string | null,
+  planning?: ErsPlanningContext | ErsPlanningFields | null,
+): { capability: "ers.generate"; context: Record<string, unknown> } {
+  const refFromPlan =
+    planning && "referenceImageAssetId" in planning
+      ? String((planning as ErsPlanningContext).referenceImageAssetId || "").trim()
+      : "";
+  const source = String(sourceAssetId || refFromPlan || "").trim();
+  const prompt = String(planning?.environmentPrompt || "").trim();
+  const storyTheme = String(planning?.storyTheme || "").trim();
+  const aspectRatio = String(planning?.aspectRatio || "").trim();
+  const generatorRaw = planning?.generator || "gpt-image-2";
+  const generator: ErsGeneratorId =
+    generatorRaw === "qwen2512" ? "qwen2512" : "gpt-image-2";
+  const base = buildErsStartContext(generator);
+  // Prompt-only: pin hosted T2I Market id. With source: keep I2I pin from buildErsStartContext.
+  const modelPins =
+    !source && generator !== "qwen2512"
+      ? {
+          kieImageModelId: ERS_GPT_T2I_ID,
+          kie_image_model_id: ERS_GPT_T2I_ID,
+        }
+      : source && generator !== "qwen2512"
+        ? {
+            kieImageModelId: ERS_GPT_OFFICIAL_ID,
+            kie_image_model_id: ERS_GPT_OFFICIAL_ID,
+          }
+        : {};
+  const context: Record<string, unknown> = {
+    ...base,
+    ...modelPins,
+    ...(spatialMapId ? { spatial_map_id: spatialMapId } : {}),
+    ...(source ? { source_asset_id: source, reference_image: source } : {}),
+  };
+  const envName = String((planning as ErsPlanningContext | undefined)?.name || "").trim();
+  if (envName) {
+    context.name = envName;
+  }
+  if ((planning as ErsPlanningContext | undefined)?.isGlobal) {
+    context.isGlobal = true;
+    context.is_global = true;
+  }
+  if (prompt) {
+    context.environmentPrompt = prompt;
+    context.environment_prompt = prompt;
+    context.prompt = prompt;
+  }
+  if (storyTheme) {
+    context.storyTheme = storyTheme;
+    context.story_theme = storyTheme;
+  }
+  if (aspectRatio) {
+    context.aspectRatio = aspectRatio;
+    context.aspect_ratio = aspectRatio;
+  }
+  if (generatorRaw) context.generator = generatorRaw;
+  if (Array.isArray(planning?.characters) && planning!.characters!.length) {
+    context.characters = planning!.characters;
+  }
+  if (Array.isArray(planning?.props) && planning!.props!.length) {
+    context.props = planning!.props;
+  }
+  return { capability: "ers.generate", context };
+}
+
+
 export function emptyErsMapScopedState(): Pick<
   ErsGenerationState,
   (typeof ERS_MAP_SCOPED_STATE_KEYS)[number]
@@ -287,6 +413,9 @@ export function useErsGeneration({
   activeExecution,
   setActiveExecution,
   attachOnly = false,
+  hydrateExistingSheets = true,
+  sourceAssetId = null,
+  planning = null,
 }: Args) {
   const inFlightRef = useRef(false);
   const startedAtRef = useRef<number | null>(null);
@@ -315,22 +444,33 @@ export function useErsGeneration({
   const [gateOverride, setGateOverride] = useState(false);
   const [sheetFingerprint, setSheetFingerprint] = useState<string | null>(null);
 
-  const counts = useMemo(() => countsFromDocument(document), [document]);
+  const counts = useMemo(
+    () => countsForErsSurface(document, planning, sourceAssetId),
+    [document, planning, sourceAssetId],
+  );
   const hasSource = useMemo(
-    () => hasAuthoritativeEnvironmentSource(document),
-    [document],
+    () =>
+      Boolean(String(sourceAssetId || "").trim()) ||
+      hasAuthoritativeEnvironmentSource(document),
+    [document, sourceAssetId],
+  );
+  const hasPrompt = useMemo(
+    () => Boolean(String(planning?.environmentPrompt || "").trim()),
+    [planning?.environmentPrompt],
   );
   const blockReason = useMemo(
     () =>
       generatorBlockReason(
-        selectedGenerator,
+        "gpt-image-2",
         qwenReady,
         gptReady,
         qwenI2IReady,
         gptI2IReady,
-        document ? hasSource : null,
+        // true => I2I readiness; false => prompt-only / need prompt-or-source message
+        hasSource ? true : false,
+        hasPrompt,
       ),
-    [document, gptI2IReady, gptReady, hasSource, qwenI2IReady, qwenReady, selectedGenerator],
+    [gptI2IReady, gptReady, hasPrompt, hasSource, qwenI2IReady, qwenReady],
   );
   const provenance = useMemo(() => formatErsProvenance(model), [model]);
 
@@ -365,7 +505,7 @@ export function useErsGeneration({
   }, []);
 
   const refreshSheetState = useCallback(async (): Promise<void> => {
-    if (!projectId || !spatialMapId) return;
+    if (!projectId) return;
     try {
       const listed = await api.environmentReferenceSheet.listSheets(projectId);
       const sheets = (listed.sheets || []) as Array<{
@@ -382,7 +522,9 @@ export function useErsGeneration({
         try {
           full = asRecord(await api.environmentReferenceSheet.getSheet(projectId, summary.sheetId));
           const mapId = asRecord(asRecord(full.sheet).spatialMap).mapId;
-          if (mapId && String(mapId) !== spatialMapId) continue;
+          // Map is optional enrichment: when a map is active, prefer matching sheets;
+          // when absent, accept project-scoped sheets (including map-less).
+          if (spatialMapId && mapId && String(mapId) !== spatialMapId) continue;
         } catch {
           // summary asset is still usable
         }
@@ -414,9 +556,9 @@ export function useErsGeneration({
     }
   }, [projectId, sheetId]);
 
-  const setSelectedGenerator = useCallback((id: ErsGeneratorId) => {
-    writeStoredGenerator(projectId, id);
-    setSelectedGeneratorState(id);
+  const setSelectedGenerator = useCallback((_id: ErsGeneratorId) => {
+    writeStoredGenerator(projectId, "gpt-image-2");
+    setSelectedGeneratorState("gpt-image-2");
   }, [projectId]);
 
   const applyProgress = useCallback((jobLike: unknown, exec?: WorkSurfaceState | null) => {
@@ -432,7 +574,7 @@ export function useErsGeneration({
     });
     setModel(nextModel);
     const reconnect = resolveErsGeneratorFromModel(nextModel);
-    if (reconnect) {
+    if (reconnect === "gpt-image-2") {
       writeStoredGenerator(projectId, reconnect);
       setSelectedGeneratorState(reconnect);
     }
@@ -561,17 +703,32 @@ export function useErsGeneration({
     if (exec) attachExecution(exec);
   }, [activeExecution, applyProgress, attachExecution, executionId, jobId, markLive, phase, projectId, setActiveExecution]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (overridePlanning?: ErsPlanningFields | ErsPlanningContext | null) => {
     if (attachOnly) return;
-    if (!projectId || !spatialMapId) return;
+    if (!projectId) return;
     if (inFlightRef.current || busy) return;
+    const mergedPlanning: ErsPlanningFields | ErsPlanningContext = {
+      ...(planning || {}),
+      ...(overridePlanning || {}),
+    };
+    const source = String(sourceAssetId || "").trim();
+    const prompt = String(mergedPlanning.environmentPrompt || "").trim();
+    const mapHasSource =
+      Boolean(spatialMapId) && hasAuthoritativeEnvironmentSource(document);
+    // Need projectId; need (sourceAssetId OR environmentPrompt OR spatialMap with source).
+    if (!source && !prompt && !mapHasSource) {
+      setError("Describe the environment in the prompt, or attach a source/reference image.");
+      setErrorDetail(null);
+      return;
+    }
     const blocked = generatorBlockReason(
-      selectedGenerator,
+      "gpt-image-2",
       qwenReady,
       gptReady,
       qwenI2IReady,
       gptI2IReady,
-      document ? hasSource : null,
+      source || mapHasSource ? true : false,
+      Boolean(prompt),
     );
     if (blocked) {
       setError(blocked);
@@ -586,7 +743,7 @@ export function useErsGeneration({
     setElapsedSec(0);
     setPhase("queued");
     setBusy(true);
-    setModel(provenanceModelFromSelection(selectedGenerator));
+    setModel(provenanceModelFromSelection("gpt-image-2"));
     setProgress({
       status: "queued",
       progressPercent: null,
@@ -598,13 +755,10 @@ export function useErsGeneration({
       genuineSampler: false,
     });
     try {
-      const res = await api.startExecution(projectId, {
-        capability: "ers.generate",
-        context: {
-          spatial_map_id: spatialMapId,
-          ...buildErsStartContext(selectedGenerator),
-        },
-      });
+      const res = await api.startExecution(
+        projectId,
+        buildErsGenerateStartPayload(spatialMapId, sourceAssetId, mergedPlanning),
+      );
       const exec = normalizeExecution(res, "ers.generate");
       attachExecution(exec);
     } catch (err) {
@@ -615,7 +769,7 @@ export function useErsGeneration({
       markLive("failed");
       setBusy(false);
     }
-  }, [attachOnly, attachExecution, busy, document, gptI2IReady, gptReady, hasSource, markLive, projectId, qwenI2IReady, qwenReady, selectedGenerator, spatialMapId]);
+  }, [attachOnly, attachExecution, busy, document, gptI2IReady, gptReady, markLive, planning, projectId, qwenI2IReady, qwenReady, sourceAssetId, spatialMapId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -643,19 +797,11 @@ export function useErsGeneration({
     };
   }, []);
 
-  // Capability-aware ERS selection: once readiness resolves, if the currently
-  // selected generator cannot perform I2I but another compatible generator is
-  // ready, auto-select the compatible one. This keeps the ERS workflow usable
-  // without a persistent red "unavailable" error during normal operation.
   useEffect(() => {
-    if (qwenI2IReady === null && gptI2IReady === null) return; // readiness not resolved yet
-    const currentDisabled = ersGeneratorOptionDisabled(selectedGenerator, qwenI2IReady, gptI2IReady);
-    if (!currentDisabled) return; // current choice is fine
-    const preferred = qwenI2IReady ? "qwen2512" : gptI2IReady ? "gpt-image-2" : null;
-    if (preferred && preferred !== selectedGenerator) {
-      setSelectedGeneratorState(preferred);
+    if (selectedGenerator !== "gpt-image-2") {
+      setSelectedGeneratorState("gpt-image-2");
     }
-  }, [qwenI2IReady, gptI2IReady, selectedGenerator]);
+  }, [selectedGenerator]);
 
   // CDX-072: if the project changes without a remount, re-seed the generator
   // from the NEW project's stored choice so project B never inherits
@@ -700,7 +846,7 @@ export function useErsGeneration({
   }, [spatialMapId]);
 
   useEffect(() => {
-    if (!projectId || !spatialMapId) return;
+    if (!projectId) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -711,6 +857,8 @@ export function useErsGeneration({
           if (cap !== "ers.generate") return false;
           if (isTerminal(normalizeExecution(row, "ers.generate"))) return false;
           const mapId = executionSpatialMapId(row);
+          // With no active map, attach any in-flight project ERS execution.
+          if (!spatialMapId) return !mapId;
           return !mapId || mapId === spatialMapId;
         });
         if (!cancelled && match && !inFlightRef.current) {
@@ -726,7 +874,8 @@ export function useErsGeneration({
   }, [attachExecution, projectId, spatialMapId]);
 
   useEffect(() => {
-    if (!projectId || !spatialMapId || compositeAssetId) return;
+    if (!hydrateExistingSheets) return;
+    if (!projectId || compositeAssetId) return;
     let cancelled = false;
     void (async () => {
       const before = compositeAssetId;
@@ -753,7 +902,7 @@ export function useErsGeneration({
     return () => {
       cancelled = true;
     };
-  }, [compositeAssetId, phase, projectId, refreshSheetState, spatialMapId]);
+  }, [compositeAssetId, hydrateExistingSheets, phase, projectId, refreshSheetState, spatialMapId]);
 
   useEffect(() => {
     if (!executionId || !busy) return;

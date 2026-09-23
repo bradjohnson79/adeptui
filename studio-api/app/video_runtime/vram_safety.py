@@ -113,8 +113,8 @@ def _safe_presets(
     new_f = int(frames)
     recs: list[str] = []
     if width >= 1600 or height >= 900:
-        new_w, new_h = 1280, 720
-        recs.append(f"Reduce resolution from {int(width)}×{int(height)} to 1280×720")
+        new_w, new_h = 1280, 704
+        recs.append(f"A legal 720p class canvas is 1280×704 — Adept will not apply this for you.")
     elif width > 960:
         new_w, new_h = 960, 544
         recs.append(f"Reduce resolution from {int(width)}×{int(height)} to 960×544")

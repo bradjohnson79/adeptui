@@ -37,7 +37,8 @@ def _capabilities() -> VideoGeneratorCapabilities:
         maximumReferenceImages=1,
         maximumReferenceVideos=0,
         maximumReferenceAudio=0,
-        supportedDurations=[5.0, 10.0],
+        # CERTIFIED_CURRENT (Brad + fal OpenAPI veo3.1): 4/6/8s — prior 10 was STALE_LIMIT
+        supportedDurations=[4.0, 6.0, 8.0],
         supportedResolutions=["1280x720"],
         supportedAspectRatios=["16:9", "9:16", "1:1"],
         supportsSeed=True,

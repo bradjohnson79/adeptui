@@ -1,5 +1,7 @@
 /** Timeline workspace layout prefs — local only, not project media. */
 
+import { clampTimelineZoom } from "./timelineZoom";
+
 export const TIMELINE_WORKSPACE_KEY = "adept_timeline_workspace_layout_v1";
 export const TIMELINE_LAYOUT_EVENT = "adept-timeline-layout";
 
@@ -33,6 +35,8 @@ export type TimelineWorkspaceLayout = {
   rightWidth: number;
   leftDrawerOpen: boolean;
   rightDrawerOpen: boolean;
+  /** Preview Monitor publish/MAGI action bar. Timeline workspace only. */
+  previewPublishBarVisible: boolean;
 };
 
 export const DEFAULT_VIEWER_PRESET: TimelineViewerPreset = "large";
@@ -103,6 +107,7 @@ export const DEFAULT_TIMELINE_WORKSPACE: TimelineWorkspaceLayout = {
   rightWidth: DEFAULT_RIGHT_WIDTH,
   leftDrawerOpen: false,
   rightDrawerOpen: false,
+  previewPublishBarVisible: true,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -130,7 +135,7 @@ function normalizeSnapshot(
     trackDensity: snapshot.trackDensity || "compact",
     zoom:
       typeof snapshot.zoom === "number" && Number.isFinite(snapshot.zoom)
-        ? clamp(snapshot.zoom, 0.5, 3)
+        ? clampTimelineZoom(snapshot.zoom)
         : 1,
   };
 }
@@ -144,7 +149,7 @@ function normalizeWorkspaceLayout(parsed: Partial<TimelineWorkspaceLayout>): Tim
         ? parsed.monitorHeightPx
         : getPresetViewerRatio(preset, currentViewportWidth());
   const zoom =
-    typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom) ? clamp(parsed.zoom, 0.5, 3) : 1;
+    typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom) ? clampTimelineZoom(parsed.zoom) : 1;
 
   return {
     ...DEFAULT_TIMELINE_WORKSPACE,
@@ -162,6 +167,7 @@ function normalizeWorkspaceLayout(parsed: Partial<TimelineWorkspaceLayout>): Tim
     zoom,
     leftDrawerOpen: parsed.leftDrawerOpen === true,
     rightDrawerOpen: parsed.rightDrawerOpen === true,
+    previewPublishBarVisible: parsed.previewPublishBarVisible !== false,
     ...clampSidebarWidths(
       typeof parsed.leftWidth === "number" ? parsed.leftWidth : DEFAULT_LEFT_WIDTH,
       typeof parsed.rightWidth === "number" ? parsed.rightWidth : DEFAULT_RIGHT_WIDTH,
@@ -195,6 +201,18 @@ export function clampDrawerWidth(side: DrawerSide, proposed: number): number {
   return clamp(Math.round(Number.isFinite(proposed) ? proposed : fallback), paneMin, paneMax);
 }
 
+/** Track canvas inset so clips never paint under an open drawer. Closed = 0.
+ *  CSS must use margin (not padding): overflow clips to the padding box. */
+export function timelineWorkspaceInsets(layout: Pick<TimelineWorkspaceLayout, "leftDrawerOpen" | "rightDrawerOpen" | "leftWidth" | "rightWidth">): {
+  left: number;
+  right: number;
+} {
+  return {
+    left: layout.leftDrawerOpen ? layout.leftWidth : 0,
+    right: layout.rightDrawerOpen ? layout.rightWidth : 0,
+  };
+}
+
 export function resetTimelineWorkspaceLayout(): TimelineWorkspaceLayout {
   return saveTimelineWorkspaceLayout({
     ...DEFAULT_TIMELINE_WORKSPACE,
@@ -217,7 +235,7 @@ export function createTimelineViewerSnapshot(
     viewerPreset: layout.viewerPreset,
     viewerHeight: layout.viewerHeight,
     trackDensity: layout.trackDensity,
-    zoom: clamp(layout.zoom, 0.5, 3),
+    zoom: clampTimelineZoom(layout.zoom),
   };
 }
 
@@ -248,7 +266,11 @@ export function saveTimelineWorkspaceLayout(patch: Partial<TimelineWorkspaceLayo
     /* ignore */
   }
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(TIMELINE_LAYOUT_EVENT, { detail: next }));
+    // Defer so a persist during TimelineWorkspaceStack render cannot setState
+    // on TimelineEditorShell in the same render pass.
+    queueMicrotask(() => {
+      window.dispatchEvent(new CustomEvent(TIMELINE_LAYOUT_EVENT, { detail: next }));
+    });
   }
   return next;
 }
@@ -279,4 +301,118 @@ export function resolveViewerHeight(layout: TimelineWorkspaceLayout, containerHe
 export function clampMonitorHeight(px: number, viewportHeight: number, dockSafe = 72): number {
   const containerHeight = Math.max(520, Math.floor(viewportHeight - dockSafe));
   return clampViewerHeight(px, containerHeight, typeof window !== "undefined" ? window.innerWidth : 1440);
+}
+
+/** MAGI finishing stack — isolated from Timeline Generator Large Viewer. */
+export const MAGI_CENTER_SPLIT_KEY = "adept_magi_center_split_v1";
+export const MAGI_LAYOUT_EVENT = "adept-magi-center-split";
+export const MAGI_SPLIT_MIGRATED_KEY = "adept_magi_center_split_v1_migrated";
+export const MAGI_DEFAULT_VIEWER_RATIO = 0.5;
+export const MAGI_VIEWER_MIN_PX = 240;
+/** Toolbar + ruler + VIDEO/AUDIO/MUSIC/SFX must stay in the stack. */
+export const MAGI_REGION_MIN_PX = 268;
+
+export function magiPreviewHeightStorageKey(projectId?: string | null): string {
+  const id = (projectId || "").trim() || "global";
+  return `adept-ui.magi.preview-height.${id}`;
+}
+
+export function loadMagiProjectPreviewHeightRatio(projectId?: string | null): number | null {
+  try {
+    const raw = localStorage.getItem(magiPreviewHeightStorageKey(projectId));
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveMagiProjectPreviewHeightRatio(projectId: string | null | undefined, ratio: number): void {
+  try {
+    localStorage.setItem(magiPreviewHeightStorageKey(projectId), String(ratio));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function magiViewerHeightBounds(containerHeight: number): { min: number; max: number } {
+  const usable = Math.max(containerHeight || 0, 1);
+  if (usable >= MAGI_VIEWER_MIN_PX + MAGI_REGION_MIN_PX + 8) {
+    return { min: MAGI_VIEWER_MIN_PX, max: usable - MAGI_REGION_MIN_PX };
+  }
+  const min = Math.max(80, Math.round(usable * 0.35));
+  return { min, max: Math.max(min, usable - min) };
+}
+
+export function clampMagiViewerHeight(px: number, containerHeight: number): number {
+  const { min, max } = magiViewerHeightBounds(containerHeight);
+  return clamp(Math.round(px), min, max);
+}
+
+export function resolveMagiViewerHeight(viewerHeight: number, containerHeight: number): number {
+  const raw = typeof viewerHeight === "number" && viewerHeight > 0 ? viewerHeight : MAGI_DEFAULT_VIEWER_RATIO;
+  const px = raw <= 1 ? (containerHeight || 0) * raw : raw;
+  return clampMagiViewerHeight(px || containerHeight * MAGI_DEFAULT_VIEWER_RATIO, containerHeight);
+}
+
+export function loadMagiCenterSplit(): { viewerHeight: number } {
+  try {
+    const raw = localStorage.getItem(MAGI_CENTER_SPLIT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { viewerHeight?: number };
+      if (typeof parsed.viewerHeight === "number" && parsed.viewerHeight > 0) {
+        return { viewerHeight: parsed.viewerHeight };
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    if (!localStorage.getItem(MAGI_SPLIT_MIGRATED_KEY)) {
+      localStorage.setItem(MAGI_SPLIT_MIGRATED_KEY, "1");
+    }
+  } catch {
+    /* ignore */
+  }
+  return { viewerHeight: MAGI_DEFAULT_VIEWER_RATIO };
+}
+
+export function saveMagiCenterSplit(patch: { viewerHeight?: number; monitorHeightPx?: number }): {
+  viewerHeight: number;
+} {
+  const current = loadMagiCenterSplit();
+  const next = {
+    viewerHeight:
+      typeof patch.viewerHeight === "number" && patch.viewerHeight > 0
+        ? patch.viewerHeight
+        : current.viewerHeight,
+  };
+  try {
+    localStorage.setItem(MAGI_CENTER_SPLIT_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore */
+  }
+  if (typeof window !== "undefined") {
+    queueMicrotask(() => {
+      window.dispatchEvent(new CustomEvent(MAGI_LAYOUT_EVENT, { detail: next }));
+    });
+  }
+  return next;
+}
+
+export function resetMagiCenterSplit(projectId?: string | null): { viewerHeight: number } {
+  const next = { viewerHeight: MAGI_DEFAULT_VIEWER_RATIO };
+  try {
+    localStorage.setItem(MAGI_CENTER_SPLIT_KEY, JSON.stringify(next));
+    localStorage.removeItem(magiPreviewHeightStorageKey(projectId));
+  } catch {
+    /* ignore */
+  }
+  if (typeof window !== "undefined") {
+    queueMicrotask(() => {
+      window.dispatchEvent(new CustomEvent(MAGI_LAYOUT_EVENT, { detail: next }));
+    });
+  }
+  return next;
 }

@@ -67,8 +67,8 @@ def capability_snapshot(*, territory: str, deployment: H3Deployment) -> dict[str
                 "MiniMax H3 is available for private local use on the Experimental Private Profile "
                 "(text-to-video and one-frame image-to-video with native audio).",
                 "Timeline Re-take is supported for text-to-video continuity variations (Private Local / Route A only).",
-                "Three Frame, PoseCraft, and ERS are not supported on this profile yet.",
-                "Three-frame requests are assembled as two guided passes rather than one native three-keyframe run.",
+                "CREATE 3 Frame uses local MiniMaxH3ImageToVideo first+last with optional MiniMaxH3AddGuide.",
+                "CREATE 3 Frame native local path uses AddGuide for optional middle; empty middle is pure first+last.",
             ]
             if excluded:
                 # Private owner access is territory-agnostic (local owner machine);
@@ -89,10 +89,10 @@ def capability_snapshot(*, territory: str, deployment: H3Deployment) -> dict[str
                 "creatorEnabled": public_creator_enabled(),
                 "bestMatchEnabled": best_match_enabled(),
                 "automaticRoutingEnabled": general_routing_enabled(),
-                "threeFrameNative": False,
-                "threeFrameStrategyDefault": "segmented-a",
+                "threeFrameNative": True,
+                "threeFrameStrategyDefault": "middle-guidance-b",
                 "supports2k": False,
-                "supportsStartEndFrame": False,
+                "supportsStartEndFrame": True,
                 "supportsStartFrame": True,
                 "supportsTextToVideo": True,
                 "supportsNativeAudio": True,
@@ -104,13 +104,19 @@ def capability_snapshot(*, territory: str, deployment: H3Deployment) -> dict[str
                 "approvalRequired": False,
                 "executable": True,
                 "profile": "Experimental Private Profile",
-                "notes": notes,
+                "maxDurationSec": 5 / 24,
+                "frameCount": 5,
+                "fps": 24.0,
+                "notes": notes + [
+                    "Generated length is 5 frames at 24 fps (~0.21s). This is not a 5-second or 15-second generator.",
+                ],
             }
         capability = "Unavailable" if excluded else "Requires Setup"
         status = "blocked" if excluded else "setup_required"
         notes = [
             "Local MiniMax H3 remains disabled in this build until license and runtime certification are complete.",
-            "Three-frame requests are assembled as two guided passes rather than one native three-keyframe run.",
+            "CREATE 3 Frame native local path uses AddGuide for optional middle; empty middle is pure first+last.",
+            "Hosted 4–15s is not certified. The only measured local profile is 5 frames at 24 fps (~0.21s).",
         ]
         if excluded:
             notes.insert(0, "Local MiniMax H3 weights are not licensed for this territory.")
@@ -119,7 +125,8 @@ def capability_snapshot(*, territory: str, deployment: H3Deployment) -> dict[str
         status = "approval_required"
         notes = [
             "Hosted MiniMax H3 may be prepared on this surface, but each generation requires explicit creator approval.",
-            "Three-frame requests are assembled as two guided passes rather than one native three-keyframe run.",
+            "CREATE 3 Frame native local path uses AddGuide for optional middle; empty middle is pure first+last.",
+            "Hosted 4–15s is not certified. Do not treat this as a 15-second generator.",
         ]
     return {
         "modelId": "minimax-h3",
@@ -135,8 +142,8 @@ def capability_snapshot(*, territory: str, deployment: H3Deployment) -> dict[str
         "creatorEnabled": public_creator_enabled(),
         "bestMatchEnabled": best_match_enabled(),
         "automaticRoutingEnabled": general_routing_enabled(),
-        "threeFrameNative": False,
-        "threeFrameStrategyDefault": "segmented-a",
+        "threeFrameNative": True,
+        "threeFrameStrategyDefault": "middle-guidance-b",
         "supports2k": False if deployment == "local_weights" else None,
         "supportsStartEndFrame": True if deployment == "api" else False,
         "supportsTextToVideo": True,

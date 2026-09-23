@@ -159,8 +159,11 @@ def _add_character(db: Session, project_id: str, card: KnowledgeCard) -> None:
         from app.character_identity.schemas import CharacterProfileCreate, CharacterProfileUpdate
         from app.character_identity.service import create_profile, list_profiles, update_profile
 
+        from app.creator_scope.contract import normalize_profile_name
+
         profiles = list_profiles(db, project_id)
-        existing = [p for p in profiles if p.name.lower() == card.title.lower()] if profiles else []
+        key = normalize_profile_name(card.title)
+        existing = [p for p in profiles if normalize_profile_name(p.name) == key] if profiles else []
         if existing:
             update_profile(
                 db,

@@ -212,6 +212,7 @@ def compile_environment_reference_sheet_prompt(
     characters: list[Any] | None = None,
     props: list[Any] | None = None,
     cameras: list[Any] | None = None,
+    camera_facts: list[Any] | None = None,
     contextual_subjects: list[Any] | None = None,
     visual_style: str = "",
     atlas_note: str = "",
@@ -319,6 +320,9 @@ def compile_environment_reference_sheet_prompt(
         lines.extend(f"- {line}" for line in contextual_lines)
     if camera_names:
         lines.append("Cameras (scale / blocking on the map only if listed): " + ", ".join(camera_names))
+    fact_lines = [_text(item) for item in (camera_facts or []) if _text(item)]
+    if fact_lines:
+        lines.extend(f"- {fact}" for fact in fact_lines)
     if atlas:
         lines.append(
             "The Atlas / source environment image is the pixel authority for this sheet "

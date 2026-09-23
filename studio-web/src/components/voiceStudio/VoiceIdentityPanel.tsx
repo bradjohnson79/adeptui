@@ -1,7 +1,28 @@
-﻿import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../ui";
 import { PanelHeading } from "../HelpTip";
+import { VoiceMethodCards } from "./VoiceMethodCards";
+import { ApprovedVoicePlayer } from "./ApprovedVoicePlayer";
+import { VoiceSamplePlayers, type VoiceSamplePlayerItem } from "./VoiceSamplePlayers";
+import { VoiceStudioSelect } from "./VoiceStudioSelect";
+import {
+  canApproveSelectedVoice,
+  compileVoiceCloneGenerateBody,
+  compileVoiceIdentityGenerateBody,
+  pickRestorableVoiceCandidates,
+  voiceStudioErrorMessage,
+} from "./voiceIdentityBrief";
+import {
+  approvedDefaultVoiceMessage,
+  approvedVoiceBannerSubtitle,
+  approvedVoiceBannerTitle,
+  approvedVoiceVersionLabel,
+  noApprovedDefaultVoiceMessage,
+} from "./defaultVoiceCopy";
+import { choosePortraitAssetId } from "./voicePortrait";
+import { voiceIdentityAction, type VoiceIdentityMethod } from "./voiceIdentityRoute";
+import { isCurrentCharacterRequest } from "./voiceStudioCharacter";
 import "./VoiceIdentityPanel.css";
 
 const AGE_OPTIONS = [
@@ -29,67 +50,43 @@ const ACCENTS = [
   "Custom",
 ] as const;
 
-const SAMPLE_LINES = [
-  { id: "greeting", text: "Hey there. Didn't expect to see you here." },
-  { id: "question", text: "What makes you think you can just walk in like that?" },
-  { id: "serious", text: "Listen carefully, because I'm only going to say this once." },
-  { id: "warm", text: "It's good to see you. Really. I mean it." },
-  { id: "excited", text: "You have no idea how long I've been waiting for this moment!" },
-];
-
-const METHOD_CARDS = [
-  {
-    id: "create" as const,
-    label: "Create New Voice",
-    description: "Design a new voice from scratch",
-    icon: "\U+1F3A4",
-  },
-  {
-    id: "existing" as const,
-    label: "Use Existing Voice",
-    description: "Select from saved voice profiles",
-    icon: "\U+1F4C1",
-  },
-  {
-    id: "clone" as const,
-    label: "Clone from Recording",
-    description: "Clone a voice from a recording",
-    icon: "\U+1F4CB",
-  },
-  {
-    id: "upload" as const,
-    label: "Upload Voice",
-    description: "Upload a prepared voice file",
-    icon: "\U+1F4E4",
-  },
-];
-
-type VoiceMethod = "create" | "existing" | "clone" | "upload";
-
-type GeneratedSample = {
-  id: string;
-  status: string;
-  audioUrl?: string;
-};
+type GeneratedSample = VoiceSamplePlayerItem;
 
 type Props = {
   projectId: string;
   characterId: string;
   characterName?: string;
+  variant?: "standard" | "express";
+  preferredMethod?: VoiceIdentityMethod | null;
   onMsg: (m: string) => void;
   onVoiceApproved?: () => void;
   onNavigate?: (tab: string) => void;
   onRefresh?: () => void;
+  onOpenFullStudio?: (characterId: string) => void;
+  onCharacterChange?: (characterId: string) => void;
 };
 
-export function VoiceIdentityPanel({ projectId, characterId, characterName, onMsg, onVoiceApproved: _onVoiceApproved, onNavigate: _onNavigate, onRefresh: _onRefresh }: Props) {
+export function VoiceIdentityPanel({
+  projectId,
+  characterId,
+  characterName,
+  variant = "standard",
+  preferredMethod = null,
+  onMsg,
+  onVoiceApproved,
+  onNavigate: _onNavigate,
+  onRefresh,
+  onOpenFullStudio,
+  onCharacterChange,
+}: Props) {
   const [characters, setCharacters] = useState<any[]>([]);
   const [selectedCharacterId, setSelectedCharacterId] = useState(characterId);
-  const [selectedCharacterName, setSelectedCharacterName] = useState(characterName);
+  const [selectedCharacterName, setSelectedCharacterName] = useState(characterName || "");
+  const [portraitUrl, setPortraitUrl] = useState("");
   const [creatingCharacter, setCreatingCharacter] = useState(false);
   const [newCharName, setNewCharName] = useState("");
 
-  const [method, setMethod] = useState<VoiceMethod | null>(null);
+  const [method, setMethod] = useState<VoiceIdentityMethod | null>(null);
   const [sex, setSex] = useState<"female" | "male">("female");
   const [age, setAge] = useState<string>(AGE_OPTIONS[4]);
   const [script, setScript] = useState("");
@@ -103,16 +100,49 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
   const [archetype, setArchetype] = useState<string>(ARCHETYPES[0]);
   const [accent, setAccent] = useState<string>(ACCENTS[0]);
   const [sampleCount, setSampleCount] = useState<1 | 2 | 3 | 4>(4);
+  const sampleCountRef = useRef<1 | 2 | 3 | 4>(4);
+  const scriptRef = useRef("");
+  sampleCountRef.current = sampleCount;
+  scriptRef.current = script;
 
   const [generationState, setGenerationState] = useState<"idle" | "generating" | "done">("idle");
+  const [voiceJob, setVoiceJob] = useState<{
+    jobId?: string | null;
+    status?: string;
+    phase?: string;
+    label?: string;
+    percent?: number;
+    sampleCount?: number;
+    sampleIndex?: number;
+    completedSamples?: number;
+    error?: string | null;
+    candidates?: unknown[];
+    voiceId?: string | null;
+  } | null>(null);
+  const generatingRef = useRef(false);
+  const approvingRef = useRef(false);
   const [samples, setSamples] = useState<GeneratedSample[]>([]);
   const [approvedVoice, setApprovedVoice] = useState<any | null>(null);
   const [hasApprovedVoice, setHasApprovedVoice] = useState(false);
+  const [previousApprovedVoices, setPreviousApprovedVoices] = useState<any[]>([]);
+  const [approveState, setApproveState] = useState<"idle" | "approving" | "approved">("idle");
   const [expanded, setExpanded] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [existingVoices, setExistingVoices] = useState<any[]>([]);
+  const [existingVoiceId, setExistingVoiceId] = useState("");
+  const [cloneFile, setCloneFile] = useState<File | null>(null);
+  const [consent, setConsent] = useState(false);
 
   const [refineLoading, setRefineLoading] = useState(false);
   const [refinePreview, setRefinePreview] = useState<string | null>(null);
+
+  const [voiceId, setVoiceId] = useState("");
+  const [boundCharacterId, setBoundCharacterId] = useState("");
+  const [selectedSampleId, setSelectedSampleId] = useState("");
+  const selectedCharacterIdRef = useRef(selectedCharacterId);
+  const selectedCharacterNameRef = useRef(selectedCharacterName);
+  selectedCharacterIdRef.current = selectedCharacterId;
+  selectedCharacterNameRef.current = selectedCharacterName;
 
   const loadCharacters = useCallback(async () => {
     try {
@@ -123,21 +153,177 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
     }
   }, [projectId]);
 
-  const loadApprovedStatus = useCallback(async () => {
+  const applyApprovedFromWorkspace = useCallback((ws: any, fallbackName: string) => {
+    const active = ws?.activeVoice;
+    const approved = Boolean(
+      ws?.activeVoiceProfileId
+      && String(active?.approval_status || "").toLowerCase() === "approved",
+    );
+    const previous = Array.isArray(ws?.previousApprovedVoices) ? ws.previousApprovedVoices : [];
+    setPreviousApprovedVoices(previous);
+    if (!approved) {
+      setHasApprovedVoice(false);
+      setApprovedVoice(null);
+      return;
+    }
+    const previewId = String(active?.approved_preview_asset_id || active?.approvedPreviewAssetId || "");
+    setHasApprovedVoice(true);
+    setApprovedVoice({
+      id: String(ws.activeVoiceProfileId),
+      name: String(active?.name || fallbackName || "Approved Voice"),
+      characterName: fallbackName,
+      versionNumber: active?.version_number,
+      audioUrl: previewId ? api.assetUrl(previewId, undefined, projectId) : undefined,
+    });
+  }, [projectId]);
+
+  const loadPortrait = useCallback(async (cid: string) => {
     try {
-      const res: any = await api.voiceApprovedStatus(projectId);
-      const approved = res?.approvedVoice || res?.items?.[0] || null;
-      setApprovedVoice(approved);
-      setHasApprovedVoice(Boolean(approved));
+      const refs = await api.listCharacterReferences(projectId, cid);
+      if (!isCurrentCharacterRequest(cid, selectedCharacterIdRef.current)) return;
+      const assetId = choosePortraitAssetId(refs.items);
+      setPortraitUrl(assetId ? api.assetUrl(assetId, undefined, projectId) : "");
     } catch {
-      /* ignore */
+      if (!isCurrentCharacterRequest(cid, selectedCharacterIdRef.current)) return;
+      setPortraitUrl("");
     }
   }, [projectId]);
 
+  const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+  const pollVoiceJob = useCallback(async (cid: string) => {
+    const started = Date.now();
+    while (Date.now() - started < 40 * 60 * 1000) {
+      if (selectedCharacterIdRef.current !== cid) return null;
+      const job = await api.getCharacterVoiceGenerateStatus(projectId, cid);
+      setVoiceJob(job);
+      const status = String(job?.status || "");
+      if (status === "complete" || status === "failed" || status === "idle") {
+        return job;
+      }
+      await sleep(800);
+    }
+    return null;
+  }, [projectId]);
+
+  const loadExistingVoices = useCallback(async (cid: string, fallbackName: string) => {
+    try {
+      const live = await api.getCharacterVoiceGenerateStatus(projectId, cid).catch(() => null);
+      if (!isCurrentCharacterRequest(cid, selectedCharacterIdRef.current)) return;
+      if (live && live.status === "complete" && Array.isArray(live.candidates) && live.candidates.length) {
+        if (String(live.mode || "") === "clone") setMethod("clone");
+        else setMethod("create");
+        setVoiceJob(live);
+        setVoiceId(String(live.voiceId || ""));
+        setBoundCharacterId(cid);
+        const next = (live.candidates || []).map((candidate: any, index: number) => {
+          const assetId = candidate?.assetId || candidate?.asset_id || (typeof candidate === "string" ? candidate : "");
+          return {
+            id: String(candidate?.id || assetId || `sample-${index}`),
+            status: candidate?.status || (assetId ? "ready" : "failed"),
+            assetId: assetId ? String(assetId) : undefined,
+            audioUrl: assetId ? api.assetUrl(String(assetId), undefined, projectId) : undefined,
+          };
+        });
+        setSamples(next);
+        setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || "");
+        setGenerationState("done");
+      }
+      if (live && (live.status === "queued" || live.status === "running")) {
+        generatingRef.current = true;
+        setGenerationState("generating");
+        setVoiceJob(live);
+        if (String(live.mode || "") === "clone") setMethod("clone");
+        else setMethod("create");
+        const finished = await pollVoiceJob(cid);
+        if (!isCurrentCharacterRequest(cid, selectedCharacterIdRef.current)) return;
+        generatingRef.current = false;
+        if (finished?.status === "complete") {
+          setVoiceId(String(finished.voiceId || ""));
+          setBoundCharacterId(cid);
+          const next = (finished.candidates || []).map((candidate: any, index: number) => {
+            const assetId = candidate?.assetId || candidate?.asset_id || (typeof candidate === "string" ? candidate : "");
+            return {
+              id: String(candidate?.id || assetId || `sample-${index}`),
+              status: candidate?.status || (assetId ? "ready" : "failed"),
+              assetId: assetId ? String(assetId) : undefined,
+              audioUrl: assetId ? api.assetUrl(String(assetId), undefined, projectId) : undefined,
+            };
+          });
+          setSamples(next);
+          setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || "");
+          setGenerationState("done");
+          return;
+        }
+        if (finished?.status === "failed") {
+          setErrors([String(finished.error || "Voice generation failed.")]);
+          setGenerationState("idle");
+          return;
+        }
+      }
+      const ws = await api.getCharacterVoiceWorkspace(projectId, cid);
+      if (!isCurrentCharacterRequest(cid, selectedCharacterIdRef.current)) return;
+      const voices = ws?.voices || [];
+      setExistingVoices(voices);
+      applyApprovedFromWorkspace(ws, fallbackName || String(ws?.characterName || ""));
+      const restored = pickRestorableVoiceCandidates(voices);
+      if (!restored) return;
+      const next = mapCandidates(restored.candidates);
+      if (!next.some((sample) => sample.audioUrl)) return;
+      setVoiceId(restored.voiceId);
+      setBoundCharacterId(cid);
+      setSamples(next);
+      setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || "");
+      setGenerationState("done");
+      if (restored.sourceMode.toUpperCase() === "CLONE") setMethod("clone");
+      else if (restored.sourceMode.toUpperCase() === "DESIGN") setMethod("create");
+    } catch {
+      if (!isCurrentCharacterRequest(cid, selectedCharacterIdRef.current)) return;
+      setExistingVoices([]);
+      setHasApprovedVoice(false);
+      setApprovedVoice(null);
+    }
+  }, [applyApprovedFromWorkspace, pollVoiceJob, projectId]);
+
+  useEffect(() => {
+    setSelectedCharacterId(characterId);
+  }, [characterId]);
+
+  useEffect(() => {
+    if (preferredMethod) setMethod(preferredMethod);
+  }, [preferredMethod]);
+
+  useEffect(() => {
+    const match = characters.find((c) => c.id === selectedCharacterId);
+    if (match) setSelectedCharacterName(match.name || match.characterName || characterName || "");
+    else if (characterName) setSelectedCharacterName(characterName);
+  }, [characters, selectedCharacterId, characterName]);
+
   useEffect(() => {
     void loadCharacters();
-    void loadApprovedStatus();
-  }, [loadCharacters, loadApprovedStatus]);
+  }, [loadCharacters]);
+
+  useEffect(() => {
+    if (!selectedCharacterId) {
+      setHasApprovedVoice(false);
+      setApprovedVoice(null);
+      setPortraitUrl("");
+      return;
+    }
+    setHasApprovedVoice(false);
+    setApprovedVoice(null);
+    setPreviousApprovedVoices([]);
+    setApproveState("idle");
+    setPortraitUrl("");
+    setVoiceId("");
+    setSelectedSampleId("");
+    setSamples([]);
+    setBoundCharacterId("");
+    setGenerationState("idle");
+    setErrors([]);
+    void loadPortrait(selectedCharacterId);
+    void loadExistingVoices(selectedCharacterId, selectedCharacterNameRef.current);
+  }, [selectedCharacterId, loadPortrait, loadExistingVoices]);
 
   const handleCreateCharacter = useCallback(async () => {
     if (!newCharName.trim()) return;
@@ -149,12 +335,13 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
         setSelectedCharacterName(newCharName.trim());
         setCreatingCharacter(false);
         setNewCharName("");
+        onCharacterChange?.(id);
         await loadCharacters();
       }
     } catch {
       /* ignore */
     }
-  }, [newCharName, projectId, loadCharacters]);
+  }, [newCharName, projectId, loadCharacters, onCharacterChange]);
 
   const handleRefinePrompt = useCallback(async () => {
     if (!promptDetails.trim()) return;
@@ -178,17 +365,6 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
     }
   }, [promptDetails, selectedCharacterName, projectId, onMsg]);
 
-  const handleAcceptRefine = useCallback(() => {
-    if (refinePreview) {
-      setPromptDetails(refinePreview);
-      setRefinePreview(null);
-    }
-  }, [refinePreview]);
-
-  const handleRejectRefine = useCallback(() => {
-    setRefinePreview(null);
-  }, []);
-
   const validate = useCallback((): string[] => {
     const errs: string[] = [];
     if (!selectedCharacterId) errs.push("Please select a character.");
@@ -197,93 +373,344 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
       if (!sex) errs.push("Please select a voice type.");
       if (!age) errs.push("Please select an age range.");
     }
+    if (method === "existing" && !existingVoiceId) errs.push("Pick a saved voice from the list.");
+    if (method === "clone" && !cloneFile) errs.push("Choose a recording to clone.");
+    if (method === "clone" && !consent) {
+      errs.push("Confirm you have permission to clone this recording.");
+    }
+    if ((method === "clone" || method === "create") && !scriptRef.current.trim()) {
+      errs.push("Enter the line the voice should speak.");
+    }
     return errs;
-  }, [selectedCharacterId, method, sex, age]);
+  }, [selectedCharacterId, method, sex, age, existingVoiceId, cloneFile, consent]);
+
+  const mapCandidates = (items: any[]): GeneratedSample[] =>
+    (items || []).map((candidate: any, index: number) => {
+      if (typeof candidate === "string") {
+        return {
+          id: candidate,
+          status: "ready",
+          audioUrl: api.assetUrl(candidate, undefined, projectId),
+        };
+      }
+      const assetId = candidate.assetId || candidate.asset_id;
+      return {
+        id: String(candidate.id || assetId || `sample-${index}`),
+        status: candidate.status || (assetId ? "ready" : "failed"),
+        assetId: assetId ? String(assetId) : undefined,
+        audioUrl: assetId ? api.assetUrl(assetId, undefined, projectId) : undefined,
+        error: candidate.error ? String(candidate.error) : undefined,
+      };
+    });
 
   const handleGenerate = useCallback(async () => {
     const errs = validate();
     setErrors(errs);
     if (errs.length > 0) return;
-
+    if (generatingRef.current || generationState === "generating") return;
+    const action = voiceIdentityAction(method);
+    if (action === "none") {
+      onMsg("Pick a saved voice. Generate is for new samples.");
+      return;
+    }
+    generatingRef.current = true;
     setGenerationState("generating");
+    setApproveState("idle");
+    setErrors([]);
     setSamples([]);
+    setSelectedSampleId("");
+    setVoiceJob({
+      status: "queued",
+      phase: "preparing",
+      label: "Preparing recording",
+      percent: 6,
+      sampleCount: sampleCountRef.current,
+      sampleIndex: 0,
+      completedSamples: 0,
+    });
+    const cid = selectedCharacterId;
     try {
-      const body: Record<string, unknown> = {
-        sex,
-        age,
-        script: script.trim() || undefined,
-        prompt: promptDetails.trim() || undefined,
-        emotion,
-        intensity,
-        speed,
-        pitch,
-        archetype,
-        accent,
-        sampleCount,
-      };
-      const res = await api.generateCharacterVoiceCandidates(projectId, selectedCharacterId, body);
-      const items: GeneratedSample[] = (res?.candidates || res?.items || []).map((c: any) => ({
-        id: c.id,
-        status: c.status || "ready",
-        audioUrl: c.assetId ? api.assetUrl(c.assetId) : undefined,
-      }));
-      setSamples(items);
+      let started: any = null;
+      if (action === "clone" && cloneFile) {
+        const uploaded = await api.uploadAsset(projectId, cloneFile, "voice-clone-ref", "audio");
+        started = await api.cloneCharacterVoiceWorkspace(
+          projectId,
+          cid,
+          {
+            ...compileVoiceCloneGenerateBody({
+              name: selectedCharacterName + " Clone",
+              characterName: selectedCharacterName,
+              referencePath: uploaded.path || "",
+              referenceAssetId: uploaded.id,
+              testLine: scriptRef.current.trim(),
+              sampleCount: sampleCountRef.current,
+              consentConfirmed: consent,
+            }),
+            asyncJob: true,
+          },
+        );
+      } else {
+        started = await api.generateCharacterVoiceCandidates(
+          projectId,
+          cid,
+          {
+            ...compileVoiceIdentityGenerateBody({
+              sex,
+              age,
+              accent,
+              archetype,
+              script: scriptRef.current,
+              promptDetails,
+              sampleCount: sampleCountRef.current,
+            }),
+            asyncJob: true,
+          },
+        );
+      }
+      if (started?.async || started?.jobId) {
+        setVoiceJob(started);
+        const finished = await pollVoiceJob(cid);
+        if (!isCurrentCharacterRequest(cid, selectedCharacterIdRef.current)) return;
+        if (finished?.status === "complete") {
+          setVoiceId(String(finished.voiceId || started.voiceId || ""));
+          setBoundCharacterId(cid);
+          const next = mapCandidates(finished.candidates || []);
+          setSamples(next);
+          setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || "");
+          setGenerationState("done");
+          setVoiceJob(finished);
+          return;
+        }
+        const reason = String(finished?.error || "Voice generation failed.");
+        setVoiceJob(finished || { status: "failed", phase: "failed", percent: started?.percent || 0, error: reason });
+        setGenerationState("idle");
+        setErrors([reason]);
+        onMsg(reason);
+        return;
+      }
+      setVoiceId(started?.id || started?.voice?.id || "");
+      setBoundCharacterId(cid);
+      const next = mapCandidates(started?.candidates || started?.items || []);
+      setSamples(next);
+      setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || next[0]?.id || "");
       setGenerationState("done");
-    } catch {
+      setVoiceJob({
+        status: "complete",
+        phase: "complete",
+        label: "Voice samples ready",
+        percent: 100,
+        sampleCount: next.length,
+        completedSamples: next.length,
+      });
+    } catch (error: unknown) {
       setGenerationState("idle");
-      onMsg("Voice generation failed.");
+      const reason = voiceStudioErrorMessage(error);
+      setVoiceJob((prev) => ({
+        ...(prev || {}),
+        status: "failed",
+        phase: "failed",
+        label: "Voice generation failed",
+        error: reason,
+        percent: prev?.percent && prev.percent < 100 ? prev.percent : 8,
+      }));
+      setErrors([reason]);
+      onMsg(reason);
+    } finally {
+      generatingRef.current = false;
     }
   }, [
-    validate, sex, age, script, promptDetails, emotion, intensity, speed, pitch,
-    archetype, accent, sampleCount, projectId, selectedCharacterId, onMsg,
+    validate, method, cloneFile, consent, projectId, generationState, pollVoiceJob,
+    selectedCharacterId, selectedCharacterName, sex, age, accent, archetype, promptDetails, onMsg,
   ]);
+
+  const handleSelectSample = useCallback(
+    async (sample: GeneratedSample) => {
+      setSelectedSampleId(sample.id);
+      if (!voiceId) return;
+      try {
+        await api.selectVoiceForTesting(projectId, selectedCharacterId, {
+          voiceId,
+          candidateId: sample.id,
+        });
+      } catch {
+        /* selection is still local if the testing bind fails */
+      }
+    },
+    [voiceId, projectId, selectedCharacterId],
+  );
 
   const handleApprove = useCallback(
     async (sampleId: string) => {
+      if (boundCharacterId && boundCharacterId !== selectedCharacterId) {
+        onMsg("That sample belongs to another character. It was not approved here.");
+        return;
+      }
+      if (approvingRef.current) return;
       try {
-        const candidate = samples.find((s) => s.id === sampleId);
-        if (!candidate) return;
-        await api.approveCharacterVoiceCandidate(projectId, selectedCharacterId, {
+        const fromFinal = samples.find((s) => s.id === sampleId);
+        if (!fromFinal?.audioUrl || !voiceId) {
+          onMsg("Approve needs the selected generated sample for this character.");
+          return;
+        }
+        if (selectedSampleId && selectedSampleId !== sampleId) {
+          onMsg("Select the sample you want to approve first.");
+          return;
+        }
+        approvingRef.current = true;
+        setApproveState("approving");
+        setErrors([]);
+        const approved = await api.approveCharacterVoiceCandidate(projectId, selectedCharacterId, {
+          voiceId,
           candidateId: sampleId,
         });
+        const previewAssetId = String(
+          fromFinal.assetId
+          || approved?.voice?.approved_preview_asset_id
+          || approved?.voice?.approvedPreviewAssetId
+          || "",
+        );
+        setSelectedSampleId(sampleId);
         setApprovedVoice({
-          id: sampleId,
-          name: selectedCharacterName + " Voice",
+          id: voiceId,
+          voiceProfileId: voiceId,
+          assetId: previewAssetId,
+          name: String(approved?.voice?.name || selectedCharacterName + " Voice"),
           characterName: selectedCharacterName,
-          audioUrl: candidate.audioUrl,
+          versionNumber: approved?.voice?.version_number,
+          audioUrl: fromFinal.audioUrl,
           approvedAt: new Date().toISOString(),
         });
         setHasApprovedVoice(true);
-        onMsg("Voice approved.");
-      } catch {
-        onMsg("Failed to approve voice candidate.");
+        setApproveState("approved");
+        onVoiceApproved?.();
+        onRefresh?.();
+        onMsg(approvedDefaultVoiceMessage(selectedCharacterName));
+        void loadExistingVoices(selectedCharacterId, selectedCharacterName);
+      } catch (error: unknown) {
+        setApproveState("idle");
+        const reason = voiceStudioErrorMessage(error, "Failed to approve voice candidate.");
+        setErrors([reason]);
+        onMsg(reason);
+      } finally {
+        approvingRef.current = false;
       }
     },
-    [samples, projectId, selectedCharacterId, selectedCharacterName, onMsg],
+    [
+      boundCharacterId, selectedCharacterId, samples, voiceId, selectedSampleId,
+      projectId, selectedCharacterName, onMsg, onVoiceApproved, onRefresh, loadExistingVoices,
+    ],
   );
+
+  const handleUseExisting = useCallback(async (voiceOverride?: string) => {
+    const targetId = voiceOverride || existingVoiceId;
+    if (!targetId || approvingRef.current) return;
+    try {
+      approvingRef.current = true;
+      setApproveState("approving");
+      setErrors([]);
+      const approved = await api.approveCharacterVoiceCandidate(projectId, selectedCharacterId, {
+        voiceId: targetId,
+      });
+      setHasApprovedVoice(true);
+      setApproveState("approved");
+      onVoiceApproved?.();
+      onRefresh?.();
+      onMsg(approvedDefaultVoiceMessage(selectedCharacterName));
+      void loadExistingVoices(selectedCharacterId, selectedCharacterName);
+      if (approved?.voice) {
+        const previewId = String(approved.voice.approved_preview_asset_id || approved.voice.approvedPreviewAssetId || "");
+        setApprovedVoice({
+          id: String(approved.voice.id || targetId),
+          name: String(approved.voice.name || selectedCharacterName || "Approved Voice"),
+          characterName: selectedCharacterName,
+          versionNumber: approved.voice.version_number,
+          audioUrl: previewId ? api.assetUrl(previewId, undefined, projectId) : undefined,
+        });
+      }
+    } catch (error: unknown) {
+      setApproveState("idle");
+      onMsg(voiceStudioErrorMessage(error, "Could not use that saved voice."));
+    } finally {
+      approvingRef.current = false;
+    }
+  }, [existingVoiceId, projectId, selectedCharacterId, selectedCharacterName, onMsg, onVoiceApproved, onRefresh, loadExistingVoices]);
 
   return (
     <section className="voice-identity-panel" data-testid="voice-identity-panel">
-      <PanelHeading title="Voice Identity" tip="Create, select, or approve a voice identity for this character." as="h2" />
+      <div className="vip-identity-hero">
+        <div className="vip-identity-portrait" data-testid="vip-character-portrait">
+          {portraitUrl ? (
+            <img src={portraitUrl} alt={selectedCharacterName || "Character"} />
+          ) : (
+            <div className="vip-identity-portrait-fallback">
+              {(selectedCharacterName || "?").slice(0, 1).toUpperCase()}
+            </div>
+          )}
+        </div>
+        <div>
+          <PanelHeading
+            title={variant === "express" ? "Voice Creator" : "Voice Identity"}
+            tip={
+              variant === "express"
+                ? "Create or assign this character's default voice. Timeline and Co-Director will use it automatically when the character speaks."
+                : "Create, select, or approve this character's default voice."
+            }
+            as="h2"
+          />
+          <p className="muted">{selectedCharacterName || "Choose a character"}</p>
+        </div>
+      </div>
 
-      {hasApprovedVoice && approvedVoice && (
+      {hasApprovedVoice && approvedVoice ? (
         <div className="vip-approved-banner" data-testid="vip-approved-voice">
           <div className="vip-approved-banner__header">
-            <strong>Approved Voice</strong>
-            <span className="muted"> — {approvedVoice.name}</span>
+            <strong data-testid="vip-approved-title">
+              {approvedVoiceBannerTitle(String(approvedVoice.name || ""), selectedCharacterName)}
+            </strong>
+            {approvedVoiceVersionLabel(approvedVoice.versionNumber) ? (
+              <span className="vip-approved-version" data-testid="vip-approved-version">
+                Current {approvedVoiceVersionLabel(approvedVoice.versionNumber)}
+              </span>
+            ) : (
+              <span className="vip-approved-version" data-testid="vip-approved-version">Current</span>
+            )}
           </div>
-          <p className="muted">Character: {approvedVoice.characterName || selectedCharacterName}</p>
+          <p className="muted" data-testid="vip-approved-subtitle">{approvedVoiceBannerSubtitle()}</p>
           {approvedVoice.audioUrl ? (
-            <audio controls src={approvedVoice.audioUrl} data-testid="vip-approved-audio" />
+            <ApprovedVoicePlayer
+              audioUrl={approvedVoice.audioUrl}
+              label={String(approvedVoice.name || selectedCharacterName || "approved voice")}
+            />
           ) : null}
-          <p className="muted">
-            Approved:{" "}
-            {approvedVoice.approvedAt
-              ? new Date(approvedVoice.approvedAt).toLocaleDateString()
-              : " — "}
-          </p>
+          {previousApprovedVoices.length > 0 ? (
+            <div className="vip-voice-history" data-testid="vip-voice-history">
+              <p className="muted">Previous versions</p>
+              {previousApprovedVoices.map((voice) => (
+                <div key={String(voice.id)} className="vip-voice-history__row">
+                  <span>
+                    {String(voice.name || "Approved voice")}
+                    {approvedVoiceVersionLabel(voice.version_number)
+                      ? ` ${approvedVoiceVersionLabel(voice.version_number)}`
+                      : ""}
+                  </span>
+                  <Button
+                    data-testid={`vip-use-version-${voice.id}`}
+                    disabled={approveState === "approving"}
+                    onClick={() => void handleUseExisting(String(voice.id))}
+                  >
+                    Use this version
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
-      )}
+      ) : selectedCharacterId ? (
+        <div className="vip-empty-voice" data-testid="vip-no-approved-voice">
+          <strong>No approved default voice</strong>
+          <p className="muted">{noApprovedDefaultVoiceMessage(selectedCharacterName)}</p>
+        </div>
+      ) : null}
 
       {errors.length > 0 && (
         <div className="vip-errors" data-testid="vip-errors">
@@ -295,34 +722,33 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
         </div>
       )}
 
+      {variant === "express" ? (
       <div className="vip-section" data-testid="vip-character-section">
-        <label className="vip-label">
+        <span className="vip-label">
           Select Character
-          <select
-            className="vip-select"
-            data-testid="vs-character-select"
-            value={selectedCharacterId}
-            onChange={(e) => {
-              const val = e.target.value;
+          <VoiceStudioSelect
+            ariaLabel="Select Character"
+            testId="vs-character-select"
+            value={creatingCharacter ? "__new__" : selectedCharacterId}
+            options={[
+              { value: "", label: "Select a character..." },
+              ...characters.map((c) => ({
+                value: String(c.id),
+                label: String(c.name || c.characterName || c.id),
+              })),
+              { value: "__new__", label: "Create New Character" },
+            ]}
+            onChange={(val) => {
               if (val === "__new__") {
                 setCreatingCharacter(true);
               } else {
                 setSelectedCharacterId(val);
-                const char = characters.find((c) => c.id === val);
-                setSelectedCharacterName(char?.name || char?.characterName || "");
                 setCreatingCharacter(false);
+                if (val) onCharacterChange?.(val);
               }
             }}
-          >
-            <option value="">Select a character...</option>
-            {characters.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name || c.characterName || c.id}
-              </option>
-            ))}
-            <option value="__new__">Create New Character</option>
-          </select>
-        </label>
+          />
+        </span>
         {creatingCharacter && (
           <div className="vip-inline-create">
             <input
@@ -338,90 +764,106 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
           </div>
         )}
       </div>
+      ) : null}
 
       <div className="vip-section" data-testid="vip-method-section">
         <PanelHeading title="Choose Voice Method" tip="Pick one way to get a voice." as="h3" />
-        <div className="vip-method-grid">
-          {METHOD_CARDS.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              className={"vip-method-card" + (method === card.id ? " selected" : "")}
-              data-testid={"vs-method-" + card.id}
-              onClick={() => setMethod(card.id)}
-            >
-              <span className="vip-method-icon">{card.icon}</span>
-              <strong>{card.label}</strong>
-              <span className="muted">{card.description}</span>
-            </button>
-          ))}
-        </div>
+        <VoiceMethodCards
+          method={method}
+          onSelect={(next) => {
+            setMethod(next);
+            setErrors([]);
+          }}
+        />
       </div>
 
-      {method === "create" && (
-        <div className="vip-section" data-testid="vip-basics-section">
-          <PanelHeading title="Voice Basics" tip="Set the fundamental voice characteristics." as="h3" />
+      {method === "existing" && (
+        <div className="vip-section" data-testid="vip-existing-section">
+          <span className="vip-label">
+            Saved voices for {selectedCharacterName || "this character"}
+            <VoiceStudioSelect
+              ariaLabel="Saved voices"
+              testId="vs-existing-voice"
+              value={existingVoiceId}
+              options={[
+                { value: "", label: "Choose a saved voice…" },
+                ...existingVoices.map((voice) => ({
+                  value: String(voice.id),
+                  label: [
+                    voice.name || voice.id,
+                    approvedVoiceVersionLabel(voice.version_number),
+                    voice.id === approvedVoice?.id ? "current" : "",
+                    voice.approval_status === "approved" && voice.id !== approvedVoice?.id ? "approved" : "",
+                  ].filter(Boolean).join(" · "),
+                })),
+              ]}
+              onChange={setExistingVoiceId}
+            />
+          </span>
+          <Button
+            variant="primary"
+            data-testid="vs-use-existing"
+            disabled={!existingVoiceId || approveState === "approving"}
+            onClick={() => void handleUseExisting()}
+          >
+            {approveState === "approving" ? "Approving..." : "Use this voice"}
+          </Button>
+        </div>
+      )}
 
+      {method === "clone" && (
+        <div className="vip-section" data-testid="vip-clone-section">
           <label className="vip-label">
-            Sex
-            <div className="vip-toggle-group" data-testid="vs-sex">
-              <button
-                type="button"
-                className={"vip-toggle" + (sex === "female" ? " selected" : "")}
-                onClick={() => setSex("female")}
-              >
-                Female
-              </button>
-              <button
-                type="button"
-                className={"vip-toggle" + (sex === "male" ? " selected" : "")}
-                onClick={() => setSex("male")}
-              >
-                Male
-              </button>
-            </div>
+            Recording
+            <input
+              className="vip-input"
+              type="file"
+              accept="audio/*"
+              data-testid="vs-clone-file"
+              onChange={(e) => setCloneFile(e.target.files?.[0] || null)}
+            />
           </label>
-
-          <label className="vip-label">
-            Age Range
-            <select className="vip-select" data-testid="vs-age" value={age} onChange={(e) => setAge(e.target.value)}>
-              {AGE_OPTIONS.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
+          <label className="vip-consent">
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} data-testid="vs-consent" />
+            I have permission to clone this recording for {selectedCharacterName || "this character"}.
           </label>
         </div>
       )}
 
+      {method === "create" && (
+        <div className="vip-section" data-testid="vip-basics-section">
+          <PanelHeading title="Voice Basics" tip="Set the fundamental voice characteristics." as="h3" />
+          <label className="vip-label">
+            Sex
+            <div className="vip-toggle-group" data-testid="vs-sex">
+              <button type="button" className={"vip-toggle" + (sex === "female" ? " selected" : "")} onClick={() => setSex("female")}>
+                Female
+              </button>
+              <button type="button" className={"vip-toggle" + (sex === "male" ? " selected" : "")} onClick={() => setSex("male")}>
+                Male
+              </button>
+            </div>
+          </label>
+          <span className="vip-label">
+            Age Range
+            <VoiceStudioSelect
+              ariaLabel="Age Range"
+              testId="vs-age"
+              value={age}
+              options={AGE_OPTIONS.map((option) => ({ value: option, label: option }))}
+              onChange={setAge}
+            />
+          </span>
+        </div>
+      )}
+
+      {(method === "create" || method === "clone") && (
       <div className="vip-section" data-testid="vip-script-section">
         <label className="vip-label">
           Script / Sample Text
-          <div className="vip-sample-toolbar">
-            <select
-              className="vip-select"
-              data-testid="vs-sample-preset"
-              defaultValue=""
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val) {
-                  const found = SAMPLE_LINES.find((s) => s.id === val);
-                  if (found) setScript(found.text);
-                }
-              }}
-            >
-              <option value="">Use Sample...</option>
-              {SAMPLE_LINES.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.id.charAt(0).toUpperCase() + s.id.slice(1)}
-                </option>
-              ))}
-            </select>
-          </div>
           <textarea
             className="vip-textarea"
-            rows={4}
+            rows={3}
             data-testid="vs-script"
             placeholder="Enter the line the character should speak..."
             value={script}
@@ -429,41 +871,43 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
           />
         </label>
       </div>
+      )}
 
-      <div className="vip-section" data-testid="vip-prompt-section">
-        <label className="vip-label">
-          Voice Prompt Details
-          <textarea
-            className="vip-textarea"
-            rows={4}
-            data-testid="vs-prompt-details"
-            placeholder="Describe what the voice should sound like..."
-            value={promptDetails}
-            onChange={(e) => setPromptDetails(e.target.value)}
-          />
-        </label>
-        <Button
-          data-testid="vs-refine-prompt"
-          disabled={refineLoading || !promptDetails.trim()}
-          onClick={handleRefinePrompt}
-        >
-          {refineLoading ? "Refining..." : "Refine with Co-Director"}
-        </Button>
-        {refinePreview !== null && (
-          <div className="vip-refine-preview" data-testid="vip-refine-preview">
-            <p className="vip-refine-preview__text">{refinePreview}</p>
-            <div className="vip-actions">
-              <Button data-testid="vip-accept-refine" variant="primary" onClick={handleAcceptRefine}>
-                Accept
-              </Button>
-              <Button data-testid="vip-reject-refine" onClick={handleRejectRefine}>
-                Reject
-              </Button>
-            </div>
+      {method === "create" && (
+        <div className="vip-section" data-testid="vip-prompt-section">
+          <label className="vip-label">
+            Voice Prompt Details
+            <textarea
+              className="vip-textarea"
+              rows={3}
+              data-testid="vs-prompt-details"
+              placeholder="Describe what the voice should sound like..."
+              value={promptDetails}
+              onChange={(e) => setPromptDetails(e.target.value)}
+            />
+          </label>
+          <div className="vip-actions">
+            <Button data-testid="vs-refine-prompt" disabled={refineLoading || !promptDetails.trim()} onClick={handleRefinePrompt}>
+              {refineLoading ? "Refining..." : "Refine with Co-Director"}
+            </Button>
           </div>
-        )}
-      </div>
+          {refinePreview !== null && (
+            <div className="vip-refine-preview" data-testid="vip-refine-preview">
+              <p className="vip-refine-preview__text">{refinePreview}</p>
+              <div className="vip-actions">
+                <Button data-testid="vip-accept-refine" variant="primary" onClick={() => { setPromptDetails(refinePreview); setRefinePreview(null); }}>
+                  Accept
+                </Button>
+                <Button data-testid="vip-reject-refine" onClick={() => setRefinePreview(null)}>
+                  Reject
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
+      {method === "create" && (
       <details
         className="vip-accordion"
         open={expanded}
@@ -471,116 +915,58 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
         data-testid="vs-advanced-controls"
       >
         <summary>Advanced Voice Controls</summary>
-
         <div className="vip-gauge" data-testid="vs-emotion">
           <label className="vip-gauge-label">Emotional Expression</label>
-          <input
-            type="range"
-            min={-2}
-            max={2}
-            step={1}
-            value={emotion}
-            onChange={(e) => setEmotion(Number(e.target.value))}
-          />
-          <div className="vip-gauge-labels">
-            <span>-2 Anger</span>
-            <span>-1 Sadness</span>
-            <span>0 Neutral</span>
-            <span>+1 Cheerful</span>
-            <span>+2 Excited</span>
-          </div>
+          <input type="range" min={-2} max={2} step={1} value={emotion} onChange={(e) => setEmotion(Number(e.target.value))} />
         </div>
-
         <div className="vip-gauge" data-testid="vs-intensity">
           <label className="vip-gauge-label">Emotional Intensity</label>
-          <input
-            type="range"
-            min={-5}
-            max={5}
-            step={1}
-            value={intensity}
-            onChange={(e) => setIntensity(Number(e.target.value))}
-          />
-          <div className="vip-gauge-labels vip-gauge-labels--numeric">
-            {[-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5].map((n) => (
-              <span key={n}>{n}</span>
-            ))}
-          </div>
+          <input type="range" min={-5} max={5} step={1} value={intensity} onChange={(e) => setIntensity(Number(e.target.value))} />
         </div>
-
         <div className="vip-gauge" data-testid="vs-speed">
           <label className="vip-gauge-label">Speaking Speed</label>
-          <input
-            type="range"
-            min={-5}
-            max={5}
-            step={1}
-            value={speed}
-            onChange={(e) => setSpeed(Number(e.target.value))}
-          />
-          <div className="vip-gauge-labels vip-gauge-labels--numeric">
-            {[-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5].map((n) => (
-              <span key={n}>{n}</span>
-            ))}
-          </div>
+          <input type="range" min={-5} max={5} step={1} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} />
         </div>
-
         <div className="vip-gauge" data-testid="vs-pitch">
           <label className="vip-gauge-label">Pitch</label>
-          <input
-            type="range"
-            min={-5}
-            max={5}
-            step={1}
-            value={pitch}
-            onChange={(e) => setPitch(Number(e.target.value))}
-          />
-          <div className="vip-gauge-labels vip-gauge-labels--numeric">
-            {[-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5].map((n) => (
-              <span key={n}>{n}</span>
-            ))}
-          </div>
+          <input type="range" min={-5} max={5} step={1} value={pitch} onChange={(e) => setPitch(Number(e.target.value))} />
         </div>
       </details>
+      )}
 
+      {method === "create" && (
       <div className="vip-section" data-testid="vip-archetype-section">
-        <label className="vip-label">
+        <span className="vip-label">
           Character Archetype
-          <select
-            className="vip-select"
-            data-testid="vs-archetype"
+          <VoiceStudioSelect
+            ariaLabel="Character Archetype"
+            testId="vs-archetype"
             value={archetype}
-            onChange={(e) => setArchetype(e.target.value)}
-          >
-            {ARCHETYPES.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-        </label>
+            options={ARCHETYPES.map((option) => ({ value: option, label: option }))}
+            onChange={setArchetype}
+          />
+        </span>
       </div>
+      )}
 
+      {method === "create" && (
       <div className="vip-section" data-testid="vip-accent-section">
-        <label className="vip-label">
+        <span className="vip-label">
           Accent
-          <select
-            className="vip-select"
-            data-testid="vs-accent"
+          <VoiceStudioSelect
+            ariaLabel="Accent"
+            testId="vs-accent"
             value={accent}
-            onChange={(e) => setAccent(e.target.value)}
-          >
-            {ACCENTS.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-        </label>
+            options={ACCENTS.map((option) => ({ value: option, label: option }))}
+            onChange={setAccent}
+          />
+        </span>
       </div>
+      )}
 
+      {(method === "create" || method === "clone") && (
       <div className="vip-section" data-testid="vip-sample-count-section">
-        <label className="vip-label">
+        <div className="vip-label">
           Number of Samples
           <div className="vip-sample-count-selector" data-testid="vs-sample-count">
             {([1, 2, 3, 4] as const).map((n) => (
@@ -588,16 +974,24 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
                 key={n}
                 type="button"
                 className={"vip-sample-count-btn" + (sampleCount === n ? " selected" : "")}
-                onClick={() => setSampleCount(n)}
+                aria-pressed={sampleCount === n}
+                disabled={generationState === "generating"}
+                onClick={() => {
+                  sampleCountRef.current = n;
+                  setSampleCount(n);
+                }}
               >
                 {n}
               </button>
             ))}
           </div>
-        </label>
+        </div>
       </div>
+      )}
 
+      {(method === "create" || method === "clone" || generationState === "generating" || voiceJob?.status === "failed") && (
       <div className="vip-section" data-testid="vip-generate-section">
+        {(method === "create" || method === "clone") && (
         <Button
           variant="primary"
           className="vip-generate-btn"
@@ -607,34 +1001,85 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
         >
           {generationState === "generating" ? "GENERATING..." : "GENERATE VOICE SAMPLES"}
         </Button>
+        )}
+        {voiceJob && (generationState === "generating" || voiceJob.status === "failed" || voiceJob.status === "complete") ? (
+          <div
+            className={"vip-progress" + (voiceJob.status === "failed" ? " vip-progress--failed" : "")}
+            data-testid="vs-generate-progress"
+            data-status={voiceJob.status || ""}
+            data-phase={voiceJob.phase || ""}
+          >
+            <p className="vip-progress__title">
+              {voiceJob.status === "failed"
+                ? "Voice generation failed"
+                : voiceJob.status === "complete"
+                  ? "Voice samples ready"
+                  : "Generating voice samples"}
+            </p>
+            <div
+              className="vip-progress__track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.max(0, Math.min(100, Number(voiceJob.percent || 0)))}
+            >
+              <div
+                className="vip-progress__fill"
+                style={{ width: `${Math.max(0, Math.min(100, Number(voiceJob.percent || 0)))}%` }}
+              />
+            </div>
+            <p className="vip-progress__pct">{Math.round(Number(voiceJob.percent || 0))}%</p>
+            <p className="vip-progress__status" data-testid="vs-generate-status">
+              {voiceJob.status === "failed"
+                ? String(voiceJob.error || "Voice generation failed.")
+                : voiceJob.label || "Generating voice samples"}
+            </p>
+            {Number(voiceJob.sampleCount || 0) > 0 && voiceJob.status !== "failed" ? (
+              <p className="vip-progress__samples">
+                Sample {Math.max(Number(voiceJob.sampleIndex || voiceJob.completedSamples || 0), 0)} of {Number(voiceJob.sampleCount)}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
+      )}
 
       {generationState === "done" && samples.length > 0 && (
-        <div className="vip-section" data-testid="vip-samples-section">
-          <PanelHeading title="Generated Samples" tip="Listen and approve a voice sample." as="h3" />
-          <div className="vip-samples-grid">
-            {samples.map((sample, i) => (
-              <div key={sample.id} className="vip-sample-card" data-testid={"vs-sample-" + i}>
-                <strong>Sample {i + 1}</strong>
-                <p className="muted">Status: {sample.status}</p>
-                {sample.audioUrl ? (
-                  <audio controls src={sample.audioUrl} />
-                ) : (
-                  <p className="muted">No audio available</p>
-                )}
-                <Button
-                  data-testid={"vs-approve-" + i}
-                  variant="primary"
-                  disabled={hasApprovedVoice}
-                  onClick={() => handleApprove(sample.id)}
-                >
-                  APPROVE
-                </Button>
-              </div>
-            ))}
-          </div>
-        </div>
+        <VoiceSamplePlayers
+          samples={samples}
+          selectedId={selectedSampleId}
+          characterName={selectedCharacterName}
+          onSelect={handleSelectSample}
+          onApprove={handleApprove}
+          approveDisabled={
+            approveState === "approving"
+            || !canApproveSelectedVoice({
+              selectedId: selectedSampleId,
+              voiceId,
+              samples,
+            })
+          }
+          replacingApproved={hasApprovedVoice}
+          approveLabel={
+            approveState === "approving"
+              ? "Approving..."
+              : approveState === "approved"
+                ? "Approved ✓"
+                : "Approve selected voice"
+          }
+        />
       )}
+
+      {variant === "express" && onOpenFullStudio ? (
+        <div className="vip-section vip-express-footer">
+          <Button
+            data-testid="voice-creator-open-full-studio"
+            onClick={() => onOpenFullStudio(selectedCharacterId)}
+          >
+            Open Full Voice Studio
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }

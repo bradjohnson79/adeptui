@@ -76,7 +76,7 @@ def render_png(db: Session, sheet: EnvironmentReferenceSheet) -> Path:
 
     highlights = [
         f"North lock: {sheet.spatialMap.northLockDirection.title()}" if sheet.spatialMap else "North lock: missing",
-        f"Spatial Map: {sheet.spatialMap.mapId}" if sheet.spatialMap else "Spatial Map: missing",
+        f"Place layout: {sheet.spatialMap.mapId}" if sheet.spatialMap else "Place layout: missing",
         f"Continuity: {sheet.continuity.status}",
         sheet.composition.continuitySummary or sheet.continuity.summary,
     ]

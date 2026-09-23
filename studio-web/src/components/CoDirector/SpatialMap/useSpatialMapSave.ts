@@ -1,7 +1,7 @@
 /**
  * Spatial Map Save Gate — shared by Spatial Map Express + Standard.
  *
- * Explicit Save commit boundary: "Use in Scene Creator" stays disabled until
+ * Explicit Save commit boundary: "Use in Image Generator" stays disabled until
  * the current revision has been successfully saved (savedVersion === version),
  * and is disabled again the moment any meaningful edit bumps the version.
  * This hook NEVER auto-saves; it only reports state and performs the explicit

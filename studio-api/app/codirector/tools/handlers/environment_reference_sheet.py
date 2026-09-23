@@ -43,7 +43,7 @@ def _require(args: dict[str, Any], key: str) -> str:
 
 
 def _load_sheet(ctx: ToolContext, sheet_id: str):
-    sheet = store.load_sheet(_project_id(ctx), sheet_id)
+    sheet = store.load_visible_sheet(ctx.db, _project_id(ctx), sheet_id)
     if sheet is None:
         raise ValueError("ERS sheet not found")
     return sheet
@@ -57,7 +57,7 @@ def _view(sheet, direction: str):
 
 
 async def list_sheets(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    sheets = store.list_sheets(_project_id(ctx))
+    sheets = store.list_visible_sheets(ctx.db, _project_id(ctx))
     return {
         "projectId": _project_id(ctx),
         "sheets": [
@@ -68,6 +68,8 @@ async def list_sheets(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
                 "continuityStatus": sheet.continuity.status,
                 "approvedDirections": [view.direction for view in sheet.directionalViews if view.approvedAssetId],
                 "updatedAt": sheet.updatedAt,
+                "isGlobal": bool(getattr(sheet, "isGlobal", False)),
+                "owningProjectId": sheet.projectId,
             }
             for sheet in sheets
         ],
@@ -87,6 +89,23 @@ async def get_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 def preview_create_sheet(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     name = _require(args, "name")
     description = _require(args, "description")
+    from ....creator_scope.contract import ENTITY_ENVIRONMENT
+    from ....creator_scope.service import reuse_existing_profile
+
+    reused = reuse_existing_profile(
+        ctx.db, entity_type=ENTITY_ENVIRONMENT, project_id=_project_id(ctx), name=name
+    )
+    if reused:
+        return ToolPreview(
+            summary=f"{name} already exists. I'll use the existing Environment profile.",
+            lines=[
+                "Does not create a second Environment.",
+                f"Existing id: {reused['existingId']}",
+                "Global" if reused.get("isGlobal") else "Local to this project",
+            ],
+            resourceKind="project",
+            resourceId=_project_id(ctx),
+        )
     return ToolPreview(
         summary=f"Create ERS draft '{name}'.",
         lines=[
@@ -101,14 +120,39 @@ def preview_create_sheet(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
 
 
 def apply_create_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....creator_scope.contract import ENTITY_ENVIRONMENT, CreatorScopeError
+    from ....creator_scope.service import reuse_existing_profile
+
+    name = _require(args, "name")
+    reused = reuse_existing_profile(
+        ctx.db, entity_type=ENTITY_ENVIRONMENT, project_id=_project_id(ctx), name=name
+    )
+    if reused:
+        sheet = store.load_visible_sheet(ctx.db, _project_id(ctx), reused["entityId"])
+        if sheet is not None:
+            reused["sheetId"] = sheet.sheetId
+            reused["sheet"] = sheet.model_dump(mode="json")
+            return reused
+    is_global = bool(args.get("isGlobal") or args.get("is_global"))
+    try:
+        store.check_environment_tag_collision(
+            ctx.db,
+            project_id=_project_id(ctx),
+            name=name,
+            making_global=is_global,
+        )
+    except CreatorScopeError as exc:
+        raise ValueError(exc.message) from exc
     sheet = orchestrator.create_sheet(
         project_id=_project_id(ctx),
         name=_require(args, "name"),
         description=_require(args, "description"),
         scene_id=_text(args, "sceneId") or None,
         creator_notes=_text(args, "creatorNotes") or None,
+        is_global=is_global,
     )
     store.save_sheet(sheet)
+    store.sync_environment_scope(ctx.db, sheet)
     return {
         "ok": True,
         "sheetId": sheet.sheetId,
@@ -526,3 +570,53 @@ def apply_export_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]
         "_summary": record.message,
         "_evidence": {"source": "environment_reference_sheet.exports + generation_tools.register_derived_asset"},
     }
+
+
+def _resolve_sheet(ctx: ToolContext, args: dict[str, Any]):
+    from ....environment_reference_sheet.store import load_visible_sheet
+    sheet_id = str(args.get("sheetId") or args.get("sheet_id") or "").strip()
+    if not sheet_id:
+        raise ValueError("sheetId is required")
+    sheet = load_visible_sheet(ctx.db, ctx.project_id, sheet_id)
+    if sheet is None:
+        raise ValueError("Environment Reference Sheet not found")
+    if sheet.projectId != ctx.project_id:
+        raise ValueError("Global environments can only be deleted from the project that created them.")
+    return sheet
+
+
+def preview_delete_sheet(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    sheet = _resolve_sheet(ctx, args)
+    from ....creator_scope.contract import ENTITY_ENVIRONMENT
+    from ....creator_scope.service import delete_preview_payload
+    preview = delete_preview_payload(
+        ctx.db,
+        entity_type=ENTITY_ENVIRONMENT,
+        entity_id=sheet.sheetId,
+        name=sheet.name,
+        is_global=getattr(sheet, "isGlobal", False) or getattr(sheet, "is_global", False),
+        owning_project_id=sheet.projectId,
+    )
+    scope_label = "Global" if preview["isGlobal"] else "Local"
+    lines = [
+        f"This is a {scope_label} Environment Reference Sheet.",
+        f"Referenced by {preview['usageCount']} scene(s) across {preview['projectCount']} project(s).",
+        "Library composite and reference images are kept — only the canonical sheet is removed.",
+        "This action cannot be undone.",
+    ]
+    if preview["isGlobal"]:
+        lines.insert(1, "Deleting it will remove the canonical sheet from every project using it.")
+    return ToolPreview(
+        summary=f'Delete Environment Reference Sheet "{sheet.name}".',
+        lines=lines,
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_delete_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    sheet = _resolve_sheet(ctx, args)
+    from ....environment_reference_sheet.store import delete_environment_sheet
+    confirm = bool(args.get("confirmCrossProject") or args.get("confirm_cross_project"))
+    result = delete_environment_sheet(ctx.db, ctx.project_id, sheet.sheetId, confirm_cross_project=confirm)
+    return {"ok": True, "deleted": result.get("deleted"), "sheetId": sheet.sheetId, "name": result.get("name")}

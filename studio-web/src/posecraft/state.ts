@@ -144,10 +144,35 @@ export function migrateSceneToCurrent(input: PoseCraftScene): PoseCraftScene {
       migratedAt: nowIso(),
       notes:
         migratedFrom < 2
-          ? "Migrated from schemaVersion 1 (block-figure) to 2 (humanoid rig). Unsupported legacy joints retained in figure.legacyJointData."
-          : "Schema normalized to current version.",
+          ? "Migrated from schemaVersion 1 to 3 (canonical stage)."
+          : migratedFrom < 3
+            ? "Migrated from schemaVersion 2 to 3 (environment/objects/cameras/shots)."
+            : "Schema normalized to current version.",
     };
   }
+  if (!scene.objects || scene.objects.length === 0) {
+    scene.objects = (scene.primitives || []).map((primitive) => ({
+      id: primitive.id,
+      name: primitive.name,
+      source: "procedural" as const,
+      primitiveKind: primitive.kind,
+      position: { x: primitive.position.x, y: 0, z: primitive.position.z },
+      rotation: { x: 0, y: primitive.rotationY ?? 0, z: 0 },
+      scale: { x: primitive.scale ?? 1, y: primitive.scale ?? 1, z: primitive.scale ?? 1 },
+      size: primitive.size,
+      color: primitive.color,
+      visible: primitive.visible,
+      locked: primitive.locked,
+      nameConfirmed: true,
+    }));
+  }
+  if (!scene.environment) {
+    scene.environment = { id: "environment", name: scene.name || "Stage", visible: true, locked: false, source: "none" };
+  }
+  if (!scene.cameras || scene.cameras.length === 0) {
+    scene.cameras = [{ id: "camera-01", name: "Camera 01", state: scene.camera }];
+  }
+  if (!scene.shots) scene.shots = [];
   return scene;
 }
 
@@ -294,7 +319,11 @@ export function createDefaultScene(): PoseCraftScene {
       showLabels: false,
     },
     camera: createDefaultCamera(),
+    environment: { id: "environment", name: "Stage", visible: true, locked: false, source: "none" },
     figures: [lead, partner],
+    objects: [],
+    cameras: [{ id: "camera-01", name: "Camera 01", state: createDefaultCamera() }],
+    shots: [],
     primitives: [createPrimitive()],
     selectedFigureId: lead.id,
     selectedJoint: "head",

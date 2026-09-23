@@ -37,6 +37,53 @@ _CONTAMINATION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
+# Internal / stale product guidance that must never leak into scene-turn prose
+# unless the creator explicitly asked about that product.
+_INTERNAL_PRODUCT_LEAK_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bSpatial Map\b",
+        r"\bPoseCraft\b",
+        r"\bFire3D\b",
+        r"\bSceneCraft\b",
+        r"\bStandalone\b",
+        r"\bImage Runtime\b",
+        r"\bLocal Video Runtime\b",
+        r"Adept is the filmmaking app",
+        r"\bEnvironment Creator Express\b",
+        r"hidden engines",
+    )
+)
+
+
+def find_internal_product_leak(text: str, *, user_message: str = "") -> list[str]:
+    """Phrases that are internal guidance, not a scene-production answer."""
+    asked = (user_message or "").lower()
+    hits: list[str] = []
+    for pat in _INTERNAL_PRODUCT_LEAK_PATTERNS:
+        m = pat.search(text or "")
+        if not m:
+            continue
+        token = m.group(0)
+        if token.lower() in asked:
+            continue
+        hits.append(token)
+    return hits
+
+
+def strip_internal_product_leak(text: str, *, user_message: str = "") -> str:
+    """Drop sentences that recite internal/stale product guidance."""
+    hits = find_internal_product_leak(text, user_message=user_message)
+    if not hits:
+        return (text or "").strip()
+    kept: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text or ""):
+        if find_internal_product_leak(sentence, user_message=user_message):
+            continue
+        kept.append(sentence)
+    return " ".join(kept).strip()
+
+
 # Developer jargon that must not appear in ordinary creator replies.
 _JARGON_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
@@ -149,9 +196,10 @@ def gate_creator_facing(
     *,
     internal_reasoning: str | None = None,
     request_id: str = "",
+    user_message: str = "",
 ) -> ProviderTurnResult:
     """Final protection gate before stream/persist."""
-    content = str(text or "").strip()
+    content = strip_internal_product_leak(str(text or "").strip(), user_message=user_message)
     hits = find_contamination(content)
     if hits:
         separated, leftover = separate_leaked_reasoning(content)

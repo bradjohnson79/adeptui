@@ -205,6 +205,9 @@ def authority_question_suffix(batch: Any) -> str:
         parts.append(
             "- If something is unclear, say 'uncertain' or 'not observed' — never guess."
         )
+        parts.append(
+            "- Reply in English only. Do not answer in Chinese or any other language."
+        )
         return "\n".join(parts)
     except Exception:
         return ""

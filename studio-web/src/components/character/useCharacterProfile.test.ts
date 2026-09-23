@@ -16,6 +16,7 @@ import type { CharacterProfile, CharacterReference } from "./types";
 import {
   CHARACTER_PROFILE_SAVED_EVENT,
   applyLoadedCharacterState,
+  characterLoadIsStale,
   characterSaveIntent,
   getHeroIdentity,
   getPendingHeroIdentity,
@@ -178,6 +179,11 @@ describe("Load Character atomic replace", () => {
     expect(pendingPatchForCurrentCharacter(pendingA, "char-a")).toEqual(pendingA.fields);
   });
 
+  it("treats a profile load that started before Save as stale", () => {
+    expect(characterLoadIsStale(1, 2)).toBe(true);
+    expect(characterLoadIsStale(2, 2)).toBe(false);
+  });
+
   it("ignores a stale in-flight load after the selected id changes", () => {
     expect(
       applyLoadedCharacterState({
@@ -264,6 +270,33 @@ describe("characterSaveIntent", () => {
       characterId: "char-1",
       fields: { name: "Anadriya", description: "Updated profile" },
     });
+  });
+
+  it("does not serialize New Character onto an existing named profile", () => {
+    const intent = characterSaveIntent({
+      projectId: "proj-1",
+      characterId: "char-korri",
+      fields: { name: "New Character", is_global: true, isGlobal: true },
+      profile: { id: "char-korri", name: "Korri", slug: "korri", project_id: "proj-1" },
+    });
+    expect(intent).toEqual({
+      ok: true,
+      method: "PATCH",
+      characterId: "char-korri",
+      fields: { name: "Korri", is_global: true, isGlobal: true },
+    });
+  });
+
+  it("refuses to PATCH a foreign Global character from another project", () => {
+    const intent = characterSaveIntent({
+      projectId: "cade-scenes",
+      characterId: "foreign-global",
+      fields: { name: "Cade O'Connor" },
+      profile: { id: "foreign-global", name: "TestGlobal", project_id: "other-project", is_global: true },
+    });
+    expect(intent.ok).toBe(false);
+    if (intent.ok) return;
+    expect(intent.error).toMatch(/project that created them/i);
   });
 });
 
@@ -355,6 +388,8 @@ describe("instant dropdown refresh wiring (source assertions)", () => {
     expect(expressSrc).toMatch(/addEventListener\(CHARACTER_PROFILE_SAVED_EVENT/);
     expect(expressSrc).toMatch(/upsertCharacterSummary\(prev, saved\)/);
     expect(expressSrc).toMatch(/detail\.projectId !== projectId/);
+    expect(expressSrc).toMatch(/pickOwnedCharacterId\(list, projectId, prev\)/);
+    expect(expressSrc).toMatch(/data-testid="character-compact-create"/);
   });
 
   it("both listeners clean up on unmount", () => {
@@ -364,5 +399,35 @@ describe("instant dropdown refresh wiring (source assertions)", () => {
 
   it("CharacterCore save path surfaces the saved profile (event flows from the hook)", () => {
     expect(coreSrc).toMatch(/const savedProfile = await cp\.save\(/);
+  });
+
+  it("save drops an in-flight profile load so the first save is not overwritten", () => {
+    expect(hookSrc).toMatch(/loadGenRef\.current \+= 1/);
+    expect(hookSrc).toMatch(/characterLoadIsStale\(gen, loadGenRef\.current\)/);
+  });
+
+  it("Express and Standard both save through CharacterCore", () => {
+    expect(expressSrc).toMatch(/<CharacterCore/);
+    expect(expressSrc).toMatch(/mode="express"/);
+    expect(standardSrc).toMatch(/<CharacterCore/);
+    expect(standardSrc).toMatch(/mode="standard"/);
+  });
+
+  it("Standard drops a profile reload that started before Save", () => {
+    expect(standardSrc).toMatch(/characterLoadIsStale\(gen, profileLoadGen\.current\)/);
+    expect(standardSrc).toMatch(/profileLoadGen\.current \+= 1/);
+  });
+});
+
+describe("character delete wiring", () => {
+  const hookSrc = readFileSync(resolve(__dirname, "useCharacterProfile.ts"), "utf8");
+
+  it("remove no longer calls window.confirm", () => {
+    expect(hookSrc).not.toMatch(/window\.confirm/);
+  });
+
+  it("remove accepts confirmCrossProject options and passes them to the delete API", () => {
+    expect(hookSrc).toMatch(/remove = useCallback\(async \(opts\?: \{ confirmCrossProject\?: boolean \}\)/);
+    expect(hookSrc).toMatch(/api\.deleteCharacterProfile\(projectId, cid, opts\?\.confirmCrossProject \?\? false\)/);
   });
 });

@@ -94,6 +94,8 @@ class ChatRequest:
     project_context: str = ""
     temperature: float = 0.55
     mode: str = "chat"
+    vision_trace: dict[str, Any] | None = None
+    vision_turn: Any = None
 
 
 @dataclass

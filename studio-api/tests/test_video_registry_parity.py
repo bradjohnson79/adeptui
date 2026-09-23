@@ -22,7 +22,6 @@ from app.hosted_providers import video_registry
 # ---------------------------------------------------------------------------
 
 EXPECTED_PRODUCT_ALIASES = {
-    "ltx": "ltx-local",
     "ltx-2.5": "ltx-2.5-distilled",
     "minimax-h3-local": "minimax-h3",
     "minimax-h3-t2v-local": "minimax-h3",
@@ -30,43 +29,40 @@ EXPECTED_PRODUCT_ALIASES = {
     "seedance-api": "seedance-2.0",
     "seedance-fal": "seedance-2.0",
     "fal_seedance": "seedance-2.0",
+    "fal_seedance_mini": "seedance-2.0-mini",
+    "seedance-mini": "seedance-2.0-mini",
     "fal_seedance_25": "seedance-2.5",
 }
 
 EXPECTED_PRODUCT_ADAPTER = {
-    "ltx-local": "ltx-local",
     "ltx-2.5-full": "ltx-2.5-distilled",
     "ltx-2.5-distilled": "ltx-2.5-distilled",
     "ltx-2.5-comfy": "ltx-2.5-distilled",
     "minimax-h3": "minimax-h3-t2v-local",
     "minimax-h3-i2v-local": "minimax-h3-i2v-local",
-    "wan-local": "wan-local",
-    "hunyuan-video-1.5-local": "hunyuan-video-1.5-local",
-    "hunyuan-video-13b-local": "hunyuan-video-13b-local",
     "kling-kie": "kling-api",
     "kling-fal": "kling-api",
     "veo-kie": "veo-api",
     "veo-fal": "veo-api",
     "seedance-2.0": "seedance-2.0",
+    "seedance-2.0-mini": "seedance-2.0-mini",
     "seedance-2.5": "seedance-2.5",
 }
 
 EXPECTED_LIVE_SUBMIT_ADAPTERS = frozenset(
     {
-        "ltx-local",
         "ltx-2.5-distilled",
         "minimax-h3-t2v-local",
         "minimax-h3-i2v-local",
         "seedance-2.0",
+        "seedance-2.0-mini",
         "seedance-2.5",
-        "wan-local",
-        "hunyuan-video-1.5-local",
-        "hunyuan-video-13b-local",
     }
 )
 
 EXPECTED_HOSTED_LIVE_ONLY = {
     "seedance-2.0": "fal_api_key",
+    "seedance-2.0-mini": "fal_api_key",
     "seedance-2.5": "fal_api_key",
     "kling-fal": "fal_api_key",
     "kling-kie": "kie_api_key",
@@ -76,23 +72,15 @@ EXPECTED_HOSTED_LIVE_ONLY = {
 }
 
 EXPECTED_SETUP_COMPONENTS = {
-    "ltx-local": ("ltx_checkpoint",),
     "ltx-2.5-full": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae", "ltx_2_5_audio_vae"),
     "ltx-2.5-distilled": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae", "ltx_2_5_audio_vae"),
     "ltx-2.5-comfy": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),
-    "wan-local": ("wan_models",),
-    "hunyuan-video-1.5-local": ("hunyuan_video_15",),
-    "hunyuan-video-13b-local": ("hunyuan_video_13b",),
 }
 
 EXPECTED_REQUIRED_NODES = {
-    "ltx-local": ("LTXVImgToVideo", "CheckpointLoaderSimple", "LoadImage"),
     "ltx-2.5-full": ("UNETLoader", "LTXVBaseSampler", "LTXVScheduler", "LTXVImgToVideo", "LoadImage"),
     "ltx-2.5-distilled": ("UNETLoader", "LTXVBaseSampler", "LTXVScheduler", "LTXVImgToVideo", "LoadImage"),
     "ltx-2.5-comfy": ("UNETLoader", "LTXVBaseSampler", "LTXVScheduler", "LTXVImgToVideo", "LoadImage"),
-    "wan-local": ("WanFirstLastFrameToVideo", "UNETLoader", "CLIPLoader"),
-    "hunyuan-video-1.5-local": ("HyVideoModelLoader", "HyVideoSampler", "HyVideoVAELoader"),
-    "hunyuan-video-13b-local": ("HyVideoModelLoader", "HyVideoSampler", "HyVideoVAELoader"),
     "minimax-h3": ("MiniMaxH3ReferenceToVideo", "UNETLoader", "CLIPLoader", "VAELoader", "LoadImage"),
     "minimax-h3-i2v-local": ("MiniMaxH3ReferenceToVideo", "UNETLoader", "CLIPLoader", "VAELoader", "LoadImage"),
 }
@@ -104,6 +92,8 @@ EXPECTED_ADAPTER_ONLY_IDS = frozenset(
         "seedance-api",
         "veo-api",
         "seedance-fal",
+        "fal_seedance_mini",
+        "seedance-mini",
     }
 )
 
@@ -112,6 +102,7 @@ EXPECTED_CREATE_ENGINE_ROWS = (
     ("minimax-h3", "MiniMax H3", "local"),
     ("ltx-2.5", "LTX 2.5", "local"),
     ("seedance-2.0", "Seedance 2.0", "hosted"),
+    ("seedance-2.0-mini", "Seedance 2.0 Mini", "hosted"),
     ("seedance-2.5", "Seedance 2.5", "hosted"),
     ("fal_kling", "Kling", "hosted"),
     ("fal_veo", "Veo", "hosted"),
@@ -125,9 +116,8 @@ EXPECTED_SURFACE_WORKFLOWS_EXISTING = {
     "ltx-2.5-comfy": {"t2v": "ltx_25.t2v", "i2v": "ltx_25.i2v", "r2v": "ltx_25.i2v"},
     "minimax-h3": {"t2v": "route_a.t2va", "i2v": "route_a.i2va", "multiFrame": "route_a.flf2va", "r2v": "h3.ref2v"},
     "minimax-h3-i2v-local": {"i2v": "route_a.i2va"},
-    "ltx-local": {"i2v": "ltx.simple_i2v", "r2v": "ltx.scene"},
-    "wan-local": {"multiFrame": "wan.first_last_frame"},
     "seedance-2.0": {"t2v": "fal.seedance-2.0.t2v", "i2v": "fal.seedance-2.0.i2v", "r2v": "fal.seedance-2.0.r2v"},
+    "seedance-2.0-mini": {"r2v": "fal.seedance-2.0-mini.r2v"},
     "seedance-2.5": {"t2v": "fal.seedance-2.5.t2v", "i2v": "fal.seedance-2.5.i2v", "r2v": "fal.seedance-2.5.r2v"},
 }
 
@@ -138,14 +128,8 @@ EXPECTED_SURFACE_WORKFLOWS_HOSTED_NEW = {
     "runway": {"i2v": "fal.runway-gen3-turbo.i2v"},
 }
 
-# The 16 model_registry video _desc kwarg dicts, in catalog order.
+# Production Dock video _desc kwarg dicts, in catalog order.
 EXPECTED_VIDEO_DESCRIPTORS = [
-    dict(
-        id="ltx-local", modality="video", label="LTX 2.3 (Local)", locality="local",
-        provider_id="comfy", capability="Certified", lifecycle="Installed",
-        supports=["image_to_video", "continuation"], does_not_support=[],
-        vram=22.0, gpu=True, executable=True,
-    ),
     dict(
         id="ltx-2.5-full", modality="video", label="LTX 2.5 Full", locality="local",
         provider_id="comfy", capability="Testing", lifecycle="Installed",
@@ -163,24 +147,6 @@ EXPECTED_VIDEO_DESCRIPTORS = [
         provider_id="comfy", capability="Testing", lifecycle="Installed",
         supports=["text_to_video", "image_to_video", "continuation", "audio_generation"],
         does_not_support=[], vram=12.0, gpu=True, executable=True,
-    ),
-    dict(
-        id="wan-local", modality="video", label="WAN 2.2 First/Last Frame", locality="local",
-        provider_id="comfy", capability="Certified", lifecycle="Installed",
-        supports=["start_end_frame", "continuation"], does_not_support=["text_to_video"],
-        vram=14.0, gpu=True, executable=True,
-    ),
-    dict(
-        id="hunyuan-video-1.5-local", modality="video", label="HunyuanVideo 1.5 (Local)", locality="local",
-        provider_id="comfy", capability="Testing", lifecycle="Installed",
-        supports=["image_to_video", "timeline_batch"], does_not_support=["text_to_video", "start_end_frame"],
-        vram=24.0, gpu=True, executable=False,
-    ),
-    dict(
-        id="hunyuan-video-13b-local", modality="video", label="HunyuanVideo 13B (Local Advanced)", locality="local",
-        provider_id="comfy", capability="Testing", lifecycle="Installed",
-        supports=["image_to_video", "timeline_batch"], does_not_support=["text_to_video", "start_end_frame"],
-        vram=32.0, gpu=True, executable=False,
     ),
     dict(
         id="minimax-h3", modality="video", label="MiniMax H3", locality="local",
@@ -212,6 +178,12 @@ EXPECTED_VIDEO_DESCRIPTORS = [
         id="seedance-2.0", modality="video", label="Seedance 2.0", locality="hosted",
         provider_id="fal", capability="Unavailable", lifecycle=None,
         supports=["text_to_video", "image_to_video"], does_not_support=[],
+        vram=None, gpu=False, executable=False,
+    ),
+    dict(
+        id="seedance-2.0-mini", modality="video", label="Seedance 2.0 Mini", locality="hosted",
+        provider_id="fal", capability="Available", lifecycle=None,
+        supports=["image_to_video"], does_not_support=[],
         vram=None, gpu=False, executable=False,
     ),
     dict(
@@ -582,7 +554,7 @@ def test_catalog_rows_never_enter_creator_surface_views(synthetic_catalog) -> No
     assert video_registry.product_aliases() == EXPECTED_PRODUCT_ALIASES
     assert video_registry.product_adapter_map() == EXPECTED_PRODUCT_ADAPTER
     assert video_registry.create_engine_rows() == EXPECTED_CREATE_ENGINE_ROWS
-    assert len(video_registry.video_model_descriptors()) == 16
+    assert len(video_registry.video_model_descriptors()) == len(EXPECTED_VIDEO_DESCRIPTORS)
 
 
 def test_catalog_registrations_empty_without_store(tmp_path, monkeypatch) -> None:
@@ -594,10 +566,13 @@ def test_catalog_registrations_empty_without_store(tmp_path, monkeypatch) -> Non
 
 
 def test_core_registry_shape() -> None:
-    assert len(video_registry.CORE_VIDEO_REGISTRY) == 17
     ids = [r.product_id for r in video_registry.CORE_VIDEO_REGISTRY]
-    assert len(set(ids)) == 17
+    assert len(ids) == len(set(ids))
     assert "runway" in ids
+    assert "ltx-local" not in ids
+    assert "wan-local" not in ids
+    assert "hunyuan-video-1.5-local" not in ids
+    assert "hunyuan-video-13b-local" not in ids
     runway = video_registry.core_registration("runway")
     assert runway is not None
     assert runway.adapter_id is None

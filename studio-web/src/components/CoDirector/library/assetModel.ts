@@ -34,6 +34,7 @@ export function resolveAssetUrl(url: string | undefined): string | undefined {
 
 export type LibraryAsset = {
   id: string;
+  project_id?: string;
   tag?: string;
   title?: string;
   filename?: string;
@@ -142,7 +143,7 @@ export function getCardPreviewUrl(asset: LibraryAsset): string | undefined {
   if (asset.thumb_url) return resolveAssetUrl(asset.thumb_url);
   const preview = asset.preview_url || asset.previewUrl;
   if (preview) return resolveAssetUrl(preview);
-  if (isImageAsset(asset)) return api.assetUrl(asset.id);
+  if (isImageAsset(asset)) return api.assetUrl(asset.id, null, asset.project_id);
   return undefined;
 }
 

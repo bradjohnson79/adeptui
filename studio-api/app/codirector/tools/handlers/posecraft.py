@@ -9,6 +9,7 @@ silently overwrite a creatorModified scene without an explicit `force` flag
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ....posecraft import pose_catalog
@@ -64,15 +65,17 @@ def _doc_summary(doc: PoseCraftDocument) -> dict[str, Any]:
         ],
         "objects": [
             {
-                "id": p.id,
-                "label": p.name,
-                "name": p.name,
-                "type": p.kind,
-                "furnitureKind": p.kind,
-                "position": p.position,
+                "id": o.id,
+                "label": o.name,
+                "name": o.name,
+                "type": o.source,
+                "source": o.source,
+                "position": o.position,
             }
-            for p in scene.primitives
+            for o in (getattr(scene, "objects", None) or scene.primitives)
         ],
+        "shots": [{"shotId": s.shotId, "name": s.name} for s in getattr(scene, "shots", []) or []],
+        "environment": getattr(scene.environment, "name", None) if getattr(scene, "environment", None) else None,
     }
 
 
@@ -84,7 +87,16 @@ async def get_status(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 async def get_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     doc = posecraft_service.load_scene(ctx.project_id, ctx.db)
     summary = _doc_summary(doc)
-    return {"scene": doc.model_dump(), "semantic": summary}
+    return {
+        "scene": {
+            "schemaVersion": doc.schemaVersion,
+            "currentScene": json.loads(doc.currentScene.model_dump_json()),
+            "selectedSnapshotId": doc.selectedSnapshotId,
+            "loadState": doc.loadState,
+            "igHandoffSnapshotId": doc.igHandoffSnapshotId,
+        },
+        "semantic": summary,
+    }
 
 
 async def list_scenes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -276,7 +288,8 @@ def _load_scene_for_mutation(ctx: ToolContext) -> PoseCraftScene:
 
 
 def _persist_scene(ctx: ToolContext, scene: PoseCraftScene, *, actor: str = "codirector") -> PoseCraftDocument:
-    doc = PoseCraftDocument(currentScene=scene)
+    doc = posecraft_service.load_scene(ctx.project_id, ctx.db)
+    doc.currentScene = scene
     return posecraft_service.save_scene(ctx.project_id, doc, ctx.db, saved_by=actor)
 
 
@@ -609,11 +622,14 @@ def preview_send_to_image_pipeline(ctx: ToolContext, args: dict[str, Any]) -> To
 def apply_send_to_image_pipeline(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     snapshot_id = args.get("snapshotId")
     preview = posecraft_service.build_export_preview(ctx.project_id, ctx.db, snapshot_id=snapshot_id)
+    doc = posecraft_service.load_scene(ctx.project_id, ctx.db)
+    doc.igHandoffSnapshotId = str(snapshot_id or doc.selectedSnapshotId or "") or None
+    posecraft_service.save_scene(ctx.project_id, doc, ctx.db, saved_by="codirector")
     return {
         "exportPreview": preview.model_dump(),
         "purpose": args.get("purpose", "shot"),
         "prompt": args.get("prompt", ""),
-        "snapshotId": snapshot_id,
+        "snapshotId": snapshot_id or doc.igHandoffSnapshotId,
         "imageAssetId": args.get("imageAssetId"),
         "honestyLabel": preview.honestyLabel,
         "next": "image_pipeline.prepare_plan",
@@ -628,25 +644,247 @@ def preview_send_to_storyboard(ctx: ToolContext, args: dict[str, Any]) -> ToolPr
 
 
 def apply_send_to_storyboard(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    """Build a honesty-labelled Storyboard handoff package from PoseCraft.
+    """Send a PoseCraft Snapshot to Storyboard and place it on the board.
 
-    PoseCraft is a *visual staging reference*, not a final frame. The package
-    carries the export preview (figures/camera/aspect), the target scene id,
-    a creator-facing label, and notes. The Storyboard ingest consumes it as a
-    blocking sketch. creatorModified protection is enforced upstream by
+    PoseCraft is a *visual staging reference*, not a final frame. The handoff
+    package carries the export preview (figures/camera/aspect), the target
+    scene id, a creator-facing label, notes, and an honesty label. When a
+    frozen Snapshot is supplied, its PNG (``imageAssetId``) is placed onto the
+    next free Storyboard panel through the same backend ingest path the image
+    surfaces use — a real placement, not a dead next-step pointer.
+    creatorModified protection is enforced upstream by
     apply_tool_mutation (refuses silent overwrite of a creator-modified scene).
-    When ``snapshotId`` is supplied, the package is built from the frozen
-    Snapshot composition (PoseCraft Snapshot — Visual Staging Reference).
     """
-    snapshot_id = args.get("snapshotId")
-    preview = posecraft_service.build_export_preview(ctx.project_id, ctx.db, snapshot_id=snapshot_id)
-    return {
+    snapshot_id = str(args.get("snapshotId") or "")
+    preview = posecraft_service.build_export_preview(ctx.project_id, ctx.db, snapshot_id=snapshot_id or None)
+    scene_id = str(args.get("sceneId", ""))[:64]
+    label = str(args.get("label", preview.sceneName))[:200]
+    notes = str(args.get("notes", ""))[:4000]
+    image_asset_id = str(args.get("imageAssetId") or "")
+
+    # Resolve the frozen Snapshot's PNG when the caller passed only snapshotId.
+    if not image_asset_id and snapshot_id:
+        try:
+            snap = posecraft_service.get_snapshot(ctx.project_id, snapshot_id, ctx.db)
+        except Exception:
+            snap = None
+        if snap is not None:
+            image_asset_id = str(getattr(snap, "imageAssetId", "") or "")
+
+    result: dict[str, Any] = {
         "exportPreview": preview.model_dump(),
-        "sceneId": str(args.get("sceneId", ""))[:64],
-        "label": str(args.get("label", preview.sceneName))[:200],
-        "notes": str(args.get("notes", ""))[:4000],
+        "sceneId": scene_id,
+        "label": label,
+        "notes": notes,
         "honestyLabel": preview.honestyLabel,
-        "snapshotId": snapshot_id,
-        "imageAssetId": args.get("imageAssetId"),
-        "next": "storyboard.ingest_posecraft_sketch",
+        "snapshotId": snapshot_id or None,
+        "imageAssetId": image_asset_id or None,
     }
+
+    if image_asset_id:
+        from ....storyboard_studio.add_from_image import add_image_to_next_panel
+
+        try:
+            placed = add_image_to_next_panel(
+                ctx.project_id,
+                asset_id=image_asset_id,
+                prompt=notes or preview.sceneName or "PoseCraft staging reference",
+                label=label,
+                lens=str(getattr(preview, "lensMm", "") or ""),
+                scene_id=scene_id or None,
+            )
+        except Exception as exc:  # placement failed — report honestly, never fake success
+            result["placed"] = False
+            result["placementError"] = str(exc)[:400]
+        else:
+            result["placed"] = True
+            result["panelId"] = placed.get("panelId")
+            result["documentId"] = placed.get("documentId")
+            result["slot"] = placed.get("slot")
+    else:
+        result["placed"] = False
+        result["placementError"] = "No Snapshot image available to place on the Storyboard."
+
+    return result
+
+
+def preview_add_object(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary=f"Add object '{args.get('name') or args.get('kind') or 'object'}' to the stage.", lines=["Affects: project"])
+
+
+def apply_add_object(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....posecraft.schemas import PoseCraftObject
+
+    scene = _load_scene_for_mutation(ctx)
+    obj = PoseCraftObject(
+        id=str(__import__("uuid").uuid4()),
+        name=str(args.get("name") or args.get("kind") or "Object")[:120],
+        source="procedural",
+        primitiveKind=str(args.get("kind") or "apple-box"),
+        position={"x": float(args.get("x") or 0.0), "y": 0.0, "z": float(args.get("z") or 0.0)},
+    )
+    scene.objects.append(obj)
+    doc = _persist_scene(ctx, scene)
+    return {"scene": _doc_summary(doc), "objectId": obj.id}
+
+
+def preview_move_object(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary=f"Move object {args.get('objectId')}.", lines=["Affects: project"])
+
+
+def apply_move_object(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....posecraft import scene_ops
+
+    scene = _load_scene_for_mutation(ctx)
+    ok = scene_ops.move_object(
+        scene,
+        str(args.get("objectId") or ""),
+        x=args.get("x"),
+        y=args.get("y"),
+        z=args.get("z"),
+    )
+    doc = _persist_scene(ctx, scene)
+    return {"scene": _doc_summary(doc), "moved": ok}
+
+
+def preview_place_figure(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary=f"Place figure {args.get('figureId')}.", lines=["Affects: project"])
+
+
+def apply_place_figure(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....posecraft import scene_ops
+
+    scene = _load_scene_for_mutation(ctx)
+    ok = scene_ops.place_figure(
+        scene,
+        str(args.get("figureId") or ""),
+        float(args.get("x") or 0.0),
+        float(args.get("z") or 0.0),
+        float(args.get("y") or 0.0),
+        args.get("rotationY"),
+    )
+    doc = _persist_scene(ctx, scene)
+    return {"scene": _doc_summary(doc), "placed": ok}
+
+
+def preview_sit_on_object(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary=f"Sit {args.get('figureId')} on {args.get('objectId')}.", lines=["Affects: project"])
+
+
+def apply_sit_on_object(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....posecraft import scene_ops
+
+    scene = _load_scene_for_mutation(ctx)
+    result = scene_ops.sit_on_object(scene, str(args.get("figureId") or ""), str(args.get("objectId") or ""))
+    doc = _persist_scene(ctx, scene)
+    return {"scene": _doc_summary(doc), **result}
+
+
+def preview_look_at(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary=f"Turn {args.get('figureId')} to look at a target.", lines=["Affects: project"])
+
+
+def apply_look_at(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....posecraft import scene_ops
+
+    scene = _load_scene_for_mutation(ctx)
+    result = scene_ops.look_at(
+        scene,
+        str(args.get("figureId") or ""),
+        target_figure_id=args.get("targetFigureId"),
+        target_object_id=args.get("targetObjectId"),
+    )
+    doc = _persist_scene(ctx, scene)
+    return {"scene": _doc_summary(doc), **result}
+
+
+def preview_focus_figure(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary=f"Focus camera on {args.get('figureId') or 'stage'}.", lines=["Affects: project"])
+
+
+def apply_focus_figure(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....posecraft import scene_ops
+
+    scene = _load_scene_for_mutation(ctx)
+    kind = str(args.get("kind") or "face")
+    scene_ops.focus_subject(scene, kind=kind, subject_id=args.get("figureId") or args.get("objectId"))  # type: ignore[arg-type]
+    doc = _persist_scene(ctx, scene)
+    return {"scene": _doc_summary(doc)}
+
+
+def preview_save_shot(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary=f"Save shot '{args.get('name') or 'Shot'}'.", lines=["Affects: project"])
+
+
+def apply_save_shot(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....posecraft import scene_ops
+
+    scene = _load_scene_for_mutation(ctx)
+    shot = scene_ops.save_shot(scene, str(args.get("name") or "Shot"))
+    doc = _persist_scene(ctx, scene)
+    return {"scene": _doc_summary(doc), "shotId": shot.shotId}
+
+
+def preview_capture_previz(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary="Capture a PoseCraft previz snapshot (requires imageAssetId).", lines=["Affects: project"])
+
+
+def apply_capture_previz(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    image_asset_id = str(args.get("imageAssetId") or "")
+    if not image_asset_id:
+        return {"captured": False, "error": "imageAssetId is required. Capture writes a Library PNG first."}
+    doc = posecraft_service.load_scene(ctx.project_id, ctx.db)
+    from ....posecraft.state_snapshot import append_snapshot
+
+    snap = append_snapshot(doc, image_asset_id, name=str(args.get("name") or "Previz"))
+    posecraft_service.save_scene(ctx.project_id, doc, ctx.db, saved_by="codirector")
+    return {"captured": True, "snapshotId": snap.snapshotId, "imageAssetId": image_asset_id}
+
+
+def preview_propose_previz_plan(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary="Propose an Auto Previz shot plan.", lines=["Affects: project"])
+
+
+def apply_propose_previz_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....posecraft.auto_previz import store_plan
+
+    scene = _load_scene_for_mutation(ctx)
+    names = [f.name for f in scene.figures[:3]] or ["the lead"]
+    return store_plan(
+        ctx.project_id,
+        {
+            "planId": f"previz-{scene.revision}",
+            "approved": False,
+            "shots": [
+                {"name": "Shot 01 — Establishing wide", "focusKind": "stage"},
+                {"name": "Shot 02 — Medium", "focusKind": "figure"},
+                {"name": f"Shot 03 — {names[0]} close-up", "focusKind": "face"},
+            ],
+        },
+    )
+
+
+def preview_execute_previz_plan(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(summary="Execute an approved Auto Previz plan.", lines=["Affects: project"])
+
+
+def apply_execute_previz_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....posecraft import scene_ops
+    from ....posecraft.auto_previz import approve_plan, get_plan
+
+    if not args.get("approved"):
+        return {"executed": False, "error": "Creator approval is required."}
+    plan = get_plan(str(args.get("planId") or ""))
+    if plan is None or plan.get("projectId") != ctx.project_id:
+        return {"executed": False, "error": "Auto Previz plan not found."}
+    approve_plan(plan["planId"], ctx.project_id)
+    scene = _load_scene_for_mutation(ctx)
+    for shot in plan.get("shots") or []:
+        scene_ops.focus_subject(
+            scene,
+            kind=shot.get("focusKind") or "stage",
+            subject_id=scene.figures[0].id if scene.figures else None,
+        )
+        scene_ops.save_shot(scene, str(shot.get("name") or "Shot"))
+    doc = _persist_scene(ctx, scene)
+    return {"executed": True, "scene": _doc_summary(doc)}

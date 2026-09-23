@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { createTempProject, deleteProject, waitForAppReady } from "../helpers/app";
 import { AuditObserver } from "../helpers/observer";
+import { openCoDirectorContentTab } from "../codirector/helpers/audit";
 
 const ARTIFACT_DIR = path.join("artifacts", "m41", "wave3");
 
@@ -122,14 +123,14 @@ test.describe("@m41 @codirector wave3", () => {
         fullPage: false,
       });
 
-      await page.getByTestId("codirector-content-tab-plans").click();
+      await openCoDirectorContentTab(page, "plans");
       await expect(page.getByTestId("codirector-retrieval-plans")).toBeVisible({ timeout: 20_000 });
       await page.screenshot({
         path: path.join(ARTIFACT_DIR, "m41-cd-49-plan-proposal-readonly.png"),
         fullPage: false,
       });
 
-      await page.getByTestId("codirector-content-tab-bible").click();
+      await openCoDirectorContentTab(page, "bible");
       await page.screenshot({
         path: path.join(ARTIFACT_DIR, "m41-cd-47-bible-canonical-status.png"),
         fullPage: false,
@@ -168,7 +169,7 @@ test.describe("@m41 @codirector wave3", () => {
       });
 
       // Approvals still uses ProposalService list — no fake seeds / no mutation from retrieval cards.
-      await page.getByTestId("codirector-content-tab-approvals").click();
+      await openCoDirectorContentTab(page, "approvals");
       await expect(page.getByTestId("codirector-approvals-empty").or(page.getByTestId("codirector-approvals-panel"))).toBeVisible({
         timeout: 15_000,
       });

@@ -153,24 +153,31 @@ class EditingService:
 
         scene_id = payload.get("sceneId")
         if not scene_id:
-            raise ValueError("edit_apply requires sceneId for director timeline mutation")
+            raise ValueError("edit_apply requires sceneId for Timeline Master mutation")
 
         from ....db import Scene
-        from ....director_timeline import (
-            dumps_director_timeline_preserving_embedded,
-            parse_director_timeline,
+        from ....director_timeline_w46 import store as timeline_store
+        from ....director_timeline_w46.contracts import BatchClip
+        from ....director_timeline_w46.master_clip_mutate import (
+            append_clip,
+            ensure_windows,
+            find_clip,
+            iter_clips,
+            restore,
+            snapshot,
         )
+        from ....director_timeline_w46.service import load_timeline_bundle
 
         scene = db.get(Scene, scene_id)
         if not scene or scene.project_id != project_id:
             raise ValueError(f"Scene not found: {scene_id}")
 
-        before = scene.director_json or ""
-        tl = parse_director_timeline(
-            before,
-            fallback_duration=float(scene.duration_sec or 5),
-            fallback_prompt=scene.prompt or "",
-        )
+        bundle = load_timeline_bundle(db, project_id, scene_id)
+        if not bundle.get("ok"):
+            raise ValueError(f"Scene timeline not found: {scene_id}")
+        master = bundle["master"]
+        ensure_windows(master, scene_id=scene_id, duration_sec=float(scene.duration_sec or 5))
+        before = snapshot(master)
         history = []
         try:
             cont = json.loads(scene.continuity_json or "{}")
@@ -184,80 +191,78 @@ class EditingService:
             if name == "undo":
                 if not undo_stack:
                     continue
-                redo_stack.append(scene.director_json or "")
-                scene.director_json = undo_stack.pop()
-                tl = parse_director_timeline(
-                    scene.director_json,
-                    fallback_duration=float(scene.duration_sec or 5),
-                    fallback_prompt=scene.prompt or "",
-                )
+                redo_stack.append(snapshot(master))
+                prev = undo_stack.pop()
+                master = restore(prev) if isinstance(prev, dict) else master
                 history.append({"op": "undo"})
                 continue
             if name == "redo":
                 if not redo_stack:
                     continue
-                undo_stack.append(scene.director_json or "")
-                scene.director_json = redo_stack.pop()
-                tl = parse_director_timeline(
-                    scene.director_json,
-                    fallback_duration=float(scene.duration_sec or 5),
-                    fallback_prompt=scene.prompt or "",
-                )
+                undo_stack.append(snapshot(master))
+                nxt = redo_stack.pop()
+                master = restore(nxt) if isinstance(nxt, dict) else master
                 history.append({"op": "redo"})
                 continue
 
-            undo_stack.append(dumps_director_timeline_preserving_embedded(tl, scene.director_json))
+            undo_stack.append(snapshot(master))
             redo_stack.clear()
 
             if name in {"trim", "speed"}:
                 clip_id = op.get("clipId")
-                clips = tl.video_clips + tl.image_clips + tl.audio_clips + tl.sfx_clips
-                for c in clips:
-                    if c.id == clip_id or (not clip_id and clips):
-                        if op.get("trimStart") is not None:
-                            c.trim_start = float(op["trimStart"])
-                        if op.get("length") is not None:
-                            c.length = float(op["length"])
-                        if op.get("start") is not None:
-                            c.start = float(op["start"])
-                        break
+                _batch, _attr, clip = find_clip(master, str(clip_id or ""))
+                if clip is None:
+                    clips = [c for _b, _a, c in iter_clips(master)]
+                    clip = clips[0] if clips else None
+                if clip is not None:
+                    if op.get("trimStart") is not None:
+                        clip.trimStart = float(op["trimStart"])
+                    if op.get("length") is not None:
+                        clip.length = float(op["length"])
+                    if op.get("start") is not None:
+                        clip.start = float(op["start"])
             elif name in {"replace", "alt_take", "clip_replace"}:
                 clip_id = op.get("clipId")
                 new_asset = op.get("assetId")
-                for c in tl.video_clips + tl.image_clips:
-                    if c.id == clip_id or (not clip_id and new_asset):
-                        c.asset_id = new_asset
-                        break
+                _batch, _attr, clip = find_clip(master, str(clip_id or ""), ("visualClips",))
+                if clip is None:
+                    visuals = [c for _b, _a, c in iter_clips(master, ("visualClips",))]
+                    clip = visuals[0] if visuals and new_asset else None
+                if clip is not None:
+                    clip.assetId = new_asset
             elif name in {"insert", "shot_insert"}:
-                from ....director_timeline import TimelineClip
-
-                clip = TimelineClip(
-                    asset_id=op.get("assetId"),
-                    start=float(op.get("start") or 0),
+                start = float(op.get("start") or 0)
+                track = (op.get("track") or "video").lower()
+                clip = BatchClip(
+                    kind=(
+                        "audio"
+                        if track == "audio"
+                        else ("sfx" if track == "sfx" else ("image" if track == "image" else "video"))
+                    ),
+                    assetId=op.get("assetId"),
+                    start=start,
                     length=float(op.get("length") or 4),
                     label=str(op.get("label") or "insert"),
                 )
-                track = (op.get("track") or "video").lower()
-                if track == "audio":
-                    tl.audio_clips.append(clip)
-                elif track == "sfx":
-                    tl.sfx_clips.append(clip)
-                else:
-                    tl.video_clips.append(clip)
+                attr = (
+                    "audioClips"
+                    if track == "audio"
+                    else ("sfxClips" if track == "sfx" else "visualClips")
+                )
+                append_clip(master, clip, start, attr)
             elif name == "ripple":
                 delta = float(op.get("delta") or op.get("amount") or 0)
                 after = float(op.get("after") or 0)
-                for c in tl.video_clips + tl.image_clips + tl.audio_clips + tl.sfx_clips:
-                    if c.start >= after:
-                        c.start = max(0.0, c.start + delta)
+                for _batch, _attr, clip in iter_clips(master):
+                    if clip.start >= after:
+                        clip.start = max(0.0, clip.start + delta)
             elif name == "transition":
-                # Store transition metadata on continuity; no silent media overwrite.
                 transitions = list(cont.get("transitions") or [])
                 transitions.append(op)
                 cont["transitions"] = transitions
             history.append({"op": name, **{k: v for k, v in op.items() if k != "op"}})
 
-        scene.director_json = dumps_director_timeline_preserving_embedded(tl, before)
+        timeline_store.save_master(db, project_id, scene_id, master, bump_revision=True)
         cont["m29EditUndo"] = undo_stack[-50:]
         cont["m29EditRedo"] = redo_stack[-50:]
         scene.continuity_json = json.dumps(cont)
@@ -269,6 +274,6 @@ class EditingService:
             "projectId": project_id,
             "sceneId": scene_id,
             "history": history,
-            "beforeHash": hash(before),
-            "provider": "director_timeline",
+            "beforeHash": hash(json.dumps(before, sort_keys=True, default=str)),
+            "provider": "timeline_master",
         }

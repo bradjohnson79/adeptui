@@ -13,12 +13,27 @@ def _word_count(text: str) -> int:
 
 
 def interpret_user_need(user_message: str) -> UserNeed:
+    from app.codirector.conversation.foundation.visual_generation import (
+        is_executable_image_turn,
+        is_prompt_only_request,
+    )
+
+    if is_prompt_only_request(user_message):
+        return "DEVELOPMENT"
+    if is_executable_image_turn(user_message):
+        return "EXECUTION"
     lower = (user_message or "").lower()
     if re.search(r"\b(actually|correction|correct|merge|not separate|wrong|rename|fix that)\b", lower):
         return "CORRECTION"
     if re.search(r"\b(critique|honest feedback|what.?s weak|tighten|pacing problem)\b", lower):
         return "CRITIQUE"
-    if re.search(r"\b(generate|render|execute|place on timeline|run|build the asset)\b", lower):
+    if re.search(
+        r"\b(generate|render|execute|place on timeline|run|build the asset|"
+        r"create this image|create the image|create an image)\b",
+        lower,
+    ):
+        return "EXECUTION"
+    if re.search(r"\b(?:create|make|render)\b.+\b(?:image|picture|still|shot)\b", lower):
         return "EXECUTION"
     if re.search(r"\b(schedule|budget|shot list|call sheet|production plan|breakdown)\b", lower):
         return "PRODUCTION"
@@ -115,6 +130,10 @@ def evaluate_minds(
 
 
 def listening_only(*, user_need: UserNeed, initiative: InitiativeLevel, user_message: str) -> bool:
+    from app.codirector.conversation.foundation.visual_generation import is_executable_image_turn
+
+    if is_executable_image_turn(user_message) or user_need == "EXECUTION":
+        return False
     if initiative == "QUIET_PARTNER" and user_need == "LISTEN":
         return True
     if user_need == "LISTEN" and _word_count(user_message) >= 35 and "?" not in (user_message or ""):
@@ -163,6 +182,10 @@ def extract_insight_seeds(user_message: str) -> list[str]:
 
 def extract_open_questions(user_message: str) -> list[str]:
     """Detect unanswered dimensions without inventing fixture lore."""
+    from app.codirector.conversation.foundation.visual_generation import is_executable_image_turn
+
+    if is_executable_image_turn(user_message):
+        return []
     lower = (user_message or "").lower()
     questions: list[str] = []
     if re.search(r"\b(character|protagonist|lead)\b", lower) and not re.search(

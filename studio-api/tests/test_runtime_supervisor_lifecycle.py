@@ -15,6 +15,7 @@ from runtime_supervisor.identity import PortState, classify_api_port, classify_l
 from runtime_supervisor.ports import parse_netstat_owner
 from runtime_supervisor.services import (
     LifecycleError,
+    ServiceResult,
     start_all,
     start_studio_api,
     stop_owned_service,
@@ -67,6 +68,30 @@ def test_port_free_parser_unbound():
 def test_port_owner_parser_extracts_pid():
     text = "  TCP    127.0.0.1:59998         0.0.0.0:0              LISTENING       12345"
     assert parse_netstat_owner(text, 59998) == 12345
+
+
+def test_port_owner_uses_ip_helper_not_netstat_exe():
+    import inspect
+    import os
+    import socket
+    import sys
+
+    from runtime_supervisor import ports
+    from runtime_supervisor.ports import port_owner_pid
+
+    src = inspect.getsource(ports)
+    assert '["netstat"' not in src
+    assert "subprocess.run" not in src
+    if sys.platform != "win32":
+        return
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = int(server.getsockname()[1])
+    try:
+        assert port_owner_pid(port) == os.getpid()
+    finally:
+        server.close()
 
 
 def test_pid_round_trip(state: SupervisorState):
@@ -159,17 +184,15 @@ def test_authoritative_start_fails_closed_on_unrelated(fake_paths: RuntimePaths,
     assert "unrelated" in str(exc.value)
 
 
-def test_authoritative_start_adopts_healthy(fake_paths: RuntimePaths, state: SupervisorState):
+def test_authoritative_start_port_conflict_on_unknown_healthy(fake_paths: RuntimePaths, state: SupervisorState):
     def classify():
-        return PortState("healthy", pid=88, cmd="uvicorn app.main:app")
+        return PortState("healthy", pid=88, cmd="uvicorn app.main:app --port 8758")
 
     result = start_studio_api(fake_paths, state, classify_fn=classify, spawn=False)
-    assert result.ok is True
-    assert result.ownership == "reused"
+    assert result.ok is False
+    assert "PORT_CONFLICT" in result.message
     rec = state.read_pid("studio_api")
-    assert rec is not None
-    assert rec.pid == 88
-    assert rec.owned is False
+    assert rec is None or rec.owned is False
 
 
 def test_start_all_never_starts_8760(tmp_path: Path, fake_paths: RuntimePaths, monkeypatch: pytest.MonkeyPatch):
@@ -180,12 +203,21 @@ def test_start_all_never_starts_8760(tmp_path: Path, fake_paths: RuntimePaths, m
         return PortState("healthy", pid=1, cmd="uvicorn app.main:app")
 
     monkeypatch.setattr("runtime_supervisor.services.classify_api_port", classify)
-    monkeypatch.setattr("runtime_supervisor.services.comfy_healthy", lambda: True)
+    monkeypatch.setattr(
+        "runtime_supervisor.services.start_comfy",
+        lambda paths, state, spawn=True: ServiceResult("comfyui", True, "headless stub", None, "owned"),
+    )
     monkeypatch.setattr("runtime_supervisor.services.ollama_healthy", lambda: False)
     monkeypatch.setattr("runtime_supervisor.services.tunnel_process_healthy", lambda _s: False)
     monkeypatch.setattr("runtime_supervisor.services.port_owner_pid", lambda _p: 1)
     monkeypatch.setattr("runtime_supervisor.services.discover_paths", lambda _r=None: fake_paths)
     monkeypatch.setattr("runtime_supervisor.services.SupervisorState.from_env", lambda _root: state)
+    monkeypatch.setattr("runtime_supervisor.control_client.control_plane_reachable", lambda: False)
+    monkeypatch.setattr("runtime_supervisor.windows_task.task_exists", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        "runtime_supervisor.services.start_studio_api",
+        lambda *_a, **_k: ServiceResult("studio_api", True, "ok", 1, "owned"),
+    )
 
     report = start_all(spawn=False, no_cloudflare=True, state=state, repo_root=tmp_path)
     assert report.started_web_8760 is False
@@ -220,3 +252,45 @@ def test_start_args_never_include_workers_or_8760():
     assert "--workers" not in text
     assert "web_server.py" not in text
     assert "8760" not in text or "RETIRED_WEB_PORT" in text
+
+
+def test_gpu_admission_blocks_second_stack_when_other_is_busy(monkeypatch: pytest.MonkeyPatch):
+    from runtime_supervisor import gpu_admission as ga
+
+    monkeypatch.setattr(ga, "comfy_healthy", lambda host="127.0.0.1", port=8188: port == 8188)
+    monkeypatch.setattr(ga, "comfy_queue_running", lambda host="127.0.0.1", port=8188: 1 if port == 8188 else 0)
+    monkeypatch.setattr(ga, "nvidia_snapshot", lambda: {"ok": True, "name": "RTX"})
+    monkeypatch.setattr(ga, "port_owner_pid", lambda _p: 11)
+    monkeypatch.setattr(ga, "process_command_line", lambda _p: "python ComfyUI/main.py")
+    blocked = ga.assess_gpu_admission("minimax_h3_route_a")
+    assert blocked["allowed"] is False
+    assert blocked["action"] == "block"
+
+
+def test_gpu_admission_reuses_healthy_route_a(monkeypatch: pytest.MonkeyPatch):
+    from runtime_supervisor import gpu_admission as ga
+
+    monkeypatch.setattr(ga, "comfy_healthy", lambda host="127.0.0.1", port=8188: port == 8192)
+    monkeypatch.setattr(ga, "comfy_queue_running", lambda host="127.0.0.1", port=8188: 0)
+    monkeypatch.setattr(ga, "nvidia_snapshot", lambda: {"ok": True, "name": "RTX"})
+    monkeypatch.setattr(ga, "port_owner_pid", lambda _p: 22)
+    monkeypatch.setattr(ga, "process_command_line", lambda _p: "python minimax-h3/comfyui/main.py --port 8192")
+    reused = ga.assess_gpu_admission("minimax_h3_route_a")
+    assert reused["allowed"] is True
+    assert reused["action"] == "reuse"
+
+
+def test_adopt_route_a_does_not_claim_owned_ready(state: SupervisorState, monkeypatch: pytest.MonkeyPatch):
+    from runtime_supervisor.services import adopt_route_a
+
+    monkeypatch.setattr("runtime_supervisor.services.comfy_healthy", lambda host="127.0.0.1", port=8188: port == 8192)
+    monkeypatch.setattr("runtime_supervisor.services.port_owner_pid", lambda _p: 33)
+    monkeypatch.setattr(
+        "runtime_supervisor.services.process_command_line",
+        lambda _p: "python runtime/minimax-h3/comfyui/main.py --port 8192",
+    )
+    result = adopt_route_a(state)
+    assert result.ok is True
+    assert result.ownership in {"reused", "external"}
+    assert result.ownership != "owned"
+    assert "not Adept-owned Ready" in result.message

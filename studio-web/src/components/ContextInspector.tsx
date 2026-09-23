@@ -6,6 +6,8 @@ import { useDirectorSelection } from "./DirectorSelectionContext";
 import { JobPanel } from "./JobPanel";
 import { GpuVramPanel } from "./GpuVramPanel";
 import { PanelHeading } from "./HelpTip";
+import { EngineAuthoritySelect } from "./generation/EngineAuthoritySelect";
+import { resolveSubmitCanvas } from "../video/legalCanvas";
 
 function GlobalPromptCard({ project, onChange }: { project: Project; onChange: () => void }) {
   const [value, setValue] = useState(project.global_prompt);
@@ -141,26 +143,12 @@ export function ContextInspector({
           </div>
           <div className="field">
             <label>Engine {scene.engine === "auto" ? <span className="pill">Auto</span> : null}</label>
-            <select
+            <EngineAuthoritySelect
               value={scene.engine}
-              onChange={(e) =>
-                api.updateScene(project.id, scene.id, { ...scene, engine: e.target.value as Scene["engine"] }).then(onChange)
+              onChange={(engine) =>
+                void api.updateScene(project.id, scene.id, { ...scene, engine }).then(onChange)
               }
-            >
-              <optgroup label="Auto">
-                <option value="auto">Auto Select</option>
-              </optgroup>
-              <optgroup label="Local">
-                <option value="ltx">LTX 2.5</option>
-                <option value="wan">WAN 2.2</option>
-              </optgroup>
-              <optgroup label="Cloud">
-                <option value="fal_seedance">Seedance</option>
-                <option value="fal_kling">Kling</option>
-                <option value="fal_veo">Veo</option>
-                <option value="fal_runway">Runway</option>
-              </optgroup>
-            </select>
+            />
           </div>
           {rec && (
             <div className="recommend-card">
@@ -224,7 +212,23 @@ export function ContextInspector({
           </div>
           <button
             className="primary"
-            onClick={() => api.render(project.id, "scene", scene.id).then(onChange)}
+            onClick={() => {
+              const canvas = resolveSubmitCanvas(
+                String(scene.engine || "auto"),
+                Number(scene.width || project.width || 0),
+                Number(scene.height || project.height || 0),
+                scene.aspect_ratio || "16:9",
+              );
+              if (!canvas.available) return;
+              return api
+                .render(project.id, "scene", scene.id, {
+                  engine: scene.engine,
+                  width: canvas.width,
+                  height: canvas.height,
+                  resolution: `${canvas.width}x${canvas.height}`,
+                })
+                .then(onChange);
+            }}
           >
             Retake scene
           </button>

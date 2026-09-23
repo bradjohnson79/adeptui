@@ -158,6 +158,10 @@ async def route_turn_with_unified(
             "available_action_classes": ctx.available_action_classes,
             "available_targets": ctx.available_targets,
             "stage_evidence": ctx.stage_evidence,
+            # Intelligence repair 2026-09-19 (RC5): the semantic fallback
+            # classifier classifies follow-ups against their conversational
+            # referent instead of in isolation.
+            "recent_messages": (session_context or {}).get("recent_messages") or [],
         },
     )
     decision = stage_sensitive.adjust_for_stage(decision, ctx)
@@ -175,12 +179,14 @@ async def route_turn_with_unified(
         foundation_intent = analyze_intent(message)
     except Exception:  # noqa: BLE001
         foundation_intent = None
+    session = session_context or {}
     unified = classify_intent(
         message,
         {
             "derived_stage": ctx.derived_stage,
             "conversation_focus": ctx.conversation_focus,
             "active_workspace": ctx.active_workspace,
+            "recent_messages": session.get("recent_messages") or session.get("messages") or [],
         },
         route_decision=decision,
         foundation_intent=foundation_intent,

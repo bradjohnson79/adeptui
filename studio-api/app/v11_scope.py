@@ -18,8 +18,9 @@ DEFERRED_MESSAGE = (
 )
 DEFERRED_LABEL = "Coming in Version 1.2"
 DEFERRED_GUIDANCE = (
-    "Version 1.1 uses 360 panoramic environments and Spatial Map production. "
-    "Create a 360 Environment, open the Spatial Map, then set camera and lighting direction."
+    "Version 1.1 uses 360 panoramic environments and Environment Creator for ERS / environment work. "
+    "Spatial Map is shelved in this release. Create or plan an environment in Environment Creator Express; "
+    "do not open Spatial Map."
 )
 
 # HTTP status for policy denials (forbidden by product scope, not a missing route).

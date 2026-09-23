@@ -80,7 +80,11 @@ export function MagiFocusProvider({ children }: { children: ReactNode }) {
 
   return (
     <MagiFocusContext.Provider value={value}>
-      <div data-magi-focus-region={value.effectiveRegion} data-testid="magi-focus-root">
+      <div
+        className="magi-focus-root"
+        data-magi-focus-region={value.effectiveRegion}
+        data-testid="magi-focus-root"
+      >
         {children}
       </div>
     </MagiFocusContext.Provider>

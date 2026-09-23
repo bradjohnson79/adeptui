@@ -34,6 +34,8 @@ TILE_VIEW_ROLES: frozenset[str] = frozenset(
         "back",
         "closeup",
         "front_closeup",
+        "three_quarter",
+        "three-quarter",
     }
 )
 
@@ -101,9 +103,9 @@ def sheet_tile_role(params: Any) -> str | None:
     if not isinstance(params, dict):
         return None
     blob = _intent_blob(params)
-    for key in ("viewRole", "role"):
+    for key in ("viewRole", "role", "cameraRole"):
         raw = str(blob.get(key) or "").strip()
-        if raw in TILE_VIEW_ROLES:
+        if raw in TILE_VIEW_ROLES or raw.lower() in TILE_VIEW_ROLES:
             return raw
     return None
 
@@ -139,6 +141,51 @@ def is_single_image_four_view(params: Any) -> bool:
     if purpose == "character_sheet" or preset == "builtin-character-sheet":
         return True
     return False
+
+
+_SINGLE_CAMERA_TASKS = frozenset(
+    {
+        "CRS_GENERATION",
+        "CRS_SINGLE_VIEW",
+        "CRS_VIEW_GENERATION",
+        "CC_V3_MULTIVIEW",
+    }
+)
+_SINGLE_CAMERA_LAYOUTS = frozenset({"crs_view", "law_views", "cc_v2", "crs_view_generation"})
+
+
+def apply_job_four_view_prompt(
+    params: dict[str, Any] | None,
+    prompt: str | None,
+    *,
+    family: str | None = None,
+    ers_purpose: str | None = None,
+) -> tuple[dict[str, Any], str, bool]:
+    """Strengthen only true one-image four-panel sheets.
+
+    Full job params only. Never OR a stripped imageIntent block — CRS and
+    Character Angles share purpose=character_sheet with hosted four-panel sheets.
+    """
+    body = dict(params) if isinstance(params, dict) else {}
+    seed = str(prompt or "")
+    task = str(body.get("taskType") or (body.get("creativeContext") or {}).get("taskType") or "").strip().upper()
+    layout = str(
+        body.get("layout")
+        or body.get("sheet_layout")
+        or (body.get("creativeContext") or {}).get("layout")
+        or ""
+    ).strip().lower()
+    if task in _SINGLE_CAMERA_TASKS or layout in _SINGLE_CAMERA_LAYOUTS:
+        return body, seed, False
+    if body.get("fourViewSingleOutput") is False:
+        return body, seed, False
+    if body.get("ccV3") or body.get("ccV2"):
+        return body, seed, False
+    if not is_single_image_four_view(body):
+        return body, seed, False
+    strengthened = strengthen_four_view_prompt(seed)
+    next_body = attach_four_view_sheet_intent(body)
+    return next_body, strengthened, True
 
 
 def strengthen_four_view_prompt(prompt: str | None) -> str:

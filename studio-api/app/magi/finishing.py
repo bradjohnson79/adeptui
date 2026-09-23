@@ -1,4 +1,8 @@
-"""Non-destructive MAGI finishing state on the sequence document."""
+"""Non-destructive MAGI finishing state on the sequence document.
+
+finishing.audio (musicAssetId/sfxAssetId/range) is MAGI Final Render mix authority.
+Audio Studio mix.json is adjacent and is not read by magi_final_render.
+"""
 
 from __future__ import annotations
 

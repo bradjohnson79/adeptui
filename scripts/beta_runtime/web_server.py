@@ -182,9 +182,12 @@ def main() -> int:
     dirs = runtime_dirs()
     parser = argparse.ArgumentParser(description="Adept UI Beta production web server")
     parser.add_argument("--host", default=os.environ.get("STUDIO_WEB_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("STUDIO_WEB_PORT", "8760")))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("STUDIO_WEB_PORT", "5173")))
     parser.add_argument("--dist", type=Path, default=dirs["dist"])
     args = parser.parse_args()
+    if int(args.port) == 8760 and not os.environ.get("ADEPT_ALLOW_RETIRED_8760"):
+        print("[beta-web] REFUSED: retired :8760 is not a creator UI. Use Vite :5173.", flush=True)
+        return 2
 
     os.environ["ADEPT_UI_BETA_RUNTIME"] = "1"
     app = build_app(Path(args.dist), status_path=dirs["status"])

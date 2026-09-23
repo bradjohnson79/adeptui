@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .contracts import AdeptMiniMaxH3Request, H3AudioPlan, H3GenerationPlan
-from .three_frame import build_segmented_plan, creator_disclosure
+from .three_frame import build_add_guide_plan, creator_disclosure
 
 
 def _summary_for_mode(request: AdeptMiniMaxH3Request) -> str:
@@ -13,13 +13,13 @@ def _summary_for_mode(request: AdeptMiniMaxH3Request) -> str:
         return "Create motion that starts from one guide frame."
     if request.mode == "first-last":
         return "Guide motion between a start frame and an end frame."
-    if request.mode == "three-frame":
-        return "Guide motion across Start, Middle, and End using a two-part assembly plan."
+    if request.mode in {"three-frame", "first-last"}:
+        return "Guide motion with First + Last stills; Middle is optional AddGuide on one local run."
     return "Create a reference-guided motion draft from the selected materials."
 
 
 def _disclosure_for_mode(request: AdeptMiniMaxH3Request) -> str:
-    if request.mode == "three-frame":
+    if request.mode in {"three-frame", "first-last"}:
         return creator_disclosure()
     if request.mode == "first-last":
         return "MiniMax H3 will use the first and last frame only. Additional references stay as guidance."
@@ -32,9 +32,9 @@ def _disclosure_for_mode(request: AdeptMiniMaxH3Request) -> str:
 
 def build_plan(request: AdeptMiniMaxH3Request) -> H3GenerationPlan:
     three_frame_plan = None
-    if request.mode == "three-frame":
+    if request.mode in {"three-frame", "first-last"}:
         try:
-            three_frame_plan = build_segmented_plan(request)
+            three_frame_plan = build_add_guide_plan(request)
         except ValueError:
             three_frame_plan = None
     audio_plan = H3AudioPlan(assetId=request.audioAssetId)
@@ -52,7 +52,7 @@ def build_plan(request: AdeptMiniMaxH3Request) -> H3GenerationPlan:
         audioPlan=audio_plan,
         advancedMetadata={
             "surface": "minimax_h3",
-            "threeFrameNative": False,
-            "threeFrameStrategyDefault": "segmented-a",
+            "threeFrameNative": True,
+            "threeFrameStrategyDefault": "middle-guidance-b",
         },
     )

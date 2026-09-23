@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../api";
 import type {
   VoiceEnvironmentProfile,
@@ -12,7 +12,9 @@ import type {
   VoicePerformanceTake,
 } from "../../../contracts/voicePerformanceM410";
 import { HelpTip, PanelHeading } from "../../HelpTip";
+import { GlobalScopeField } from "../../creator/GlobalScopeField";
 import { Button } from "../../ui";
+import { pickCanonicalVoiceRecord } from "../canonicalVoiceRecord";
 import {
   DEVICE_PRESETS,
   DIRECTION_PRESETS,
@@ -161,11 +163,7 @@ function pickRecord(
   characterId: string,
   voiceIdentityId?: string | null,
 ): VoicePerformanceRecord | null {
-  const matching = records
-    .filter((record) => record.characterId === characterId && record.approvedTakeId)
-    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-  if (!matching.length) return null;
-  return matching.find((record) => record.voiceIdentityId === voiceIdentityId) || matching[0];
+  return pickCanonicalVoiceRecord(records, characterId, voiceIdentityId, { requireApprovedTake: true });
 }
 
 function optionLabel(options: readonly PresetOption[], id: string) {
@@ -250,11 +248,13 @@ export function VoiceEnvironmentPanel({
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [draft, setDraft] = useState<VoiceEnvironmentDraft>(() => createDefaultDraft(characterName));
   const [lastSavedSnapshot, setLastSavedSnapshot] = useState("");
+  const processedPlayerRef = useRef<HTMLAudioElement | null>(null);
   const [renders, setRenders] = useState<VoiceEnvironmentRender[]>([]);
   const [selectedRenderId, setSelectedRenderId] = useState("");
   const [recommendation, setRecommendation] = useState<VoiceEnvironmentRecommendation | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
   const [busyAction, setBusyAction] = useState("");
+  const [isGlobal, setIsGlobal] = useState(false);
 
   const hasApprovedVoiceIdentity = Boolean(approvedVoiceIdentity?.id);
   const hasApprovedPerformance = isTakeReady(approvedTake);
@@ -432,20 +432,31 @@ export function VoiceEnvironmentPanel({
         onMsg("Approve a performance take first.");
         return;
       }
-      if (!selectedProfileId) {
-        onMsg("Save this Voice Environment profile first.");
-        return;
-      }
-      if (isDirty) {
-        onMsg("Save your latest environment changes before previewing or rendering.");
-        return;
-      }
       if (runtimeStatus && runtimeStatus.ok === false) {
         onMsg(runtimeStatus.message || "Voice Environment processing is not ready yet.");
         return;
       }
       setBusyAction(mode);
       try {
+        // ORDER 4: auto-apply draft filters so Preview/Render work without requiring Save first.
+        let profileId = selectedProfileId;
+        if (!profileId || isDirty) {
+          const payload = {
+            projectId,
+            characterId,
+            ...draftPayload(draft),
+          };
+          const profile = profileId
+            ? await api.voiceEnvironment.updateProfile(profileId, payload)
+            : await api.voiceEnvironment.createProfile(payload);
+          applyProfile(profile);
+          await refreshProfiles();
+          profileId = profile.id;
+        }
+        if (!profileId) {
+          onMsg("Could not apply environment filters for processing.");
+          return;
+        }
         const next =
           mode === "preview"
             ? await api.voiceEnvironment.preview({
@@ -453,7 +464,7 @@ export function VoiceEnvironmentPanel({
                 characterId,
                 performanceRecordId: record.id,
                 performanceTakeId: approvedTake.id,
-                environmentProfileId: selectedProfileId,
+                environmentProfileId: profileId,
                 preview: true,
               })
             : await api.voiceEnvironment.render({
@@ -461,7 +472,7 @@ export function VoiceEnvironmentPanel({
                 characterId,
                 performanceRecordId: record.id,
                 performanceTakeId: approvedTake.id,
-                environmentProfileId: selectedProfileId,
+                environmentProfileId: profileId,
                 preview: false,
               });
         setSelectedRenderId(next.id);
@@ -474,17 +485,31 @@ export function VoiceEnvironmentPanel({
       }
     },
     [
+      applyProfile,
       approvedTake?.id,
       characterId,
+      draft,
       isDirty,
       onMsg,
       projectId,
       record?.id,
+      refreshProfiles,
       refreshRenders,
       runtimeStatus,
       selectedProfileId,
     ],
   );
+
+
+  useEffect(() => {
+    const el = processedPlayerRef.current;
+    if (!el || !currentRender?.processedAudioAssetId) return;
+    if (busyAction === "preview" || busyAction === "render") return;
+    // Autoplay latest environment pass after Preview/Render completes (user gesture already started the action).
+    void el.play().catch(() => {
+      /* browser may still block; controls remain */
+    });
+  }, [busyAction, currentRender?.id, currentRender?.processedAudioAssetId]);
 
   const approveRender = useCallback(async () => {
     if (!currentRender?.id) {
@@ -493,15 +518,19 @@ export function VoiceEnvironmentPanel({
     }
     setBusyAction("approve");
     try {
-      await api.voiceEnvironment.approve(currentRender.id, true);
+      await api.voiceEnvironment.approve(currentRender.id, true, { isGlobal });
       await refreshRenders();
-      onMsg("Voice Environment approved.");
+      onMsg(
+        isGlobal
+          ? "Voice Environment approved and saved to Global Library (available in every project)."
+          : "Voice Environment approved and saved to this project's Library.",
+      );
     } catch (error: any) {
       onMsg(error?.message || "Voice Environment approval failed.");
     } finally {
       setBusyAction("");
     }
-  }, [currentRender?.id, onMsg, refreshRenders]);
+  }, [currentRender?.id, isGlobal, onMsg, refreshRenders]);
 
   const sendToTimeline = useCallback(async () => {
     if (!currentRender?.id) {
@@ -514,7 +543,7 @@ export function VoiceEnvironmentPanel({
         sceneId: draft.sceneId || record?.sceneId || undefined,
         useProcessedMix: true,
       });
-      onMsg("Sent to Timeline with dry and processed audio links. Spoken start stays dry-aligned.");
+      onMsg("Placed on the Timeline audio track (Dialogue). Spoken start stays dry-aligned.");
     } catch (error: any) {
       onMsg(error?.message || "Timeline handoff failed.");
     } finally {
@@ -522,23 +551,6 @@ export function VoiceEnvironmentPanel({
     }
   }, [currentRender?.id, draft.sceneId, onMsg, record?.sceneId]);
 
-  const prepareLipsync = useCallback(async () => {
-    if (!currentRender?.id) {
-      onMsg("Render an environment version first.");
-      return;
-    }
-    setBusyAction("lipsync");
-    try {
-      await api.voiceEnvironment.prepareLipsync(currentRender.id, {
-        sceneId: draft.sceneId || record?.sceneId || undefined,
-      });
-      onMsg("Lip Sync prepared using dry timing. Environment tails are ignored.");
-    } catch (error: any) {
-      onMsg(error?.message || "Lip Sync prepare failed.");
-    } finally {
-      setBusyAction("");
-    }
-  }, [currentRender?.id, draft.sceneId, onMsg, record?.sceneId]);
 
   const openInAudioStudio = useCallback(async () => {
     if (!currentRender?.id) {
@@ -559,27 +571,6 @@ export function VoiceEnvironmentPanel({
       setBusyAction("");
     }
   }, [currentRender?.id, onMsg]);
-
-  const applyToScene = useCallback(async () => {
-    if (!currentRender?.id) {
-      onMsg("Render an environment version first.");
-      return;
-    }
-    const sceneId = draft.sceneId || record?.sceneId;
-    if (!sceneId) {
-      onMsg("Choose a scene before applying this environment.");
-      return;
-    }
-    setBusyAction("scene");
-    try {
-      await api.voiceEnvironment.applyToScene(currentRender.id, sceneId);
-      onMsg("Environment applied to the selected scene.");
-    } catch (error: any) {
-      onMsg(error?.message || "Could not apply environment to scene.");
-    } finally {
-      setBusyAction("");
-    }
-  }, [currentRender?.id, draft.sceneId, onMsg, record?.sceneId]);
 
   if (!hasApprovedVoiceIdentity) {
     return (
@@ -657,7 +648,7 @@ export function VoiceEnvironmentPanel({
               Dialogue stays dry for timing. Environment processing wraps around this take without shifting the spoken start.
             </p>
             {approvedTake?.audioAssetId ? (
-              <audio controls src={api.assetUrl(approvedTake.audioAssetId)} data-testid="voice-environment-dry-player" />
+              <audio controls src={api.assetUrl(approvedTake.audioAssetId, undefined, projectId)} data-testid="voice-environment-dry-player" />
             ) : null}
           </article>
 
@@ -666,10 +657,15 @@ export function VoiceEnvironmentPanel({
             <p className="muted">
               {currentRender
                 ? `${optionLabel(SPACE_PRESETS, draft.spacePreset)} · ${optionLabel(DISTANCE_PRESETS, draft.distancePreset)} · ${optionLabel(DIRECTION_PRESETS, draft.directionPreset)}`
-                : "Save a profile, then preview or render the environment to hear the scene acoustic."}
+                : "Preview or Render to hear the scene acoustic. Filter changes apply without Save."}
             </p>
             {currentRender?.processedAudioAssetId ? (
-              <audio controls src={api.assetUrl(currentRender.processedAudioAssetId)} data-testid="voice-environment-processed-player" />
+              <audio
+                ref={processedPlayerRef}
+                controls
+                src={api.assetUrl(currentRender.processedAudioAssetId, undefined, projectId)}
+                data-testid="voice-environment-processed-player"
+              />
             ) : (
               <div className="voice-studio-empty-player">No environment pass yet.</div>
             )}
@@ -727,6 +723,11 @@ export function VoiceEnvironmentPanel({
             >
               Render
             </Button>
+            <GlobalScopeField
+              testId="voice-environment-global"
+              checked={isGlobal}
+              onChange={setIsGlobal}
+            />
             <Button
               type="button"
               disabled={!currentRender || busyAction === "approve"}
@@ -738,26 +739,10 @@ export function VoiceEnvironmentPanel({
             <Button
               type="button"
               disabled={!currentRender || Boolean(busyAction)}
-              onClick={() => void applyToScene()}
-              data-testid="voice-environment-apply-scene"
-            >
-              Apply to Scene
-            </Button>
-            <Button
-              type="button"
-              disabled={!currentRender || Boolean(busyAction)}
               onClick={() => void sendToTimeline()}
               data-testid="voice-environment-timeline"
             >
               Send to Timeline
-            </Button>
-            <Button
-              type="button"
-              disabled={!currentRender || Boolean(busyAction)}
-              onClick={() => void prepareLipsync()}
-              data-testid="voice-environment-lipsync"
-            >
-              Prepare Lip Sync
             </Button>
             <Button
               type="button"
@@ -1060,10 +1045,10 @@ export function VoiceEnvironmentPanel({
 
           <p className="muted">
             {isDirty
-              ? "You have unsaved environment changes."
+              ? "Unsaved filter changes — Preview and Render will use them immediately."
               : selectedProfileId
                 ? "This environment profile is saved."
-                : "Save this environment profile before previewing or rendering."}
+                : "Adjust filters, then Preview (instant hear) or Render (full process). Save Profile is optional."}
           </p>
         </section>
       </div>

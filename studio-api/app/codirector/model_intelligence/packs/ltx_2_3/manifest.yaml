@@ -5,7 +5,7 @@ engineId: ltx
 displayName: LTX 2.3
 modelVersion: '2.3'
 knowledgePackVersion: 1.0.0
-status: ACTIVE
+status: DEPRECATED
 runtimeStatus: not_production_ready
 media:
 - video

@@ -12,7 +12,9 @@ from app.codirector.video_intelligence.compare import compare_intent_vs_actual
 from app.codirector.video_intelligence.compile import compile_temporal_continuation
 from app.codirector.video_intelligence.contracts import (
     PACKET_SCHEMA,
+    Assessment,
     CoDirectorContinuityPolicy,
+    ExitState,
     TemporalContinuityPacket,
     VideoPerceptionObservation,
 )
@@ -58,7 +60,10 @@ def _master_two_batches() -> SceneTimelineMaster:
         duration=DurationState(plannedDuration=5.0),
         promptSegments=[TimelinePromptSegment(text="Korri responds. Both keep walking.")],
     )
+    from app.runtime_session import current_runtime_session_id
+
     return SceneTimelineMaster(
+        renderSessionId=current_runtime_session_id(),
         batchBlocks=[first, second],
         continuityBridges=[
             ContinuityBridge(
@@ -79,11 +84,21 @@ def test_packet_name_is_not_wave5_continuity_packet():
     assert type(packet).__name__ == "TemporalContinuityPacket"
 
 
-def test_automatic_cadence_picks_action_vs_dialogue():
+def test_automatic_cadence_uses_full_clip_every_batch():
+    """Full-clip Continuity: automatic Timeline path reviews the whole approved shot."""
+    from app.codirector.video_intelligence.cadence import review_window_kind
+
     policy = CoDirectorContinuityPolicy(reviewCadence="automatic")
-    assert resolve_cadence(policy, prompt="a fight and dolly", character_count=2) == "interval_3"
-    assert resolve_cadence(policy, prompt="quiet dialogue sitting") == "interval_5"
+    assert resolve_cadence(policy, prompt="a fight and dolly", character_count=2) == "every_batch"
+    assert resolve_cadence(policy, prompt="quiet dialogue sitting") == "every_batch"
+    assert resolve_cadence(policy, prompt="anything", generated_duration=15.0) == "every_batch"
+    # Explicit creator choices still honor interval / every_batch.
+    assert resolve_cadence(CoDirectorContinuityPolicy(reviewCadence="interval_3"), prompt="fight") == "interval_3"
+    assert resolve_cadence(CoDirectorContinuityPolicy(reviewCadence="interval_5"), prompt="dialogue") == "interval_5"
     assert window_seconds("interval_3", 5.0) == 3.0
+    assert window_seconds("every_batch", 15.0) == 15.0
+    assert review_window_kind("every_batch") == "full_clip"
+    assert review_window_kind("interval_5") == "tail_5"
 
 
 def test_compare_keeps_successful_material_and_continues_unfinished():
@@ -107,19 +122,93 @@ def test_compare_keeps_successful_material_and_continues_unfinished():
     assert any("restart" in item.lower() for item in out.continuation.avoid)
 
 
+def test_compile_carries_full_watch_and_exit_frame():
+    packet = TemporalContinuityPacket(
+        availability="ready",
+        source={"batchId": "bb_a", "targetBatchId": "bb_b"},
+        assessment=Assessment(
+            observedState=(
+                "One distant figure walks through a golden field. "
+                "The camera pushes in. The last frame is a medium shot of that same figure, "
+                "sun still on the left. {\"unfinishedActions\": [], \"completedActions\": [], \"confidence\": 0.8}"
+            )
+        ),
+        exitState=ExitState(
+            summary="The figure is still walking away.",
+            cameraState="medium shot, pushing in",
+            environmentState="golden field, sun on the left",
+            characterStates=["one distant figure in dark clothing"],
+        ),
+    )
+    compiled = compile_temporal_continuation(packet, supports_prompt_continuation=True)
+    prefix = compiled["promptPrefix"]
+    assert "Watched:" in prefix
+    assert "golden field" in prefix
+    assert "unfinishedActions" not in prefix
+    assert "ExitCamera: medium shot, pushing in" in prefix
+    assert "ExitPlace: golden field, sun on the left" in prefix
+    assert "ExitPerson: one distant figure in dark clothing" in prefix
+
+
 def test_degraded_packet_releases_gate_and_does_not_invent_directives():
     master = _master_two_batches()
     packet = TemporalContinuityPacket(
         availability="unavailable",
         reason="VIDEOCHAT3_NOT_INSTALLED",
         source={"batchId": "bb_a", "targetBatchId": "bb_b"},
+        extras={"reviewedAssetId": "asset_a"},
     )
     master.temporalPackets = [packet]
-    assert packet.is_gate_ready()
-    assert packet_blocks_submit(master, "bb_b") is False
+    assert packet.is_gate_ready() is False
+    assert packet_blocks_submit(master, "bb_b") is True
     compiled = compile_temporal_continuation(packet, supports_prompt_continuation=True)
     assert compiled["applied"] is False
     assert compiled["promptPrefix"] == ""
+
+
+def test_unstamped_packet_blocks_submit_gate():
+    """Historical-take contamination guard at the gate: a packet that cannot
+    prove it reviewed the predecessor's CURRENT asset must not release the
+    extension submit — even when it is otherwise gate-ready."""
+    master = _master_two_batches()
+    packet = TemporalContinuityPacket(
+        availability="unavailable",
+        reason="VIDEOCHAT3_NOT_INSTALLED",
+        source={"batchId": "bb_a", "targetBatchId": "bb_b"},
+        # No extras.reviewedAssetId — legacy/stale packet shape.
+    )
+    master.temporalPackets = [packet]
+    assert packet.is_gate_ready() is False
+    assert packet_blocks_submit(master, "bb_b") is True
+
+
+def test_packet_invalidated_by_revision_is_stale():
+    """REBUILD LAW fence (scene revision authority): when a batch's prompt
+    materially changes, packets derived from the OLD intent are invalidated
+    (extras.invalidatedByRevision) and must not release the extension submit
+    even though the reviewed asset id is unchanged — the next submit forces a
+    re-review against the current revision."""
+    from app.codirector.video_intelligence.service import (
+        invalidate_packets_for_source_batch,
+        is_packet_stale_for_batch,
+    )
+
+    master = _master_two_batches()
+    packet = TemporalContinuityPacket(
+        availability="ready",
+        source={"batchId": "bb_a", "targetBatchId": "bb_b"},
+        extras={"reviewedAssetId": "asset_a"},
+    )
+    master.temporalPackets = [packet]
+    # Asset unchanged → not stale before revision.
+    batch_a = next(b for b in master.batchBlocks if b.id == "bb_a")
+    assert is_packet_stale_for_batch(packet, batch_a) is False
+    # Material revision → invalidated → stale at the gate.
+    assert invalidate_packets_for_source_batch(master, "bb_a") == 1
+    assert is_packet_stale_for_batch(packet, batch_a) is True
+    assert packet_blocks_submit(master, "bb_b") is True
+    # Idempotent.
+    assert invalidate_packets_for_source_batch(master, "bb_a") == 0
 
 
 def test_missing_packet_blocks_submit_when_continuity_on():
@@ -161,7 +250,7 @@ def test_review_without_video_emits_degraded_packet(monkeypatch):
     packet = review_completed_batch(None, "p1", "s1", master, master.batchBlocks[0], target_batch_id="bb_b")
     assert packet.availability == "unavailable"
     assert find_packet_for_handoff(master, "bb_a", "bb_b") is not None
-    assert packet_blocks_submit(master, "bb_b") is False
+    assert packet_blocks_submit(master, "bb_b") is True
 
 
 def test_setup_catalog_marks_videochat3_required():
@@ -282,6 +371,10 @@ def test_submit_next_queued_does_not_call_adapter_until_packet_exists(monkeypatc
         lambda *args, **kwargs: None,
     )
 
+    from app.codirector.video_intelligence.gpu_lease import handoff_key, note_handoff, reset_handoff_state
+
+    reset_handoff_state()
+    note_handoff(handoff_key("s1", "", "bb_a"), state="ready")
     result = orchestrator.submit_next_queued_batch(None, "p1", "s1")
     assert result.get("submitted") is False
     assert result.get("reason") == "temporal_review_pending"
@@ -291,6 +384,7 @@ def test_submit_next_queued_does_not_call_adapter_until_packet_exists(monkeypatc
         availability="unavailable",
         reason="VIDEOCHAT3_NOT_INSTALLED",
         source={"batchId": "bb_a", "targetBatchId": "bb_b"},
+        extras={"reviewedAssetId": "asset_a"},
     )
     master.temporalPackets = [packet]
 
@@ -302,8 +396,9 @@ def test_submit_next_queued_does_not_call_adapter_until_packet_exists(monkeypatc
         ensure_ready,
     )
     result = orchestrator.submit_next_queued_batch(None, "p1", "s1")
-    assert submitted == ["submit"]
-    assert result.get("submitted") is True
+    assert submitted == []
+    assert result.get("submitted") is False
+    assert result.get("reason") == "temporal_review_pending"
     assert SeedanceApiAdapter.capabilities.supportsPromptContinuation is True
     assert KlingApiAdapter.capabilities.supportsTemporalConditioning is False
 
@@ -358,7 +453,7 @@ def test_prepare_plan_routes_videochat3_away_from_hunyuan():
     assert action["type"] == "video_understanding_hf_install"
     assert "Tencent" not in action["summary"]
     hunyuan = _checkpoint_for("hunyuan_video_15", "install")
-    assert hunyuan["type"] == "hunyuan_hf_install"
+    assert hunyuan["type"] == "retired_video_generator"
 
 
 def test_production_forbids_stub_and_missing_model_is_unavailable(tmp_path, monkeypatch):
@@ -417,7 +512,7 @@ def test_review_maps_missing_model_to_unavailable_without_stub_directives(tmp_pa
     assert packet.reason == "MODEL_NOT_INSTALLED"
     assert packet.continuation.preserve == []
     assert packet.continuation.nextBatchDirectives == []
-    assert packet_blocks_submit(master, "bb_b") is False
+    assert packet_blocks_submit(master, "bb_b") is True
 
 
 def test_extracted_review_clip_is_removed(tmp_path):
@@ -557,3 +652,175 @@ def test_queue_hops_merge_keeps_claim_timestamp():
     assert hops["enqueueOk"] is True
     assert hops["providerPromptId"] == "p1"
     assert hops["providerAccepted"] is True
+
+
+# ---------------------------------------------------------------------------
+# Full-clip Continuity Challenge + rolling scene state
+# ---------------------------------------------------------------------------
+
+
+def test_sample_timestamps_cover_early_and_dense_end():
+    from app.codirector.video_intelligence.clip_extract import sample_timestamps_for_full_clip_review
+
+    stamps = sample_timestamps_for_full_clip_review(15.0, broad_count=6, dense_end_sec=3.0, dense_fps=2.0)
+    assert stamps[0] <= 0.05
+    assert any(t <= 2.5 for t in stamps)  # early
+    assert any(5.0 <= t <= 10.0 for t in stamps)  # mid
+    assert stamps[-1] >= 14.0
+    # Dense near end: multiple samples in last 3s
+    end_samples = [t for t in stamps if t >= 12.0]
+    assert len(end_samples) >= 3
+
+
+def test_continuity_challenge_early_event_survives_into_next_packet(tmp_path, monkeypatch):
+    """Continuity Challenge: event early in ~15s clip must appear in next-shot packet."""
+    import os
+    from app.codirector.video_intelligence.contracts import ImportantEvent
+    from app.codirector.video_intelligence.worker_client import VideoPerceptionObservation as _unused
+
+    os.environ["ADEPT_TEMPORAL_PERCEPTION_MODE"] = "stub"
+    video = tmp_path / "clip15.mp4"
+    video.write_bytes(b"not-a-real-mp4")
+
+    master = _master_two_batches()
+    master.batchBlocks[0].duration.generatedDuration = 15.0
+    master.batchBlocks[0].duration.plannedDuration = 15.0
+    master.coDirectorContinuityPolicy.reviewCadence = "automatic"
+
+    # Stub perception that reports an EARLY event in a 15s window.
+    from app.codirector.video_intelligence.contracts import VideoPerceptionObservation
+
+    early_obs = VideoPerceptionObservation(
+        modelId="videochat3-4b",
+        timeRange=(0.0, 15.0),
+        rawText=(
+            "At the start a blue cup is knocked over on the left table. "
+            "Later the characters keep walking forward. "
+            "Near the end Korri turns toward Anadriya."
+            '\n\n{"unfinishedActions": [], "completedActions": ["blue cup knocked over", "walking continues", "Korri turns"], "confidence": 0.82}'
+        ),
+        unfinishedActions=[],
+        completedActions=["blue cup knocked over", "walking continues", "Korri turns"],
+        confidence=0.82,
+        parseOk=True,
+    )
+
+    monkeypatch.setattr(
+        "app.codirector.video_intelligence.service._asset_path",
+        lambda *args, **kwargs: str(video),
+    )
+    monkeypatch.setattr(
+        "app.codirector.video_intelligence.service.run_perception",
+        lambda *args, **kwargs: early_obs,
+    )
+    monkeypatch.setattr(
+        "app.codirector.video_intelligence.service.extract_full_clip_review",
+        lambda *args, **kwargs: str(video),
+    )
+    monkeypatch.setattr(
+        "app.codirector.video_intelligence.service.cleanup_extracted_clip",
+        lambda *args, **kwargs: True,
+    )
+
+    packet = review_completed_batch(None, "p1", "s1", master, master.batchBlocks[0], target_batch_id="bb_b")
+    assert packet.availability == "ready"
+    assert (packet.extras or {}).get("reviewWindowKind") == "full_clip"
+    assert float(packet.source.startTime) == 0.0
+    assert float(packet.source.endTime) >= 14.0
+
+    labels = " ".join(e.label.lower() for e in (packet.importantEvents or []))
+    assert "blue cup" in labels or "knocked" in labels
+    early_or_mid = [e for e in (packet.importantEvents or []) if e.phase in ("early", "mid")]
+    assert early_or_mid, f"expected early/mid events, got {[e.phase for e in packet.importantEvents]}"
+
+    # Early event must appear in next-batch directives / compiled prompt for N+1.
+    directive_blob = " ".join(packet.continuation.nextBatchDirectives).lower()
+    assert "blue cup" in directive_blob or "earlier beat" in directive_blob or "knocked" in directive_blob
+
+    compiled = compile_temporal_continuation(packet, supports_prompt_continuation=True)
+    assert compiled["applied"] is True
+    assert compiled.get("reviewWindowKind") == "full_clip"
+    assert "blue cup" in compiled["promptPrefix"].lower() or "knocked" in compiled["promptPrefix"].lower()
+    assert "Event(" in compiled["promptPrefix"]
+
+    # Rolling digest persisted on master
+    assert getattr(master, "coDirectorRollingSceneDigest", None)
+    digest = master.coDirectorRollingSceneDigest
+    assert isinstance(digest, dict)
+    event_labels = " ".join(
+        str(e.get("label") or "").lower() for e in (digest.get("importantEvents") or [])
+    )
+    assert "blue cup" in event_labels or "knocked" in event_labels
+
+
+def test_compare_captures_early_mid_events_not_only_tail():
+    packet = TemporalContinuityPacket(
+        source={"batchId": "bb_a", "targetBatchId": "bb_b", "startTime": 0.0, "endTime": 15.0}
+    )
+    observation = VideoPerceptionObservation(
+        modelId="stub",
+        timeRange=(0.0, 15.0),
+        rawText="Early on a lantern tips over. Midway she waves. At the end he looks left.",
+        completedActions=["lantern tips over", "she waves", "he looks left"],
+        unfinishedActions=[],
+        confidence=0.9,
+        parseOk=True,
+    )
+    out = compare_intent_vs_actual(packet, observation, context={"prompt": "continue the scene"})
+    phases = {e.phase for e in out.importantEvents}
+    assert "early" in phases or "mid" in phases
+    assert any("lantern" in e.label.lower() for e in out.importantEvents)
+    assert out.exitState is not None
+    assert out.rollingSceneDigest is not None
+
+
+def test_retake_memory_freezes_temporal_directives_from_approved_prior():
+    from app.director_timeline_w46.continuity import compile_retake_memory
+
+    master = _master_two_batches()
+    packet = TemporalContinuityPacket(
+        availability="ready",
+        source={"batchId": "bb_a", "targetBatchId": "bb_b"},
+    )
+    packet.continuation.nextBatchDirectives = ["Finish the remaining Korri turn."]
+    packet.continuation.preserve = ["walking velocity"]
+    packet.importantEvents = [
+        __import__("app.codirector.video_intelligence.contracts", fromlist=["ImportantEvent"]).ImportantEvent(
+            label="blue cup knocked over", phase="early", approxTimeSec=1.2
+        )
+    ]
+    packet.extras = {"reviewWindowKind": "full_clip"}
+    master.temporalPackets = [packet]
+    master.coDirectorRollingSceneDigest = {"schemaVersion": "rolling-scene-digest-v1", "preserve": ["walking velocity"]}
+
+    mem = compile_retake_memory(
+        master=master,
+        batch=master.batchBlocks[1],
+        user_correction={"note": "tighter framing"},
+        incoming=master.continuityBridges[0],
+    )
+    frozen = mem["incomingContinuity"].get("temporalContinuity") or {}
+    assert frozen.get("packetId") == packet.packetId
+    assert "Finish the remaining Korri turn." in (frozen.get("nextBatchDirectives") or [])
+    assert mem["sequenceMemory"].get("temporalDirectivesFrozen") is True
+    assert any("blue cup" in str(e.get("label") or "").lower() for e in (frozen.get("importantEvents") or []))
+
+
+def test_rejected_packet_not_frozen_into_retake_memory():
+    from app.director_timeline_w46.continuity import compile_retake_memory
+
+    master = _master_two_batches()
+    packet = TemporalContinuityPacket(
+        availability="ready",
+        source={"batchId": "bb_a", "targetBatchId": "bb_b"},
+    )
+    packet.continuation.nextBatchDirectives = ["BAD DIRECTIVE FROM REJECTED"]
+    packet.continuation.creatorRejected = True
+    master.temporalPackets = [packet]
+    mem = compile_retake_memory(
+        master=master,
+        batch=master.batchBlocks[1],
+        user_correction={},
+        incoming=master.continuityBridges[0],
+    )
+    assert "temporalContinuity" not in (mem.get("incomingContinuity") or {})

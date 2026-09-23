@@ -16,7 +16,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ..production_lifecycle.service import _load_life, scene_production_package
+from ..production_lifecycle.live_scene_readiness import compute_live_scene_readiness
+from ..production_lifecycle.service import _load_life
 from ..wiki_intelligence.compiled.page_compiler import compile_wiki_bundle
 from .contracts import (
     SceneCraftHierarchy,
@@ -62,8 +63,9 @@ def _gate_level(readiness: TimelineSceneReadiness, action_scope: str) -> str:
     """Derive the Smart Production Gate level from readiness + action scope.
 
     EXPLORATION: always allowed (storyboarding, drafts).
-    PRODUCTION_WARNING: final generation allowed but warned if partially ready.
-    PRODUCTION_LOCK: final generation blocked until readiness satisfied.
+    PRODUCTION_WARNING: final generation allowed; advisory quality gaps only.
+    PRODUCTION_LOCK: genuine technical impossibility only — never Location /
+    References / Cast / Voice advisories (those are PARTIAL).
     """
     if action_scope == "exploration":
         return "EXPLORATION"
@@ -214,43 +216,24 @@ def build_timeline_context_package(
     except Exception:  # noqa: BLE001
         pass
 
-    # 6. Scene readiness from the Production Readiness Service
+    # 6. Live scene readiness — current Timeline bindings, not chat snapshots.
     readiness = TimelineSceneReadiness(sceneId=scene_id)
     try:
-        pkg = scene_production_package(db, project_id, scene_id)
-        if pkg.get("ok") and pkg.get("package"):
-            p = pkg["package"]
-            readiness = TimelineSceneReadiness(
-                sceneId=scene_id,
-                status=p.get("status", "BLOCKED"),
-                blockerSummary=p.get("blockerSummary", "") or "",
-                castReady=bool(p.get("castReady", False)) or bool(p.get("approvedCastReferences")),
-                locationReady=bool(p.get("locationReady", False)),
-                wardrobeReady=bool(p.get("wardrobeReady", False)),
-                propsReady=bool(p.get("propsReady", False)),
-                imageReferencesReady=bool(p.get("imageReferencesReady", False)),
-                voiceReady=bool(p.get("voiceReady", False)),
-                generationPlanReady=bool(p.get("generationPlanReady", False)),
-            )
-        else:
-            # Not ready — surface the blocker but still return the package so
-            # editing remains available (provider outage resilience).
-            upstream_error = str(pkg.get("error") or "")
-            if upstream_error == "Scene not found":
-                # The scene exists; it simply has no readiness record yet
-                # (never assessed by the Production Readiness Service). Say so
-                # plainly — "Scene not found" is alarming and untrue.
-                readiness = TimelineSceneReadiness(
-                    sceneId=scene_id,
-                    status="BLOCKED",
-                    blockerSummary="Readiness not assessed yet — run Co-Director Preflight to assess this scene.",
-                )
-            else:
-                readiness = TimelineSceneReadiness(
-                    sceneId=scene_id,
-                    status="BLOCKED",
-                    blockerSummary=str(pkg.get("blockerSummary") or pkg.get("error") or "Not ready"),
-                )
+        live = compute_live_scene_readiness(db, project_id, scene_id)
+        readiness = TimelineSceneReadiness(
+            sceneId=scene_id,
+            status=str(live.get("status") or "BLOCKED"),
+            blockerSummary=str(live.get("blockerSummary") or ""),
+            castReady=bool(live.get("castReady")),
+            locationReady=bool(live.get("locationReady")),
+            wardrobeReady=bool(live.get("wardrobeReady")),
+            propsReady=bool(live.get("propsReady")),
+            imageReferencesReady=bool(live.get("imageReferencesReady")),
+            voiceReady=bool(live.get("voiceReady")),
+            generationPlanReady=bool(live.get("generationPlanReady")),
+            liveComputed=True,
+            departments=list(live.get("departments") or []),
+        )
     except Exception as exc:  # noqa: BLE001
         readiness = TimelineSceneReadiness(
             sceneId=scene_id,

@@ -113,10 +113,42 @@ def _scene_has_complete_render(master: SceneTimelineMaster) -> bool:
     return all(str(_batch_playable_asset(b).get("assetId") or "").strip() for b in batches)
 
 
+def _migration_playable_asset(batch: Any, master: SceneTimelineMaster) -> dict[str, Any]:
+    """Initial Take-A migration capture: existing media binds to Take A (no rerender).
+
+    resolve_current_take is FAIL-CLOSED across take boundaries (a later Take
+    must never inherit a prior Take's asset). The FIRST migration has no prior
+    take to protect — approvedClip / latest candidate ARE the pre-Takes media.
+    Without this fallback the migration minted an empty Take A and the next
+    place_approved_batches_on_timeline blanked the Visual track.
+    """
+    info = _batch_playable_asset(batch, master)
+    if info.get("assetId"):
+        return info
+    approved = getattr(batch, "approvedClip", None)
+    approved_id = str(getattr(approved, "assetId", None) or "").strip()
+    if approved_id:
+        info["assetId"] = approved_id
+        info["candidateId"] = getattr(approved, "candidateId", None) or info.get("candidateId")
+        info["source"] = "approved_clip_migration"
+        return info
+    cands = [
+        c
+        for c in (getattr(batch, "candidateVersions", None) or [])
+        if str(getattr(c, "assetId", None) or "").strip()
+    ]
+    if cands:
+        latest = max(cands, key=lambda c: str(getattr(c, "createdAt", None) or ""))
+        info["assetId"] = str(getattr(latest, "assetId", "")).strip()
+        info["candidateId"] = getattr(latest, "id", None) or info.get("candidateId")
+        info["source"] = "candidate_migration"
+    return info
+
+
 def capture_batch_members(master: SceneTimelineMaster) -> list[SceneTakeBatchMember]:
     rows: list[SceneTakeBatchMember] = []
     for batch in sorted(master.batchBlocks or [], key=lambda b: (int(getattr(b, "order", 0) or 0), str(b.id))):
-        info = _batch_playable_asset(batch, master)
+        info = _migration_playable_asset(batch, master)
         rows.append(
             SceneTakeBatchMember(
                 batchId=batch.id,
@@ -225,17 +257,23 @@ def _freeze_take_from_live(master: SceneTimelineMaster, take: SceneTake) -> None
         take.resultAssetId = take.batches[0].assetId
 
 
-def adopt_legacy_retakes(master: SceneTimelineMaster, director_tl: Any) -> bool:
-    """Bind pre-Takes Visual Re-Take clips to Take A so they do not follow later Takes."""
+def adopt_legacy_retakes(master: SceneTimelineMaster, director_tl: Any = None) -> bool:
+    """Bind pre-Takes Visual Re-Take clips to Take A so they do not follow later Takes.
+
+    SINGLE-STORE: retake clips live in Master batch.visualClips (rtclip_* with
+    metadata.retakeId). The retired legacy video_clips array is never read;
+    the director_tl param is kept only for call-site signature compatibility.
+    """
     first = next((t for t in (master.sceneTakes or []) if int(t.letterIndex or 0) == 1), None)
     if first is None or first.retakeIds:
         return False
     ids: list[str] = []
-    for clip in getattr(director_tl, "video_clips", None) or []:
-        meta = getattr(clip, "metadata", None) or {}
-        rid = str(meta.get("retakeId") or "").strip() if isinstance(meta, dict) else ""
-        if rid and rid not in ids:
-            ids.append(rid)
+    for batch in getattr(master, "batchBlocks", None) or []:
+        for clip in getattr(batch, "visualClips", None) or []:
+            meta = getattr(clip, "metadata", None) or {}
+            rid = str(meta.get("retakeId") or "").strip() if isinstance(meta, dict) else ""
+            if rid and rid not in ids:
+                ids.append(rid)
     if not ids:
         return False
     first.retakeIds = ids
@@ -304,8 +342,148 @@ def batch_has_provider_live_job(batch: Any) -> bool:
     return False
 
 
+def _batch_staged_for_sequential_slot(batch: Any) -> bool:
+    """Queued with a staged snapshot is the next sequential window, not a leftover."""
+    if str(getattr(batch, "status", "") or "") != "Queued":
+        return False
+    return bool(str(getattr(batch, "pendingSnapshotId", None) or "").strip())
+
+
+def batch_has_unsubmitted_snapshot(batch: Any) -> bool:
+    """A window still owes its staged snapshot. An older take's job does not count.
+
+    Reconcile used to close that window to QC_Pending from the previous take's
+    finished job. The snapshot is still unsubmitted, so the chain and the
+    Preview Monitor must keep treating the window as in flight.
+    """
+    status = str(getattr(batch, "status", "") or "")
+    # A finished window must not be sent to the renderer again because a
+    # leftover snapshot id is still stored on it. QC_Pending stays eligible
+    # so a later window that reconcile closed early can still advance.
+    if status in {
+        "Generating",
+        "Cancelled",
+        "Failed",
+        "Approved",
+        "CandidateReady",
+        "ApprovedConfigurationChanged",
+    }:
+        return False
+    pending = str(getattr(batch, "pendingSnapshotId", None) or "").strip()
+    if not pending:
+        return False
+    for job in getattr(batch, "generationJobs", None) or []:
+        if str(getattr(job, "executionSnapshotId", None) or "") == pending:
+            return False
+    return True
+
+
+_SESSION_ABANDON_BATCH = frozenset({"Generating", "Waiting", "Queued"})
+
+
+def close_previous_session_render(master: SceneTimelineMaster) -> bool:
+    """Drop a render chain that belongs to an earlier Studio API process.
+
+    Completed windows and their assets stay. In-flight and staged windows are
+    closed so opening the project cannot submit them. This does not call a
+    GPU runtime.
+    """
+    from ..runtime_session import current_runtime_session_id
+
+    current = current_runtime_session_id()
+    stored = str(getattr(master, "renderSessionId", None) or "").strip()
+    if stored == current:
+        return False
+    changed = False
+    for batch in master.batchBlocks or []:
+        if str(getattr(batch, "status", "") or "") not in _SESSION_ABANDON_BATCH:
+            continue
+        batch.status = "Cancelled"
+        batch.pendingSnapshotId = None
+        changed = True
+    for take in master.sceneTakes or []:
+        if str(getattr(take, "status", "") or "") != "rendering":
+            continue
+        has_asset = any(str(getattr(member, "assetId", None) or "").strip() for member in (take.batches or []))
+        take.status = "incomplete" if has_asset else "cancelled"
+        if not take.completedAt:
+            take.completedAt = _now()
+        changed = True
+    active_id = str(getattr(master, "activeSceneTakeId", None) or "")
+    if active_id:
+        active = next((take for take in (master.sceneTakes or []) if take.id == active_id), None)
+        if active is None or str(getattr(active, "status", "") or "") != "rendering":
+            master.activeSceneTakeId = None
+            changed = True
+    if stored:
+        master.renderSessionId = None
+        changed = True
+    return changed
+
+
+def close_all_previous_session_renders(db: Session | None = None) -> int:
+    """Startup pass. Closes stale Timeline chains. Does not submit or contact Comfy."""
+    from ..db import Scene, SessionLocal
+
+    owns = db is None
+    if owns:
+        db = SessionLocal()
+    closed = 0
+    try:
+        rows = db.query(Scene).all()
+        for scene in rows:
+            blob = str(getattr(scene, "director_json", None) or "")
+            if "rendering" not in blob and "Queued" not in blob and "Generating" not in blob:
+                continue
+            payload = store.load_master(db, scene.project_id, scene.id)
+            if not payload.get("ok"):
+                continue
+            master = SceneTimelineMaster.model_validate(payload["master"])
+            if not close_previous_session_render(master):
+                continue
+            store.save_master(db, scene.project_id, scene.id, master, touch_batches=False)
+            closed += 1
+        return closed
+    finally:
+        if owns and db is not None:
+            db.close()
+
+
+def take_owes_staged_window(master: SceneTimelineMaster, take: SceneTake | None) -> bool:
+    if take is None or take.status not in {"incomplete", "rendering"}:
+        return False
+    by_id = {b.id: b for b in (master.batchBlocks or [])}
+    for member in take.batches or []:
+        if str(member.assetId or "").strip():
+            continue
+        batch = by_id.get(member.batchId)
+        if batch is not None and batch_has_unsubmitted_snapshot(batch):
+            return True
+    return False
+
+
+def reopen_take_for_staged_window(master: SceneTimelineMaster) -> bool:
+    """Point the open take back at rendering when a later window is still staged."""
+    current = current_scene_take(master)
+    if not take_owes_staged_window(master, current):
+        return False
+    changed = False
+    if master.activeSceneTakeId != current.id:
+        master.activeSceneTakeId = current.id
+        changed = True
+    if current.status != "rendering":
+        current.status = "rendering"
+        changed = True
+    return changed
+
+
 def scene_has_live_render(master: SceneTimelineMaster | None) -> bool:
-    """Identity-safe: sequential Queued without Generating/provider job is stale."""
+    """Identity-safe: a Queued batch with no snapshot and no provider job is stale.
+
+    A later window staged for the sequential slot (Queued + pendingSnapshotId)
+    is live even after the previous window leaves Generating. Clearing it
+    drops batches 2..N before they are submitted.
+    """
     if master is None:
         return False
     generating = False
@@ -314,7 +492,23 @@ def scene_has_live_render(master: SceneTimelineMaster | None) -> bool:
         status = str(getattr(batch, "status", "") or "")
         if status in {"Generating", "Waiting"}:
             generating = True
-        if status == "Queued" and batch_has_provider_live_job(batch):
+        # The gap after a window finishes, before the next window is submitted,
+        # is still this take. Cancelling there drops the take while the chain
+        # is between models.
+        if status in {"QC_Pending", "CandidateReady"}:
+            order = int(getattr(batch, "order", 0) or 0)
+            later_waiting = any(
+                int(getattr(other, "order", 0) or 0) > order
+                and str(getattr(other, "status", "") or "") in {"Queued", "Draft", "Generating", "Waiting"}
+                for other in (master.batchBlocks or [])
+            )
+            if later_waiting:
+                queued_live = True
+        if status == "Queued" and (
+            batch_has_provider_live_job(batch) or _batch_staged_for_sequential_slot(batch)
+        ):
+            queued_live = True
+        if batch_has_unsubmitted_snapshot(batch):
             queued_live = True
         for job in getattr(batch, "generationJobs", None) or []:
             if str(getattr(job, "status", "") or "").lower() in _LIVE_CANCEL_JOB:
@@ -368,10 +562,12 @@ def clear_stale_queued_batches(master: SceneTimelineMaster) -> bool:
     for batch in master.batchBlocks or []:
         if str(getattr(batch, "status", "") or "") != "Queued":
             continue
-        if batch_has_provider_live_job(batch):
+        if batch_has_provider_live_job(batch) or _batch_staged_for_sequential_slot(batch):
             continue
-        info = _batch_playable_asset(batch)
-        batch.status = "CandidateReady" if info.get("assetId") else "Draft"
+        # Demotion target reflects ANY playable media on the batch (approved
+        # clip or candidate asset) — fail-closed current-take resolution is
+        # for take-boundary authority, not for "does media exist".
+        batch.status = "CandidateReady" if _batch_has_playable_output(batch) else "Draft"
         if getattr(batch, "pendingSnapshotId", None) and batch.status == "Draft":
             batch.pendingSnapshotId = None
         changed = True
@@ -438,11 +634,59 @@ def window_execution_fingerprint(master: SceneTimelineMaster | dict[str, Any] | 
     return (gen, ordered)
 
 
+def take_has_completed_generation(take: SceneTake | None) -> bool:
+    """True when this take holds a finished window or a published/stitched result."""
+    if take is None:
+        return False
+    if str(getattr(take, "resultAssetId", None) or "").strip():
+        return True
+    if str(getattr(take, "publishedAssetId", None) or "").strip():
+        return True
+    return any(str(getattr(member, "assetId", None) or "").strip() for member in (take.batches or []))
+
+
+def scene_requires_execution_take_boundary(master: SceneTimelineMaster | None) -> bool:
+    """A new SceneTake is required only after a generation has finished or is rendering.
+
+    Window and generator changes before the first completed generation do not
+    mint Take A / Take B. Those rows are not creator takes.
+    """
+    if master is None:
+        return False
+    if _scene_has_complete_render(master):
+        return True
+    if any(m.assetId for m in capture_batch_members(master)):
+        return True
+    for take in master.sceneTakes or []:
+        if take_has_completed_generation(take):
+            return True
+        if str(take.status or "") in {"ready", "rendering"}:
+            return True
+    return False
+
+
+def prune_pregeneration_scene_takes(master: SceneTimelineMaster) -> bool:
+    """Drop scene takes that were minted before any generation completed.
+
+    Existing projects recover on the next canonical read. After the first
+    finished or in-flight generation, incomplete boundary takes stay so
+    continuity keys remain valid.
+    """
+    if scene_requires_execution_take_boundary(master):
+        return False
+    if not master.sceneTakes and not master.currentSceneTakeId and not master.activeSceneTakeId:
+        return False
+    master.sceneTakes = []
+    master.currentSceneTakeId = None
+    master.activeSceneTakeId = None
+    return True
+
+
 def begin_execution_revision(
     master: SceneTimelineMaster,
     *,
     reason: str,
-) -> SceneTake:
+) -> SceneTake | None:
     """Mint a fresh SceneTake BEFORE window rematerialize / generate.
 
     Fail-closed ownership (Systems P5):
@@ -451,7 +695,11 @@ def begin_execution_revision(
     - Old ``stk_`` remains in history but is NOT the live continuity chain —
       VCM resolve prefers active/current, so writes go to the new folder only.
     - Does NOT start generate. Projection law stays Co-Director's.
+    - Does NOT mint when no generation has completed or is rendering.
     """
+    if not scene_requires_execution_take_boundary(master):
+        prune_pregeneration_scene_takes(master)
+        return None
     prev_id = str(
         getattr(master, "activeSceneTakeId", None)
         or getattr(master, "currentSceneTakeId", None)
@@ -561,6 +809,7 @@ def scene_take_candidate_label(master: SceneTimelineMaster | None) -> str:
 
 def ensure_scene_takes(master: SceneTimelineMaster) -> bool:
     """Migrate existing generated media to Take A. No rerender. Returns True if saved needed."""
+    changed = prune_pregeneration_scene_takes(master)
     if master.sceneTakes:
         changed = False
         if not master.currentSceneTakeId and master.sceneTakes:
@@ -569,10 +818,11 @@ def ensure_scene_takes(master: SceneTimelineMaster) -> bool:
         changed = reclaim_misallocated_take_a(master) or changed
         changed = clear_stale_queued_batches(master) or changed
         changed = sync_rendering_take(master) or changed
+        changed = adopt_finished_windows(master) or changed
         return changed
     members = capture_batch_members(master)
     if not any(m.assetId for m in members) and not _scene_has_complete_render(master):
-        return False
+        return changed
     complete = _scene_has_complete_render(master) or (members and all(m.assetId for m in members))
     take = SceneTake(
         id=_nid("stk_"),
@@ -725,8 +975,32 @@ def _heal_current_take_pointer(master: SceneTimelineMaster, finished_take: Scene
         master.currentSceneTakeId = finished_take.id
 
 
+def adopt_finished_windows(master: SceneTimelineMaster) -> bool:
+    """Attach a window that finished after this take opened.
+
+    A poll can close the take in the gap after the render job is marked done
+    and before the picture is saved. The take then has no pictures, and Make
+    Current says it has no finished scene. The saved window still belongs to
+    this take.
+    """
+    changed = False
+    for take in master.sceneTakes or []:
+        if take.status not in {"cancelled", "incomplete"}:
+            continue
+        if any(str(m.assetId or "").strip() for m in (take.batches or [])):
+            continue
+        adopted = capture_members_for_active_take(master, take)
+        if not any(str(m.assetId or "").strip() for m in adopted):
+            continue
+        take.batches = adopted
+        take.status = "incomplete"
+        changed = True
+    return changed
+
+
 def sync_rendering_take(master: SceneTimelineMaster) -> bool:
     """Stamp the active rendering take as batches finish. Mark Ready / Incomplete."""
+    reopen_take_for_staged_window(master)
     take = active_scene_take(master)
     if take is None:
         for candidate in reversed(list(master.sceneTakes or [])):
@@ -1001,8 +1275,33 @@ def start_new_take(
     if not master.batchBlocks:
         return {"ok": False, "error": "NO_BATCHES", "message": "Add scene batches before creating a new take.", "mock": False}
 
+    previous_take_id = str(master.currentSceneTakeId or "") or None
     take = allocate_rendering_take(master)
     store.save_master(db, project_id, scene_id, master, touch_batches=False)
+
+    # Scene length owns the window count. 60s is 4 windows, 75s is 5.
+    # New Take rematerializes before it renders so a stale 3-window scene
+    # cannot compress a longer Timed Prompt.
+    from .service import rematerialize_execution_windows
+
+    rematerialize_execution_windows(
+        db,
+        project_id,
+        scene_id,
+        generator_id=master.sceneGeneratorId,
+        allow_scene_take_id=take.id,
+        previous_scene_take_id=previous_take_id,
+    )
+    refreshed = store.load_master(db, project_id, scene_id)
+    if refreshed.get("ok"):
+        master = SceneTimelineMaster.model_validate(refreshed["master"])
+        live = _take_or_error(master, take.id)
+        if live is not None and live.status == "rendering":
+            live.batches = [
+                SceneTakeBatchMember(batchId=b.id, order=int(b.order or 0), status="pending")
+                for b in sorted(master.batchBlocks or [], key=lambda x: int(x.order or 0))
+            ]
+            store.save_master(db, project_id, scene_id, master, touch_batches=False)
 
     from . import orchestrator
 
@@ -1041,6 +1340,55 @@ def start_new_take(
     }
 
 
+
+def begin_execution_revision_for_scene(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    *,
+    reason: str = "generator_switch_window_topology_change",
+) -> dict[str, Any]:
+    """Lightweight SceneTake mint for rematerialize gate. Does NOT start generate."""
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    ensure_scene_takes(master)
+    previous_id = str(
+        getattr(master, "currentSceneTakeId", None)
+        or getattr(master, "activeSceneTakeId", None)
+        or ""
+    ).strip() or None
+    take = begin_execution_revision(
+        master, reason=str(reason or "generator_switch_window_topology_change")
+    )
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
+    if take is None:
+        return {
+            "ok": True,
+            "currentSceneTakeId": master.currentSceneTakeId,
+            "takeId": None,
+            "previousSceneTakeId": previous_id,
+            "take": None,
+            "master": master.model_dump(),
+            "message": "No take until a generation has completed.",
+            "mock": False,
+            "generationStarted": False,
+            "takeMinted": False,
+        }
+    return {
+        "ok": True,
+        "currentSceneTakeId": take.id,
+        "takeId": take.id,
+        "previousSceneTakeId": previous_id,
+        "take": take.model_dump(),
+        "master": master.model_dump(),
+        "message": f"Execution revision minted ({scene_take_display(take.label)}).",
+        "mock": False,
+        "generationStarted": False,
+    }
+
+
 def make_current_take(db: Session, project_id: str, scene_id: str, take_id: str) -> dict[str, Any]:
     payload = store.load_master(db, project_id, scene_id)
     if not payload.get("ok"):
@@ -1057,6 +1405,8 @@ def make_current_take(db: Session, project_id: str, scene_id: str, take_id: str)
             "message": f"{scene_take_display(take.label)} is still rendering.",
             "mock": False,
         }
+    if adopt_finished_windows(master):
+        take = _take_or_error(master, take_id) or take
     if take.status in {"cancelled", "incomplete"} and not any(m.assetId for m in take.batches):
         return {
             "ok": False,

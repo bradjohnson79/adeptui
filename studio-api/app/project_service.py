@@ -57,6 +57,28 @@ def pick_cover_asset(assets: list[Asset]) -> Asset | None:
     return None
 
 
+def pick_cover_for_project(db: Session, project_id: str) -> Asset | None:
+    """Newest image, else newest video — without loading the whole Library."""
+    images = (
+        db.query(Asset)
+        .filter(Asset.project_id == project_id, Asset.kind.in_(tuple(_IMAGE_KINDS)))
+        .order_by(Asset.created_at.desc())
+        .limit(24)
+        .all()
+    )
+    cover = pick_cover_asset(images)
+    if cover:
+        return cover
+    videos = (
+        db.query(Asset)
+        .filter(Asset.project_id == project_id, Asset.kind.in_(tuple(_VIDEO_KINDS)))
+        .order_by(Asset.created_at.desc())
+        .limit(24)
+        .all()
+    )
+    return pick_cover_asset(videos)
+
+
 def status_label(*, archived: bool, active_jobs: int, scene_count: int, scenes_with_output: int) -> str:
     """The library's status heuristic, in one place."""
 

@@ -26,7 +26,7 @@ from .intent_parser import (
     parse_scene_intent,
     production_request_id,
 )
-from .prompt_compiler import compile_batch_prompts
+from .prompt_compiler import compile_generator_prompt
 from .reference_resolver import resolve_project_references
 from .scene_breakdown import build_director_scene_intent
 from .scene_understanding import LlmFn, extract_scene_understanding
@@ -38,6 +38,36 @@ CONTEXT_KEY = "active"
 
 def _event(kind: str, message: str, *, surface: str = "creator", **payload: Any) -> PreparationEvent:
     return PreparationEvent(type=kind, message=message, payload={"surface": surface, **payload})
+
+
+
+def build_generator_switch_handoff(
+    *,
+    previous_generator_id: str,
+    new_generator_id: str,
+    duration_seconds: float,
+    previous_windows: list | None = None,
+) -> dict:
+    """CD handoff for Timeline Gen / Systems on generator switch (no timeline_builder edits)."""
+    from .execution_windows import generator_switch_plan_delta
+
+    delta = generator_switch_plan_delta(
+        previous_generator_id=previous_generator_id,
+        new_generator_id=new_generator_id,
+        duration_seconds=duration_seconds,
+        previous_windows=previous_windows,
+    )
+    return {
+        "requiresNewSceneTake": delta.requires_new_scene_take,
+        "requiresRevisionBump": delta.requires_revision_bump,
+        "reason": delta.reason,
+        "previousGeneratorId": delta.previous_generator_id,
+        "newGeneratorId": delta.new_generator_id,
+        "previousWindows": delta.previous_windows,
+        "newWindows": delta.new_windows,
+        "newBatchCount": delta.new_batch_count,
+        "note": delta.note,
+    }
 
 
 def _human_generator(generator_id: str) -> str:
@@ -274,8 +304,7 @@ def prepare_production_request(
                 # Batch count: inherit the prior count only when the edit does
                 # not state one. An explicit "1 batch" / "single batch" is an
                 # intentional structural reduction and must be honored.
-                if not mentions_batch_count(message) and prior_spec.batch_count > 1:
-                    spec.batch_count = prior_spec.batch_count
+                # P2+: do not inherit creator/prior batch_count — capability replans.
                 # Retry law: an edit that does not mention aspect, quality, or
                 # camera inherits them from the validated prior spec — a
                 # follow-up must never silently reset the scene to 16:9 or
@@ -443,6 +472,44 @@ def prepare_production_request(
                 generatorId=spec.generator_id,
             )
         )
+
+        # Generator-aware batch planning (capability law): the batch count and
+        # temporal windows come from the generator's certified single-generation
+        # window in the Timeline capability registry — never a hardcoded
+        # threshold. A creator-stated count is honored only when every window
+        # still fits the certified maximum.
+        # REBUILD LAW: planning runs BEFORE generator validation. The validator
+        # checks the PLANNED windows (per_batch_duration prefers spec.batchWindows);
+        # validating an unplanned even-split first used to reject over-window
+        # scenes (e.g. "37 seconds" on H3) before the planner could resolve the
+        # batch count — blocking capability-driven long-scene planning.
+        from .execution_windows import plan_spec_execution_windows
+
+        # CLEAR P2+: creator batchCount / chat "N batches" is NON-AUTHORITATIVE.
+        # Execution Windows come only from duration + generator capability.
+        _prev_count, _plan_windows = plan_spec_execution_windows(spec)
+        spec.batch_count = _prev_count
+        spec.batchWindows = list(_plan_windows)
+        events.append(
+            _event(
+                "batch_plan_resolved",
+                (
+                    f"{spec.batch_count} Execution Window plan — "
+                    + ", ".join(
+                        f"{float(w.get('start', 0)):g}–{float(w.get('end', 0)):g}s"
+                        for w in _plan_windows
+                    )
+                    + f" ({_human_generator(spec.generator_id)} certified single-generation window; "
+                    "creator batch count ignored)"
+                ),
+                surface="debug",
+                batchCount=spec.batch_count,
+                batchWindows=spec.batchWindows,
+                creatorBatchCountIgnored=True,
+            )
+        )
+        spec.production_request_id = production_request_id(project_id, spec)
+
         validate_scene_spec_against_generator(spec)
 
         intent = build_director_scene_intent(
@@ -540,10 +607,30 @@ def prepare_production_request(
                 generatorId=spec.generator_id,
             )
         )
-        batch_prompts = compile_batch_prompts(spec, resolved)
-        compiled = batch_prompts[0] if len(batch_prompts) == 1 else "\n\n".join(batch_prompts)
+        compiled = compile_generator_prompt(spec, resolved)
         spec.compiled_prompt = compiled
         events.append(_event("prompt_compiled", "Timeline prompt synthesized", generatorId=spec.generator_id, prompt=compiled))
+
+        # Long-scene law: multi-batch scenes get one COMPLETE execution prompt
+        # per batch, compiled from the capability-driven temporal windows —
+        # not the full scene prompt re-sent N times.
+        batch_prompts: list[str] = []
+        if int(spec.batch_count or 1) > 1:
+            from .prompt_compiler import compile_batch_prompts
+
+            batch_prompts = compile_batch_prompts(spec, resolved)
+            events.append(
+                _event(
+                    "batch_prompts_compiled",
+                    f"{len(batch_prompts)} batch execution prompts compiled "
+                    + " · ".join(
+                        f"Batch {i + 1}: {float(w.get('start', 0)):g}–{float(w.get('end', 0)):g}s"
+                        for i, w in enumerate(spec.batchWindows or [])
+                    ),
+                    surface="debug",
+                    batchCount=len(batch_prompts),
+                )
+            )
 
         spec.preparation_state = "building_timeline"
         events.append(_event("timeline_building", "Building Timeline shot...", surface="debug"))

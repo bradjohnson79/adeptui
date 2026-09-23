@@ -1,34 +1,36 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-import { buildNavEntries } from "./navEntries.ts";
+import { describe, expect, it } from "vitest";
+import { CONTENT_NAV, OPEN_CONTENT_TAB_EVENT } from "./navEntries";
+import { isSpatialMapEnabled } from "../../core/featureFlags";
 
-test("nav entries omit mis-aliased Storyboards / Props / Exports", () => {
-  const entries = buildNavEntries("proj-1");
-  const ids = entries.map((e) => e.id);
-  assert.ok(ids.includes("scripts"));
-  assert.ok(ids.includes("characters"));
-  assert.ok(ids.includes("approvals"));
-  assert.ok(ids.includes("plans"));
-  assert.ok(ids.includes("wiki"));
-  assert.equal(entries.find((e) => e.id === "wiki")?.label, "Wiki");
-  assert.equal(entries.find((e) => e.id === "content")?.label, "Project Focus");
-  assert.ok(!ids.includes("storyboards"));
-  assert.ok(!ids.includes("props"));
-  assert.ok(!ids.includes("exports"));
-});
+describe("Co-Director viewport navigation", () => {
+  it("keeps production tabs and does not expose a More overflow", () => {
+    const tabs = CONTENT_NAV.filter((item) => item.kind === "tab").map((item) => item.id);
+    const more = CONTENT_NAV.find((item) => item.kind === "group" && item.id === "more");
+    const expected = [
+      "wiki",
+      "notes",
+      "story",
+      "scriptwriter",
+      "characters",
+      "voice_creator",
+      "prop_creator",
+      ...(isSpatialMapEnabled() ? (["spatial_map"] as const) : []),
+      "scene_creator",
+      "timeline",
+      "library",
+    ];
+    expect(tabs).toEqual([...expected]);
+    expect(more).toBeUndefined();
+    expect(CONTENT_NAV.some((item) => item.label === "More")).toBe(false);
+    expect(OPEN_CONTENT_TAB_EVENT).toBe("adept:open-codirector-content-tab");
+    expect(tabs).not.toContain("storyboards");
+    expect(tabs).not.toContain("casting");
+    expect(tabs).not.toContain("jobs");
+  });
 
-test("jobs entry stays available when project bound", () => {
-  const jobs = buildNavEntries("proj-1").find((e) => e.id === "jobs");
-  assert.ok(jobs);
-  assert.equal(jobs?.deferred, undefined);
-  assert.equal(jobs?.target.kind, "content");
-  if (jobs?.target.kind === "content") {
-    assert.equal(jobs.target.tab, "jobs");
-  }
-});
-
-test("no-project nav stays honest", () => {
-  const entries = buildNavEntries(undefined);
-  assert.equal(entries.find((e) => e.id === "project")?.label, "No Project Selected");
-  assert.ok(!entries.some((e) => e.id === "approvals"));
+  it("shelves Spatial Map from Express tabs when the v1.1 gate is off", () => {
+    expect(isSpatialMapEnabled()).toBe(false);
+    const tabs = CONTENT_NAV.filter((item) => item.kind === "tab").map((item) => item.id);
+    expect(tabs).not.toContain("spatial_map");
+  });
 });

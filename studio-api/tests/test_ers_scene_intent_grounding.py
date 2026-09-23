@@ -294,10 +294,13 @@ def _patched_ers_handle(monkeypatch, captured, *, document):
     monkeypatch.setattr(
         "app.environment_reference_sheet.store.save_sheet", lambda current: None
     )
+    monkeypatch.setattr(ers_generate, "_public_asset_url", lambda aid: f"https://assets.example/{aid}")
     return ers_generate
 
 
-def test_ers_qwen_uses_i2i_pixel_grounding(monkeypatch) -> None:
+def test_ers_qwen_selection_is_refused(monkeypatch) -> None:
+    import pytest
+
     intent = _schnick_intent()
     project_id = f"proj-{uuid.uuid4()}"
     map_id = f"map-{uuid.uuid4()}"
@@ -311,34 +314,17 @@ def test_ers_qwen_uses_i2i_pixel_grounding(monkeypatch) -> None:
     captured: list[dict] = []
     ers_generate = _patched_ers_handle(monkeypatch, captured, document=document)
 
-    ers_generate.handle(
-        db=None,
-        project_id=project_id,
-        execution_id=str(uuid.uuid4()),
-        spatial_map_id=map_id,
-        source="local",
-        model="qwen2512",
-        model_family_preference="qwen2512",
-    )
-
-    assert len(captured) == 1
-    body = captured[0]
-    # Qwen ERS is image-to-image: source pixels must reach the ref workflow.
-    assert body.get("sourceAssetId") == "4d3062e8-8c30-4230-8376-bc25d1d4f735"
-    assert body.get("source_asset_id") == "4d3062e8-8c30-4230-8376-bc25d1d4f735"
-    assert body.get("forceWorkflowKey") == "qwen2512.ref"
-    ctx = body["creativeContext"]
-    assert ctx["operationIntent"] == "image_to_image_reference"
-    assert ctx["referenceGrounding"]["mode"] == "pixel"
-    assert ctx["authoritativeSourceAssetId"] == "4d3062e8-8c30-4230-8376-bc25d1d4f735"
-    assert ctx["sceneIntent"]["sceneTitle"] == "Schnick Coffee"
-    assert ctx["sceneIntentVersion"] == 1
-    assert ctx["groundingAssetIds"] == [
-        "4d3062e8-8c30-4230-8376-bc25d1d4f735",
-        "caa72759-d965-41f9-b1d5-77cdcf9b9614",
-    ]
-    assert ctx["groundingFingerprint"]
-    assert "text_to_image" not in str(ctx.get("operationIntent") or "")
+    with pytest.raises(RuntimeError, match="GPT Image 2 API only"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id=str(uuid.uuid4()),
+            spatial_map_id=map_id,
+            source="local",
+            model="qwen2512",
+            model_family_preference="qwen2512",
+        )
+    assert not captured
 
 
 def test_ers_gpt_image_2_explicit_carve_out_attaches_pixel_urls(monkeypatch) -> None:
@@ -396,6 +382,7 @@ def test_ers_gpt_image_2_without_public_base_blocks(monkeypatch) -> None:
     captured: list[dict] = []
     ers_generate = _patched_ers_handle(monkeypatch, captured, document=document)
     monkeypatch.setattr("app.config.settings.public_api_base_url", "")
+    monkeypatch.setattr(ers_generate, "_public_asset_url", lambda aid: "")
 
     with pytest.raises(RuntimeError, match="public URL"):
         ers_generate.handle(
@@ -425,7 +412,7 @@ def test_ers_other_hosted_models_are_blocked(monkeypatch) -> None:
     captured: list[dict] = []
     ers_generate = _patched_ers_handle(monkeypatch, captured, document=document)
 
-    with pytest.raises(RuntimeError, match="image-to-image-capable generator"):
+    with pytest.raises(RuntimeError, match="GPT Image 2"):
         ers_generate.handle(
             db=None,
             project_id=project_id,

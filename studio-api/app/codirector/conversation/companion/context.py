@@ -25,6 +25,7 @@ def assemble_companion_context(
     bundle: CompanionProjectBundle,
     recent_messages: list[dict[str, Any]] | None = None,
     specialist_findings: list[str] | None = None,
+    snapshot: Any | None = None,
 ) -> str:
     lines = [
         "=== Companion context (ranked) ===",
@@ -35,6 +36,47 @@ def assemble_companion_context(
         f"Support need: {support.support_needed.value}",
         f"Advisory decision: {bundle.advisoryDecisionState.value}",
     ]
+    # Final-closure mission 2026-09-19 (Blocker 2 — Recall Law): the companion
+    # path previously consulted NO structured memory — recall rode entirely on
+    # a raw message window. Render the existing snapshot's established facts
+    # (bounded) so scene questions can be answered from active state plus the
+    # conversation, per "active_scene_state + recent conversation + recent
+    # corrections". Mirrors the listening branch's confirmed-facts line.
+    if snapshot is not None:
+        established: list[str] = []
+        try:
+            established.extend(
+                str(f).strip() for f in (getattr(snapshot, "confirmedFacts", None) or []) if str(f or "").strip()
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            established.extend(
+                str(c).strip() for c in (getattr(snapshot, "keyCharacters", None) or []) if str(c or "").strip()
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            for entry in getattr(snapshot, "knowledgeEntries", None) or []:
+                if getattr(entry, "state", "") == "confirmed" and str(getattr(entry, "text", "") or "").strip():
+                    established.append(str(entry.text).strip())
+        except Exception:  # noqa: BLE001
+            pass
+        established = list(dict.fromkeys(e for e in established if e))[:12]
+        if established:
+            lines.append("Established facts (authoritative for scene recall — do not contradict):")
+            for item in established:
+                if len(item) > 220:
+                    item = item[:217] + "..."
+                lines.append(f"- {item}")
+        try:
+            corrections = [str(c).strip() for c in (getattr(snapshot, "recentCorrections", None) or []) if str(c or "").strip()]
+        except Exception:  # noqa: BLE001
+            corrections = []
+        if corrections:
+            lines.append("Recent corrections (LATEST WINS — supersede earlier statements):")
+            for item in corrections[:4]:
+                lines.append(f"- {item[:220]}")
     if support.evidence_spans:
         lines.append("Support evidence: " + " | ".join(support.evidence_spans[:4]))
     if support.suggested_response_strategy:
@@ -105,11 +147,11 @@ def assemble_companion_context(
     msgs = recent_messages or []
     if msgs:
         lines.append("Recent messages:")
-        for m in msgs[-5:]:
+        for m in msgs[-10:]:
             role = str(m.get("role") or "user")
             content = str(m.get("content") or "").strip()
-            if len(content) > 200:
-                content = content[:197] + "..."
+            if len(content) > 600:
+                content = content[:597] + "..."
             lines.append(f"- {role}: {content}")
 
     lines.append("Do NOT dump full wiki/bible. Do NOT invent canon. Do NOT use generic praise.")

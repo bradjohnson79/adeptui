@@ -48,7 +48,7 @@ export function TimelineHotKeysPane({
     <section className="panel timeline-hotkeys-pane" data-testid="timeline-hotkeys-pane">
       <div className="timeline-inspector__eyebrow">Hot Keys</div>
       <p className="scene-meta">Shortcuts run the same Timeline buttons. They stay off while you type.</p>
-      <p className="scene-meta">@ # * stay inside Prompt and Lip Sync fields. They are not global shortcuts.</p>
+      <p className="scene-meta">@ # * stay inside Prompt fields. They are not global shortcuts.</p>
       {grouped.map((group) => (
         <details key={group.category} className="timeline-inspector__accordion" open={group.category === "Generation" || group.category === "Playback"}>
           <summary>{group.category}</summary>

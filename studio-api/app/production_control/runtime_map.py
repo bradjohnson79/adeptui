@@ -1,7 +1,7 @@
 """Map Production Dock model ids → runtime engine/family keys.
 
 Dock registry ids are preference-layer identifiers. Image/video compilers and
-queue workers speak family/engine ids (qwen2512, ltx, wan, fal_*). This module
+queue workers speak family/engine ids (qwen2512, ltx-2.5, minimax-h3, fal_*). This module
 is the only translation surface — no silent substitute when unmapped.
 """
 
@@ -18,12 +18,14 @@ IMAGE_FAMILY_BY_MODEL: dict[str, str] = {
     "qwen-image-2512-local": "qwen2512",
     "flux-local": "flux",
     "zimage-local": "zimage",
+    "illustrious-local": "illustrious",
     "krea2-turbo-local": "krea2",
     "krea2-raw-local": "krea2",
     "flux-kie": "flux",
     "flux-fal": "flux",
     "nano-banana-kie": "imagen",
     "gpt-image-2-kie": "imagen",
+    "gpt-image-2-fal": "gptimage2",
     "seedream-kie": "imagen",
     "krea2-turbo-fal": "krea2",
     "krea2-medium-fal": "krea2",
@@ -35,14 +37,17 @@ VIDEO_ENGINE_BY_MODEL: dict[str, str] = {
     "minimax-h3": "minimax-h3",
     "minimax-h3-t2v-local": "minimax-h3",
     "minimax-h3-i2v-local": "minimax-h3",
-    "ltx-local": "ltx",
-    "wan-local": "wan",
-    "hunyuan-video-1.5-local": "hunyuan15",
-    "hunyuan-video-13b-local": "hunyuan13b",
-    "kling-kie": "fal_kling",
     "kling-fal": "fal_kling",
-    "seedance-fal": "fal_seedance",
+    "seedance-fal": "seedance-2.0",
+    "seedance-api": "seedance-2.0",
+    "seedance-2.0": "seedance-2.0",
+    "seedance-2.5": "seedance-2.5",
+    "seedance-kie": "seedance-kie",
+    "fal_seedance": "seedance-2.0",
     "veo-fal": "fal_veo",
+    "ltx-2.5-full": "ltx-2.5",
+    "ltx-2.5-distilled": "ltx-2.5",
+    "ltx-2.5-comfy": "ltx-2.5",
 }
 
 # Dock LLM id → Ollama / config selectedModel

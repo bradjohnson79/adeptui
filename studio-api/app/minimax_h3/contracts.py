@@ -73,8 +73,8 @@ class H3ThreeFramePlan(BaseModel):
 
 
 class H3FallbackOffer(BaseModel):
-    providerId: str = "ltx-local"
-    label: str = "LTX 2.3"
+    providerId: str = "ltx-2.5-distilled"
+    label: str = "LTX 2.5"
     reason: str
     requiresExplicitApproval: bool = True
     preservesInputs: list[str] = Field(default_factory=lambda: ["prompt", "frames", "references"])

@@ -9,7 +9,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.db import Base, Project, Scene, SessionLocal, engine
+from app.db import Asset, Base, Project, Scene, SessionLocal, engine
+from app.director_timeline import TimelineClip
 from app.director_timeline_w46 import orchestrator, service
 from app.director_timeline_w46.generation.completion import (
     apply_shared_completion,
@@ -24,7 +25,23 @@ from app.director_timeline_w46.generation.registry import (
     get_registry,
 )
 from app.director_timeline_w46.generation.request_builder import build_timeline_generation_request
-from app.director_timeline_w46.contracts import ExecutionSnapshot
+from app.director_timeline_w46.contracts import ExecutionSnapshot, GeneratorCapability
+
+_READY_LTX25_LOCAL = GeneratorCapability(
+    id="ltx-2.5-distilled",
+    label="LTX 2.5",
+    locality="local",
+    executable=True,
+    readiness="Ready",
+    supportsTimelineGeneration=True,
+    timelineAdapterId="ltx-2.5-distilled",
+)
+
+
+def _force_timeline_ready(generator_id: str | None):
+    if str(generator_id or "").startswith("ltx-2.5"):
+        return _READY_LTX25_LOCAL
+    return None
 
 
 @pytest.fixture()
@@ -58,8 +75,10 @@ def test_registry_resolves_generator_ids():
     assert reg.resolve_id("minimax-h3-local") == "minimax-h3-t2v-local"
     assert reg.resolve_id("minimax-h3") == "minimax-h3-t2v-local"
     assert reg.resolve_id("minimax-h3-i2v-local") == "minimax-h3-i2v-local"
-    assert reg.resolve_id("ltx-local") == "ltx-local"
-    assert reg.resolve_id("seedance-api") == "seedance-api"
+    assert reg.resolve_id("ltx-2.5-distilled") == "ltx-2.5-distilled"
+    assert reg.resolve_id("seedance-api") == "seedance-2.0"
+    assert reg.resolve_id("seedance-2.0") == "seedance-2.0"
+    assert reg.resolve_id("seedance-2.5") == "seedance-2.5"
     assert reg.resolve_id("kling-api") == "kling-api"
     with pytest.raises(GeneratorNotFoundError):
         reg.resolve_id("unknown-engine")
@@ -129,10 +148,12 @@ def test_normalized_request_from_batch(db_scene):
         project_id=pid, scene_id=sid, batch=batch, snapshot=snap, fallback_allowed=False
     )
     assert req.generatorId == "minimax-h3-t2v-local"
-    assert req.generationMode == "text_to_video"
+    assert req.generationMode == "reference"
     assert "glass bottle" in req.prompt
-    assert req.startImageAssetId is None  # T2V profile does not accept I2V start frames
-    assert req.providerOptions.get("planningStartImageAssetId") == "img-a"
+    assert req.startImageAssetId == "img-a"
+    slots = (req.providerOptions.get("r2v") or {}).get("slots") or []
+    # Phase N: H3 sockets are checked Timeline References only — not opening pictures.
+    assert not any(slot.get("assetId") == "img-a" for slot in slots)
     assert req.fallbackAllowed is False
 
 
@@ -182,8 +203,10 @@ def test_i2v_normalized_request_binds_start_image(db_scene):
         project_id=pid, scene_id=sid, batch=batch, snapshot=snap, fallback_allowed=False
     )
     assert req.generatorId == "minimax-h3-i2v-local"
-    assert req.generationMode == "image_to_video"
-    assert req.startImageAssetId == "img-i2v-a"
+    assert req.generationMode == "reference"
+    slots = (req.providerOptions.get("r2v") or {}).get("slots") or []
+    assert not any(slot.get("assetId") == "img-i2v-a" for slot in slots)
+    assert (req.providerOptions.get("r2v") or {}).get("mechanism") == "h3_ref2va"
     assert req.fallbackAllowed is False
 
 
@@ -197,7 +220,7 @@ def test_ltx_routes_through_shared_interface(db_scene):
         sid,
         batch_id,
         {
-            "generatorId": "ltx-local",
+            "generatorId": "ltx-2.5-distilled",
             "promptSegments": [
                 {
                     "id": "ps1",
@@ -211,17 +234,43 @@ def test_ltx_routes_through_shared_interface(db_scene):
                     "versionId": "psv1",
                 }
             ],
+            "sourceAnchors": [
+                {
+                    "id": "anc1",
+                    "kind": "image",
+                    "assetId": "img-ltx-a",
+                    "label": "Start",
+                    "atTime": 0,
+                    "strength": 1,
+                }
+            ],
         },
     )
-    with patch(
-        "app.director_timeline_w46.generation.watcher.start_completion_watcher",
-        MagicMock(),
+    fake_sub = MagicMock()
+    fake_sub.status = "running"
+    fake_sub.queueJobId = "ltx25-job-1"
+    fake_sub.providerJobId = "ltx25-job-1"
+    fake_sub.internalJobId = "ltx25-job-1"
+    fake_sub.apiUsed = False
+    fake_sub.generatorId = "ltx-2.5-distilled"
+    fake_sub.providerMetadata = {}
+    fake_sub.model_dump = lambda: {"queueJobId": "ltx25-job-1"}
+
+    adapter = get_registry().get("ltx-2.5-distilled")
+    with (
+        patch("app.director_timeline_w46.generation.watcher.start_completion_watcher", MagicMock()),
+        patch("app.director_timeline_w46.capabilities.get_generator", _force_timeline_ready),
+        patch(
+            "app.director_timeline_w46.capabilities.list_generators",
+            lambda: [_READY_LTX25_LOCAL],
+        ),
+        patch.object(adapter, "submit", return_value=fake_sub),
     ):
         gen = orchestrator.submit_batch_generation(db, pid, sid, batch_id)
-    assert gen["ok"] is True
-    assert gen["generatorId"] == "ltx-local"
+    assert gen.get("ok") is True, gen
+    assert gen["generatorId"] == "ltx-2.5-distilled"
     assert gen["queueJobId"]
-    assert gen["normalizedRequest"]["generatorId"] == "ltx-local"
+    assert gen["normalizedRequest"]["generatorId"] == "ltx-2.5-distilled"
     assert gen["job"]["queueJobId"] == gen["queueJobId"]
 
 
@@ -258,7 +307,7 @@ def test_ltx_collects_output_asset_ids_from_job_params(db_scene):
     sub = NormalizedJobSubmission(
         internalJobId=job_id,
         queueJobId=job_id,
-        generatorId="ltx-local",
+        generatorId="ltx-2.5-distilled",
         status="queued",
     )
     st = adapter.get_status(sub)
@@ -267,6 +316,86 @@ def test_ltx_collects_output_asset_ids_from_job_params(db_scene):
     result = adapter.collect_result(sub)
     assert result.status == "completed"
     assert result.outputAssetIds == ["asset-ltx-draft"]
+
+
+def test_ltx_submit_copies_ingredients_identity_params(db_scene):
+    from app.db import Job
+    from app.director_timeline_w46.generation.adapters.ltx_local import LtxLocalAdapter
+
+    db, pid, sid = db_scene
+    adapter = LtxLocalAdapter()
+    req = TimelineGenerationRequest(
+        projectId=pid,
+        sceneId=sid,
+        batchBlockId="bb_id",
+        executionSnapshotId="snap_id",
+        generatorId="ltx-2.5-distilled",
+        generationMode="image_to_video",
+        prompt="Korri walks the Venture corridor.",
+        duration=5.0,
+        startImageAssetId="corridor",
+        providerOptions={
+            "ingredients_ic_lora": True,
+            "sheet_id": "sheet_1",
+            "source_asset_ids": ["hero", "corridor"],
+            "image_asset_id": "sheet_img",
+            "reference_prompt": "Korri",
+            "characterIdentity": {"applied": True, "method": "ingredients_ic_lora"},
+        },
+    )
+    with patch(
+        "app.codirector.executive.imagegen_adapter.schedule_job_queue_enqueue",
+        MagicMock(),
+    ):
+        sub = adapter.submit(req)
+    row = db.get(Job, sub.queueJobId)
+    params = json.loads(row.params_json)
+    assert params["ingredients_ic_lora"] is True
+    assert params["reference_method"] == "ingredients_ic_lora"
+    assert params["sheet_id"] == "sheet_1"
+    assert params["image_asset_id"] == "sheet_img"
+    assert params["source_asset_ids"] == ["hero", "corridor"]
+    assert params["characterIdentity"]["applied"] is True
+
+
+def test_ltx_submit_copies_ltx25_i2v_identity_without_ingredients(db_scene):
+    from app.db import Job
+    from app.director_timeline_w46.generation.adapters.ltx_local import LtxLocalAdapter
+
+    db, pid, sid = db_scene
+    adapter = LtxLocalAdapter()
+    req = TimelineGenerationRequest(
+        projectId=pid,
+        sceneId=sid,
+        batchBlockId="bb_id",
+        executionSnapshotId="snap_id",
+        generatorId="ltx-2.5-distilled",
+        generationMode="image_to_video",
+        prompt="Korri looks back.",
+        duration=5.0,
+        startImageAssetId="hero",
+        providerOptions={
+            "originalGeneratorId": "ltx-2.5-distilled",
+            "reference_method": "ltx25_i2v_start",
+            "source_asset_ids": ["hero"],
+            "characterIdentity": {
+                "applied": True,
+                "method": "ltx25_i2v_start",
+                "startImageAssetId": "hero",
+            },
+        },
+    )
+    with patch(
+        "app.codirector.executive.imagegen_adapter.schedule_job_queue_enqueue",
+        MagicMock(),
+    ):
+        sub = adapter.submit(req)
+    row = db.get(Job, sub.queueJobId)
+    params = json.loads(row.params_json)
+    assert params["ingredients_ic_lora"] is False
+    assert params["reference_method"] == "ltx25_i2v_start"
+    assert params["source_asset_ids"] == ["hero"]
+    assert params["characterIdentity"]["method"] == "ltx25_i2v_start"
 
 
 def test_ltx_submit_preserves_timeline_2_5_identity(db_scene):
@@ -280,7 +409,7 @@ def test_ltx_submit_preserves_timeline_2_5_identity(db_scene):
         sceneId=sid,
         batchBlockId="bb_25",
         executionSnapshotId="snap_25",
-        generatorId="ltx-local",
+        generatorId="ltx-2.5-distilled",
         generationMode="image_to_video",
         prompt="continue the turn",
         duration=5.0,
@@ -296,7 +425,7 @@ def test_ltx_submit_preserves_timeline_2_5_identity(db_scene):
     params = json.loads(row.params_json)
     assert params["generatorId"] == "ltx-2.5-distilled"
     assert params["variant"] == "ltx-2.5-distilled"
-    assert params["adapterId"] == "ltx-local"
+    assert params["adapterId"] == "ltx-2.5-distilled"
     assert sub.providerMetadata.get("requestedModel") == "ltx-2.5-distilled"
 
 
@@ -347,7 +476,7 @@ def test_ltx_enqueue_failure_fails_job_instead_of_eternal_queued(db_scene):
         sceneId=sid,
         batchBlockId="bb_fail",
         executionSnapshotId="snap_fail",
-        generatorId="ltx-local",
+        generatorId="ltx-2.5-distilled",
         generationMode="image_to_video",
         prompt="fail enqueue",
         duration=5.0,
@@ -373,7 +502,7 @@ def test_ltx_submit_enqueues_job_queue_not_missing_worker_alias(db_scene):
         sid,
         batch_id,
         {
-            "generatorId": "ltx-local",
+            "generatorId": "ltx-2.5-distilled",
             "promptSegments": [
                 {
                     "id": "ps1",
@@ -387,12 +516,27 @@ def test_ltx_submit_enqueues_job_queue_not_missing_worker_alias(db_scene):
                     "versionId": "psv1",
                 }
             ],
+            "sourceAnchors": [
+                {
+                    "id": "anc1",
+                    "kind": "image",
+                    "assetId": "img-ltx-enqueue",
+                    "label": "Start",
+                    "atTime": 0,
+                    "strength": 1,
+                }
+            ],
         },
     )
     enqueue = MagicMock()
     with (
         patch("app.director_timeline_w46.generation.watcher.start_completion_watcher", MagicMock()),
         patch("app.codirector.executive.imagegen_adapter.schedule_job_queue_enqueue", enqueue),
+        patch("app.director_timeline_w46.capabilities.get_generator", _force_timeline_ready),
+        patch(
+            "app.director_timeline_w46.capabilities.list_generators",
+            lambda: [_READY_LTX25_LOCAL],
+        ),
     ):
         gen = orchestrator.submit_batch_generation(db, pid, sid, batch_id)
     assert gen["ok"] is True
@@ -445,8 +589,27 @@ def test_submit_requires_generator(db_scene):
     assert gen["error"] == "GENERATOR_REQUIRED"
 
 
-def test_minimax_submit_mocked_adapter(db_scene):
+def test_minimax_submit_mocked_adapter(db_scene, tmp_path, monkeypatch):
+    import uuid as uuid_mod
+
     db, pid, sid = db_scene
+    asset_id = f"img-h3-test-{uuid_mod.uuid4().hex[:8]}"
+    from app.video_runtime import comfy_asset_stage as stage_mod
+
+    monkeypatch.setattr(stage_mod.settings, "comfy_input_dir", tmp_path / "input")
+    pic = tmp_path / "start.png"
+    pic.write_bytes(b"png-bytes")
+    db.add(
+        Asset(
+            id=asset_id,
+            project_id=pid,
+            kind="image",
+            filename="start.png",
+            path=str(pic),
+            tag="h3",
+        )
+    )
+    db.commit()
     ws = service.workspace(db, pid, sid)
     batch_id = ws["master"]["batchBlocks"][0]["id"]
     service.patch_batch(
@@ -456,6 +619,7 @@ def test_minimax_submit_mocked_adapter(db_scene):
         batch_id,
         {
             "generatorId": "minimax-h3-t2v-local",
+            "plannedDuration": 5 / 24,
             "promptSegments": [
                 {
                     "id": "ps1",
@@ -467,6 +631,15 @@ def test_minimax_submit_mocked_adapter(db_scene):
                     "anchorIds": [],
                     "executionStrategy": "compiled",
                     "versionId": "psv1",
+                }
+            ],
+            "references": [
+                {
+                    "kind": "image",
+                    "role": "character",
+                    "assetId": asset_id,
+                    "label": "Korri",
+                    "consumed": True,
                 }
             ],
         },
@@ -488,7 +661,7 @@ def test_minimax_submit_mocked_adapter(db_scene):
         MagicMock(),
     ):
         gen = orchestrator.submit_batch_generation(db, pid, sid, batch_id)
-    assert gen["ok"] is True
+    assert gen["ok"] is True, gen
     assert gen["generatorId"] == "minimax-h3-t2v-local"
     assert gen["queueJobId"] == "h3-job-1"
     assert gen["normalizedRequest"]["generatorId"] == "minimax-h3-t2v-local"
@@ -499,9 +672,9 @@ def test_shared_completion_places_clips_in_batch_order(db_scene):
     db, pid, sid = db_scene
     ws = service.workspace(db, pid, sid)
     b1 = ws["master"]["batchBlocks"][0]["id"]
-    added = service.add_batch(db, pid, sid, label="Batch 2", planned_duration=5.0, generator_id="ltx-local")
+    added = service.add_batch(db, pid, sid, label="Batch 2", planned_duration=5.0, generator_id="ltx-2.5-distilled")
     b2 = added["batch"]["id"]
-    service.patch_batch(db, pid, sid, b1, {"generatorId": "ltx-local", "label": "Batch 1"})
+    service.patch_batch(db, pid, sid, b1, {"generatorId": "ltx-2.5-distilled", "label": "Batch 1"})
 
     # Create snapshots + approve via shared completion
     with patch(
@@ -524,7 +697,7 @@ def test_shared_completion_places_clips_in_batch_order(db_scene):
                 internalJobId=f"job-{asset}",
                 providerJobId=f"prov-{asset}",
                 queueJobId=f"q-{asset}",
-                generatorId="ltx-local",
+                generatorId="ltx-2.5-distilled",
                 status="completed",
                 outputAssetIds=[asset],
                 duration=5.0,
@@ -566,7 +739,7 @@ def test_lineage_survives_reload(db_scene):
     db, pid, sid = db_scene
     ws = service.workspace(db, pid, sid)
     batch_id = ws["master"]["batchBlocks"][0]["id"]
-    service.patch_batch(db, pid, sid, batch_id, {"generatorId": "ltx-local", "label": "Hero"})
+    service.patch_batch(db, pid, sid, batch_id, {"generatorId": "ltx-2.5-distilled", "label": "Hero"})
     from app.director_timeline_w46.contracts import SceneTimelineMaster
     from app.director_timeline_w46 import store
 
@@ -580,7 +753,7 @@ def test_lineage_survives_reload(db_scene):
         internalJobId="job-lin",
         providerJobId="prov-lin",
         queueJobId="q-lin",
-        generatorId="ltx-local",
+        generatorId="ltx-2.5-distilled",
         status="completed",
         outputAssetIds=["asset-lin"],
         duration=4.5,
@@ -604,7 +777,7 @@ def test_lineage_survives_reload(db_scene):
         None,
     )
     assert lineage is not None
-    assert lineage["generatorId"] == "ltx-local"
+    assert lineage["generatorId"] == "ltx-2.5-distilled"
     assert lineage["queueJobId"] == "q-lin"
     assert lineage["outputAssetId"] == "asset-lin"
 
@@ -624,7 +797,10 @@ def test_i2v_adapter_rejects_missing_start_image():
     )
     result = adapter.validate(req)
     assert result.ok is False
-    assert any("startImageAssetId" in e or "Start image" in e for e in result.errors)
+    assert any(
+        "Reference-to-Video" in e or "startImageAssetId" in e or "Start image" in e or "picture" in e.lower()
+        for e in result.errors
+    )
 
 
 def test_i2v_adapter_rejects_fallback_allowed():
@@ -723,7 +899,7 @@ def test_retake_does_not_overwrite_active_take(db_scene):
     db, pid, sid = db_scene
     ws = service.workspace(db, pid, sid)
     batch_id = ws["master"]["batchBlocks"][0]["id"]
-    service.patch_batch(db, pid, sid, batch_id, {"generatorId": "ltx-local", "label": "Hero"})
+    service.patch_batch(db, pid, sid, batch_id, {"generatorId": "ltx-2.5-distilled", "label": "Hero"})
     from app.director_timeline_w46.contracts import SceneTimelineMaster
     from app.director_timeline_w46 import store
 
@@ -743,7 +919,7 @@ def test_retake_does_not_overwrite_active_take(db_scene):
             internalJobId="job-a",
             providerJobId="prov-a",
             queueJobId="q-a",
-            generatorId="ltx-local",
+            generatorId="ltx-2.5-distilled",
             status="completed",
             outputAssetIds=["asset-take-a"],
             duration=5.0,
@@ -771,7 +947,7 @@ def test_retake_does_not_overwrite_active_take(db_scene):
             internalJobId="job-b",
             providerJobId="prov-b",
             queueJobId="q-b",
-            generatorId="ltx-local",
+            generatorId="ltx-2.5-distilled",
             status="completed",
             outputAssetIds=["asset-take-b"],
             duration=5.0,
@@ -793,14 +969,18 @@ def test_retake_does_not_overwrite_active_take(db_scene):
 
 def test_draft_capability_truth_table():
     reg = get_registry()
-    ltx = reg.capabilities("ltx-local")
+    ltx = reg.capabilities("ltx-2.5-distilled")
     assert ltx.draftPathway == "local_live"
     assert ltx.supportsQueuedCancel is True
     assert ltx.supportsRunningCancel is True
     assert ltx.supportsVideoReferences is False
     mm = reg.capabilities("minimax-h3-t2v-local")
-    assert mm.draftPathway == "none"
+    assert mm.draftPathway == "local_live"
     assert mm.supportsRunningCancel is True
+    assert mm.supportsAudioReferences is True
+    assert mm.maximumReferenceAudio == 9
+    assert mm.supportsReferenceToVideo is True
+    assert ltx.supportsAudioReferences is False
     seed = reg.capabilities("seedance-api")
     assert seed.draftPathway == "cheap_preview"
     assert seed.supportsVideoReferences is True
@@ -813,7 +993,7 @@ def test_draft_capability_truth_table():
 def test_video_reference_refused_not_silently_dropped():
     from app.director_timeline_w46.generation.adapter import validate_against_capabilities
 
-    for gen_id in ("ltx-local", "minimax-h3-t2v-local", "kling-api"):
+    for gen_id in ("ltx-2.5-distilled", "minimax-h3-t2v-local", "kling-api"):
         caps = get_registry().capabilities(gen_id)
         req = TimelineGenerationRequest(
             projectId="p",
@@ -868,7 +1048,7 @@ def test_request_builder_sets_draft_and_aspect(db_scene):
         sid,
         batch_id,
         {
-            "generatorId": "ltx-local",
+            "generatorId": "ltx-2.5-distilled",
             "promptSegments": [
                 {
                     "id": "ps1",
@@ -899,15 +1079,15 @@ def test_request_builder_sets_draft_and_aspect(db_scene):
 
     master = SceneTimelineMaster.model_validate(payload["master"])
     batch = next(b for b in master.batchBlocks if b.id == batch_id)
-    snap = ExecutionSnapshot(batchBlockId=batch.id, selectedGenerator="ltx-local")
+    snap = ExecutionSnapshot(batchBlockId=batch.id, selectedGenerator="ltx-2.5-distilled")
     req = build_timeline_generation_request(
         project_id=pid, scene_id=sid, batch=batch, snapshot=snap, aspect_ratio="21:9"
     )
     assert req.aspectRatio == "21:9"
-    assert req.resolution == "672x288"
+    assert req.resolution == "1632x704"
     assert req.providerOptions.get("draftMode") is True
     assert req.videoReferenceAssetId == "motion-1"
-    refused = get_registry().get("ltx-local").validate(req)
+    refused = get_registry().get("ltx-2.5-distilled").validate(req)
     assert refused.ok is False
     assert any("video reference" in e.lower() for e in refused.errors)
 
@@ -949,11 +1129,49 @@ def test_seedance_draft_uses_480p_final_uses_720p():
     assert final.providerOptions.get("draftMode") is False
 
 
+def test_ltx_25_fast_keeps_production_resolution():
+    from app.director_timeline_w46.contracts import BatchBlock, DurationState, TimelinePromptSegment
+    from app.director_timeline_w46.generation.request_builder import build_timeline_generation_request
+
+    batch = BatchBlock(
+        id="b25",
+        sceneId="s",
+        label="Hero",
+        generatorId="ltx-2.5-distilled",
+        duration=DurationState(plannedDuration=5.0),
+        promptSegments=[
+            TimelinePromptSegment(
+                id="ps1",
+                start=0,
+                length=5,
+                text="continue the corridor",
+                role="primary",
+                strength=1,
+                anchorIds=[],
+                executionStrategy="compiled",
+                versionId="psv1",
+            )
+        ],
+    )
+    snap = ExecutionSnapshot(batchBlockId=batch.id, selectedGenerator="ltx-2.5-distilled")
+    fast = build_timeline_generation_request(
+        project_id="p", scene_id="s", batch=batch, snapshot=snap, aspect_ratio="16:9", draft_mode=True
+    )
+    quality = build_timeline_generation_request(
+        project_id="p", scene_id="s", batch=batch, snapshot=snap, aspect_ratio="16:9", draft_mode=False
+    )
+    assert fast.resolution == "1280x704"
+    assert quality.resolution == "1280x704"
+    assert fast.providerOptions.get("fast_generation") is True
+    assert quality.providerOptions.get("fast_generation") is False
+    assert fast.providerOptions.get("originalGeneratorId") == "ltx-2.5-distilled"
+
+
 def test_draft_completion_does_not_auto_approve(db_scene):
     db, pid, sid = db_scene
     ws = service.workspace(db, pid, sid)
     batch_id = ws["master"]["batchBlocks"][0]["id"]
-    service.patch_batch(db, pid, sid, batch_id, {"generatorId": "ltx-local"})
+    service.patch_batch(db, pid, sid, batch_id, {"generatorId": "ltx-2.5-distilled"})
     from app.director_timeline_w46 import store
     from app.director_timeline_w46.contracts import SceneTimelineMaster
 
@@ -973,7 +1191,7 @@ def test_draft_completion_does_not_auto_approve(db_scene):
         execution_snapshot_id=snap.id,
         result=TimelineGenerationResult(
             internalJobId="job-draft",
-            generatorId="ltx-local",
+            generatorId="ltx-2.5-distilled",
             status="completed",
             outputAssetIds=["asset-draft"],
             duration=5.0,
@@ -988,5 +1206,169 @@ def test_draft_completion_does_not_auto_approve(db_scene):
     cand = batch_rel["candidateVersions"][0]
     assert cand["takeState"]["quality"] == "draft"
     assert cand["approved"] is False
+
+
+def test_draft_completion_places_playable_take_on_visual_track(db_scene):
+    """Finished generate lands on Visual without Approve or a Library drag."""
+    db, pid, sid = db_scene
+    ws = service.workspace(db, pid, sid)
+    batch_id = ws["master"]["batchBlocks"][0]["id"]
+    service.patch_batch(db, pid, sid, batch_id, {"generatorId": "ltx-2.5-distilled", "label": "Batch 1"})
+    from app.director_timeline import parse_director_timeline
+    from app.director_timeline_w46 import store
+    from app.director_timeline_w46.contracts import SceneTimelineMaster
+
+    payload = store.load_master(db, pid, sid)
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    batch = next(b for b in master.batchBlocks if b.id == batch_id)
+    snap = orchestrator.create_execution_snapshot(
+        batch, continuity={"takeState": {"quality": "draft", "draftPathway": "local_live"}}
+    )
+    master.executionSnapshots[snap.id] = snap
+    store.save_master(db, pid, sid, master)
+    done = apply_shared_completion(
+        db,
+        project_id=pid,
+        scene_id=sid,
+        batch_id=batch_id,
+        execution_snapshot_id=snap.id,
+        result=TimelineGenerationResult(
+            internalJobId="job-visual-draft",
+            generatorId="ltx-2.5-distilled",
+            status="completed",
+            outputAssetIds=["asset-visual-draft"],
+            duration=5.0,
+        ),
+        auto_approve=True,
+    )
+    assert done["ok"] is True
+    assert done["placement"]["placedCount"] == 1
+    assert done["placement"]["clipIds"] == [f"bbclip_{batch_id}"]
+
+    reloaded = service.workspace(db, pid, sid)
+    batch_rel = next(b for b in reloaded["master"]["batchBlocks"] if b["id"] == batch_id)
+    assert batch_rel["approvedClip"] is None
+    assert batch_rel["status"] == "CandidateReady"
+    managed_visual = [c for c in batch_rel["visualClips"] if c["id"] == f"bbvclip_{batch_id}"]
+    assert len(managed_visual) == 1
+    assert managed_visual[0]["assetId"] == "asset-visual-draft"
+    assert managed_visual[0]["kind"] == "video"
+
+    scene = store.get_scene(db, pid, sid)
+    tl = parse_director_timeline(scene.director_json, fallback_duration=5.0, fallback_prompt="")
+    assert tl.media_mode == "video"
+    managed = [c for c in tl.video_clips if str(c.id).startswith("bbclip_")]
+    assert len(managed) == 1
+    assert managed[0].id == f"bbclip_{batch_id}"
+    assert managed[0].asset_id == "asset-visual-draft"
+
+    # Second generate replaces the same managed clip; a manual Library clip stays.
+    tl.video_clips.append(
+        TimelineClip(
+            id="manual_lib",
+            asset_id="asset-manual",
+            start=5.0,
+            length=2.0,
+            label="Library drop",
+        )
+    )
+    store.save_master(db, pid, sid, SceneTimelineMaster.model_validate(reloaded["master"]), director_tl=tl)
+    payload2 = store.load_master(db, pid, sid)
+    master2 = SceneTimelineMaster.model_validate(payload2["master"])
+    batch2 = next(b for b in master2.batchBlocks if b.id == batch_id)
+    snap2 = orchestrator.create_execution_snapshot(
+        batch2, continuity={"takeState": {"quality": "draft", "draftPathway": "local_live"}}
+    )
+    master2.executionSnapshots[snap2.id] = snap2
+    store.save_master(db, pid, sid, master2)
+    second = apply_shared_completion(
+        db,
+        project_id=pid,
+        scene_id=sid,
+        batch_id=batch_id,
+        execution_snapshot_id=snap2.id,
+        result=TimelineGenerationResult(
+            internalJobId="job-visual-draft-2",
+            generatorId="ltx-2.5-distilled",
+            status="completed",
+            outputAssetIds=["asset-visual-draft-2"],
+            duration=5.0,
+        ),
+        auto_approve=False,
+    )
+    assert second["ok"] is True
+    scene2 = store.get_scene(db, pid, sid)
+    tl2 = parse_director_timeline(scene2.director_json, fallback_duration=5.0, fallback_prompt="")
+    managed2 = [c for c in tl2.video_clips if str(c.id).startswith("bbclip_")]
+    manuals = [c for c in tl2.video_clips if c.id == "manual_lib"]
+    assert len(managed2) == 1
+    assert managed2[0].asset_id == "asset-visual-draft-2"
+    assert len(manuals) == 1
+    assert manuals[0].asset_id == "asset-manual"
+
+
+def test_place_keeps_approved_take_when_newer_candidate_exists(db_scene):
+    """Re-Take candidate is not the Visual clip until the creator activates it."""
+    db, pid, sid = db_scene
+    ws = service.workspace(db, pid, sid)
+    batch_id = ws["master"]["batchBlocks"][0]["id"]
+    service.patch_batch(db, pid, sid, batch_id, {"generatorId": "ltx-2.5-distilled"})
+    from app.director_timeline import parse_director_timeline
+    from app.director_timeline_w46 import store
+    from app.director_timeline_w46.contracts import SceneTimelineMaster
+
+    payload = store.load_master(db, pid, sid)
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    batch = next(b for b in master.batchBlocks if b.id == batch_id)
+    snap_a = orchestrator.create_execution_snapshot(batch)
+    master.executionSnapshots[snap_a.id] = snap_a
+    store.save_master(db, pid, sid, master)
+    first = apply_shared_completion(
+        db,
+        project_id=pid,
+        scene_id=sid,
+        batch_id=batch_id,
+        execution_snapshot_id=snap_a.id,
+        result=TimelineGenerationResult(
+            internalJobId="job-take-a",
+            generatorId="ltx-2.5-distilled",
+            status="completed",
+            outputAssetIds=["asset-take-a"],
+            duration=5.0,
+        ),
+        auto_approve=True,
+    )
+    assert first["ok"] is True
+
+    payload = store.load_master(db, pid, sid)
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    batch = next(b for b in master.batchBlocks if b.id == batch_id)
+    snap_b = orchestrator.create_execution_snapshot(
+        batch,
+        continuity={"reTakeReason": "creator_retake"},
+    )
+    master.executionSnapshots[snap_b.id] = snap_b
+    store.save_master(db, pid, sid, master)
+    second = apply_shared_completion(
+        db,
+        project_id=pid,
+        scene_id=sid,
+        batch_id=batch_id,
+        execution_snapshot_id=snap_b.id,
+        result=TimelineGenerationResult(
+            internalJobId="job-take-b",
+            generatorId="ltx-2.5-distilled",
+            status="completed",
+            outputAssetIds=["asset-take-b"],
+            duration=5.0,
+        ),
+        auto_approve=True,
+    )
+    assert second["ok"] is True
+    scene = store.get_scene(db, pid, sid)
+    tl = parse_director_timeline(scene.director_json, fallback_duration=5.0, fallback_prompt="")
+    managed = [c for c in tl.video_clips if str(c.id).startswith("bbclip_")]
+    assert len(managed) == 1
+    assert managed[0].asset_id == "asset-take-a"
 
 

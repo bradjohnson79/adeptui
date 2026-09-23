@@ -83,53 +83,47 @@ test.describe("M3.2 Co-Director UI @DETERMINISTIC", () => {
     }
   });
 
-  test("CODIRECTOR-UI-03 drawer opens from hamburger", async ({ page, request }) => {
+  test("CODIRECTOR-UI-03 hamburger menu is gone; overflow remains", async ({ page, request }) => {
     await waitForAppReady(request);
     const project = await createTempProject(request, `M32 drawer ${Date.now()}`);
     try {
       await page.goto(`/project/${project.id}`);
       await openCoDirector(page);
-      await page.getByTestId("codirector-menu-button").click();
-      await expect(page.getByTestId("codirector-nav-drawer")).toBeVisible();
-      await expect(page.getByTestId("codirector-nav-chat")).toBeVisible();
+      await expect(page.getByTestId("codirector-menu-button")).toHaveCount(0);
+      await expect(page.getByTestId("codirector-nav-drawer")).toHaveCount(0);
+      await page.getByTestId("codirector-overflow-button").click();
+      await expect(page.getByTestId("codirector-overflow-panel")).toBeVisible();
       await page.screenshot({ path: path.join(SHOT_DIR, "03-nav-drawer.png") });
     } finally {
       await deleteProject(request, project.id);
     }
   });
 
-  test("CODIRECTOR-UI-04 drawer Escape closes and restores focus", async ({ page, request }) => {
+  test("CODIRECTOR-UI-04 overflow Close restores the compact chat", async ({ page, request }) => {
     await waitForAppReady(request);
     const project = await createTempProject(request, `M32 esc ${Date.now()}`);
     try {
       await page.goto(`/project/${project.id}`);
       await openCoDirector(page);
-      const menu = page.getByTestId("codirector-menu-button");
-      await menu.click();
-      await expect(page.getByTestId("codirector-nav-drawer")).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(page.getByTestId("codirector-nav-drawer")).toHaveCount(0);
+      const more = page.getByTestId("codirector-overflow-button");
+      await more.click();
+      await expect(page.getByTestId("codirector-overflow-panel")).toBeVisible();
+      await page.getByTestId("codirector-overflow-panel").getByRole("button", { name: "Close" }).click();
+      await expect(page.getByTestId("codirector-overflow-panel")).toHaveCount(0);
       await expect(page.getByTestId("codirector-popup")).toBeVisible();
-      await expect(menu).toBeFocused();
     } finally {
       await deleteProject(request, project.id);
     }
   });
 
-  test("CODIRECTOR-UI-05 drawer backdrop closes", async ({ page, request }) => {
+  test("CODIRECTOR-UI-05 hamburger drawer surface is removed", async ({ page, request }) => {
     await waitForAppReady(request);
     const project = await createTempProject(request, `M32 backdrop ${Date.now()}`);
     try {
       await page.goto(`/project/${project.id}`);
       await openCoDirector(page);
-      await page.getByTestId("codirector-menu-button").click();
-      await expect(page.getByTestId("codirector-nav-drawer")).toBeVisible();
-      // Panel occupies the left; click the right side of the full-bleed backdrop.
-      await page.getByTestId("codirector-nav-drawer-backdrop").click({
-        position: { x: 240, y: 40 },
-        force: true,
-      });
       await expect(page.getByTestId("codirector-nav-drawer")).toHaveCount(0);
+      await expect(page.getByTestId("codirector-nav-drawer-backdrop")).toHaveCount(0);
     } finally {
       await deleteProject(request, project.id);
     }
@@ -221,7 +215,6 @@ test.describe("M3.2 Co-Director UI @DETERMINISTIC", () => {
       await page.goto(`/project/${project.id}`);
       await openCoDirector(page);
       for (const name of [
-        "Open Co-Director menu",
         "Co-Director more options",
         "Open full-screen Co-Director",
         "Close Co-Director",
@@ -274,7 +267,8 @@ test.describe("M3.2 Co-Director UI @DETERMINISTIC", () => {
       });
       await openCoDirector(page);
       await expect(page.getByTestId("codirector-composer")).toBeVisible();
-      await expect(page.getByTestId("codirector-menu-button")).toBeVisible();
+      await expect(page.getByTestId("codirector-overflow-button")).toBeVisible();
+      await expect(page.getByTestId("codirector-menu-button")).toHaveCount(0);
       await page.screenshot({ path: path.join(SHOT_DIR, "13-zoom-200.png") });
     } finally {
       await deleteProject(request, project.id);
@@ -289,8 +283,8 @@ test.describe("M3.2 Co-Director UI @DETERMINISTIC", () => {
       await page.goto(`/project/${project.id}`);
       await openCoDirector(page);
       await expect(page.getByTestId("m214-unified-workspace")).toHaveCount(0);
-      await page.getByTestId("codirector-menu-button").click();
-      await expect(page.getByTestId("codirector-nav-drawer")).toBeVisible();
+      await expect(page.getByTestId("codirector-composer")).toBeVisible();
+      await expect(page.getByTestId("codirector-menu-button")).toHaveCount(0);
       await page.screenshot({ path: path.join(SHOT_DIR, "14-narrow-drawer.png") });
     } finally {
       await deleteProject(request, project.id);
@@ -369,9 +363,8 @@ test.describe("M3.2 Co-Director UI @DETERMINISTIC", () => {
     try {
       await page.goto(`/project/${project.id}`);
       await openCoDirector(page);
-      await page.getByTestId("codirector-menu-button").click();
-      await page.getByTestId("codirector-nav-content").click();
-      await expect(page).toHaveURL(/\/co-director/);
+      await page.getByTestId("codirector-expand-button").click();
+      await expect(page.getByTestId("codirector-shell")).toHaveAttribute("data-mode", "fullscreen");
       await expect(page.getByTestId("codirector-project-content")).toBeVisible({ timeout: 20_000 });
       await page.screenshot({ path: path.join(SHOT_DIR, "18-nav-to-content.png") });
     } finally {

@@ -118,7 +118,7 @@ export function CoDirectorBriefing({
       <h2>What to do next</h2>
       {!items.length ? (
         <p className="muted">
-          Your production is quiet. Ask Co-Director to propose the next scene, storyboard, or spatial block.
+          Your production is quiet. Ask Co-Director to propose the next scene, storyboard, or Environment Creator step.
         </p>
       ) : (
         <ul>
@@ -198,6 +198,13 @@ export function ActivityFeed({
   );
 }
 
+function jobStatusTone(status: string): "ok" | "bad" | "warn" {
+  const s = status.trim().toLowerCase();
+  if (["failed", "error"].includes(s)) return "bad";
+  if (["completed", "complete", "done", "success", "succeeded"].includes(s)) return "ok";
+  return "warn";
+}
+
 export function RecentAssetCard({
   name,
   kind,
@@ -211,10 +218,15 @@ export function RecentAssetCard({
   meta?: string;
   onOpen: () => void;
 }) {
+  const [thumbFailed, setThumbFailed] = useState(false);
   return (
     <button type="button" className="recent-asset-card" onClick={onOpen}>
       <div className="recent-asset-thumb">
-        {thumb ? <img src={thumb} alt="" /> : <span className="library-card-fallback">{kind}</span>}
+        {thumb && !thumbFailed ? (
+          <img src={thumb} alt="" onError={() => setThumbFailed(true)} />
+        ) : (
+          <span className="library-card-fallback">{kind}</span>
+        )}
       </div>
       <span className="recent-asset-name">{name}</span>
       <span className="scene-meta">{meta || kind}</span>
@@ -242,7 +254,7 @@ export function RenderJobCard({
       {thumb && <img src={thumb} alt="" className="render-job-thumb" />}
       <div className="render-job-body">
         <strong>{title}</strong>
-        <span className={`status-badge ${status === "failed" ? "bad" : status === "done" ? "ok" : "warn"}`}>
+        <span className={`status-badge ${jobStatusTone(status)}`}>
           {status}
         </span>
         <div className="progress-strip" aria-hidden="true">
@@ -268,7 +280,7 @@ export function CoDirectorComposer({
   const examples = [
     "Create a dialogue scene with two characters.",
     "Turn Scene 1 into a storyboard.",
-    "Continue the last Spatial Map.",
+    "Open Environment Creator for the next scene.",
     "Build a Director timeline from approved panels.",
   ];
   return (

@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { DirectorTimeline } from "../DirectorTracks";
+import type { TimelineBoardView } from "../DirectorTracks";
 import { collectTimelineAudioAtTime } from "./collectTimelineAudioAtTime";
 
-function timeline(): DirectorTimeline {
+function timeline(): TimelineBoardView {
   return {
     media_mode: "image",
     duration_sec: 8,
-    image_clips: [],
-    video_clips: [],
-    prompt_segments: [],
-    audio_clips: [],
-    sfx_clips: [
+    imageClips: [],
+    videoClips: [],
+    promptSegments: [],
+    audioClips: [],
+    sfxClips: [
       { id: "k1", asset_id: "sfx-metal", start: 0, length: 0.45, label: "Korri footsteps", volume: 0.32 },
       { id: "a1", asset_id: "sfx-metal", start: 0.22, length: 0.45, label: "Anadriya footsteps", volume: 0.32 },
     ],
@@ -44,31 +44,42 @@ describe("collectTimelineAudioAtTime", () => {
     expect(layers.every((layer) => layer.kind === "sfx")).toBe(true);
   });
 
-  it("plays Korri dialogue without overlapping Anadriya", () => {
+  it("does NOT play legacy Lip Sync dialogue (demoted; Re-Take/Visual AV owns speech)", () => {
     const atKorri = collectTimelineAudioAtTime(timeline(), null, 1.2);
-    expect(atKorri.some((layer) => layer.kind === "dialogue" && layer.assetId === "dlg-k")).toBe(true);
-    expect(atKorri.some((layer) => layer.assetId === "dlg-a")).toBe(false);
+    expect(atKorri.some((layer) => layer.kind === "dialogue")).toBe(false);
+    expect(atKorri.some((layer) => layer.assetId === "dlg-k")).toBe(false);
     const atAna = collectTimelineAudioAtTime(timeline(), null, 4.2);
-    expect(atAna.some((layer) => layer.kind === "dialogue" && layer.assetId === "dlg-a")).toBe(true);
-    expect(atAna.some((layer) => layer.assetId === "dlg-k")).toBe(false);
+    expect(atAna.some((layer) => layer.kind === "dialogue")).toBe(false);
+    expect(atAna.some((layer) => layer.assetId === "dlg-a")).toBe(false);
+  });
+
+  it("does not layer lipsync dialogue under rtclip_* Re-Take Visual window", () => {
+    const tl = timeline();
+    tl.media_mode = "video";
+    tl.videoClips = [
+      { id: "rtclip_repair1", asset_id: "asset-retake", start: 1, length: 4, label: "Retake" },
+    ] as never;
+    const layers = collectTimelineAudioAtTime(tl, null, 2.0);
+    expect(layers.some((layer) => layer.kind === "dialogue")).toBe(false);
+    expect(layers.some((layer) => layer.assetId === "dlg-k" || layer.assetId === "dlg-a")).toBe(false);
   });
 
   it("mutes a legacy sfx clip to zero while preserving stored volume", () => {
     const tl = timeline();
-    tl.sfx_clips[0] = { ...tl.sfx_clips[0], volume: 0.5, muted: true };
+    tl.sfxClips[0] = { ...tl.sfxClips[0], volume: 0.5, muted: true };
     const layers = collectTimelineAudioAtTime(tl, null, 0.3);
     const korri = layers.find((l) => l.label === "Korri footsteps");
     expect(korri).toBeDefined();
     expect(korri!.volume).toBe(0);
   });
 
-  it("keeps unmuted legacy sfx volume clamped to the fallback", () => {
+  it("keeps unmuted legacy sfx volume within preview/control range (0..2)", () => {
     const tl = timeline();
-    tl.sfx_clips[0] = { ...tl.sfx_clips[0], volume: 2, muted: false };
+    tl.sfxClips[0] = { ...tl.sfxClips[0], volume: 2, muted: false };
     const layers = collectTimelineAudioAtTime(tl, null, 0.3);
     const korri = layers.find((l) => l.label === "Korri footsteps");
     expect(korri).toBeDefined();
-    expect(korri!.volume).toBe(1);
+    expect(korri!.volume).toBe(2);
   });
 
   it("mutes batch audio clips to zero", () => {

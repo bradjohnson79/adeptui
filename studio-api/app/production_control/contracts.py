@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -62,6 +62,14 @@ class ModelDescriptor(BaseModel):
     executable: bool = False
     """True only when Certified and Runtime Ready — the only default-eligible class."""
     defaultEligible: bool = False
+    selectable: bool = True
+    readiness: Optional[str] = None
+    disabledReason: Optional[str] = None
+    timelineAdapterId: Optional[str] = None
+    supportsTimelineGeneration: bool = False
+    """Per-surface workflow truth (t2v / i2v / multiFrame / r2v). Timeline R2V
+    metadata never decides CREATE surface eligibility."""
+    workflowCapabilities: Optional[dict[str, dict[str, Any]]] = None
 
 
 class ModelRoutingPreference(BaseModel):

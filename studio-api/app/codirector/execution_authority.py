@@ -33,8 +33,7 @@ ROUTINE_TOOLS: frozenset[str] = frozenset({
     "timeline.propose_add_image_clip",
     "timeline.propose_add_prompt_segment",
     "timeline.propose_add_batch",
-    "timeline.propose_add_camera",
-    "timeline.propose_update_camera",
+    # Phase 0: timeline.propose_add/update_camera removed from routine tools (CAMERA lane retired)
     "timeline.update_settings",
     "timeline.set_playhead",
     "spatial.create_camera",

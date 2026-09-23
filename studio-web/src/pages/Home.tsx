@@ -22,8 +22,8 @@ import { focusProjectLibrary, PROJECT_LIBRARY_HASH } from "../navigation/project
 import {
   pruneDeletedProjects,
   pushRecentProject,
-  resolutionToSize,
 } from "../workspacePrefs";
+import { legalCanvasSize } from "../video/legalCanvas";
 import {
   buildProjectWorkspacePath,
   getExploreWorkspaceCards,
@@ -49,6 +49,7 @@ import {
 } from "../components/ProjectPasswordModals";
 import { clearProjectUnlockToken, getProjectUnlockToken } from "../projectSecurity";
 import { HomeCreateProjectModal } from "../components/generationStudio/HomeCreateProjectModal";
+import { useHomeLibraryBounds } from "../components/generationStudio/useHomeLibraryBounds";
 
 type StatusFilter = "All" | "Active" | "Rendering" | "Complete";
 
@@ -60,6 +61,7 @@ export default function Home() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [createFormKey, setCreateFormKey] = useState(0);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [view, setView] = useState<"grid" | "list">("grid");
@@ -124,6 +126,7 @@ export default function Home() {
     const ac = new AbortController();
     refreshAcRef.current = ac;
     try {
+      setProjectsError(null);
       const p = await api.listProjects({ signal: ac.signal });
       if (!mountedRef.current || ac.signal.aborted) return;
       setProjects(p);
@@ -136,6 +139,7 @@ export default function Home() {
         await new Promise((resolve) => window.setTimeout(resolve, 0));
         if (!mountedRef.current || ac.signal.aborted) return;
       }
+      setProjectsError(error instanceof Error ? error.message : "Could not load projects.");
       throw error;
     } finally {
       if (mountedRef.current && !ac.signal.aborted) {
@@ -270,6 +274,15 @@ export default function Home() {
     });
   }, [projects, query, statusFilter]);
 
+  const { resultsRef: libraryResultsRef, bounds: libraryBounds } = useHomeLibraryBounds(
+    view,
+    filtered.length,
+  );
+
+  useEffect(() => {
+    libraryResultsRef.current?.scrollTo({ top: 0 });
+  }, [query, statusFilter, view, libraryResultsRef]);
+
   const createWithDefaults = async (opts: {
     name: string;
     primaryProjectType: string;
@@ -278,6 +291,7 @@ export default function Home() {
     resolution?: string;
     fps?: number | "auto";
     storyboard_style?: string;
+    preferred_video_generator?: string;
     stayOnHome?: boolean;
     /** @deprecated legacy template path */
     type?: string;
@@ -289,7 +303,19 @@ export default function Home() {
       const primary =
         opts.primaryProjectType ||
         (opts.type ? String(opts.type).toLowerCase().replace(/\s+/g, "_") : "custom");
-      const { width, height } = resolutionToSize(opts.resolution || "1080p", opts.aspect || "16:9");
+      const engineForCanvas =
+        opts.preferred_video_generator && opts.preferred_video_generator !== "automatic"
+          ? opts.preferred_video_generator
+          : "ltx-2.5";
+      const canvas = legalCanvasSize(engineForCanvas, opts.resolution || "1080p", opts.aspect || "16:9");
+      if (!canvas.available) {
+        throw new Error(
+          canvas.honestyLabel ||
+            `${opts.resolution || "1080p"} is not a legal canvas for ${engineForCanvas}.`,
+        );
+      }
+      const width = canvas.width;
+      const height = canvas.height;
       const p = await api.createProject(opts.name, {
         primary_project_type: primary,
         project_traits: opts.projectTraits || [],
@@ -437,7 +463,20 @@ export default function Home() {
               </button>
             </div>
           </div>
-          {!filtered.length ? (
+          {!projectsLoaded ? (
+            <p className="muted" data-testid="home-projects-loading">Loading projects…</p>
+          ) : projectsError && !projects.length ? (
+            <EmptyState
+              kind="failed"
+              title="Could not load projects"
+              description="The project list did not arrive. Check that Studio Runtime is available, then try again."
+              actions={
+                <button type="button" className="ui-btn ui-btn--primary" onClick={() => void refresh()}>
+                  Try Again
+                </button>
+              }
+            />
+          ) : !projects.length ? (
             <EmptyState
               kind="first-use"
               title="No Projects Yet"
@@ -455,7 +494,28 @@ export default function Home() {
                 </button>
               }
             />
+          ) : !filtered.length ? (
+            <EmptyState
+              kind="filtered"
+              title="No matching projects"
+              description="Nothing matches this search or filter. Clear the filter to see your library."
+            />
           ) : (
+            <div
+              ref={libraryResultsRef}
+              className="gs-library__results"
+              data-testid="home-library-results"
+              data-visible-rows="3"
+              style={
+                libraryBounds
+                  ? {
+                      height: `${libraryBounds.height}px`,
+                      maxHeight: `${libraryBounds.height}px`,
+                      minHeight: `${libraryBounds.height}px`,
+                    }
+                  : undefined
+              }
+            >
             <div className={`project-library-grid ${view}`}>
               {[...(preferredProjectId ? filtered.filter((project) => project.id === preferredProjectId) : []), ...filtered.filter((project) => project.id !== preferredProjectId)].map((p) => {
                 const cover = resolveProjectCover(p);
@@ -558,6 +618,7 @@ export default function Home() {
                 );
               })}
             </div>
+            </div>
           )}
           <Dialog
             open={Boolean(deleteTarget)}
@@ -651,6 +712,7 @@ export default function Home() {
         <div className="home-system-block glass-section" data-testid="system-status-block">
           <SectionHeader title="System Status" />
           <SystemStatusStrip
+            projectId={preferredProjectId || undefined}
             onOpenCoDirector={() =>
               navigate(preferredProjectId ? `/co-director?projectId=${encodeURIComponent(preferredProjectId)}` : "/co-director")
             }

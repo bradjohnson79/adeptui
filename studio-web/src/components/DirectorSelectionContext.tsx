@@ -6,6 +6,7 @@ import {
   saveTimelineWorkspaceLayout,
   type TimelineWorkspaceLayout,
 } from "../timelineMaster/workspaceLayout";
+import { clampTimelineZoom } from "../timelineMaster/timelineZoom";
 
 type Ctx = {
   selection: DirectorSelection;
@@ -45,7 +46,7 @@ export function DirectorSelectionProvider({ children }: { children: ReactNode })
   };
 
   const setZoom = (value: number) => {
-    const next = Math.min(3, Math.max(0.5, value));
+    const next = clampTimelineZoom(value);
     setZoomState(next);
     saveTimelineWorkspaceLayout({ zoom: next });
   };

@@ -11,7 +11,10 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from ..db import Asset, Project, Scene
+from ..db import Asset
+from ..project_library.service import assign_asset
+
+from ..db import Project, Scene
 from ..voice_performance.m410_models import VoicePerformanceRecordRow, VoicePerformanceTakeRow
 from .compiler import compile_dsp_plan
 from .contracts import (
@@ -342,6 +345,7 @@ def create_render(
             room_path,
             walla_path if profile.wallaPreset != "none" else None,
             dsp_plan,
+            preview=preview,
         )
         processed_asset = _register_audio_asset(
             db,
@@ -414,16 +418,64 @@ def create_render(
         )
 
 
-def approve_render(db: Session, render_id: str, approved: bool = True) -> VoiceEnvironmentRender:
+def approve_render(
+    db: Session, render_id: str, approved: bool = True, *, is_global: bool = False
+) -> VoiceEnvironmentRender:
+    """Approve a render and automatically ingest processed audio into the project Library.
+
+    When is_global is True, asset.scope becomes "global" (universal across projects),
+    matching Express Character/Environment creator Global scope — not a second registry.
+    """
     row = db.get(VoiceEnvironmentRenderRow, render_id)
     if not row:
         raise VoiceEnvironmentError("VOICE_ENVIRONMENT_RENDER_FAILED", "Environment render not found.", status_code=404)
     if row.status not in {"completed", "preview_ready"}:
-        raise VoiceEnvironmentError("VOICE_ENVIRONMENT_RENDER_FAILED", "Only completed or preview-ready renders can be approved.")
+        raise VoiceEnvironmentError(
+            "VOICE_ENVIRONMENT_RENDER_FAILED",
+            "Only completed or preview-ready renders can be approved.",
+        )
     row.approved = bool(approved)
     if approved and row.status == "preview_ready":
         row.status = "completed"
     row.updated_at = _now()
+
+    if approved and row.processed_audio_asset_id:
+        asset = db.get(Asset, row.processed_audio_asset_id)
+        if asset is None:
+            raise VoiceEnvironmentError(
+                "VOICE_ENVIRONMENT_LIBRARY_INGEST_FAILED",
+                "Approved render has no processed audio asset to save into the Library.",
+                status_code=409,
+            )
+        assign_asset(
+            db,
+            asset,
+            system_key="audio.dialogue",
+            classified_by="voice_environment.approve",
+            override=True,
+            entity_type="voice_environment",
+            entity_id=row.id,
+            entity_name="Voice Environment",
+        )
+        asset.scope = "global" if is_global else "project"
+        asset.production_approval = "approved"
+        meta: dict[str, Any] = {}
+        try:
+            loaded = json.loads(asset.prompt_meta_json or "{}")
+            if isinstance(loaded, dict):
+                meta = loaded
+        except Exception:
+            meta = {}
+        meta.update(
+            {
+                "voiceEnvironmentRenderId": row.id,
+                "voiceEnvironmentApproved": True,
+                "libraryKey": "audio.dialogue",
+                "isGlobal": bool(is_global),
+            }
+        )
+        asset.prompt_meta_json = json.dumps(meta, ensure_ascii=False)
+
     db.commit()
     db.refresh(row)
     return _render_to_contract(row)
@@ -572,6 +624,20 @@ def place_timeline(db: Session, render_id: str, *, scene_id: Optional[str] = Non
                 "speechStartOffsetMs": row.speech_start_offset_ms,
             }
         )
+    
+    # Also expose under audioTracks so Timeline "audio track" consumers resolve the same clip.
+    audio_tracks = timeline.setdefault("audioTracks", [])
+    audio_track = next((t for t in audio_tracks if t.get("id") in {"audio-dialogue", "dialogue-main", "audio-main"}), None)
+    if not audio_track:
+        audio_track = {"id": "audio-dialogue", "name": "Dialogue", "kind": "audio", "clips": []}
+        audio_tracks.append(audio_track)
+    audio_track["clips"] = [
+        c
+        for c in (audio_track.get("clips") or [])
+        if not (c.get("recordId") == record_id and c.get("environmentRenderId"))
+    ]
+    audio_track["clips"].append(dict(proposal["clip"]))
+
     project.settings_json = json.dumps(settings, ensure_ascii=False)
     project.updated_at = _now()
     record = db.get(VoicePerformanceRecordRow, row.performance_record_id)

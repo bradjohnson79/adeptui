@@ -33,7 +33,7 @@ def register_derived_asset(
     if not src.is_file():
         raise FileNotFoundError(f"Output missing: {src}")
 
-    dest_dir = settings.data_dir / "projects" / project_id / "assets"
+    dest_dir = Path(settings.data_dir) / "projects" / project_id / "assets"
     dest_dir.mkdir(parents=True, exist_ok=True)
     suffix = src.suffix or (".png" if kind == "image" else ".wav" if kind == "audio" else ".mp4")
     dest_name = filename or f"{op}_{uuid.uuid4().hex[:10]}{suffix}"
@@ -87,8 +87,9 @@ def register_derived_asset(
             from ..project_library.service import assign_asset
 
             assign_asset(db, asset, system_key=library_key, classified_by="generation_tools", override=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            if str(tag or "") == "magi_upscale" or str(op or "") == "upscale":
+                raise RuntimeError(f"Library registration failed for MAGI upscale: {exc}") from exc
 
     db.commit()
     db.refresh(asset)

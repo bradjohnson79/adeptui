@@ -10,4 +10,12 @@ This package must not import FastAPI or app.main so it can start the API.
 from .identity import PortState, classify_listener
 from .state import SupervisorState
 
-__all__ = ["PortState", "SupervisorState", "classify_listener"]
+__all__ = ["PortState", "SupervisorState", "classify_listener", "ensure_studio_api_running", "ensureStudioApiRunning"]
+
+
+def __getattr__(name: str):
+    if name in {"ensure_studio_api_running", "ensureStudioApiRunning"}:
+        from .ensure_studio_api import ensureStudioApiRunning, ensure_studio_api_running
+
+        return ensure_studio_api_running if name == "ensure_studio_api_running" else ensureStudioApiRunning
+    raise AttributeError(name)

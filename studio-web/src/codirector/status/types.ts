@@ -82,6 +82,11 @@ export interface StatusCheckResult {
   timedOut: boolean;
   partial: boolean;
   stale?: boolean;
+  readinessClass?: string | null;
+  v11Requirement?: string | null;
+  workflowScope?: string | null;
+  productionEffect?: string | null;
+  severity?: string | null;
 }
 
 export interface StatusCategoryTally {
@@ -112,6 +117,8 @@ export interface StatusRunSummary {
   blockedChecks: number;
   checkedAt: string;
   scoreExplanation: string;
+  scoreSemantics?: string;
+  readinessPolicyVersion?: string;
 }
 
 export interface StatusRun {
@@ -128,6 +135,11 @@ export interface StatusRun {
   categories: StatusCategoryTally[];
   explainability: StatusExplainability;
   results: StatusCheckResult[];
+  readOnly?: boolean;
+  mutatesRuntime?: boolean;
+  mutatesConfig?: boolean;
+  installsModels?: boolean;
+  forceRefresh?: boolean;
 }
 
 export interface StatusCheckRequest {
@@ -135,4 +147,5 @@ export interface StatusCheckRequest {
   sceneId?: string;
   workspace?: string;
   checkIds?: string[];
+  forceRefresh?: boolean;
 }

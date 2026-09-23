@@ -42,7 +42,7 @@ def _run(run_id: str) -> HealthRun:
     summary = HealthRunSummary(
         statusIndicator="Operational",
         score=98,
-        band="Excellent",
+        band="Operational",
         mode="standard",
         totalChecks=1,
         healthyChecks=1,
@@ -60,7 +60,7 @@ def _run(run_id: str) -> HealthRun:
         completedAt="2026-08-02T05:00:01+00:00",
         summary=summary,
         categories=[],
-        explainability=HealthExplainability(band="Excellent"),
+        explainability=HealthExplainability(band="Operational"),
         results=[],
     )
 
@@ -135,7 +135,7 @@ def test_run_status_check_executes_independent_probes_concurrently(monkeypatch):
         await asyncio.sleep(0.05)
         return _result(check_id, status="healthy")
 
-    async def _fake_warm(project_id=None):
+    async def _fake_warm(project_id=None, force=False):
         return SimpleNamespace(comfy_health=None, capabilities=None, warm_errors=[], warmed_at="t")
 
     monkeypatch.setattr(

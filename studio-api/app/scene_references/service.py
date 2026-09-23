@@ -10,6 +10,12 @@ from sqlalchemy.orm import Session
 
 from . import repository as repo
 from .aliases import display_token, media_kind_for, sanitize_alias, unique_alias
+from .identity_resolve import (
+    desired_identity_alias,
+    enrich_binding_identity,
+    is_identity_reference_type,
+    is_smoke_test_asset,
+)
 from .capability import get_capability, list_capabilities, support_status_for
 from .constants import REFERENCE_TYPES, SCOPE_TYPES, USAGE_MODES
 from .inheritance import ancestor_chain, merge_inherited
@@ -53,7 +59,9 @@ def _enrich(db: Session, d: dict[str, Any]) -> dict[str, Any]:
     d["media_kind"] = kind
     alias = sanitize_alias(d.get("alias") or d.get("asset_name") or "")
     d["alias"] = alias or d.get("alias")
-    d["display_token"] = display_token(alias, kind) if alias else None
+    d["display_token"] = (
+        display_token(alias, kind, str(d.get("reference_type") or "") or None) if alias else None
+    )
     broken = False
     reason = None
     asset_id = d.get("asset_id")
@@ -71,18 +79,42 @@ def _enrich(db: Session, d: dict[str, Any]) -> dict[str, Any]:
             broken = True
             reason = "missing_asset"
     if kind == "entity" and d.get("identity_id"):
-        try:
-            from app.character_identity.models import CharacterProfileRow
+        ref = str(d.get("reference_type") or "").lower()
+        if ref in {"character", "wardrobe", "creature"}:
+            try:
+                from app.character_identity.models import CharacterProfileRow
 
-            ident = db.get(CharacterProfileRow, d["identity_id"])
-            if ident is None:
-                broken = True
-                reason = reason or "missing_entity"
+                ident = db.get(CharacterProfileRow, d["identity_id"])
+                if ident is None:
+                    broken = True
+                    reason = reason or "missing_entity"
+            except Exception:
+                pass
+
+    # CRS approval authority: a character binding whose identity has an
+    # approved Character Reference Sheet is "approved" regardless of whether
+    # a separate ApprovedReferenceRow exists. This is the same canonical
+    # state that Timeline preflight and generation read. "unlinked" from the
+    # ApprovedReferenceRow table does not override a real approved CRS.
+    if d.get("approval_status") != "approved" and d.get("identity_id") and str(d.get("reference_type") or "").lower() in {
+        "character",
+        "wardrobe",
+        "creature",
+    }:
+        try:
+            from app.character_identity.crs_service import load_persisted_crs
+
+            persisted = load_persisted_crs(db, str(d["identity_id"]))
+            sheet_id = str(persisted.get("approved_sheet_asset_id") or "").strip()
+            if sheet_id:
+                d["approval_status"] = "approved"
+                d["approved_sheet_asset_id"] = sheet_id
         except Exception:
             pass
+
     d["broken"] = broken
     d["broken_reason"] = reason
-    return d
+    return enrich_binding_identity(db, d)
 
 
 def list_for_scope(
@@ -116,6 +148,14 @@ def list_for_scope(
     return merge_inherited(by_scope, chain)
 
 
+def get_one(db: Session, project_id: str, binding_id: str) -> dict[str, Any]:
+    require_project(db, project_id)
+    row = repo.get_binding(db, project_id, binding_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Binding not found")
+    return _enrich(db, repo.binding_to_dict(row))
+
+
 def attach(db: Session, project_id: str, body: dict[str, Any], *, actor: str = "user") -> dict[str, Any]:
     require_project(db, project_id)
     asset_id = body["asset_id"]
@@ -144,10 +184,26 @@ def attach(db: Session, project_id: str, body: dict[str, Any], *, actor: str = "
     asset_kind = None
     try:
         from app.db import Asset
+        from .sheet_tags import classify_asset
 
         asset_row = db.get(Asset, asset_id)
         asset_kind = getattr(asset_row, "kind", None) if asset_row else None
-        if not body.get("alias"):
+        classified = classify_asset(asset_row) if asset_row is not None else None
+        if classified and classified.kind in {"crs", "ers", "prs", "video"}:
+            # Prop Creator sends reference_type=prop. A prompt that says
+            # "no environment scene" must not restamp that sheet as a place.
+            keep_explicit_prop = (
+                str(reference_type or "").strip().lower() == "prop"
+                and classified.reference_type == "environment"
+            )
+            if not keep_explicit_prop:
+                reference_type = classified.reference_type
+            body = {
+                **body,
+                "media_kind": "entity" if keep_explicit_prop else classified.media_kind,
+                "alias": body.get("alias") or classified.alias,
+            }
+        elif not body.get("alias"):
             body = {**body, "alias": getattr(asset_row, "tag", None) or getattr(asset_row, "filename", None)}
     except Exception:
         pass
@@ -155,6 +211,71 @@ def attach(db: Session, project_id: str, body: dict[str, Any], *, actor: str = "
     media_kind = body.get("media_kind") or media_kind_for(reference_type, asset_kind=asset_kind)
     if media_kind not in ("entity", "image", "video"):
         raise HTTPException(status_code=400, detail={"code": "INVALID_MEDIA_KIND", "message": str(media_kind)})
+
+    identity_id = str(body.get("identity_id") or "").strip()
+    identity_ref = bool(identity_id)
+    desired_alias = (
+        desired_identity_alias(db, body, reference_type=reference_type)
+        if identity_ref
+        else sanitize_alias(body.get("alias") or reference_type or "Reference")
+    )
+
+    existing = None
+    if identity_id:
+        existing = repo.find_live_binding_by_identity(
+            db,
+            project_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            identity_id=identity_id,
+            reference_type=reference_type,
+        )
+    if existing is None:
+        existing = repo.find_live_binding(
+            db,
+            project_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            asset_id=asset_id,
+            reference_type=reference_type,
+        )
+    if existing is None and desired_alias and identity_ref:
+        existing = repo.find_live_binding_by_alias(
+            db,
+            project_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            alias=desired_alias,
+        )
+    if existing is not None:
+        changed = False
+        if identity_id and not str(getattr(existing, "identity_id", "") or "").strip():
+            existing.identity_id = identity_id
+            changed = True
+        if desired_alias and str(getattr(existing, "alias", "") or "") != desired_alias:
+            existing.alias = desired_alias
+            changed = True
+        if existing.asset_id != asset_id:
+            try:
+                from app.db import Asset
+
+                current_asset = db.get(Asset, existing.asset_id)
+                incoming_asset = db.get(Asset, asset_id)
+            except Exception:
+                current_asset = incoming_asset = None
+            if is_smoke_test_asset(current_asset) and not is_smoke_test_asset(incoming_asset):
+                existing.asset_id = asset_id
+                changed = True
+            elif identity_id and not is_smoke_test_asset(incoming_asset):
+                existing.asset_id = asset_id
+                changed = True
+        if changed:
+            existing.updated_by = actor
+            db.commit()
+            db.refresh(existing)
+        out = _enrich(db, repo.binding_to_dict(existing))
+        out["alias_adjusted"] = False
+        return out
     restored = repo.find_soft_deleted_binding(
         db,
         project_id,
@@ -166,9 +287,12 @@ def attach(db: Session, project_id: str, body: dict[str, Any], *, actor: str = "
     alias, alias_adjusted = unique_alias(
         db,
         project_id,
-        body.get("alias"),
-        fallback=str(body.get("alias") or reference_type or "Reference"),
+        desired_alias or body.get("alias"),
+        fallback=str(desired_alias or body.get("alias") or reference_type or "Reference"),
         exclude_id=restored.id if restored is not None else None,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        allow_collision_suffix=not identity_ref,
     )
     if restored is not None:
         restored = repo.restore_binding(
@@ -189,30 +313,47 @@ def attach(db: Session, project_id: str, body: dict[str, Any], *, actor: str = "
         out["alias_adjusted"] = alias_adjusted
         return out
 
-    row = repo.create_binding(
-        db,
-        {
-            "project_id": project_id,
-            "asset_id": asset_id,
-            "scope_type": scope_type,
-            "scope_id": scope_id,
-            "reference_type": reference_type,
-            "usage_modes": usage_modes,
-            "reference_roles": list(body.get("reference_roles") or []),
-            "identity_id": body.get("identity_id"),
-            "identity_version_id": body.get("identity_version_id"),
-            "variant_ids": list(body.get("variant_ids") or []),
-            "enabled": bool(body.get("enabled", True)),
-            "order_index": order,
-            "requested_weight": body.get("requested_weight"),
-            "notes": body.get("notes"),
-            "alias": alias,
-            "media_kind": media_kind,
-        },
-        actor=actor,
-    )
-    db.commit()
-    db.refresh(row)
+    try:
+        row = repo.create_binding(
+            db,
+            {
+                "project_id": project_id,
+                "asset_id": asset_id,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "reference_type": reference_type,
+                "usage_modes": usage_modes,
+                "reference_roles": list(body.get("reference_roles") or []),
+                "identity_id": body.get("identity_id"),
+                "identity_version_id": body.get("identity_version_id"),
+                "variant_ids": list(body.get("variant_ids") or []),
+                "enabled": bool(body.get("enabled", True)),
+                "order_index": order,
+                "requested_weight": body.get("requested_weight"),
+                "notes": body.get("notes"),
+                "alias": alias,
+                "media_kind": media_kind,
+            },
+            actor=actor,
+        )
+        db.commit()
+        db.refresh(row)
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raced = repo.find_live_binding(
+            db,
+            project_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            asset_id=asset_id,
+            reference_type=reference_type,
+        )
+        if raced is None:
+            raise
+        row = raced
     out = _enrich(db, repo.binding_to_dict(row))
     out["alias_adjusted"] = alias_adjusted
     return out
@@ -237,7 +378,16 @@ def update(
         desired = sanitize_alias(patch["alias"])
         if not desired:
             raise HTTPException(status_code=400, detail={"code": "INVALID_ALIAS", "message": "Alias cannot be empty."})
-        unique, adjusted = unique_alias(db, project_id, desired, exclude_id=binding_id, fallback=desired)
+        unique, adjusted = unique_alias(
+            db,
+            project_id,
+            desired,
+            exclude_id=binding_id,
+            fallback=desired,
+            scope_type=row.scope_type,
+            scope_id=row.scope_id,
+            allow_collision_suffix=not is_identity_reference_type(row.reference_type),
+        )
         if adjusted and desired.lower() != unique.lower():
             # Explicit rename to a taken token is refused with a suggestion.
             raise HTTPException(
@@ -740,7 +890,35 @@ def _entity_refs_for_asset(db: Session, project_id: str, asset_id: str) -> list[
     except Exception:
         pass
 
-    # 10) Asset graph edges touching this node.
+    # 10) PoseCraft document — figures, objects, environment, snapshots.
+    try:
+        import json as _json
+
+        from ..db import Project
+
+        project = db.get(Project, project_id)
+        raw = (getattr(project, "posecraft_document_json", None) or "").strip() if project else ""
+        if raw:
+            doc = _json.loads(raw)
+            scene = doc.get("currentScene") or {}
+            for figure in scene.get("figures") or []:
+                custom_id = figure.get("customAssetId")
+                if custom_id == asset_id:
+                    _add("posecraft", "figure", figure.get("id") or "", figure.get("name") or "", "customAssetId", "PoseCraft figure mesh")
+            for obj in scene.get("objects") or []:
+                for field in ("meshAssetId", "assetId"):
+                    if obj.get(field) == asset_id:
+                        _add("posecraft", "object", obj.get("id") or "", obj.get("name") or "", field, "PoseCraft object mesh")
+            env = scene.get("environment") or {}
+            if env.get("meshAssetId") == asset_id:
+                _add("posecraft", "environment", env.get("id") or "environment", env.get("name") or "Environment", "meshAssetId", "PoseCraft environment mesh")
+            for snap in doc.get("snapshots") or []:
+                if snap.get("imageAssetId") == asset_id:
+                    _add("posecraft", "snapshot", snap.get("snapshotId") or "", snap.get("name") or "Previz", "imageAssetId", "PoseCraft previz capture")
+    except Exception:
+        pass
+
+    # 11) Asset graph edges touching this node.
     try:
         from ..asset_graph import AssetEdge
 

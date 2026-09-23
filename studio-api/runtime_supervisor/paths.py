@@ -56,6 +56,25 @@ def _first_existing(*candidates: Path) -> Path | None:
 
 
 def _discover_comfy() -> tuple[Path | None, Path | None, Path | None, Path | None]:
+    env_root = (os.environ.get("ADEPT_COMFY_ROOT") or "").strip()
+    env_py = (os.environ.get("ADEPT_COMFY_PYTHON") or "").strip()
+    if env_root:
+        root = Path(env_root)
+        main_py = root / "ComfyUI" / "main.py"
+        if not main_py.exists():
+            main_py = root / "main.py"
+        if env_py:
+            venv_py = Path(env_py)
+        else:
+            venv_py = root / "ComfyUI" / ".venv" / "Scripts" / "python.exe"
+            if not venv_py.exists():
+                venv_py = root / ".venv" / "Scripts" / "python.exe"
+            if not venv_py.exists():
+                venv_py = root / "ComfyUI" / ".venv" / "bin" / "python"
+        if main_py.exists() and venv_py.exists():
+            install = root if (root / "ComfyUI" / "main.py").exists() else root.parent
+            comfy_root = install / "ComfyUI" if (install / "ComfyUI" / "main.py").exists() else root
+            return install, comfy_root, venv_py, main_py
     local = os.environ.get("LOCALAPPDATA") or ""
     desktop_root = Path(local) / "Comfy-Desktop" / "ComfyUI-Installs" if local else None
     if desktop_root and desktop_root.is_dir():
@@ -70,21 +89,32 @@ def _discover_comfy() -> tuple[Path | None, Path | None, Path | None, Path | Non
 
 
 def discover_paths(repo: Path | None = None) -> RuntimePaths:
-    root = repo or repo_root_from()
+    from .canonical_config import try_load_runtime_config
+
+    cfg = try_load_runtime_config()
+    root = repo or (Path(cfg.repoRoot) if cfg and cfg.repoRoot else None) or repo_root_from()
     api_dir = root / "studio-api"
     api_py = api_dir / ".venv" / "Scripts" / "python.exe"
     if not api_py.exists():
         api_py = api_dir / ".venv" / "bin" / "python"
-    install_root, comfy_root, comfy_py, comfy_main = _discover_comfy()
+    if cfg and cfg.comfyRoot and cfg.comfyPython:
+        install = Path(cfg.comfyRoot)
+        main_py = install / "ComfyUI" / "main.py"
+        comfy_root = install / "ComfyUI" if main_py.exists() else install
+        if not main_py.exists():
+            main_py = install / "main.py"
+        install_root, comfy_py, comfy_main = install, Path(cfg.comfyPython), main_py
+    else:
+        install_root, comfy_root, comfy_py, comfy_main = _discover_comfy()
     launch = os.environ.get("ADEPT_COMFY_LAUNCH", "").strip()
     if not comfy_py and launch:
-        # ADEPT_COMFY_LAUNCH is a leftover second launcher. Prefer Desktop.
-        # Only used when Desktop install is absent.
+        # ADEPT_COMFY_LAUNCH is a leftover second launcher. Engine binary only.
+        # Never used as extra_model_paths and never adopts a running Desktop process.
         launch_path = Path(launch)
         if launch_path.exists():
             comfy_py = launch_path
     appdata = os.environ.get("APPDATA") or ""
-    shared = Path(appdata) / "Comfy Desktop" / "shared_model_paths.yaml" if appdata else None
+    adept_yaml = Path(appdata) / "Adept" / "Comfy" / "extra_model_paths.yaml" if appdata else None
     shared_base = Path(local_appdata()) / "Comfy-Desktop" / "ComfyUI-Shared"
     cf = shutil.which("cloudflared")
     cf_path = Path(cf) if cf else _first_existing(
@@ -105,7 +135,7 @@ def discover_paths(repo: Path | None = None) -> RuntimePaths:
         comfy_root=comfy_root,
         comfy_python=comfy_py,
         comfy_main=comfy_main,
-        comfy_shared_paths=shared if shared and shared.exists() else None,
+        comfy_shared_paths=adept_yaml if adept_yaml and adept_yaml.exists() else None,
         comfy_input_dir=shared_base / "input",
         comfy_output_dir=shared_base / "output",
         cloudflared=cf_path,
@@ -114,7 +144,7 @@ def discover_paths(repo: Path | None = None) -> RuntimePaths:
         else None,
         tunnel_name=os.environ.get("ADEPT_TUNNEL_NAME") or TUNNEL_NAME,
         ollama=ol_path,
-        logs_dir=root / "logs" / "runtime" / "supervisor",
+        logs_dir=Path(cfg.logDir) if cfg and cfg.logDir else (root / "logs" / "runtime" / "supervisor"),
     )
 
 

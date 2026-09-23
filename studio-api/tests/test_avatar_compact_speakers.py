@@ -181,7 +181,7 @@ def test_codirector_create_job_writes_conversation_fields(client, monkeypatch) -
         db.close()
 
 
-def test_generate_blocked_when_runtime_not_certified(monkeypatch) -> None:
+def test_generate_blocked_when_runtime_not_ready(monkeypatch) -> None:
     from app import avatar_runtimes
 
     monkeypatch.setattr(
@@ -191,8 +191,46 @@ def test_generate_blocked_when_runtime_not_certified(monkeypatch) -> None:
             "displayName": "InfiniteTalk",
             "healthState": "repair_required",
             "certifiedReady": False,
+            "runtimeReady": False,
         },
     )
     ready, line = avatar_runtimes.runtime_gate_line("infinitetalk-local")
     assert ready is False
     assert line == "InfiniteTalk needs repair — Open Runtime Setup"
+
+
+def test_generate_allowed_when_runtime_ready(monkeypatch) -> None:
+    from app import avatar_runtimes
+
+    monkeypatch.setattr(
+        avatar_runtimes,
+        "inspect_runtime",
+        lambda _provider_id: {
+            "displayName": "InfiniteTalk",
+            "healthState": "experimental",
+            "certifiedReady": True,
+            "runtimeReady": True,
+        },
+    )
+    ready, line = avatar_runtimes.runtime_gate_line("infinitetalk-local")
+    assert ready is True
+    assert line == ""
+
+
+def test_generate_allowed_when_runtime_ready_even_if_legacy_certified_false(monkeypatch) -> None:
+    """Product gate follows runtimeReady; hardcoded-false certifiedReady must not block."""
+    from app import avatar_runtimes
+
+    monkeypatch.setattr(
+        avatar_runtimes,
+        "inspect_runtime",
+        lambda _provider_id: {
+            "displayName": "InfiniteTalk",
+            "healthState": "experimental",
+            "certifiedReady": False,
+            "runtimeReady": True,
+        },
+    )
+    ready, line = avatar_runtimes.runtime_gate_line("infinitetalk-local")
+    assert ready is True
+    assert line == ""

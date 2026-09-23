@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import type { AdeptMiniMaxH3Request, H3Mode, H3Plan, H3SourceSurface } from "../../contracts/minimaxH3";
+import { MINIMAX_ROUTE_A_DURATION_SEC } from "../../contracts/minimaxH3";
 import { resolveMiniMaxH3Territory } from "../../core/minimaxH3Territory";
 
 type JobState = {
@@ -141,7 +142,7 @@ export function MiniMaxH3PlanPanel(props: Props) {
         sourceSurface: props.sourceSurface,
         deployment: "local_weights",
         territory,
-        durationSec: props.durationSec || 5,
+        durationSec: props.durationSec || MINIMAX_ROUTE_A_DURATION_SEC,
         referenceAssignments: buildAssignments(props),
         timelineContext:
           props.sceneId || props.shotId

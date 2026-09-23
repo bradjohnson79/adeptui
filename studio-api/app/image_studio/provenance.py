@@ -144,6 +144,9 @@ def reopen_from_asset(project_id: str, asset_id: str) -> dict[str, Any] | None:
             or (creative.get("visualLanguage") or {}).get("visualEra"),
             "productionStyle": cinematic.get("productionStyle")
             or (creative.get("visualLanguage") or {}).get("productionStyle"),
+            "visualStyle": cinematic.get("visualStyle")
+            or creative.get("visualStyle")
+            or (creative.get("visualLanguage") or {}).get("visualStyle"),
             "aspectRatio": aspect,
             "shotIntent": cinematic.get("shotIntent") or "medium",
             "category": cinematic.get("category") or job_params.get("purpose") or "storyboard",

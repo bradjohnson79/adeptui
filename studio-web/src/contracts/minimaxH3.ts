@@ -1,3 +1,8 @@
+/** Route A Experimental Private Profile: 5 frames at 24 fps. Not 5s. Not 15s. */
+export const MINIMAX_ROUTE_A_FRAME_COUNT = 5;
+export const MINIMAX_ROUTE_A_FPS = 24;
+export const MINIMAX_ROUTE_A_DURATION_SEC = MINIMAX_ROUTE_A_FRAME_COUNT / MINIMAX_ROUTE_A_FPS;
+
 export type H3SourceSurface =
   | "codirector"
   | "text-to-video"

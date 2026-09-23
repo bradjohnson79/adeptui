@@ -16,7 +16,7 @@ _COMPONENT_STALL_SECONDS: dict[str, int] = {
     "qwen3_tts": 300,
     "qwen_voice": 300,
 }
-_LARGE_COMPONENT_PREFIXES = ("hunyuan", "qwen", "pack_", "index_tts")
+_LARGE_COMPONENT_PREFIXES = ("qwen", "pack_", "index_tts")
 
 _ACTIVE_PROGRESS_STATES = {
     InstallState.QUEUED,

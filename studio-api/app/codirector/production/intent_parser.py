@@ -258,10 +258,18 @@ def is_timeline_scene_prepare_request(message: str) -> bool:
     return False
 
 
+_RETRY_FOLLOW_UP_RE = re.compile(
+    r"\b(?:retry(?:\s+that)?|try\s+again|prepare\s+again|reprocess)\b",
+    re.I,
+)
+
+
 def is_follow_up_edit(message: str) -> bool:
     text = message or ""
     if is_timeline_scene_prepare_request(text) or _NEW_SHOT_RE.search(text):
         return False
+    if _RETRY_FOLLOW_UP_RE.search(text):
+        return True
     return bool(_EDIT_RE.search(text)) and not bool(
         re.search(r"\b(?:generate|render)\s+(?:this\s+|the\s+)?shot\b", text, re.I)
     )

@@ -33,6 +33,8 @@ import {
   fetchLatestStatus,
   fetchStatusHistory,
   fetchStatusRegistry,
+  invalidateStatusCaches,
+  rememberLatestStatus,
   runDeepDiagnostic as requestDeepDiagnostic,
   runStatusCheck as requestStatusCheck,
 } from "../../codirector/status/client";
@@ -97,6 +99,16 @@ import {
   type PromptMode,
   type WelcomeSuggestion,
 } from "./types";
+
+import {
+  getEnvironmentCreatorPlanningSnapshot,
+  subscribeEnvironmentCreatorPlanning,
+} from "./EnvironmentCreator/environmentCreatorPlanning";
+import { applyLiveExecutionToMessages } from "./liveExecutionSync";
+import {
+  getImageGeneratorPlanningSnapshot,
+  subscribeImageGeneratorPlanning,
+} from "../image-studio/imageGeneratorPlanning";
 import type { WorkSurfaceState } from "./AgentWorkSurface/types";
 
 const PROMPT_VERSIONS_KEY = "adept_prompt_versions";
@@ -167,8 +179,8 @@ type SessionValue = {
   setPromptMode: (mode: PromptMode) => void;
   setIncludeProjectKnowledge: (value: boolean) => void;
   clearConversation: () => void;
-  bindWorkspace: (bindings: CoDirectorWorkspaceBindings) => void;
-  unbindWorkspace: () => void;
+  bindWorkspace: (bindings: CoDirectorWorkspaceBindings) => number;
+  unbindWorkspace: (opts?: { bindGeneration?: number }) => void;
   setActiveContentTab: (tab: string | null) => void;
   /** Lightweight Script Writer current-scene updates (no workspace rebind). */
   setScriptwriterScene: (sceneId: string | null) => void;
@@ -212,7 +224,7 @@ type SessionValue = {
   statusChecking: boolean;
   statusError: string | null;
   loadStatus: () => Promise<void>;
-  runStatusCheck: (opts?: { deep?: boolean }) => Promise<void>;
+  runStatusCheck: (opts?: { deep?: boolean; forceRefresh?: boolean }) => Promise<void>;
   openStatusPanel: () => void;
 };
 
@@ -235,7 +247,6 @@ function buildWelcomeSuggestions(ctx: CoDirectorUIContext): WelcomeSuggestion[] 
     projectType === "video_cinematic_trailer" ||
     projectType.includes("trailer") ||
     projectType === "teaser_trailer";
-  const isTalkingAvatar = projectType === "talking_avatar";
 
   if (isExplainer) {
     suggestions.push({
@@ -278,15 +289,6 @@ function buildWelcomeSuggestions(ctx: CoDirectorUIContext): WelcomeSuggestion[] 
       description: "Cold open to title card.",
       text: "Build a cinematic trailer beat sheet: cold open, escalation, hero shots, title reveal, and release information — without inventing fake assets.",
       mode: "chat",
-    });
-  }
-  if (isTalkingAvatar) {
-    suggestions.push({
-      id: "avatar-presenter",
-      label: "Prep talking-avatar scene",
-      description: "Script, voice, lip-sync.",
-      text: "Prepare a talking-avatar presenter scene: concise script, Character Profile / voice needs, lip-sync path, and caption defaults.",
-      mode: "setup",
     });
   }
 
@@ -443,10 +445,29 @@ type ServerConversationMessage = {
   role: string;
   content: string;
   created_at?: string;
+  message_type?: string;
+  messageType?: string;
+  status?: string;
+  execution?: unknown;
   attachmentIds?: unknown;
   attachment_ids?: unknown;
   attachments?: unknown;
 };
+
+// Intelligence mission 2026-09-19 (RC3): execution/tool/workflow state is
+// machine state — never the assistant's conversational memory. Execution cards
+// (execution_status / completion / error) must not ride into the LLM history
+// payload as if they were the assistant's prior conversational thought. The
+// server-side fold (fold_events_for_llm) is the authoritative filter; this
+// client-side filter is defense in depth for legacy paths.
+const EXECUTION_MESSAGE_KINDS = new Set(["execution_status", "completion", "error"]);
+
+function isConversationalForLlmHistory(m: CoDirectorMessage): boolean {
+  if (m.role !== "assistant") return true;
+  if (m.messageType && EXECUTION_MESSAGE_KINDS.has(m.messageType)) return false;
+  if (m.execution) return false;
+  return true;
+}
 
 function normalizeServerMessage(m: ServerConversationMessage): CoDirectorMessage {
   const attachmentIds = Array.isArray(m.attachmentIds)
@@ -479,6 +500,12 @@ function normalizeServerMessage(m: ServerConversationMessage): CoDirectorMessage
         [],
       )
     : undefined;
+  // Intelligence mission 2026-09-19 (RC3): preserve the assistant message kind
+  // and the execution payload so execution/workflow state survives reload as a
+  // CARD — it must not degrade into a plain assistant chat bubble.
+  const rawType = m.messageType ?? m.message_type;
+  const messageType = typeof rawType === "string" && rawType.trim() ? (rawType as CoDirectorMessage["messageType"]) : undefined;
+  const execution = m.execution && typeof m.execution === "object" ? (m.execution as CoDirectorMessageExecution) : undefined;
   return {
     id: m.id || newMessageId(),
     role: m.role === "user" ? "user" : "assistant",
@@ -486,6 +513,8 @@ function normalizeServerMessage(m: ServerConversationMessage): CoDirectorMessage
     attachmentIds,
     attachments,
     createdAt: m.created_at || new Date().toISOString(),
+    ...(messageType ? { messageType } : {}),
+    ...(execution ? { execution } : {}),
   };
 }
 
@@ -515,6 +544,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const location = useLocation();
   const { prefs: languagePrefs } = useLanguagePrefs();
   const bindingsRef = useRef<CoDirectorWorkspaceBindings>({});
+  const bindGenerationRef = useRef(0);
   const activeContentTabRef = useRef<string | null>(null);
   const [open, setOpenState] = useState(false);
   const [displayMode, setDisplayModeState] = useState<CoDirectorDisplayMode>(() => loadDisplayMode());
@@ -579,6 +609,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const [suggestedPrompt, setSuggestedPrompt] = useState<string | null>(null);
   const [setup, setSetup] = useState<SceneSetup | null>(null);
   const [activeExecution, setActiveExecution] = useState<WorkSurfaceState | null>(null);
+  useEffect(() => {
+    if (!activeExecution?.execution_id) return;
+    setMessages((prev) => applyLiveExecutionToMessages(prev, activeExecution));
+  }, [activeExecution]);
   const [proposals, setProposals] = useState<CoDirectorProposal[]>([]);
   const [proposalActingId, setProposalActingId] = useState<string | null>(null);
   const [toolActivity, setToolActivity] = useState<CoDirectorToolActivity | null>(null);
@@ -1177,12 +1211,14 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   }, []);
 
   const bindWorkspace = useCallback((bindings: CoDirectorWorkspaceBindings) => {
+    const generation = ++bindGenerationRef.current;
     const prevProjectId = bindingsRef.current.projectId;
     if (prevProjectId && bindings.projectId && prevProjectId !== bindings.projectId) {
       cancelInFlightForProjectSwitch();
     }
     bindingsRef.current = bindings;
     setUiContext((prev) => {
+      const pid = bindings.projectId || "";
       const next: CoDirectorUIContext = {
         projectId: bindings.projectId,
         projectName: bindings.projectName,
@@ -1192,6 +1228,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         workspaceId: bindings.workspaceTab,
         activeDocumentId: bindings.activeDocumentId,
         onGoTab: bindings.onGoTab,
+        environmentCreatorPlanning: pid ? getEnvironmentCreatorPlanningSnapshot(pid) : null,
+        imageGeneratorPlanning: pid ? getImageGeneratorPlanningSnapshot(pid) : null,
       };
       if (
         prev.projectId === next.projectId &&
@@ -1200,7 +1238,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         prev.sceneId === next.sceneId &&
         prev.sceneName === next.sceneName &&
         prev.workspaceId === next.workspaceId &&
-        prev.activeDocumentId === next.activeDocumentId
+        prev.activeDocumentId === next.activeDocumentId &&
+        prev.onGoTab === next.onGoTab
       ) {
         return prev;
       }
@@ -1220,9 +1259,20 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         return suggestion;
       });
     }
+    return generation;
   }, [cancelInFlightForProjectSwitch]);
 
-  const unbindWorkspace = useCallback(() => {
+  const unbindWorkspace = useCallback((opts?: { bindGeneration?: number }) => {
+    if (opts && typeof opts.bindGeneration === "number") {
+      const generation = opts.bindGeneration;
+      queueMicrotask(() => {
+        if (bindGenerationRef.current !== generation) return;
+        cancelInFlightForProjectSwitch();
+        bindingsRef.current = {};
+        setUiContext({});
+      });
+      return;
+    }
     cancelInFlightForProjectSwitch();
     bindingsRef.current = {};
     setUiContext({});
@@ -1237,6 +1287,37 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   useEffect(() => {
     activeContentTabRef.current = uiContext.activeContentTab ?? null;
   }, [uiContext.activeContentTab]);
+
+  // Keep uiContext planning snapshots fresh when Image Generator / Env Creator publish.
+  // bindWorkspace equality intentionally ignores planning fields to avoid thrash.
+  useEffect(() => {
+    const refreshIg = () => {
+      const pid = bindingsRef.current.projectId || "";
+      if (!pid) return;
+      const snap = getImageGeneratorPlanningSnapshot(pid);
+      setUiContext((prev) => {
+        if ((prev.projectId || "") !== pid) return prev;
+        if (prev.imageGeneratorPlanning === snap) return prev;
+        return { ...prev, imageGeneratorPlanning: snap };
+      });
+    };
+    const refreshEnv = () => {
+      const pid = bindingsRef.current.projectId || "";
+      if (!pid) return;
+      const snap = getEnvironmentCreatorPlanningSnapshot(pid);
+      setUiContext((prev) => {
+        if ((prev.projectId || "") !== pid) return prev;
+        if (prev.environmentCreatorPlanning === snap) return prev;
+        return { ...prev, environmentCreatorPlanning: snap };
+      });
+    };
+    const unsubIg = subscribeImageGeneratorPlanning(() => refreshIg());
+    const unsubEnv = subscribeEnvironmentCreatorPlanning(() => refreshEnv());
+    return () => {
+      unsubIg();
+      unsubEnv();
+    };
+  }, []);
 
   // Script Writer current-scene awareness: lightweight setter that does NOT
   // rebind the workspace (rebinding on every navigator click would tear down
@@ -1391,7 +1472,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       let postCompletionError: ClassifiedError | null = null;
       let executionCreated = false;
 
-      const apiMessages = transcriptForApi.map((m) => ({ role: m.role, content: m.content }));
+      const apiMessages = transcriptForApi.filter(isConversationalForLlmHistory).map((m) => ({ role: m.role, content: m.content }));
       const lastUser = [...transcriptForApi].reverse().find((m) => m.role === "user");
       const turnAttachmentIds = Array.isArray(lastUser?.attachmentIds)
         ? lastUser.attachmentIds.filter((value): value is string => Boolean(value))
@@ -1897,6 +1978,26 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           const result = (event.invocation?.result || {}) as Record<string, unknown>;
           pendingToolRetryRef.current = null;
           syncProjectIdentityFromResult(result);
+          if (
+            (event.toolId === "timeline.propose_add_prompt_segment" ||
+              event.toolId === "timeline.remove_item") &&
+            result.verified === true &&
+            bindingsRef.current.projectId
+          ) {
+            window.dispatchEvent(
+              new CustomEvent("adept:codirector-project-mutated", {
+                detail: {
+                  projectId: bindingsRef.current.projectId,
+                  toolId: event.toolId,
+                  sceneId: String(result.destinationSceneId || (result.uiFocus as { sceneId?: string } | undefined)?.sceneId || ""),
+                  segmentId: String(result.segmentId || result.itemId || ""),
+                  itemId: String(result.itemId || ""),
+                  itemKind: String(result.itemKind || ""),
+                  verified: true,
+                },
+              }),
+            );
+          }
           const uiAction = String(result.uiAction || "");
           if (uiAction === "open_voice_performance" || uiAction === "open_voice_creator") {
             const characterId = String(result.characterId || "");
@@ -1939,14 +2040,37 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             }
           }
           if (uiAction === "open_avatar_studio") {
+            /* Avatar Studio retired from current Adept UI — do not navigate/execute. */
+            console.info("[CoDirector] Avatar Studio is not available in this version.");
+          }
+          if (uiAction === "open_environment_creator") {
+            /* CD01: actually navigate to Environment Creator Express (contentTab scene_creator). */
             const workspaceUrl = String(result.workspaceUrl || "");
+            const contentTab = String(result.contentTab || "scene_creator");
+            const projectId = String(result.projectId || "");
             if (workspaceUrl) {
               navigate(workspaceUrl);
+            } else if (projectId) {
+              navigate(
+                `/co-director?projectId=${encodeURIComponent(projectId)}&contentTab=${encodeURIComponent(contentTab)}`,
+              );
+            } else {
+              console.warn("[CoDirector] open_environment_creator missing workspaceUrl/projectId — fail closed.");
+            }
+          }
+          if (uiAction === "open_image_generator") {
+            /* CD01: actually navigate to Cinematic Image Generator workspace. */
+            const workspaceUrl = String(result.workspaceUrl || "");
+            const projectId = String(result.projectId || "");
+            if (workspaceUrl) {
+              navigate(workspaceUrl);
+            } else if (projectId) {
+              navigate(`/project/${encodeURIComponent(projectId)}?workspace=imagegen`);
             } else {
               try {
-                bindingsRef.current.onGoTab?.("avatar");
+                bindingsRef.current.onGoTab?.("imagegen");
               } catch {
-                /* tab binding optional */
+                console.warn("[CoDirector] open_image_generator missing workspaceUrl/projectId — fail closed.");
               }
             }
           }
@@ -1980,6 +2104,14 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               operatorWorkspace = "audiostudio";
               operatorTarget = "audio";
               operatorVerified = true;
+            } else if (uiAction === "open_environment_creator") {
+              operatorWorkspace = "environment_creator";
+              operatorTarget = String(result.contentTab || "scene_creator");
+              operatorVerified = false; // CD01 fail-closed until URL proves tab open
+            } else if (uiAction === "open_image_generator") {
+              operatorWorkspace = "imagegen";
+              operatorTarget = "imagegen";
+              operatorVerified = false; // CD01 fail-closed until URL proves workspace open
             } else if (uiFocus && typeof uiFocus === "object" && uiFocus.target) {
               operatorWorkspace = "timeline";
               operatorTarget = String(uiFocus.target);
@@ -2005,10 +2137,52 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
                 .catch(() => {
                   // fire-and-forget: an ack failure must never break the chat stream
                 });
-              setToolActivity((prev) => (prev ? { ...prev, phase: "completed", title: operatorToolId } : prev));
+              setToolActivity((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      phase: operatorVerified ? "completed" : "operator_timeout",
+                      title: operatorToolId,
+                    }
+                  : prev,
+              );
             };
-            // The navigation above ran synchronously; defer the ack one tick so the pending badge paints.
-            window.setTimeout(confirmAndAck, 0);
+            const needsOpenVerify =
+              uiAction === "open_environment_creator" || uiAction === "open_image_generator";
+            if (needsOpenVerify) {
+              const deadline = Date.now() + 3000;
+              const pollOpen = () => {
+                if (ackSent) return;
+                const href = String(window.location.href || "");
+                const search = String(window.location.search || "");
+                let openOk = false;
+                if (uiAction === "open_environment_creator") {
+                  openOk =
+                    /[?&]contentTab=scene_creator(?:&|$)/.test(search) ||
+                    /[?&]contentTab=scene_creator(?:&|$)/.test(href);
+                } else {
+                  openOk =
+                    /[?&]workspace=imagegen(?:&|$)/.test(search) ||
+                    /[?&]tab=imagegen(?:&|$)/.test(search) ||
+                    /[?&]workspace=imagegen(?:&|$)/.test(href);
+                }
+                if (openOk) {
+                  operatorVerified = true;
+                  confirmAndAck();
+                  return;
+                }
+                if (Date.now() >= deadline) {
+                  operatorVerified = false; // fail closed — never claim verified
+                  confirmAndAck();
+                  return;
+                }
+                window.setTimeout(pollOpen, 50);
+              };
+              window.setTimeout(pollOpen, 0);
+            } else {
+              // The navigation above ran synchronously; defer the ack one tick so the pending badge paints.
+              window.setTimeout(confirmAndAck, 0);
+            }
           }
         } else if (event.type === "tool_result_truncated") {
           setToolActivity((prev) => (prev ? { ...prev, truncated: true } : prev));
@@ -2164,6 +2338,12 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             workspaceTab: b.workspaceTab || undefined,
             active_document_id: b.activeDocumentId || undefined,
             scriptwriter_scene_id: scriptwriterSceneRef.current || undefined,
+            environmentCreatorPlanning: b.projectId
+              ? getEnvironmentCreatorPlanningSnapshot(b.projectId)
+              : undefined,
+            imageGeneratorPlanning: b.projectId
+              ? getImageGeneratorPlanningSnapshot(b.projectId)
+              : undefined,
           },
           { signal: controller.signal, onEvent },
         );
@@ -2803,11 +2983,31 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         // c5: any tool proposal that mutates native project/scene/character/timeline/voice
         // state should notify the active workspace to refresh without requiring a manual reload.
         if (projectId && isTool) {
+          // BOT2: Instant Update after verified destination for Timed Prompt place OR remove.
+          const toolIdStr = String(receipt.toolId || "");
+          const timedPromptMut =
+            toolIdStr === "timeline.propose_add_prompt_segment" ||
+            toolIdStr === "timeline.remove_item";
+          const verifiedOk = !timedPromptMut || toolResult?.verified === true;
+          if (verifiedOk) {
           window.dispatchEvent(
             new CustomEvent("adept:codirector-project-mutated", {
-              detail: { projectId, proposalId, toolId: receipt.toolId },
+              detail: {
+                projectId,
+                proposalId,
+                toolId: receipt.toolId,
+                sceneId: String(
+                  (toolResult && (toolResult.destinationSceneId || (toolResult.uiFocus as { sceneId?: string } | undefined)?.sceneId)) ||
+                    "",
+                ),
+                segmentId: String((toolResult && (toolResult.segmentId || toolResult.itemId)) || ""),
+                itemId: String((toolResult && toolResult.itemId) || ""),
+                itemKind: String((toolResult && toolResult.itemKind) || ""),
+                verified: timedPromptMut ? true : Boolean(toolResult?.verified),
+              },
             }),
           );
+          }
           // Legacy plan-workspace refresh: keep emitting the old event name for production_plan.*
           // tools until the Plan workspace migrates to the generic event.
           if (String(receipt.toolId || "").startsWith("production_plan.")) {
@@ -2951,18 +3151,28 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const list = Array.from(files);
-    setAttachments((prev) => [
-      ...prev,
-      ...list.map((file) => ({
-        id: newAttachmentId(),
-        kind: "file" as const,
-        name: file.name,
-        mimeType: file.type,
-        mediaKind: inferAttachmentMediaKind(file.name, file.type),
-        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
-        file,
-      })),
-    ]);
+    setAttachments((prev) => {
+      const room = Math.max(0, 8 - prev.length);
+      if (room <= 0) return prev;
+      return [
+        ...prev,
+        ...list.slice(0, room).map((file) => {
+          const raw = (file.name || "").trim();
+          const nameless = !raw || raw === "blob" || /^image\.(png|jpe?g|webp)$/i.test(raw);
+          const ext = file.type === "image/webp" ? "webp" : file.type === "image/jpeg" ? "jpg" : "png";
+          const name = nameless && (file.type || "").startsWith("image/") ? `Pasted image.${ext}` : raw || file.name;
+          return {
+            id: newAttachmentId(),
+            kind: "file" as const,
+            name,
+            mimeType: file.type,
+            mediaKind: inferAttachmentMediaKind(name, file.type),
+            previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+            file,
+          };
+        }),
+      ];
+    });
   }, []);
 
   const addLibraryAssets = useCallback(
@@ -3040,7 +3250,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   }, [uiContext.projectId, uiContext.sceneId]);
 
   const runStatusCheck = useCallback(
-    async (opts?: { deep?: boolean }) => {
+    async (opts?: { deep?: boolean; forceRefresh?: boolean }) => {
       setStatusChecking(true);
       setStatusError(null);
       try {
@@ -3062,16 +3272,27 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             return;
           }
         }
+        // forceRefresh must reach the backend body so the status TTL cache is
+        // bypassed (runner._execute_one + run_status_check invalidate on
+        // force_refresh). Without it the Re-check button silently returns a
+        // stale cached run (e.g. Blocked 35 from when comfy.health was offline)
+        // while the API latest is 100.
         const body = {
           projectId: uiContext.projectId,
           sceneId: uiContext.sceneId,
           workspace: uiContext.workspaceId,
+          forceRefresh: Boolean(opts?.forceRefresh),
         };
         const run = opts?.deep
           ? await requestDeepDiagnostic({ ...body, confirm: true })
           : await requestStatusCheck(body);
         setStatusLatestRun(run);
         setStatusHistory((prev) => [run, ...prev.filter((item) => item.runId !== run.runId)].slice(0, 20));
+        // Keep the shared status client cache in sync with the just-completed
+        // run so the header chip and a subsequent openStatusPanel/loadStatus
+        // read this fresh run instead of a stale 30s-TTL cached latest.
+        invalidateStatusCaches(uiContext.projectId, uiContext.sceneId);
+        rememberLatestStatus(uiContext.projectId, uiContext.sceneId, run);
       } catch (err) {
         const { isStudioApiConnectivityFailure } = await import("../../runtime/studioApiConnection");
         if (isStudioApiConnectivityFailure(err)) {
@@ -3469,6 +3690,7 @@ export function useOpenCoDirector() {
 
 export function useBindCoDirectorWorkspace(bindings: CoDirectorWorkspaceBindings) {
   const { bindWorkspace, unbindWorkspace, setScriptwriterScene } = useCoDirectorSession();
+  const bindGenerationRef = useRef(0);
   // Script Writer scene selection changes often (every navigator click). It
   // must NOT join the bind/unbind cycle — unbind cancels in-flight chat — so
   // it flows through a lightweight setter instead.
@@ -3480,7 +3702,7 @@ export function useBindCoDirectorWorkspace(bindings: CoDirectorWorkspaceBindings
   // Bind after paint so we never setState on CoDirectorSessionProvider during render.
   // Depend on stable binding fields — not the bindings object identity — to avoid rebinding every paint.
   useEffect(() => {
-    bindWorkspace(bindings);
+    bindGenerationRef.current = bindWorkspace(bindings);
   }, [
     bindWorkspace,
     bindings.projectId,
@@ -3494,8 +3716,12 @@ export function useBindCoDirectorWorkspace(bindings: CoDirectorWorkspaceBindings
     bindings.onApplyPrompt,
     bindings.onAppliedSetup,
   ]);
-  useEffect(() => () => unbindWorkspace(), [unbindWorkspace]);
+  useEffect(
+    () => () => unbindWorkspace({ bindGeneration: bindGenerationRef.current }),
+    [unbindWorkspace],
+  );
 }
 
 // Satisfy unused Project import if tree-shaking complains — keep for future typing.
 export type { Project };
+

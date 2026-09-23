@@ -121,7 +121,7 @@ def extract_output_path_from_history(history_entry: dict) -> Path | None:
     if not isinstance(history_entry, dict):
         return None
     outputs = history_entry.get("outputs") or {}
-    keys = {"video_path", "text", "string", "gifs", "videos"}
+    keys = {"video_path", "text", "string", "gifs", "videos", "images"}
     if isinstance(outputs, dict):
         for node_output in outputs.values():
             if not isinstance(node_output, dict):
@@ -182,6 +182,9 @@ def prepare_still_face_video(
         str(image_path),
         "-i",
         str(audio_path),
+        # h264/yuv420p requires even dimensions; pad odd-sized stills.
+        "-vf",
+        "pad=ceil(iw/2)*2:ceil(ih/2)*2",
         "-c:v",
         "libx264",
         "-tune",

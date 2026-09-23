@@ -4,10 +4,11 @@ import json
 import uuid
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .lipsync_tracks import LipSyncTracks, parse_lipsync_tracks
 from .director_timeline_w46.camera_catalog import describe_camera_clip
+from .director_timeline_bindings import PromptNameBinding
 
 
 def _nid() -> str:
@@ -24,17 +25,29 @@ class RegionBox(BaseModel):
 
 
 class TimelineClip(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str = Field(default_factory=_nid)
     asset_id: Optional[str] = None
     start: float = 0.0
     length: float = 5.0
     trim_start: float = 0.0
     label: str = ""
+    # Canonical media labels (see timeline_media_labels.resolve_media_clip_labels).
+    # label = truncated clip-face; title/description = full Inspector strings.
+    title: Optional[str] = None
+    description: Optional[str] = None
     volume: float = 1.0
     muted: bool = False
     fade_in: float = 0.0
     fade_out: float = 0.0
     reference_binding_id: Optional[str] = None
+    # Omni Wave 3A: explicit Visual mediaType (image=reference, video=take).
+    media_type: Optional[Literal["image", "video"]] = Field(
+        default=None, alias="mediaType"
+    )
+    # Range-retake / composition provenance (A|Retake|B). Optional; old JSON stays valid.
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ImageClip(TimelineClip):
@@ -43,6 +56,8 @@ class ImageClip(TimelineClip):
 
 
 class PromptSegment(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str = Field(default_factory=_nid)
     start: float = 0.0
     length: float = 2.0
@@ -66,6 +81,11 @@ class PromptSegment(BaseModel):
     dialogue: Optional[str] = None
     # Canonical scene-reference binding IDs (order preserved). Alias text is display-only.
     reference_binding_ids: list[str] = Field(default_factory=list)
+    # Creator Prompt Names bound to those IDs. Compile uses binding_id, not text replace.
+    reference_name_bindings: list[PromptNameBinding] = Field(default_factory=list)
+    temperature: float = 1.0
+    movement_segment_ref: Optional[dict[str, Any]] = Field(default=None, alias="movementSegmentRef")
+    movement_segment_revision: Optional[int] = Field(default=None, alias="movementSegmentRevision")
 
 
 CameraMotionType = Literal[
@@ -120,6 +140,27 @@ class CameraClip(BaseModel):
     # Cinematography / motion-control instruction. Alias tokens are display-only.
     text: str = ""
     reference_binding_ids: list[str] = Field(default_factory=list)
+    shot_id: Optional[str] = None
+    lens_id: Optional[str] = None
+    focus_id: Optional[str] = None
+    focus_name: Optional[str] = None
+    lighting_id: Optional[str] = None
+
+
+
+def _director_default_lipsync() -> LipSyncTracks:
+    """Empty tracks under Owner Lip Sync lock; else legacy Lip Sync 1 default."""
+    try:
+        from .director_timeline_w46.creator_lipsync_surface import (
+            empty_lipsync_tracks,
+            owner_lipsync_ux_reintroduce_forbidden,
+        )
+
+        if owner_lipsync_ux_reintroduce_forbidden():
+            return empty_lipsync_tracks()
+    except Exception:
+        pass
+    return LipSyncTracks.default()
 
 
 class DirectorTimeline(BaseModel):
@@ -147,17 +188,19 @@ class DirectorTimeline(BaseModel):
     camera_clips: list[CameraClip] = Field(default_factory=list)
     audio_clips: list[TimelineClip] = Field(default_factory=list)
     sfx_clips: list[TimelineClip] = Field(default_factory=list)
-    lipsync: LipSyncTracks = Field(default_factory=LipSyncTracks.default)
+    lipsync: LipSyncTracks = Field(default_factory=lambda: _director_default_lipsync())
     playhead: float = 0.0
     next_image_tag_number: int = 1
     # W46 SA40 — compilation/provenance preference (never mutates already-generated assets).
     guidance_priority: Literal["visual_first", "prompt_first", "balanced", "custom"] = "visual_first"
     # Idempotent Prompt-ref hydration from legacy image/video reference tracks.
     prompt_refs_migrated: bool = False
+    # Timeline Library pane staging IDs. Not generation input.
+    library_asset_ids: Optional[list[str]] = None
 
     @classmethod
     def default(cls, duration_sec: float = 5.0, prompt: str = "") -> "DirectorTimeline":
-        """True-empty tracks by default; lip sync starts with one empty track."""
+        """True-empty tracks by default; Lip Sync stays empty under Owner law."""
         _ = prompt  # kept for API compat; does not invent Timeline items
         return cls(
             media_mode="image",
@@ -170,7 +213,7 @@ class DirectorTimeline(BaseModel):
             video_clips=[],
             video_reference_clips=[],
             image_reference_clips=[],
-            lipsync=LipSyncTracks.default(),
+            lipsync=_director_default_lipsync(),
             playhead=0.0,
             guidance_priority="visual_first",
         )

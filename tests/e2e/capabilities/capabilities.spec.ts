@@ -14,6 +14,7 @@ const STATUSES = [
   "degraded",
   "not_configured",
   "unknown",
+  "deferred_version_1_2",
 ];
 
 type Capability = {
@@ -28,6 +29,7 @@ type Capability = {
 type Snapshot = {
   capabilities: Capability[];
   blockers: { capabilityId: string; status: string; message: string }[];
+  productionBlockers?: { capabilityId: string; status: string; message: string }[];
   callable: string[];
   counts: Record<string, number>;
   generatedAt: string;
@@ -179,15 +181,16 @@ test.describe("@critical @isolated capabilities", () => {
         { timeout: 30_000 },
       );
 
+      const productBlockers = snapshot.productionBlockers ?? snapshot.blockers;
       const badge = page.getByTestId("capability-badge").first();
       await expect(badge).toBeVisible();
       await expect(badge).toHaveText(
-        snapshot.blockers.length
-          ? new RegExp(`${snapshot.blockers.length} Capability Blocker`)
+        productBlockers.length
+          ? new RegExp(`${productBlockers.length} Capability Blocker`)
           : /Capabilities Ready/,
       );
 
-      if (snapshot.blockers.length > 0) {
+      if (productBlockers.length > 0) {
         await expect(page.getByTestId("capability-blockers")).toBeVisible();
       } else {
         await expect(page.getByTestId("capability-no-blockers")).toBeVisible();

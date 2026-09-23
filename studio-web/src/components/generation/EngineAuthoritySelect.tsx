@@ -17,10 +17,6 @@ export const ENGINE_NAME_TO_PRODUCT: Record<EngineName, string> = {
   auto: "",
   "minimax-h3": "minimax-h3",
   "ltx-2.5": "ltx-2.5-distilled",
-  ltx: "ltx-local",
-  wan: "wan-local",
-  hunyuan15: "hunyuan-video-1.5-local",
-  hunyuan13b: "hunyuan-video-13b-local",
   "seedance-2.0": "seedance-2.0",
   "seedance-2.5": "seedance-2.5",
   fal_seedance: "seedance-2.0",
@@ -33,10 +29,6 @@ const ENGINE_LABELS: Record<EngineName, string> = {
   auto: "Auto Select",
   "minimax-h3": "MiniMax H3",
   "ltx-2.5": "LTX 2.5",
-  ltx: "LTX 2.3 (Local)",
-  wan: "WAN 2.2 First/Last Frame",
-  hunyuan15: "HunyuanVideo 1.5",
-  hunyuan13b: "HunyuanVideo 13B",
   "seedance-2.0": "Seedance 2.0",
   "seedance-2.5": "Seedance 2.5",
   fal_seedance: "Seedance 2.0",
@@ -57,7 +49,7 @@ const CREATE_DEFAULT_ENGINES: EngineName[] = [
   "fal_runway",
 ];
 
-const LEGACY_ONLY_ENGINES: EngineName[] = ["ltx", "wan", "hunyuan15", "hunyuan13b", "fal_seedance"];
+const LEGACY_ONLY_ENGINES: EngineName[] = ["fal_seedance"];
 
 function matchProduct(productId: string, optionId: string, aliases: string[]) {
   if (!productId) return false;

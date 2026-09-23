@@ -17,6 +17,7 @@ test.describe("M3.2a Generation Tools @DETERMINISTIC", () => {
     await waitForAppReady(request);
     const catalog = await (await request.get(`${API}/api/generation-tools/catalog`)).json();
     const ids = (catalog.tools as { id: string }[]).map((t) => t.id);
+    expect(ids).not.toContain("brand.studio");
     for (const id of [
       "video.upscale",
       "image.upscale",
@@ -28,7 +29,6 @@ test.describe("M3.2a Generation Tools @DETERMINISTIC", () => {
       "audio.sfx.generate",
       "video.extend",
       "image.portrait_skin",
-      "brand.studio",
     ]) {
       expect(ids, id).toContain(id);
       const st = await (await request.get(`${API}/api/generation-tools/${id}/status`)).json();

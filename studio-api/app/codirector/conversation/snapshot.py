@@ -35,8 +35,8 @@ def _load_conversation_messages(db: Session, project_id: str) -> list[dict[str, 
 
 def _truncate_message(message: dict[str, Any]) -> dict[str, Any]:
     content = str(message.get("content") or "").strip()
-    if len(content) > 280:
-        content = content[:277].rstrip() + "..."
+    if len(content) > 1200:
+        content = content[:1197].rstrip() + "..."
     item = {
         "role": str(message.get("role") or "user"),
         "content": content,

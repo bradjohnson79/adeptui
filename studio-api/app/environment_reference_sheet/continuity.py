@@ -22,13 +22,15 @@ def validate_sheet(sheet: EnvironmentReferenceSheet) -> ContinuityValidationRepo
     views = _view_by_direction(sheet)
 
     if sheet.spatialMap is None:
+        # Adept UI v1.1: Spatial Map is optional enrichment (shelved). ERS remains
+        # environment authority without a map document — soft advisory only.
         findings.append(
             ContinuityFinding(
-                severity="error",
+                severity="warning",
                 code="spatial_map_missing",
-                title="Spatial Map required",
-                message="ERS needs a project-owned Spatial Map before north-locked directional views can stay consistent.",
-                recommendedAction="Attach or create a Spatial Map first.",
+                title="Place layout not attached",
+                message="No place-layout document is linked. Directional north-lock enrichment is unavailable; ERS package/sheet/composite remains authoritative.",
+                recommendedAction="Optional later: attach a place-layout document for geometry enrichment. Not required for Environment Creator ERS.",
             )
         )
 
@@ -76,9 +78,9 @@ def validate_sheet(sheet: EnvironmentReferenceSheet) -> ContinuityValidationRepo
             ContinuityFinding(
                 severity="warning",
                 code="spatial_map_warnings",
-                title="Spatial Map has open warnings",
-                message="The linked Spatial Map still reports staging warnings that may affect environment continuity.",
-                recommendedAction="Clear the Spatial Map warnings before final approval when possible.",
+                title="Place layout has open warnings",
+                message="The linked place-layout document still reports staging warnings that may affect environment continuity.",
+                recommendedAction="Clear those layout warnings before final approval when possible.",
             )
         )
 

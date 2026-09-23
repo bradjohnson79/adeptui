@@ -31,6 +31,9 @@ export type TimelineFocusRequest = {
   layoutReset?: boolean;
   fitViewer?: boolean;
   openInpaint?: boolean;
+  openRetake?: boolean;
+  takeId?: string;
+  takeLabel?: string;
 };
 
 export const TIMELINE_FOCUS_EVENT = "adept-timeline-focus";

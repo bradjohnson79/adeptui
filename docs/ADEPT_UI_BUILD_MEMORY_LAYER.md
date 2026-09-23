@@ -1,7 +1,15 @@
 # Adept UI Build Memory Layer — Permanent Build Laws
 
+LAW — As of 2026-09-13, Spatial Map, PoseCraft, Fire3D and SceneCraft are outside Adept UI v1.1 scope. Preserve them without active production exposure. Development resumes under SceneCraft for Adept UI v1.2 Cloud; their incomplete certification must never block v1.1 GO.
+
 **Status:** Standing instructions for Cursor, Grok, primary agents, and all subagents on every milestone.  
-**Cursor rules:** `.cursor/rules/adept-ui-build-laws.mdc`, `.cursor/rules/beta-refresh-after-build.mdc` (`alwaysApply: true`)
+**Cursor rules:** `.cursor/rules/adept-ui-build-laws.mdc`, `.cursor/rules/beta-refresh-after-build.mdc`, `.cursor/rules/comfyui-gpu-runtime-guardrails.mdc`, `.cursor/rules/v11-spatial-3d-shelf.mdc`, `.cursor/rules/completed-system-lock.mdc`, `.cursor/rules/new-build-closed.mdc`, `.cursor/rules/fix-the-system-not-the-project.mdc` (`alwaysApply: true`)
+
+**Completed System Lock ledger:** `docs/ADEPT_UI_COMPLETED_SYSTEM_LOCK.md` (Owner unlock only).
+
+**New Build Closed / Final Convergence (Law 33):** `docs/ADEPT_UI_NEW_BUILD_CLOSED.md` (Owner unlock: `Owner unlock: New Build — <named capability>`).
+
+**Fix the System, Not the Project (Law 36):** `.cursor/rules/fix-the-system-not-the-project.mdc`. A project is evidence. Repair the producer. Data recovery only with `Owner authority: repair this project's data`.
 
 These laws are the permanent foundation. A change that violates them is incomplete regardless of local code edits.
 
@@ -13,7 +21,7 @@ Every UI, workflow, API, configuration, or integration change must be applied to
 
 The agent must:
 
-* start or restart the correct Beta services
+* refresh Adept UI at the smallest necessary scope (Vite/HMR or Studio API recycle). Do not run full supervisor restart, and do not stop/restart protected Comfy `:8188` or MiniMax `:8192`, after ordinary builds (`.cursor/rules/comfyui-gpu-runtime-guardrails.mdc`)
 * verify the correct branch and build are running
 * confirm the updated UI is visible at the expected localhost address
 * clear stale build caches when necessary
@@ -404,6 +412,101 @@ No learning may silently alter creator projects.
 
 ---
 
+## Law 33 — New Build Closed / Final Convergence
+
+Adept UI is feature-complete for the current platform generation. NEW BUILD = CLOSED.
+
+Assume the required capability already exists. Audit and reconnect the existing implementation end-to-end, remove dual-stack contamination, repair every in-scope defect through a continuous GO loop, then lock the certified system.
+
+Do not create a replacement or new subsystem without:
+
+`Owner unlock: New Build — <named capability>`
+
+Priority: RESTORE → RECONNECT → RETARGET → REMOVE CONFLICT → VERIFY. Not REBUILD.
+
+Canon: `docs/ADEPT_UI_NEW_BUILD_CLOSED.md`.
+
+---
+
+## Law 36 — Fix the System, Not the Project
+
+When a defect appears inside an Adept UI project, the project is evidence of the defect, not the repair target.
+
+Fix the system that produced the bad project state. Do not spend the mission manually repairing individual projects.
+
+Short form: **Project broken → fix the producer, not the project.**
+
+A project may be inspected, reproduced, and used as evidence. It must not become a substitute for repairing the underlying platform. This law is mandatory on every system mission, beside the wiring question: is the system fully wired, and are we repairing the system itself or only the evidence inside one project?
+
+### Project symptoms point to system defects
+
+Missing references, wrong character bindings, stale assets, incorrect tags, broken Timeline state, missing audio, duplicate scenes, missing global assets, incorrect persistence, bad provider selection, broken job state, stale UI hydration, missing clips, malformed JSON, disconnected Creator assets, and failed Co-Director mutations all start with one question: what system allowed this state to occur?
+
+### Projects are diagnostic fixtures
+
+Projects may be used to reproduce, trace, inspect, compare, and verify.
+
+They are not the place to hand-patch, backfill, rewrite, manually reassign, or manually repair database state just to make one project work.
+
+### Repair the producer of bad state
+
+PROJECT DEFECT → TRACE PRODUCING SYSTEM → FIND EARLIEST BROKEN HOP → FIX SYSTEM → RETEST → CREATE OR USE A CLEAN FIXTURE → VERIFY THE PROJECT NOW WORKS NATURALLY.
+
+Example: a character missing from Timeline is not fixed by inserting that character into one project's JSON. Trace Character Creator → asset registry → project/global availability → Timeline reference resolver → Master binding, and repair the broken hop.
+
+### No project-specific code
+
+Forbidden without explicit Owner authorization:
+
+* `if projectId === "..."`
+* `if sceneId === "..."`
+* `if assetName === "Korri"` or `"Cade"`
+* special-case Schnick, Venture, or a test project
+
+A named project or asset may reveal a bug. It must not become hard-coded product logic.
+
+### No manual data repair as certification
+
+Manually editing a project until it looks healthy is not certification. Required path: reproduce the bad state, repair the system, perform the normal creator action, confirm canonical state is produced automatically, reload, and verify downstream behavior. No manual project intervention between the creator action and the downstream check.
+
+### Disposable and production projects
+
+Use disposable projects to test the system, not to perfect the disposable project's creative content. If diagnosis contaminates a test project, reset the test state.
+
+Never mutate a production project merely to prove a platform repair unless the Owner explicitly authorizes that project. Production state can be inspected. Repair the system, then verify on a disposable fixture.
+
+### Existing projects recover naturally
+
+Where the system repair allows it, existing projects recover through reload, migration, re-resolve, canonical read, or a normal save. Do not write a one-off project repair script unless the platform legitimately needs a migration. A required migration must be deterministic, platform-wide, idempotent, one-way, and tested. It must not be project-specific.
+
+### Earliest broken hop, no downstream compensation
+
+Fix the earliest layer that produced the invalid state: UI → resolver → API → persistence → compiler → provider.
+
+If the resolver wrote the wrong asset id, fix the resolver. Do not teach the compiler to compensate. If persistence lost the asset id, fix persistence. Do not make the UI re-infer it later.
+
+Forbidden: an upstream binding is lost, so a later stage guesses the character from text. Repair the binding. Each layer receives correct canonical state from the layer before it.
+
+### Project cleanup cannot consume the mission
+
+If the work becomes manually restoring clips, fixing scenes, reconstructing one project's JSON, or cleaning a test project's creative state, stop and return to the system defect.
+
+### Exception
+
+Project-specific repair is allowed only when the Owner writes:
+
+`Owner authority: repair this project's data`
+
+That is a data-recovery mission. It is not platform certification.
+
+### Mission header
+
+```text
+LAW 36 — FIX THE SYSTEM, NOT THE PROJECT: Projects are diagnostic evidence, not repair targets. Do not spend mission time manually correcting project-specific state, JSON, references, assets, scenes, or records to make a test pass. Trace the defect to the earliest broken platform layer, repair the system generically, then prove the fix through a clean creator workflow on a disposable project with no manual data intervention.
+```
+
+---
+
 ## Permanent Completion Checklist
 
 ```text
@@ -439,4 +542,6 @@ No learning may silently alter creator projects.
 [ ] One governing document per milestone; superseded reports marked (Law 30)
 [ ] Capability completion evidenced: Playwright, artifacts, independent verification (Law 31)
 [ ] Co-Director learning transparent, reviewable, creator-controlled, project-isolated (Law 32)
+[ ] New Build Closed: existing path audited/reconnected; no replacement subsystem without Owner unlock (Law 33)
+[ ] Fix the System, Not the Project: producer repaired; no project-specific code or manual project repair as certification (Law 36)
 ```

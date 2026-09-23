@@ -191,7 +191,7 @@ async def _run_with_asset_path(
     packet = (take.get("cameraPackets") or {}).get(str(result.get("cameraId") or "")) or {}
     fact_card = _fact_card(packet, result)
 
-    from ..codirector.vision.vision_review import chat_vision, chat_vision_fal, parse_field_verdicts
+    from ..codirector.vision.vision_review import chat_vision, parse_field_verdicts
 
     if not image_path or not Path(image_path).is_file():
         record = {
@@ -207,30 +207,11 @@ async def _run_with_asset_path(
 
     prompt = _GATE_INSTRUCTIONS + "\n\nPRODUCTION FACTS:\n" + fact_card + "\n\nCANDIDATE IMAGE (under review):"
 
-    # Provider priority: fal any-llm/vision (public URL) -> Kie Gemini (data URL).
-    # fal requires a public URL; the Cloudflare public base is configured in
-    # production so candidate assets are reachable.
-    from ..codirector.vision.vision_review import data_url_from_path
-    from ..config import settings as _settings
-
-    asset_id = str(result.get("assetId") or "").strip()
-    public_base = str(getattr(_settings, "public_api_base_url", "") or "").rstrip("/")
-    public_url = f"{public_base}/api/assets/{asset_id}/file" if public_base and asset_id else ""
-    response: dict[str, Any] | None = None
-    if public_url:
-        response = await chat_vision_fal(prompt=prompt, image_urls=[public_url])
-    if response is None or not response.get("ok"):
-        image_url = data_url_from_path(image_path)
-        if image_url:
-            response = await chat_vision(
-                instructions=_GATE_INSTRUCTIONS,
-                parts=[
-                    {"type": "text", "text": "PRODUCTION FACTS:\n" + fact_card},
-                    {"type": "text", "text": "CANDIDATE IMAGE (under review):"},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-                temperature=0.0,
-            )
+    response = await chat_vision(
+        instructions=prompt,
+        image_paths=[Path(image_path)],
+        temperature=0.0,
+    )
     if response is None:
         record = {
             "state": "validation_unavailable",
@@ -279,8 +260,8 @@ async def _run_with_asset_path(
         "verdict": overall,
         "fields": fields,
         "summary": reason or ("Passed continuity review." if overall == "PASS" else "Failed continuity review."),
-        "model": str(response.get("model") or "gemini-3-pro"),
-        "provider": str(response.get("provider") or "kie"),
+        "model": str(response.get("model") or ""),
+        "provider": str(response.get("provider") or "fal"),
         "checkedAt": _now(),
     }
     result["validation"] = record

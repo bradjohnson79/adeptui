@@ -1,9 +1,8 @@
 import { useTranslation } from "react-i18next";
 import type React from "react";
+import { trackControlLabel, type TrackControl } from "../../timelineMaster/trackFlags";
 
-type TrackControl = "eye" | "lock" | "mute" | "solo";
-
-function TrackGlyph({ name }: { name: TrackControl | "plus" }) {
+function TrackGlyph({ name, active = false }: { name: TrackControl | "plus"; active?: boolean }) {
   const common = { width: 12, height: 12, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.4 };
   if (name === "eye") {
     return (
@@ -25,7 +24,11 @@ function TrackGlyph({ name }: { name: TrackControl | "plus" }) {
     return (
       <svg {...common} aria-hidden>
         <path d="M3 6.5h2.2L9 3.5v9L5.2 9.5H3z" />
-        <path d="M11 6.5l3 3M14 6.5l-3 3" />
+        {active ? (
+          <path d="M11 6.5l3 3M14 6.5l-3 3" />
+        ) : (
+          <path d="M11 5c1.5 1.5 1.5 4.5 0 6" />
+        )}
       </svg>
     );
   }
@@ -48,15 +51,19 @@ export function TimelineTrackLabel({
   labelKey,
   testId,
   controls = ["eye", "lock"],
+  pressedControls = [],
   headerExtra,
   onAction,
+  onControlToggle,
 }: {
   label: string;
   labelKey?: string;
   testId?: string;
   controls?: TrackControl[];
+  pressedControls?: TrackControl[];
   headerExtra?: React.ReactNode;
   onAction?: () => void;
+  onControlToggle?: (control: TrackControl) => void;
 }) {
   const { t } = useTranslation("timeline");
   const text = labelKey ? t(labelKey, { defaultValue: label }) : label;
@@ -68,11 +75,30 @@ export function TimelineTrackLabel({
         {headerExtra ? (
           <span className="timeline-v2__track-label-extra">{headerExtra}</span>
         ) : null}
-        {controls.map((control) => (
-          <span key={control} className="timeline-v2__track-label-icon" aria-hidden>
-            <TrackGlyph name={control} />
-          </span>
-        ))}
+        {controls.map((control) => {
+          const pressed = pressedControls.includes(control);
+          const controlLabel =
+            control === "mute" ? (pressed ? "Unmute" : "Mute") : trackControlLabel(control, pressed, text);
+          return (
+            <button
+              key={control}
+              type="button"
+              className={`timeline-v2__track-label-icon${pressed ? " is-pressed" : ""}`}
+              data-testid={`track-control-${slug}-${control}`}
+              aria-pressed={pressed}
+              aria-label={controlLabel}
+              title={controlLabel}
+              alt={controlLabel}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onControlToggle?.(control);
+              }}
+            >
+              <TrackGlyph name={control} active={pressed} />
+            </button>
+          );
+        })}
         {onAction ? (
           <button
             type="button"

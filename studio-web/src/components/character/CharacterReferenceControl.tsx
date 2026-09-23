@@ -60,7 +60,7 @@ export function CharacterReferenceControl({
         canonical: false,
       });
       await onChanged();
-      if (useAsIdentity && onUseAsIdentity) {
+      if (onUseAsIdentity) {
         await onUseAsIdentity(assetId, sourceType);
       }
     } catch (e) {
@@ -185,8 +185,8 @@ export function CharacterReferenceControl({
           onChange={(e) => setUseAsIdentity(e.target.checked)}
         />
         <span>
-          Use as Character Identity{" "}
-          <span className="character-core__tip" title="Use this image directly as the character's look, without AI generation. You'll confirm it before it's set.">
+          Use as Front{" "}
+          <span className="character-core__tip" title="This picture becomes the Front view. You still Approve Front before Character Angles.">
             (?)
           </span>
         </span>

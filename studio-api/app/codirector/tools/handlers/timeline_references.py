@@ -8,8 +8,12 @@ from typing import Any
 from ....director_references.errors import DirectorReferenceError, FeatureDisabled
 from ....director_references.package import ReferencePackageBuilder
 from ....director_references.service import TimelineReferenceService
-from ....director_references.tags import ensure_tags, find_clip_by_tag, parse_tag_number
-from ....director_timeline import parse_director_timeline
+from ....director_timeline_w46.master_lookup import (
+    find_master_visual_clip,
+    iter_master_visual_clips,
+    load_scene_master,
+    visual_clip_public,
+)
 from ....db import Scene
 from ....feature_flags import feature_flags
 from ..definitions import ToolContext, ToolPreview
@@ -29,14 +33,11 @@ def _scene(ctx: ToolContext, scene_id: str) -> Scene:
     return scene
 
 
-def _timeline(scene: Scene):
-    return ensure_tags(
-        parse_director_timeline(
-            scene.director_json,
-            fallback_duration=scene.duration_sec or 5.0,
-            fallback_prompt=scene.prompt or "",
-        )
-    )
+def _master(ctx: ToolContext, scene: Scene):
+    master = load_scene_master(ctx.db, ctx.project_id, scene.id)
+    if master is None:
+        raise DirectorReferenceError("timeline_item_not_found", f"Scene not found: {scene.id}")
+    return master
 
 
 async def get_timeline_image(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -48,29 +49,31 @@ async def get_timeline_image(ctx: ToolContext, args: dict[str, Any]) -> dict[str
     svc = TimelineReferenceService(ctx.db)
     if tag:
         return svc.resolve_tag(ctx.project_id, scene_id, tag)
-    tl = _timeline(scene)
-    clip = next((c for c in tl.image_clips if c.id == item_id), None)
+    master = _master(ctx, scene)
+    clip = find_master_visual_clip(master, item_id)
     if not clip:
         raise DirectorReferenceError("timeline_item_not_found", f"Item not found: {item_id}")
-    return svc.resolve_tag(ctx.project_id, scene_id, clip.display_tag or "")
+    pub = visual_clip_public(clip)
+    return svc.resolve_tag(ctx.project_id, scene_id, pub["displayTag"] or clip.id)
 
 
 async def list_timeline_images(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     _require_enabled()
     scene_id = str(args.get("sceneId") or "")
     scene = _scene(ctx, scene_id)
-    tl = _timeline(scene)
+    master = _master(ctx, scene)
     svc = TimelineReferenceService(ctx.db)
     items = []
-    for clip in tl.image_clips:
+    for _batch, clip in iter_master_visual_clips(master):
         refs = svc.store.load_active_set(ctx.project_id, scene_id, clip.id)
+        pub = visual_clip_public(clip)
         items.append(
             {
                 "timelineItemId": clip.id,
-                "displayTag": clip.display_tag,
-                "assetId": clip.asset_id,
-                "start": clip.start,
-                "length": clip.length,
+                "displayTag": pub["displayTag"],
+                "assetId": pub["assetId"],
+                "start": pub["start"],
+                "length": pub["length"],
                 "referenceCount": len(refs.version.bindings) if refs and refs.version else 0,
                 "activeVersion": refs.active_version if refs else 0,
             }
@@ -108,32 +111,38 @@ async def suggest_reference_bindings(ctx: ToolContext, args: dict[str, Any]) -> 
     scene_id = str(args["sceneId"])
     item_id = str(args.get("timelineItemId") or args.get("itemId") or "")
     scene = _scene(ctx, scene_id)
-    tl = _timeline(scene)
-    clip = next((c for c in tl.image_clips if c.id == item_id), None)
+    master = _master(ctx, scene)
+    clip = find_master_visual_clip(master, item_id)
     if not clip:
         raise DirectorReferenceError("timeline_item_not_found", f"Item not found: {item_id}")
     suggestions: list[dict[str, Any]] = []
-    # Suggest prior timeline image as continuity candidate
+    clip_start = float(getattr(clip, "start", 0.0) or 0.0)
     priors = sorted(
-        [c for c in tl.image_clips if c.id != item_id and c.asset_id and (c.start + c.length) <= clip.start + 1e-6],
-        key=lambda c: c.start + c.length,
+        [
+            c
+            for _batch, c in iter_master_visual_clips(master)
+            if c.id != item_id and c.assetId and (float(c.start or 0.0) + float(c.length or 0.0)) <= clip_start + 1e-6
+        ],
+        key=lambda c: float(c.start or 0.0) + float(c.length or 0.0),
         reverse=True,
     )
     if priors:
         p = priors[0]
+        pub = visual_clip_public(p)
         suggestions.append(
             {
                 "role": "continuity",
                 "influence": "strong",
-                "referenceAssetId": p.asset_id,
+                "referenceAssetId": pub["assetId"],
                 "sourceTimelineItemId": p.id,
-                "displayTag": p.display_tag,
+                "displayTag": pub["displayTag"],
                 "rationale": "Nearest prior timeline image for continuity.",
             }
         )
+    clip_pub = visual_clip_public(clip)
     return {
         "timelineItemId": item_id,
-        "displayTag": clip.display_tag,
+        "displayTag": clip_pub["displayTag"],
         "suggestions": suggestions,
         "note": "Suggestions are advisory; apply via propose_* tools after approval.",
     }

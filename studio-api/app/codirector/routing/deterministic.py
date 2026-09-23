@@ -1,4 +1,4 @@
-"""Deterministic classifier for the Co-Director 2.0 router — Â§8 of the Phase 3 contract."""
+"""Deterministic classifier for the Co-Director 2.0 router â€” Ã‚Â§8 of the Phase 3 contract."""
 
 from __future__ import annotations
 
@@ -35,9 +35,9 @@ _APPROVE_PATTERN = re.compile(
     re.I,
 )
 
-# Execution-specific confirmation pattern (spec Â§4) — affirmative responses that
+# Execution-specific confirmation pattern (spec Ã‚Â§4) â€” affirmative responses that
 # resolve a PENDING EXECUTION (not a Wiki/Bible proposal). Checked BEFORE generic
-# intent classification so the LLM cannot hijack a confirmation turn (spec Â§35).
+# intent classification so the LLM cannot hijack a confirmation turn (spec Ã‚Â§35).
 _EXECUTION_CONFIRMATION_PATTERN = re.compile(
     r"\b(?:yes|yep|yeah|sure|ok|okay|proceed|go ahead|do it|continue|start|generate it"
     r"|approved|sounds? good|let'?s do it|that'?s fine|alright|please proceed|please continue"
@@ -106,9 +106,20 @@ _EXECUTE_GENERATE_PATTERN = re.compile(
 )
 
 _DISCUSS_SEEKING_PATTERN = re.compile(
-    r"\b(?:think about|opinion|suggest)\b",
+    r"\b(?:think about|opinion|suggest)\b"
+    r"|\bwhat do you (?:think|reckon|say)\b"
+    r"|\bwhat'?s your (?:take|opinion|read|reaction)\b"
+    r"|\bhow do you (?:feel|see)\b"
+    r"|\bthoughts (?:on|about)\b"
+    r"|\bdo you (?:like|enjoy)\b",
     re.I,
 )
+
+# Opinion/feedback asks are creative conversation (Intelligence mission RC2):
+# "What do you think of the Schnick Coffee scene?" must reach the LLM as a
+# discussion turn â€” never as a data query merely because a production noun
+# ("scene") also appears in the message.
+_IS_OPINION_SEEKING = _DISCUSS_SEEKING_PATTERN
 
 
 # --- Spatial Map + Atlas + ERS + Scene Creator operational commands (m413) ---
@@ -120,7 +131,7 @@ _DISCUSS_SEEKING_PATTERN = re.compile(
 # the generic `_EXECUTE_GENERATE_PATTERN` so a specific "generate the ers"
 # is not collapsed into a generic image-generation intent.
 #
-# The deterministic classifier itself does not resolve capability ids — it
+# The deterministic classifier itself does not resolve capability ids â€” it
 # only sets `RouteDecision.target` to a stable marker string. The unified
 # intent classifier (`routing.unified_intent._resolve_capability`) maps the
 # message text to the registered capability id (atlas.generate / ers.generate
@@ -139,7 +150,7 @@ _USE_AS_SPATIAL_MAP_PATTERN = re.compile(
 )
 
 # "put @Korri behind the bar" / "place @character at <location>"
-# Deferred — requires LLM spatial reasoning to extract a normalized (x,y)
+# Deferred â€” requires LLM spatial reasoning to extract a normalized (x,y)
 # placement. We still classify deterministically as EXECUTE_PRODUCTION so the
 # downstream LLM/curated-tools path can resolve the placement.
 _PLACE_CHARACTER_PATTERN = re.compile(
@@ -168,7 +179,7 @@ _CRS_ADVICE_RE = re.compile(
     re.I,
 )
 
-# "suggest a close-up" / "suggest a shot" — NOT an execution; a suggestion.
+# "suggest a close-up" / "suggest a shot" â€” NOT an execution; a suggestion.
 # Returns READ_INSPECT (analysis) so the LLM proposes shots without firing
 # the image.generate capability.
 _SUGGEST_SHOT_PATTERN = re.compile(
@@ -195,7 +206,7 @@ _IMAGE_BATCH_PATTERN = re.compile(
 # numbers are handled so "generate four shots" classifies the same as
 # "generate 4 shots". The generic ``_EXECUTE_GENERATE_PATTERN`` uses
 # ``\bshot\b`` (no optional ``s``), so plural "shots" would otherwise fall
-# through to the semantic classifier — this specific pattern wins first.
+# through to the semantic classifier â€” this specific pattern wins first.
 #
 # The pattern requires EITHER an explicit count (digit or word-number) OR
 # the "scene" qualifier, so a bare "create shots." still falls through to
@@ -222,7 +233,7 @@ _REGENERATE_SHOT_PATTERN = re.compile(
 
 # "send those to timeline" / "send to timeline" / "send these shots to the timeline"
 
-# Wave 4 Omni: deposit completed 1F/3F video → Timeline Visual (not Scene Creator send)
+# Wave 4 Omni: deposit completed 1F/3F video â†’ Timeline Visual (not Scene Creator send)
 _DEPOSIT_COMPLETED_VIDEO_PATTERN = re.compile(
     r"\b(?:deposit|export|send)\b.+\b(?:completed|finished)?\s*(?:1\s*f(?:rame)?|3\s*f(?:rame)?|one[\s-]?frame|three[\s-]?frame)\b.+\b(?:timeline|visual)\b"
     r"|\b(?:deposit|export|send)\b.+\b(?:completed|finished)\s+video\b.+\b(?:timeline(?:\s+visual)?|visual)\b"
@@ -255,13 +266,64 @@ _CAMERA_SHOTS_PATTERN = re.compile(
 _TIMELINE_EDIT_PATTERN = re.compile(
     r"\b(?:put|add|place|move|drop|insert|attach)\b.*\b(?:on|to|into|in|at|onto)\s+(?:the\s+)?timeline\b"
     r"|\b(?:put|add|place|move)\b.*\b(?:at|near)\s+(?:the\s+)?(?:start|beginning|end|top|head)\s+of\s+(?:the\s+)?timeline\b"
-    r"|\b(?:timed\s+prompt|prompt\s+clip|prompt\s+track)\b"
     r"|\b(?:create|make|add|build|start)\s+(?:a\s+|the\s+|another\s+|next\s+)?batch\b"
     r"|\b(?:run|generate)\s+(?:this|the|that|it|batch\s*\d*)\s+(?:in|with)\s+(?:minimax|qwen|ltx)\b"
     r"|\b(?:make|set)\s+(?:the\s+)?(?:clip|shot|batch|it|this)\s+\d+\s*seconds?\b",
 
     re.I,
 )
+
+# Prompt AUTHORING (Intelligence mission 2026-09-19): the creator wants the
+# prompt TEXT written (timed prompt, shot prompt, prompt draft). This is a
+# writing turn for the LLM â€” never an execution and never asset placement.
+# Placement phrasing ("add the timed prompt to the timeline") is handled
+# EARLIER by _TIMELINE_EDIT_PATTERN, so reaching this guard means authorship.
+_PROMPT_AUTHORING_RE = re.compile(
+    r"\b(?:timed\s+prompt|prompt\s+clip|prompt\s+track|prompt\s+segment)\b"
+    r"|\b(?:write|draft|give|show|compose|create|make)\b[^.?!]{0,60}\b(?:the\s+|a\s+|an\s+|that\s+|this\s+|me\s+(?:the\s+|a\s+))?prompt\b",
+    re.I,
+)
+
+# A full production specification (duration, batch counts, aspect ratio,
+# engine) means the creator is asking to PREPARE/RUN a real scene â€” a
+# Timeline operation â€” even when the sentence contains the word "prompt"
+# ("create a Timeline prompt for the Character referenceâ€¦ 30 secondsâ€¦ 2
+# batchesâ€¦ MiniMax H3"). Prompt AUTHORING asks do not carry production specs.
+_PRODUCTION_SPEC_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:seconds?|secs?|s)\b"
+    r"|\b\d+\s*(?:batches?|shots?|frames?)\b"
+    r"|\b\d+\s*:\s*\d+\b"
+    r"|megapixels?"
+    r"|\b(?:minimax|\bh3\b|ltx|wan|seedance|kling|veo)\b"
+    r"|\bfps\b",
+    re.I,
+)
+
+
+def is_prompt_authoring(message: str) -> bool:
+    """True when the creator wants prompt TEXT written (timed prompt, prompt draft).
+
+    Intelligence mission 2026-09-19 (Phase 5): WRITE TIMED PROMPT is authorship
+    for the LLM — never an execution and never asset placement. Placement
+    phrasing ("add the timed prompt to the timeline") is a Timeline operation —
+    the deterministic classifier handles it via the timeline-edit lane, and the
+    unified guard must not intercept it. A message carrying a full production
+    specification (duration/batches/aspect/engine) is scene preparation, not
+    authorship.
+    """
+
+    text = message or ""
+    if not _PROMPT_AUTHORING_RE.search(text):
+        return False
+    if re.search(
+        r"\b(?:add|put|place|insert|attach|drop)\b.*\b(?:on|to|into|in)\s+(?:the\s+)?timeline\b",
+        text,
+        re.I,
+    ):
+        return False
+    if _PRODUCTION_SPEC_RE.search(text):
+        return False
+    return True
 
 
 NAVIGATION_TARGETS: dict[str, str] = {
@@ -359,7 +421,7 @@ def _has_negated_action(message: str) -> bool:
     exclusion constraints inside a scene spec ("Do not reveal Cade before the
     blast", "Do not show the courier before the portal opens", "No additional
     characters", "Cade is NOT yet visible", "He does not rush") negate story
-    events, not the request — they must not flip a production request to
+    events, not the request â€” they must not flip a production request to
     DISCUSS. Visibility verbs ("show", "reveal") are cinematic reveal-gating
     vocabulary, not production actions, so they are deliberately absent from
     the verb list.
@@ -367,11 +429,47 @@ def _has_negated_action(message: str) -> bool:
     return bool(_NEGATED_ACTION_VERB_RE.search(message or ""))
 
 
+# Whole-utterance confirmation (Intelligence mission RC6): an utterance that
+# carries NEW imperative content ("Okay, prepare it.") is an instruction, not a
+# confirmation of the previous execution. Only a bare affirmation resolves
+# pending state; anything with production-overlay verbs beyond the affirmation
+# itself goes back through normal classification.
+_INSTRUCTION_OVERLAY_RE = re.compile(
+    r"\b(?:prepare|set(?:\s+up)?|setup|add|put|place|insert|create|write|draft|"
+    r"remove|delete|move|swap|change|fix|update|generate|render|run|execute|build|make)\b",
+    re.I,
+)
+
+_AFFIRMATION_PHRASES_RE = re.compile(
+    r"\b(?:yes|yep|yeah|sure|ok(?:ay)?|alright|proceed|go ahead|do it|continue|start|"
+    r"approved|confirmed|perfect|that works|that'?s fine|sounds? good|let'?s do it|"
+    r"please proceed|please continue|looks good|please|great|good|go|"
+    r"generate it|run it|build it|create it)\b[\s,.!]*",
+    re.I,
+)
+
+
+def _is_bare_affirmation(message: str) -> bool:
+    """True when the utterance is ONLY affirmation language.
+
+    Affirmation phrases are stripped; if a production imperative remains
+    ("prepare it", "set up the scene", "add the image"), the utterance is an
+    instruction â€” not a confirmation/approval of prior state.
+    """
+
+    remainder = _AFFIRMATION_PHRASES_RE.sub(" ", message or "")
+    return not _INSTRUCTION_OVERLAY_RE.search(remainder)
+
+
 def is_execution_confirmation(message: str) -> bool:
     """Return True if `message` is an affirmative confirmation of a pending execution.
 
-    Spec Â§4 + Â§35: this is checked BEFORE generic intent classification so the LLM
+    Spec Ã‚Â§4 + Ã‚Â§35: this is checked BEFORE generic intent classification so the LLM
     cannot hijack a confirmation turn. Returns False for negated/reject responses.
+
+    Whole-utterance rule (Intelligence mission RC6): the ENTIRE utterance must be
+    an affirmation. "Okay, prepare it." carries new imperative content â€” it is a
+    new instruction, not a confirmation of the previous execution.
     """
     if not message:
         return False
@@ -380,7 +478,9 @@ def is_execution_confirmation(message: str) -> bool:
         return False
     if _REJECT_PATTERN.search(message):
         return False
-    return bool(_EXECUTION_CONFIRMATION_PATTERN.search(message))
+    if not _EXECUTION_CONFIRMATION_PATTERN.search(message):
+        return False
+    return _is_bare_affirmation(message)
 
 
 def is_execution_rejection(message: str) -> bool:
@@ -433,7 +533,7 @@ def classify_deterministic(
     to the semantic classifier.
     """
 
-    # 1. Negation detection (run FIRST — Â§8.7)
+    # 1. Negation detection (run FIRST â€” Ã‚Â§8.7)
     if _has_negated_action(message):
         return RouteDecision(
             actionClass=RouteActionClass.DISCUSS,
@@ -441,7 +541,7 @@ def classify_deterministic(
             executionLane="discuss",
             writeAllowed=False,
             destructive=False,
-            evidence=["Negation detected — action intent negated by user"],
+            evidence=["Negation detected â€” action intent negated by user"],
         )
     # 1.5 Production-orchestrator commands (mission): explicit production verbs
     # run BEFORE the approve/reject checks so phrases like "put it at the start of
@@ -466,6 +566,22 @@ def classify_deterministic(
             writeAllowed=True,
             destructive=False,
             evidence=["Matched timeline edit pattern"],
+        )
+
+    # 1.6 Prompt authoring (Intelligence mission 2026-09-19, Phase 5): the
+    # creator wants the prompt TEXT written. This is LLM authorship — never an
+    # execution and never asset placement. Placement phrasing was handled by
+    # the timeline-edit lane above; full production specifications are scene
+    # preparation, not authorship.
+    if is_prompt_authoring(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.DISCUSS,
+            target="prompt_authoring",
+            confidence=0.9,
+            executionLane="discuss",
+            writeAllowed=False,
+            destructive=False,
+            evidence=["Prompt authoring request — the model writes the prompt text"],
         )
 
     # Adept UI v1.1 Spatial Map shelf; Environment Creator Express for create-environment.
@@ -493,7 +609,7 @@ def classify_deterministic(
             evidence=["Matched Image Generator (v1.1 spatial/3D shelf)"],
         )
 
-    # 2. NAVIGATE (Â§8.1)
+    # 2. NAVIGATE (Ã‚Â§8.1)
     nav_match = _NAVIGATE_PATTERN.search(message)
     if nav_match:
         target_ws, unresolved_target = _extract_navigate_target(message, available_workspaces)
@@ -517,51 +633,57 @@ def classify_deterministic(
             evidence=evidence,
         )
 
-    # 3. APPROVE (Â§8.4)
+    # 3. APPROVE (Ã‚Â§8.4) â€” whole-utterance rule (Intelligence mission RC6):
+    # an utterance carrying NEW imperative content ("Okay, prepare it.") is an
+    # instruction, not an approval of the previous proposal; let it fall
+    # through to normal classification.
     if _APPROVE_PATTERN.search(message):
-        if not pending_proposal_ids:
+        if _is_bare_affirmation(message):
+            if not pending_proposal_ids:
+                return RouteDecision(
+                    actionClass=RouteActionClass.CLARIFY,
+                    target=None,
+                    confidence=0.9,
+                    executionLane="discuss",
+                    writeAllowed=False,
+                    destructive=False,
+                    evidence=["No pending proposal to approve â€” returning CLARIFY"],
+                )
             return RouteDecision(
-                actionClass=RouteActionClass.CLARIFY,
-                target=None,
+                actionClass=RouteActionClass.APPROVE,
+                target=pending_proposal_ids[0],
                 confidence=0.9,
-                executionLane="discuss",
-                writeAllowed=False,
+                executionLane="approve",
+                writeAllowed=True,
                 destructive=False,
-                evidence=["No pending proposal to approve — returning CLARIFY"],
+                evidence=["Matched approve pattern with pending proposals"],
             )
-        return RouteDecision(
-            actionClass=RouteActionClass.APPROVE,
-            target=pending_proposal_ids[0],
-            confidence=0.9,
-            executionLane="approve",
-            writeAllowed=True,
-            destructive=False,
-            evidence=["Matched approve pattern with pending proposals"],
-        )
 
-    # 4. REJECT (Â§8.4)
+    # 4. REJECT (Ã‚Â§8.4) â€” same whole-utterance rule (compound rejections that
+    # also carry a new instruction are classified, not auto-rejected).
     if _REJECT_PATTERN.search(message):
-        if not pending_proposal_ids:
+        if _is_bare_affirmation(message):
+            if not pending_proposal_ids:
+                return RouteDecision(
+                    actionClass=RouteActionClass.CLARIFY,
+                    target=None,
+                    confidence=0.9,
+                    executionLane="discuss",
+                    writeAllowed=False,
+                    destructive=False,
+                    evidence=["No pending proposal to reject â€” returning CLARIFY"],
+                )
             return RouteDecision(
-                actionClass=RouteActionClass.CLARIFY,
-                target=None,
-                confidence=0.9,
-                executionLane="discuss",
-                writeAllowed=False,
+                actionClass=RouteActionClass.REJECT,
+                target=pending_proposal_ids[0],
+                confidence=0.88,
+                executionLane="reject",
+                writeAllowed=True,
                 destructive=False,
-                evidence=["No pending proposal to reject — returning CLARIFY"],
+                evidence=["Matched reject pattern with pending proposals"],
             )
-        return RouteDecision(
-            actionClass=RouteActionClass.REJECT,
-            target=pending_proposal_ids[0],
-            confidence=0.88,
-            executionLane="reject",
-            writeAllowed=True,
-            destructive=False,
-            evidence=["Matched reject pattern with pending proposals"],
-        )
 
-    # 5. READ_INSPECT (Â§8.2)
+    # 5. READ_INSPECT (Ã‚Â§8.2)
     if _READ_INSPECT_PATTERN.search(message) and not _is_discussion_seeking(message):
         entity_tools = _detect_read_entity(message)
         return RouteDecision(
@@ -574,7 +696,7 @@ def classify_deterministic(
             evidence=["Matched read/inspect pattern"],
         )
 
-    # 6. DISCUSS (Â§8.3) — ordered sub-patterns
+    # 6. DISCUSS (Ã‚Â§8.3) â€” ordered sub-patterns
     if _DISCUSS_FEEDBACK_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.DISCUSS,
@@ -621,7 +743,7 @@ def classify_deterministic(
             evidence=["Matched opinion-seeking discuss pattern"],
         )
 
-    # 7. MODIFY_KNOWLEDGE (Â§8.5)
+    # 7. MODIFY_KNOWLEDGE (Ã‚Â§8.5)
     if _MODIFY_KNOWLEDGE_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.MODIFY_KNOWLEDGE,
@@ -638,7 +760,7 @@ def classify_deterministic(
     # The `target` field carries a stable marker string consumed by the
     # unified-intent capability resolver; capability id is resolved there.
 
-    # "suggest a close-up" / "suggest a shot" → analysis (NOT execution).
+    # "suggest a close-up" / "suggest a shot" â†’ analysis (NOT execution).
     # The LLM proposes shot text; the creator then says "generate four shots".
     if _SUGGEST_SHOT_PATTERN.search(message):
         return RouteDecision(
@@ -651,7 +773,7 @@ def classify_deterministic(
             evidence=["Matched scene shot suggestion pattern (analysis, not execution)"],
         )
 
-    # "create an atlas shot of X" → atlas.generate
+    # "create an atlas shot of X" â†’ atlas.generate
     if _ATLAS_SHOT_PATTERN.search(message) and not is_spatial_map_creator_execution_gated():
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
@@ -663,10 +785,10 @@ def classify_deterministic(
             evidence=["Matched atlas shot generation pattern"],
         )
 
-    # "use that as the spatial map" → set spatial map background (no capability
+    # "use that as the spatial map" â†’ set spatial map background (no capability
     # yet; this is an inline spatial map operation handled by the LLM/curated
     # tools path with the most recent atlas asset). Classified as EXECUTION so
-    # the dispatcher acts rather than acknowledges (Law #13 — no fake
+    # the dispatcher acts rather than acknowledges (Law #13 â€” no fake
     # operation).
     if _USE_AS_SPATIAL_MAP_PATTERN.search(message) and not is_spatial_map_creator_execution_gated():
         return RouteDecision(
@@ -690,7 +812,7 @@ def classify_deterministic(
             evidence=["Matched Character Reference Sheet create pattern"],
         )
 
-    # "generate the ers" → ers.generate
+    # "generate the ers" â†’ ers.generate
     if _ERS_GENERATE_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
@@ -776,7 +898,7 @@ def classify_deterministic(
             evidence=["Matched scene shot regeneration pattern"],
         )
 
-    # "send those to timeline" → scene creator timeline handoff
+    # "send those to timeline" â†’ scene creator timeline handoff
         # Wave 4: completed Omni video deposit (prefer over Scene Creator send)
     if _DEPOSIT_COMPLETED_VIDEO_PATTERN.search(message):
         return RouteDecision(
@@ -786,7 +908,7 @@ def classify_deterministic(
             executionLane="proposal",
             writeAllowed=True,
             destructive=False,
-            evidence=["Matched completed video → Timeline Visual deposit pattern"],
+            evidence=["Matched completed video â†’ Timeline Visual deposit pattern"],
         )
 
     if _SEND_TO_TIMELINE_PATTERN.search(message):
@@ -801,9 +923,9 @@ def classify_deterministic(
         )
 
     # "put @Korri behind the bar" / "place #coffeecup in front of her"
-    # → spatial map placement. Classified as EXECUTION so the dispatcher
+    # â†’ spatial map placement. Classified as EXECUTION so the dispatcher
     # routes through curated tools. The LLM resolves the normalized (x,y)
-    # placement from the location phrase (deferred — requires LLM spatial
+    # placement from the location phrase (deferred â€” requires LLM spatial
     # reasoning; the deterministic router extracts the @/# tag and the
     # location phrase but does not compute coordinates).
     place_char = _PLACE_CHARACTER_PATTERN.search(message)
@@ -817,7 +939,7 @@ def classify_deterministic(
             destructive=False,
             evidence=[
                 f"Matched spatial map character placement pattern (entity=@{place_char.group(1)})",
-                "Coordinate resolution deferred — requires LLM spatial reasoning",
+                "Coordinate resolution deferred â€” requires LLM spatial reasoning",
             ],
         )
     place_prop = _PLACE_PROP_PATTERN.search(message)
@@ -831,11 +953,11 @@ def classify_deterministic(
             destructive=False,
             evidence=[
                 f"Matched spatial map prop placement pattern (entity=#{place_prop.group(1)})",
-                "Coordinate resolution deferred — requires LLM spatial reasoning",
+                "Coordinate resolution deferred â€” requires LLM spatial reasoning",
             ],
         )
 
-    # 8. EXECUTE_PRODUCTION (Â§8.6)
+    # 8. EXECUTE_PRODUCTION (Ã‚Â§8.6)
     if _EXECUTE_DESTRUCTIVE_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
@@ -855,5 +977,5 @@ def classify_deterministic(
             evidence=["Matched generate production pattern"],
         )
 
-    # 9. No deterministic match — fall back to semantic classifier
+    # 9. No deterministic match â€” fall back to semantic classifier
     return None

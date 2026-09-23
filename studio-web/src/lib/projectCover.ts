@@ -36,12 +36,12 @@ export function resolveProjectCover(project: Project): ProjectCover {
         ? project.cover_kind
         : mediaKind(project.assets?.find((a) => a.id === project.cover_asset_id) || ({ kind: "image" } as Asset)) ||
           "image";
-    return { url: api.assetUrl(project.cover_asset_id), kind };
+    return { url: api.assetUrl(project.cover_asset_id, null, project.id), kind };
   }
   const assets = project.assets || [];
   const image = newest(assets.filter((a) => mediaKind(a) === "image"));
-  if (image) return { url: api.assetUrl(image.id), kind: "image" };
+  if (image) return { url: api.assetUrl(image.id, null, project.id), kind: "image" };
   const video = newest(assets.filter((a) => mediaKind(a) === "video"));
-  if (video) return { url: api.assetUrl(video.id), kind: "video" };
+  if (video) return { url: api.assetUrl(video.id, null, project.id), kind: "video" };
   return { url: null, kind: null };
 }

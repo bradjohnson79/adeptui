@@ -214,6 +214,8 @@ def _get_characters(db: Session, project_id: str) -> Optional[dict[str, Any]]:
                     "speciesOrType": p.species_or_type,
                     "apparentAge": p.apparent_age,
                     "activeVoiceProfileId": p.active_voice_profile_id,
+                    "isGlobal": bool(getattr(p, "is_global", False) or getattr(p, "isGlobal", False)),
+                    "owningProjectId": p.project_id,
                 }
                 for p in profiles
             ],
@@ -251,12 +253,13 @@ def _get_spatial_map_summary(db: Session, project_id: str) -> Optional[dict[str,
     JSON.
     """
     try:
-        from app.spatial_map.service import list_documents
+        from app.spatial_map.service import list_documents, planning_context
 
         docs = list_documents(db, project_id)
         if not docs:
             return None
         doc = docs[0]
+        plan = planning_context(doc)
         has_ers = False
         try:
             from app.spatial_map.ers_persistence import list_ers_packages
@@ -275,10 +278,58 @@ def _get_spatial_map_summary(db: Session, project_id: str) -> Optional[dict[str,
             "camera_count": len(doc.cameras or []),
             "cameras": _cinematographer_context(db, project_id, doc),
             "has_background": bool(doc.backgroundAssetId),
+            "geometry_source": plan.get("geometrySource") or "",
+            "background_asset_id": plan.get("backgroundAssetId"),
+            "pixels_unchanged": bool(plan.get("pixelsUnchanged")),
+            "source_line": plan.get("sourceLine") or "",
+            "placements": {
+                "characters": [
+                    {"label": item.get("label"), "summary": item.get("summary")}
+                    for item in (plan.get("characters") or [])
+                ],
+                "props": [
+                    {"label": item.get("label"), "summary": item.get("summary")}
+                    for item in (plan.get("props") or [])
+                ],
+                "cameras": [
+                    {
+                        "label": item.get("label"),
+                        "summary": item.get("summary"),
+                        "facing": item.get("facing") or "",
+                    }
+                    for item in (plan.get("cameras") or [])
+                ],
+            },
             "has_ers": has_ers,
             "scene_id": doc.sceneId,
             "updated_at": doc.updatedAt,
         }
+        try:
+            from app.spatial_map import spin_camera
+
+            spin_placement = getattr(doc, "spinCamera", None)
+            if spin_placement is not None:
+                result["spin_camera"] = {
+                    "placement": spin_placement.model_dump(mode="json"),
+                    "centerStatus": spin_camera.center_status(doc, spin_placement),
+                }
+            packages = spin_camera._manifests_for_map(db, project_id, doc.id)
+            result["spin_packages"] = [
+                {
+                    "id": pkg.spinPackageId,
+                    "version": pkg.version,
+                    "provider": pkg.provider,
+                    "viewStatuses": {
+                        d: pkg.views[d].status for d in spin_camera.DIRECTIONS
+                    },
+                    "ersStale": pkg.ersStale,
+                    "createdAt": pkg.createdAt,
+                }
+                for pkg in sorted(packages, key=lambda p: p.createdAt or "", reverse=True)
+            ]
+        except Exception:
+            pass
+        return result
     except Exception:
         pass
     return None

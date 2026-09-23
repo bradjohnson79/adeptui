@@ -314,6 +314,20 @@ def _add_slot(
     )
 
 
+def _open_on_prior_frame(payload: CanonicalR2VRequest) -> None:
+    """Bridge last frame is picture 1 so the next window begins on that still."""
+    visuals = [slot for slot in payload.slots if slot.pictureIndex]
+    prior = next((slot for slot in visuals if slot.role == "prior_frame"), None)
+    if prior is None or prior.pictureIndex == 1:
+        return
+    rest = sorted(
+        (slot for slot in visuals if slot is not prior),
+        key=lambda slot: int(slot.pictureIndex or 0),
+    )
+    for index, slot in enumerate((prior, *rest), start=1):
+        slot.pictureIndex = index
+
+
 def _add_bridge_prior_frame_slot(slots: list[R2VSlot], request: TimelineGenerationRequest) -> None:
     # OWNER-PROTECTED (Timeline Batch Architecture Guard). prior_frame = Batch N
     # ACTUAL last frame via the continuity bridge — the certified H3 extension
@@ -344,21 +358,54 @@ def _add_bridge_prior_frame_slot(slots: list[R2VSlot], request: TimelineGenerati
     _add_slot(slots, asset_id=last_frame, role="prior_frame", label="Previous take")
 
 
+def _is_bound_visual_reference(ref: dict[str, Any]) -> bool:
+    """Creator-bound Master visual (@/%/#) even when consumed is False."""
+    if not isinstance(ref, dict):
+        return False
+    aid = str(ref.get("assetId") or "").strip()
+    if not aid:
+        return False
+    kind = str(ref.get("kind") or "").lower()
+    if kind in {"charactervoice", "voice", "audio", "motion", "video"}:
+        return False
+    rtype = str(
+        ref.get("referenceType") or ref.get("bindingType") or ref.get("reference_type") or ""
+    ).lower()
+    role = str(ref.get("role") or "").lower()
+    if rtype in {"character", "crs", "prop", "vehicle", "environment", "location", "entity"}:
+        return True
+    if role in {"character", "crs", "prop", "place", "environment", "entity", "entity_reference"}:
+        return True
+    if kind in {"entity", "image"} and (
+        ref.get("identityId") or ref.get("characterId") or ref.get("bindingId")
+    ):
+        return True
+    return False
+
+
 def _consumed_timeline_cast(batch: BatchBlock) -> tuple[set[str], set[str]]:
     """Character ids/assets the creator actually checked on the Timed Prompt.
 
     Stale characterIdentity / leftover voices must not expand this cast.
+    Bound entity rows stay in the cast even when consumed is False.
     """
     ids: set[str] = set()
     assets: set[str] = set()
     for ref in batch.references or []:
-        if not isinstance(ref, dict) or ref.get("consumed") is False:
+        if not isinstance(ref, dict):
+            continue
+        if ref.get("consumed") is False and not _is_bound_visual_reference(ref):
             continue
         kind = str(ref.get("kind") or "").lower()
         if kind in {"characteridentity", "charactervoice", "voice", "audio", "motion"}:
             continue
         role = str(ref.get("role") or "").lower()
-        if role not in {"character", "crs", "entity", "entity_reference"} and "character" not in role:
+        rtype = str(ref.get("referenceType") or ref.get("bindingType") or "").lower()
+        if (
+            role not in {"character", "crs", "entity", "entity_reference"}
+            and "character" not in role
+            and rtype not in {"character", "crs"}
+        ):
             continue
         aid = str(ref.get("assetId") or "").strip()
         ident = str(ref.get("identityId") or ref.get("characterId") or "").strip()
@@ -388,8 +435,12 @@ def collect_slots_from_batch(
     cast_ids, cast_assets = _consumed_timeline_cast(batch)
     # Kinds that produce audio/video slots, never visual slots.
     _AUDIO_VIDEO_KINDS = {"charactervoice", "voice", "audio", "motion"}
+    from ...scene_references.sheet_tags import r2v_role_for_reference
+
     for ref in batch.references or []:
-        if not isinstance(ref, dict) or ref.get("consumed") is False:
+        if not isinstance(ref, dict):
+            continue
+        if ref.get("consumed") is False and not _is_bound_visual_reference(ref):
             continue
         kind = str(ref.get("kind") or "")
         # Voice/audio/motion references are handled by the audio slot loop below.
@@ -424,7 +475,12 @@ def collect_slots_from_batch(
         aid = str(ref.get("assetId") or "").strip()
         if not aid:
             continue
-        role = _norm_role(str(ref.get("role") or ""), kind=kind)
+        sheet_role = r2v_role_for_reference(
+            ref.get("referenceType") or ref.get("bindingType"),
+            role=str(ref.get("role") or ""),
+            kind=kind,
+        )
+        role = _norm_role(str(sheet_role or ref.get("role") or ""), kind=kind)
         if role == "video" or "video" in kind.lower() or kind == "motion":
             _add_slot(
                 slots,
@@ -892,6 +948,25 @@ def map_canonical_r2v(
     )
 
 
+def _refuse_dropped_bound_visuals(batch: BatchBlock, payload: CanonicalR2VRequest) -> None:
+    """Fail closed when a bound @/%/# image never reached an H3 picture slot."""
+    slotted = {
+        str(slot.assetId or "").strip()
+        for slot in (payload.slots or [])
+        if str(slot.assetId or "").strip() and slot.pictureIndex
+    }
+    for ref in batch.references or []:
+        if not _is_bound_visual_reference(ref if isinstance(ref, dict) else {}):
+            continue
+        aid = str(ref.get("assetId") or "").strip()
+        if aid and aid not in slotted:
+            tag = str(ref.get("tag") or ref.get("promptName") or ref.get("label") or aid)
+            rtype = str(ref.get("referenceType") or ref.get("role") or "reference")
+            raise ValueError(
+                f"BOUND_REFERENCE_DROPPED: {rtype} {tag} ({aid}) did not reach an H3 picture slot"
+            )
+
+
 def attach_canonical_r2v(
     request: TimelineGenerationRequest,
     batch: BatchBlock,
@@ -964,6 +1039,8 @@ def attach_canonical_r2v(
         joining=joining,
         style_key=style_key,
     )
+    if payload.mechanism == H3_MECHANISM and str(getattr(request, "continuityBridgeId", None) or "").strip():
+        _open_on_prior_frame(payload)
     request.providerOptions = dict(request.providerOptions or {})
     request.providerOptions["r2v"] = payload.to_job_dict()
     kb = knowledge_for_generator(product)
@@ -990,7 +1067,24 @@ def attach_canonical_r2v(
         # Input Text authority. promptPrefix is diagnostics-only — residual H3
         # overwrite authority DELETED (never request.prompt = promptPrefix on H3).
         request.providerOptions["h3PromptAuthority"] = "timed_prompt_direct_line"
-        # Keep promptPrefix in r2v dict for ledger; do not promote to Input Text.
+        # Additive subject/picture binds after slots exist. authoredPrompt stays.
+        from .semantic_contract import apply_bound_reference_tokens
+
+        request.prompt = apply_bound_reference_tokens(request.prompt, payload.slots)
+        prior = next(
+            (slot for slot in payload.slots if slot.role == "prior_frame" and slot.pictureIndex),
+            None,
+        )
+        if prior is not None and str(getattr(request, "continuityBridgeId", None) or "").strip():
+            opener = (
+                f"<Picture {int(prior.pictureIndex)}> is the last frame of the previous window. "
+                "Begin this shot on that exact picture. "
+                "Keep the same people, distance, and light at the cut."
+            )
+            if opener.lower() not in (request.prompt or "").lower():
+                request.prompt = opener + "\n\n" + (request.prompt or "").strip()
+        request.providerOptions["h3ReferenceTokensApplied"] = True
+        _refuse_dropped_bound_visuals(batch, payload)
     elif direct is None and payload.promptPrefix and payload.mechanism in {
         LTX25_MECHANISM,
         SEEDANCE_MECHANISM,
@@ -1008,6 +1102,7 @@ def merge_identity_slots(
     place_asset_id: str | None = None,
     method: str,
     joining: bool = False,
+    batch: BatchBlock | None = None,
 ) -> CanonicalR2VRequest:
     raw = ((request.providerOptions or {}).get("r2v") or {}) if request.providerOptions else {}
     slots = [R2VSlot.model_validate(item) for item in (raw.get("slots") or [])]
@@ -1065,6 +1160,13 @@ def merge_identity_slots(
     )
     if payload.mechanism == H3_MECHANISM and not str(request.resolution or "").strip():
         request.resolution = H3_CANVAS
+    if payload.mechanism == H3_MECHANISM:
+        from .semantic_contract import apply_bound_reference_tokens
+
+        request.prompt = apply_bound_reference_tokens(request.prompt, payload.slots)
+        request.providerOptions["h3ReferenceTokensApplied"] = True
+        if batch is not None:
+            _refuse_dropped_bound_visuals(batch, payload)
     # Wave 2A / Phase A: H3 Timed Prompt stays on request.prompt; promptPrefix is
     # diagnostics only. Residual H3 overwrite authority deleted.
     if payload.promptPrefix and payload.mechanism != H3_MECHANISM:

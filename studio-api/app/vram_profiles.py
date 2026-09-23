@@ -25,7 +25,7 @@ class VramProfile:
     lipsync_steps: int
     # Soft assist: process video in frame windows on low VRAM (documented for future chunked pipelines)
     assist_chunk_frames: int
-    recommended_engine: Literal["minimax-h3", "ltx", "wan"]
+    recommended_engine: Literal["minimax-h3", "ltx-2.5"]
     summary: str
     assists: tuple[str, ...]
 
@@ -85,7 +85,7 @@ PROFILES: dict[VramTier, VramProfile] = {
         vram_gb=24,
         label="24 GB",
         width=1280,
-        height=720,
+        height=704,
         fps=24,
         max_duration_sec=6.0,
         max_frames=121,
@@ -96,9 +96,9 @@ PROFILES: dict[VramTier, VramProfile] = {
         lipsync_steps=18,
         assist_chunk_frames=0,
         recommended_engine="minimax-h3",
-        summary="Full HD comfort zone — default Adept quality path for LTX / WAN.",
+        summary="Full HD comfort zone — default Adept quality path for MiniMax H3 / LTX 2.5.",
         assists=(
-            "1280×720 output",
+            "1280×704 output (legal 720p class)",
             "Max ~6s / 121 frames",
             "24 fps",
             "Full quality steps",
@@ -109,7 +109,7 @@ PROFILES: dict[VramTier, VramProfile] = {
         vram_gb=32,
         label="32+ GB",
         width=1280,
-        height=720,
+        height=704,
         fps=24,
         max_duration_sec=10.0,
         max_frames=193,
@@ -122,7 +122,8 @@ PROFILES: dict[VramTier, VramProfile] = {
         recommended_engine="minimax-h3",
         summary="High-VRAM headroom — longer clips, more steps, fewer OOM safeguards.",
         assists=(
-            "1280×720 (room to push higher manually)",
+            "1280×704 legal 720p class (room to choose a higher published tier)",
+            "MiniMax H3 canvas must be multiples of 32 (e.g. 1280x704; 720 is illegal)",
             "Max ~10s / 193 frames",
             "24 fps",
             "Extra sampler steps for quality",
@@ -186,22 +187,13 @@ def resolve_render_plan(project: Any) -> RenderPlan:
     quality = (getattr(project, "preset", "quality") or "quality").lower() == "quality"
     steps = profile.steps_quality if quality else profile.steps_draft
 
-    # Never exceed the VRAM ceiling on ≤24 GB; 32+ allows manual upscaling.
+    # Creator canvas/FPS are authoritative. VRAM profiles do not shrink them.
     pw = int(getattr(project, "width", profile.width) or profile.width)
     ph = int(getattr(project, "height", profile.height) or profile.height)
     pfps = int(getattr(project, "fps", profile.fps) or profile.fps)
-    if profile.vram_gb >= 32:
-        width, height, fps = pw, ph, pfps
-        clamped = False
-    else:
-        width = min(pw, profile.width)
-        height = min(ph, profile.height)
-        fps = min(pfps, profile.fps)
-        clamped = width < pw or height < ph or fps < pfps
-
+    width, height, fps = pw, ph, pfps
+    clamped = False
     notes = ""
-    if clamped:
-        notes = f"Clamped to {width}×{height} @{fps}fps for {profile.label} VRAM safety."
 
     return RenderPlan(
         vram_gb=profile.vram_gb,
@@ -224,12 +216,9 @@ def resolve_render_plan(project: Any) -> RenderPlan:
 
 
 def apply_profile_to_project(project: Any, vram_gb: int) -> VramProfile:
-    """Write VRAM preset dimensions onto the project (user-selected Advanced control)."""
+    """Record a display-only VRAM class. Never rewrite canvas, FPS, or duration."""
     profile = get_profile(vram_gb)
     project.vram_gb = profile.vram_gb
-    project.width = profile.width
-    project.height = profile.height
-    project.fps = profile.fps
     return profile
 
 
@@ -268,22 +257,41 @@ def query_gpu_stats() -> dict[str, Any]:
         "name,driver_version,memory.total,memory.used,memory.free,"
         "temperature.gpu,utilization.gpu,utilization.memory,power.draw,fan.speed"
     )
-    try:
-        proc = subprocess.run(
-            [
-                "nvidia-smi",
-                f"--query-gpu={query}",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except FileNotFoundError:
-        return {"ok": False, "message": "nvidia-smi not found", "gpus": [], "recommended_tier": None}
-    except Exception as exc:
-        return {"ok": False, "message": str(exc), "gpus": [], "recommended_tier": None}
+    # Under heavy CUDA load nvidia-smi can stall past a few seconds; keep the
+    # GPU panel honest with a longer timeout and one retry instead of a raw
+    # subprocess TimeoutExpired dumped into the UI.
+    smi_cmd = [
+        "nvidia-smi",
+        f"--query-gpu={query}",
+        "--format=csv,noheader,nounits",
+    ]
+    last_exc: Exception | None = None
+    proc = None
+    for attempt in range(2):
+        try:
+            proc = subprocess.run(
+                smi_cmd,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            last_exc = None
+            break
+        except FileNotFoundError:
+            return {"ok": False, "message": "nvidia-smi not found", "gpus": [], "recommended_tier": None}
+        except subprocess.TimeoutExpired as exc:
+            last_exc = exc
+            continue
+        except Exception as exc:
+            return {"ok": False, "message": str(exc), "gpus": [], "recommended_tier": None}
+    if proc is None:
+        return {
+            "ok": False,
+            "message": "GPU stats timed out while the GPU was busy. Click Refresh in a moment.",
+            "gpus": [],
+            "recommended_tier": None,
+        }
 
     if proc.returncode != 0 or not (proc.stdout or "").strip():
         err = (proc.stderr or proc.stdout or "nvidia-smi failed").strip()
@@ -327,21 +335,26 @@ def query_gpu_stats() -> dict[str, Any]:
 
     primary = max(gpus, key=lambda g: float(g.get("memory_total_mib") or 0))
     total_mib = float(primary.get("memory_total_mib") or 0)
-    tier = normalize_vram_tier(int(round(total_mib / 1024.0))) if total_mib else None
+    used_mib = float(primary.get("memory_used_mib") or 0)
+    free_mib = float(primary.get("memory_free_mib") or 0)
+    total_gb = round(total_mib / 1024.0, 2) if total_mib else None
     return {
         "ok": True,
         "message": "ok",
         "gpus": gpus,
         "primary_index": primary.get("index", 0),
-        "recommended_tier": tier,
+        "recommended_tier": None,
+        "memory_total_gb": total_gb,
+        "memory_used_gb": round(used_mib / 1024.0, 2) if total_mib else None,
+        "memory_free_gb": round(free_mib / 1024.0, 2) if total_mib else None,
+        "gpu_name": primary.get("name") or "",
     }
 
 
 def clamp_frames(frames: int, plan: RenderPlan) -> tuple[int, bool]:
-    """Keep LTX-friendly 8n+1 pattern while respecting VRAM max_frames."""
-    frames = max(9, frames)
-    frames = ((frames - 1) // 8) * 8 + 1
-    if frames <= plan.max_frames:
-        return frames, False
-    capped = ((plan.max_frames - 1) // 8) * 8 + 1
-    return max(9, capped), True
+    """Retired mutator. Returns the requested count unchanged.
+
+    Duration legality lives in video_runtime.legal_canvas. Callers must not
+    treat the second tuple value as permission to rewrite length.
+    """
+    return max(1, int(frames)), False

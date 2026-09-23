@@ -87,7 +87,9 @@ export function useWorkspaceFullscreen(options: UseWorkspaceFullscreenOptions): 
   useEffect(() => {
     if (!enabled) return;
     const onChange = () => syncFromDocument();
-    const onError = () => {
+    const onError = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target !== containerRef.current) return;
       setError("Unable to enter full screen. Your browser may have blocked the request.");
       setIsFullscreen(false);
       syncBodyClass(false, null);

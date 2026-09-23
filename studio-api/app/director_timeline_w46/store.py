@@ -17,7 +17,6 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from ..db import Scene
-from ..director_timeline import dumps_director_timeline, parse_director_timeline
 from .contracts import SceneTimelineMaster, _now
 from .migration import embed_master_into_director_dict, load_or_migrate_scene_master
 
@@ -63,9 +62,18 @@ def normalize_timeline_workspace(raw: Any) -> dict[str, Any]:
         "removedItems": [],
         "layoutIntent": {},
         "inpaintIntent": {},
+        # SINGLE-STORE: playhead is workspace state. save_master persists
+        # Master + workspace only, so a director_tl.playhead write is a dead
+        # write — the workspace carries the durable playhead.
+        "playhead": 0.0,
     }
     if not isinstance(raw, dict):
         return base
+    if raw.get("playhead") is not None:
+        try:
+            base["playhead"] = max(0.0, float(raw["playhead"]))
+        except (TypeError, ValueError):
+            pass
     if isinstance(raw.get("settings"), dict):
         base["settings"] = {**base["settings"], **raw["settings"]}
     if raw.get("guidancePriority"):
@@ -81,7 +89,35 @@ def normalize_timeline_workspace(raw: Any) -> dict[str, Any]:
         base["layoutIntent"] = dict(raw["layoutIntent"])
     if isinstance(raw.get("inpaintIntent"), dict):
         base["inpaintIntent"] = dict(raw["inpaintIntent"])
+    if isinstance(raw.get("libraryAssetIds"), list):
+        base["libraryAssetIds"] = [str(item) for item in raw["libraryAssetIds"] if str(item).strip()]
     return base
+
+
+def set_library_asset_ids(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    asset_ids: list[str],
+) -> dict[str, Any]:
+    """Timeline Library tray membership. Workspace state, not a second clip store."""
+    scene = get_scene(db, project_id, scene_id)
+    if not scene:
+        return {"ok": False, "error": "SCENE_NOT_FOUND"}
+    raw: dict[str, Any] = {}
+    try:
+        parsed = json.loads(scene.director_json or "{}")
+        if isinstance(parsed, dict):
+            raw = parsed
+    except Exception:
+        raw = {}
+    ws = normalize_timeline_workspace(raw.get("timelineWorkspace"))
+    ws["libraryAssetIds"] = [str(item) for item in asset_ids if str(item).strip()]
+    raw["timelineWorkspace"] = ws
+    scene.director_json = json.dumps(raw, ensure_ascii=False)
+    db.add(scene)
+    db.commit()
+    return {"ok": True, "libraryAssetIds": ws["libraryAssetIds"]}
 
 
 def extract_timeline_workspace(director_raw: str | None) -> dict[str, Any]:
@@ -94,6 +130,46 @@ def extract_timeline_workspace(director_raw: str | None) -> dict[str, Any]:
     except Exception:
         pass
     return normalize_timeline_workspace(None)
+
+
+ALLOWED_SCENE_METADATA_KEYS = frozenset({"promptIntelligence"})
+
+
+def patch_scene_metadata(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    patch: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge isolated director_json keys from current disk state.
+
+    Never accepts timelineMaster / timelineWorkspace from the client.
+    """
+    scene = get_scene(db, project_id, scene_id)
+    if not scene:
+        return {"ok": False, "error": "SCENE_NOT_FOUND"}
+    if not isinstance(patch, dict) or not patch:
+        return {"ok": False, "error": "METADATA_PATCH_REQUIRED"}
+    forbidden = set(patch) - ALLOWED_SCENE_METADATA_KEYS
+    if forbidden:
+        return {"ok": False, "error": "METADATA_KEY_FORBIDDEN", "keys": sorted(forbidden)}
+    raw: dict[str, Any] = {}
+    try:
+        parsed = json.loads(scene.director_json or "{}")
+        if isinstance(parsed, dict):
+            raw = parsed
+    except Exception:
+        raw = {}
+    before_master = json.dumps(raw.get("timelineMaster"), sort_keys=True, default=str)
+    for key, value in patch.items():
+        raw[key] = value
+    after_master = json.dumps(raw.get("timelineMaster"), sort_keys=True, default=str)
+    if before_master != after_master:
+        return {"ok": False, "error": "TIMELINE_MASTER_MUTATION_FORBIDDEN"}
+    scene.director_json = json.dumps(raw, ensure_ascii=False)
+    db.add(scene)
+    db.commit()
+    return {"ok": True, "promptIntelligence": raw.get("promptIntelligence")}
 
 
 def get_scene(db: Session, project_id: str, scene_id: str) -> Scene | None:
@@ -123,7 +199,26 @@ def load_master(db: Session, project_id: str, scene_id: str) -> dict[str, Any]:
     from ..creator_scope.identity_converge import migrate_loaded_master
 
     tag_repaired = migrate_loaded_master(db, project_id, master)
-    if not existing_master or tag_repaired:
+    # P6: never cement a collapsed migration over a richer embedded master.
+    # An empty embedded master that this read filled (execution-window bootstrap)
+    # is not a collapse. Persist that fill once so batch and prompt ids stay
+    # stable. Leaving it in memory only minted a new track on every GET.
+    collapse = False
+    bootstrapped_empty = False
+    if isinstance(existing_master, dict):
+        prev_n = len(existing_master.get("batchBlocks") or [])
+        next_n = len(getattr(master, "batchBlocks", None) or [])
+        if prev_n >= 2 and next_n < prev_n:
+            collapse = True
+        elif prev_n == 0 and next_n > 0:
+            bootstrapped_empty = True
+    if collapse:
+        # Prefer embedded master; do not persist migration wipe.
+        try:
+            master = SceneTimelineMaster.model_validate(existing_master)
+        except Exception:
+            pass
+    elif not existing_master or tag_repaired or bootstrapped_empty:
         save_master(db, project_id, scene_id, master, director_tl=tl)
     return {
         "ok": True,
@@ -146,26 +241,27 @@ def save_master(
     bump_revision: bool = False,
     touch_batches: bool = True,
 ) -> SceneTimelineMaster:
+    """Persist SceneTimelineMaster as the sole Timeline authority.
+
+    SINGLE-STORE LAW: this writes timelineMaster + timelineWorkspace only. It
+    does NOT serialize a live DirectorTimeline prompt/clip store as authority.
+    The director_tl param is accepted for migrate-only callers and is not
+    persisted as a second store. Legacy keys already on disk are preserved
+    byte-for-byte (COW) but are never updated by this save.
+    """
     scene = get_scene(db, project_id, scene_id)
     if not scene:
         raise ValueError("SCENE_NOT_FOUND")
-    if director_tl is None:
-        director_tl = parse_director_timeline(
-            scene.director_json,
-            fallback_duration=float(scene.duration_sec or 5.0),
-            fallback_prompt=scene.prompt or "",
-        )
-    base = json.loads(dumps_director_timeline(director_tl))
     raw: dict[str, Any] = {}
     try:
         parsed = json.loads(scene.director_json or "{}")
         if isinstance(parsed, dict):
             raw = parsed
-            for k, v in raw.items():
-                if k not in base and k not in ("timelineMaster", "timelineWorkspace"):
-                    base[k] = v
     except Exception:
-        pass
+        raw = {}
+    # Preserve any non-Master, non-workspace keys already on disk (legacy blob,
+    # lipsync, etc.) without re-serializing a live DirectorTimeline store.
+    base = {k: v for k, v in raw.items() if k not in ("timelineMaster", "timelineWorkspace")}
     ws = normalize_timeline_workspace(workspace if workspace is not None else raw.get("timelineWorkspace"))
     if bump_revision:
         ws["timelineRevision"] = int(ws.get("timelineRevision") or 0) + 1
@@ -269,6 +365,12 @@ def replace_master(db: Session, project_id: str, scene_id: str, payload: dict[st
             incoming["sceneTakes"] = prev_master["sceneTakes"]
             incoming.setdefault("currentSceneTakeId", prev_master.get("currentSceneTakeId"))
             incoming.setdefault("activeSceneTakeId", prev_master.get("activeSceneTakeId"))
+    # P6 master-stability: never persist a collapsed single-Draft over multi-batch.
+    from .generation.timeline_reconciler import refuse_master_structure_collapse
+
+    collapse = refuse_master_structure_collapse(previous=prev_master, incoming=incoming)
+    if collapse is not None:
+        return collapse
     master = SceneTimelineMaster.model_validate(incoming)
     from .scene_takes import (
         begin_execution_revision,

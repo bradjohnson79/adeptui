@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
 import { candidateAssetId, isLiveGenerating, type ActiveCrsStatus } from "./activeCrsCard";
+import {
+  openCharacterSheetInImageGenerator,
+  openCharacterSheetInLibrary,
+  type GoTab,
+} from "./characterSheetDestinations";
 import { candidateErrorMessage, candidateStage, type CharacterCandidate } from "./types";
+import { promptCanonicalCharacterTag } from "../../creatorScope/identityTags";
 
 export type { ActiveCrsStatus };
 
@@ -19,6 +25,8 @@ export function CharacterActiveCrsCard({
   onRegenerate,
   onApprove,
   onReject,
+  onGoTab,
+  characterId,
 }: {
   hero: CharacterCandidate | null;
   characterName: string;
@@ -33,8 +41,10 @@ export function CharacterActiveCrsCard({
   onRegenerate?: () => void;
   onApprove: (candidate: CharacterCandidate) => void;
   onReject?: (candidate: CharacterCandidate) => void;
+  onGoTab?: GoTab;
+  characterId?: string;
 }) {
-  const atName = characterName.trim() ? `@${characterName.trim()}` : null;
+  const atTag = promptCanonicalCharacterTag(characterName);
   const assetId = candidateAssetId(hero);
   const assetUrl = assetId ? api.assetUrl(assetId, revision) : null;
   const [imgFailed, setImgFailed] = useState(false);
@@ -58,6 +68,21 @@ export function CharacterActiveCrsCard({
         </p>
       ) : (
         <div className="character-active-crs__body">
+          {atTag && assetId ? (
+            <div className="character-core__tag-row" data-testid="character-creator-tag-row" style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+              <code data-testid="character-creator-tag">{atTag}</code>
+              <button
+                type="button"
+                className="character-core__button"
+                data-testid="character-creator-copy-tag"
+                onClick={() => {
+                  void navigator.clipboard.writeText(atTag);
+                }}
+              >
+                Copy @tag
+              </button>
+            </div>
+          ) : null}
           <button
             type="button"
             className="character-active-crs__thumb"
@@ -107,8 +132,8 @@ export function CharacterActiveCrsCard({
             {revision != null ? (
               <div data-testid="character-active-crs-revision">Revision {revision}</div>
             ) : null}
-            {status === "approved" && atName ? (
-              <div data-testid="character-active-crs-at">{atName} is ready everywhere</div>
+            {status === "approved" && atTag ? (
+              <div data-testid="character-active-crs-at">{atTag} is ready everywhere</div>
             ) : null}
           </div>
         </div>
@@ -151,6 +176,33 @@ export function CharacterActiveCrsCard({
           >
             Reject
           </button>
+        ) : null}
+        {hero && assetId && onGoTab ? (
+          <>
+            <button
+              type="button"
+              className="character-core__button"
+              data-testid="character-active-crs-open-library"
+              disabled={disabled}
+              onClick={() => openCharacterSheetInLibrary(onGoTab, assetId)}
+            >
+              Open in Library
+            </button>
+            <button
+              type="button"
+              className="character-core__button character-core__button--primary"
+              data-testid="character-active-crs-use-imagegen"
+              disabled={disabled}
+              onClick={() =>
+                openCharacterSheetInImageGenerator(onGoTab, {
+                  characterId: characterId || "",
+                  assetId,
+                })
+              }
+            >
+              Use in Image Generator
+            </button>
+          </>
         ) : null}
       </div>
     </section>

@@ -198,7 +198,7 @@ def _pick_sheet(
     sheets = list_sheets(project_id)
     if not sheets:
         raise SceneCreatorHandoffError(
-            "Scene Creator needs an Environment Reference Sheet. Create one in Spatial Map first."
+            "Image Generator needs an Environment Reference Sheet. Create one in Environment Creator Express first."
         )
     # CDX-037: prefer the sheet bound to the ACTIVE spatial map. The map is the
     # canonical spatial truth; a sceneId match or the newest-with-composite

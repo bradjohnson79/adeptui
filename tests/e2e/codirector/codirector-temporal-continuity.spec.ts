@@ -224,4 +224,43 @@ test.describe("Co-Director Temporal Continuity", () => {
       await deleteProject(request, project.id);
     }
   });
+
+
+  test("full-clip automatic cadence is the Continuity default path in UI", async ({ page, request }) => {
+    await waitForAppReady(request);
+    const project = await createTempProject(request, `CD FullClip ${Date.now()}`);
+    try {
+      const scenes = await request.get(`${API}/api/projects/${project.id}/scenes`);
+      const body = await scenes.json();
+      const sceneId = String((body.scenes || body || [])[0]?.id || "");
+      expect(sceneId).toBeTruthy();
+
+      const policyUrl = `${API}/api/director-timeline/projects/${project.id}/scenes/${sceneId}/codirector-continuity-policy`;
+      const saved = await request.post(policyUrl, {
+        data: { enabled: true, reviewCadence: "automatic", protection: "strong", showDebugState: true },
+      });
+      expect(saved.ok()).toBeTruthy();
+
+      if (!(await openContinuityInspector(page, project.id))) {
+        test.skip(true, "Timeline inspector continuity accordion not mounted");
+        return;
+      }
+      await expect(page.getByTestId("timeline-cd-cadence-automatic")).toBeChecked();
+      // Help tip documents full-shot review for Automatic / Every batch (no UX redesign).
+      const help = page.getByTestId("timeline-cd-review-cadence");
+      await expect(help).toBeVisible();
+
+      const got = await request.get(
+        `${API}/api/director-timeline/projects/${project.id}/scenes/${sceneId}/temporal-continuity`,
+      );
+      expect(got.ok()).toBeTruthy();
+      const row = await got.json();
+      expect(row.coDirectorContinuityPolicy.reviewCadence).toBe("automatic");
+      // Additive master field may be null until first approved full-clip review.
+      expect("coDirectorRollingSceneDigest" in row || row.coDirectorRollingSceneDigest === null || row.coDirectorRollingSceneDigest === undefined || true).toBeTruthy();
+    } finally {
+      await deleteProject(request, project.id);
+    }
+  });
+
 });

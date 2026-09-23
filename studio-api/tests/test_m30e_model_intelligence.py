@@ -29,7 +29,7 @@ PACKS = Path(__file__).resolve().parents[1] / "app" / "codirector" / "model_inte
 def test_packs_validate():
     result = validate_all()
     assert not result["failed"], result["failed"]
-    assert "ltx_2_3" in result["ok"]
+    assert "ltx_2_5_distilled" in result["ok"]
     assert "fal_seedance" in result["ok"]
     assert "z_image" in result["ok"]
 
@@ -83,7 +83,7 @@ def test_mi01_ltx_no_background_music():
         ),
     )
     assert intent.audioIntent.music == AudioChannelPolicy.PROHIBITED
-    out = compile_intent(intent, model_id="ltx_2_3")
+    out = compile_intent(intent, model_id="ltx_2_5_distilled")
     assert out.status == "ok"
     assert out.parameters.get("audioStrategy") == "external_audio_pipeline"
     assert any(r.ruleId == "audio.music_prohibited" for r in out.appliedRules)
@@ -103,7 +103,7 @@ def test_mi02_ltx_with_intended_music():
             music=AudioChannelPolicy.REQUIRED,
         ),
     )
-    out = compile_intent(intent, model_id="ltx_2_3")
+    out = compile_intent(intent, model_id="ltx_2_5_distilled")
     assert not any(r.ruleId == "audio.generate_audio_false" for r in out.appliedRules)
     assert any("music" in r.ruleId for r in out.appliedRules)
 
@@ -155,7 +155,7 @@ def test_mi06_wrong_model_version():
         hasSourceImage=True,
         audioIntent=AudioIntent(music=AudioChannelPolicy.PROHIBITED),
     )
-    out = compile_intent(intent, model_id="ltx_2_3", runtime_model_version="9.9.9")
+    out = compile_intent(intent, model_id="ltx_2_5_distilled", runtime_model_version="9.9.9")
     assert out.warnings
     assert out.confidence < 0.7
     assert any("does not match" in w.lower() or "mismatch" in w.lower() for w in out.warnings)
@@ -188,7 +188,7 @@ def test_mi09_example_contamination():
         hasSourceImage=True,
         audioIntent=AudioIntent(music=AudioChannelPolicy.PROHIBITED),
     )
-    out = compile_intent(intent, model_id="ltx_2_3")
+    out = compile_intent(intent, model_id="ltx_2_5_distilled")
     assert "laboratory observation room" not in out.compiledPrompt.lower()
     assert any(r.ruleId == "safety.no_example_leak" for r in out.appliedRules)
 
@@ -198,13 +198,13 @@ def test_mi10_user_override_force_model():
         userPrompt="No music motion",
         mode="image_to_video",
         hasSourceImage=True,
-        forceModelId="wan_2_2",
+        forceModelId="fal_seedance",
         audioIntent=AudioIntent(music=AudioChannelPolicy.PROHIBITED),
         userOverrides={"unsupportedFancyControl": True, "seed": 42},
     )
     rec = recommend(intent)
-    assert rec.recommendedModel == "wan_2_2"
-    out = compile_intent(intent, model_id="wan_2_2")
+    assert rec.recommendedModel == "fal_seedance"
+    out = compile_intent(intent, model_id="fal_seedance")
     assert out.overrideDispositions.get("unsupportedFancyControl").value == "rejected"
     assert out.parameters.get("seed") == 42
 
@@ -286,6 +286,7 @@ def test_selector_prefers_production_ready_for_video():
     )
     rec = recommend(intent)
     assert rec.recommendedModel
+    assert rec.recommendedModel not in {"wan_2_2", "ltx_2_3"}
     assert rec.explanation
     assert rec.scores
 
@@ -293,7 +294,7 @@ def test_selector_prefers_production_ready_for_video():
 def test_api_filmmaker_summary(client):
     res = client.get(
         "/api/codirector/model-intelligence/filmmaker-summary",
-        params={"userPrompt": "No background music I2V shot", "modelId": "ltx_2_3"},
+        params={"userPrompt": "No background music I2V shot", "modelId": "ltx_2_5_distilled"},
     )
     assert res.status_code == 200
     body = res.json()

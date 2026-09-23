@@ -362,10 +362,10 @@ def test_health_endpoint_top_level_missing_lists_exclude_optional(monkeypatch) -
 
     payload = asyncio.run(api_mod.health())
     data = payload.model_dump() if hasattr(payload, "model_dump") else dict(payload)
-    assert "krea2_models" not in (data.get("missing_model_component_ids") or [])
-    assert "Krea 2 Turbo (+RAW) Models" not in (data.get("missing_models") or [])
-    assert data.get("missing_optional_model_component_ids") == ["krea2_models"]
-    assert "Krea 2 Turbo (+RAW) Models" in (data.get("missing_optional_models") or [])
-    assert (data.get("comfy") or {}).get("missingRequiredModelComponentIds") == []
-    assert data.get("comfy_status") == "ready"
+    assert data.get("comfy_probed") is False
+    assert data.get("comfy_reachable") is False
+    assert data.get("comfy_status") == "not_probed"
+    assert (data.get("comfy") or {}).get("status") == "not_probed"
+    assert "krea2_models" not in (fake.get("missingRequiredModelComponentIds") or [])
+    assert fake.get("missingOptionalModelComponentIds") == ["krea2_models"]
 

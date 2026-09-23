@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { Project } from "../types";
@@ -10,9 +10,11 @@ import { IdentityRegistryWorkspace } from "./continuity/IdentityRegistryWorkspac
 import { CharacterCore } from "./character";
 import {
   CHARACTER_PROFILE_SAVED_EVENT,
+  characterLoadIsStale,
   upsertCharacterSummary,
   type CharacterProfileSavedDetail,
 } from "./character/useCharacterProfile";
+import { characterOwnedByProject, pickOwnedCharacterId } from "../creatorScope";
 import { PropsWorkspace } from "./character/PropsWorkspace";
 import { VariantsWorkspace } from "./character/VariantsWorkspace";
 
@@ -257,6 +259,7 @@ export function CharacterProfileWorkspace({
   initialCharacterId,
   initialIdentityId,
   returnWorkspace,
+  onGo,
 }: {
   project: Project;
   onChange?: () => Promise<void>;
@@ -264,6 +267,7 @@ export function CharacterProfileWorkspace({
   initialCharacterId?: string;
   initialIdentityId?: string;
   returnWorkspace?: string;
+  onGo?: (tab: string, extra?: Record<string, string>) => void;
 }) {
   const navigate = useNavigate();
   const openCoDirector = useOpenCoDirector();
@@ -293,21 +297,28 @@ export function CharacterProfileWorkspace({
   });
 
   const selected = useMemo(() => items.find((i) => i.id === selectedId) || profile, [items, selectedId, profile]);
+  const profileLoadGen = useRef(0);
 
   const refreshList = async () => {
     const res = await api.listCharacterProfiles(project.id);
-    setItems(res.items || []);
-    if (!selectedId && res.items?.[0]?.id) setSelectedId(res.items[0].id);
+    const list = res.items || [];
+    setItems(list);
+    if (!selectedId) {
+      const owned = pickOwnedCharacterId(list, project.id);
+      if (owned) setSelectedId(owned);
+    }
   };
 
   const refreshSelected = async (id: string) => {
     if (!id) return;
+    const gen = ++profileLoadGen.current;
     // Visual-sheet GET heals roleAssets → references before list returns.
     await api.getCharacterVisualSheet(project.id, id).catch(() => null);
     const [p, r] = await Promise.all([
       api.getCharacterProfile(project.id, id),
       api.listCharacterReferences(project.id, id),
     ]);
+    if (characterLoadIsStale(gen, profileLoadGen.current)) return;
     setProfile(p);
     setRefs(r.items || []);
   };
@@ -325,8 +336,9 @@ export function CharacterProfileWorkspace({
       const detail = (ev as CustomEvent<CharacterProfileSavedDetail>).detail;
       if (!detail || detail.projectId !== project.id || !detail.profile?.id) return;
       const saved = detail.profile;
+      profileLoadGen.current += 1;
       setItems((prev) => upsertCharacterSummary(prev, saved));
-      setSelectedId((prev) => prev || saved.id);
+      setSelectedId((prev) => prev || (characterOwnedByProject(saved, project.id) ? saved.id : prev));
       setProfile((prev: any) => (prev && prev.id === saved.id ? { ...prev, ...saved } : prev));
     };
     window.addEventListener(CHARACTER_PROFILE_SAVED_EVENT, onSaved);
@@ -587,6 +599,12 @@ export function CharacterProfileWorkspace({
           characterId={selectedId}
           mode="standard"
           autoFocusName={autoFocusNew}
+          onGoTab={onGo}
+          onCreated={setSelectedId}
+          onDeleted={() => {
+            setSelectedId("");
+            void refreshList();
+          }}
           renderAdvanced={({ saved }) => (
             <>
               <Button
@@ -603,21 +621,6 @@ export function CharacterProfileWorkspace({
                 }}
               >
                 Voice Studio
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={!saved}
-                title={!saved ? "Save the character first" : "Open PoseCraft for this character"}
-                onClick={() => {
-                  const params = new URLSearchParams({
-                    workspace: "posecraft",
-                    characterId: selectedId,
-                    returnWorkspace: "characters",
-                  });
-                  navigate(`/project/${project.id}?${params.toString()}`);
-                }}
-              >
-                PoseCraft
               </Button>
               <Button
                 variant="ghost"

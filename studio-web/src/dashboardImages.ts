@@ -40,6 +40,12 @@ export const dashboardImages = {
     motif: "motif-edit",
     plate: "plate-aurora",
   },
+  codirector: {
+    src: "/images/hero/CoDirector_Feature_16-9.png",
+    alt: "Co-Director — intelligent AI production partner",
+    motif: "motif-codirector",
+    plate: "plate-aurora",
+  },
   script: fromAurora("workspaces.script"),
   spatial: fromAurora("workspaces.spatial"),
   imagegen: fromAurora("workspaces.imagegen"),
@@ -53,6 +59,9 @@ export const dashboardImages = {
   oneFrame: fromAurora("workspaces.oneFrame"),
   threeFrame: fromAurora("workspaces.threeFrame"),
   characterCreator: fromAurora("workspaces.characterCreator"),
+  propCreator: fromAurora("workspaces.propCreator"),
+  environmentCreator: fromAurora("workspaces.environmentCreator"),
+  storyboard: fromAurora("workspaces.storyboard"),
   scriptwriter: fromAurora("workspaces.scriptwriter"),
   createProject: fromAurora("surfaces.createProject"),
 } as const satisfies Record<string, DashboardImage>;

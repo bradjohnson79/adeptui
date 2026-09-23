@@ -45,6 +45,7 @@ def submit_render_scene(
         "seed": request.seed,
         "batchBlockId": request.batchBlockId,
         "executionSnapshotId": request.executionSnapshotId,
+        "sceneTakeId": str(request.providerOptions.get("sceneTakeId") or ""),
         "generationMode": request.generationMode,
         "timelineGeneration": True,
         "fallbackAllowed": bool(request.fallbackAllowed),

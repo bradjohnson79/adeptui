@@ -101,8 +101,21 @@ def load_pack(db: Session, project_id: str, execution_id: str) -> ExecutionPlan 
         return None
 
 
-def list_packs(db: Session, project_id: str, active_only: bool = False) -> list[ExecutionPlan]:
-    """List execution packs for a project."""
+def _packs_from_rows(rows: list[Any]) -> list[ExecutionPlan]:
+    packs: list[ExecutionPlan] = []
+    for row in rows:
+        try:
+            data = json.loads(row.value)
+            pack = ExecutionPlan(**data)
+            packs.append(pack)
+        except Exception:
+            continue
+    packs.sort(key=lambda p: p.created_at or p.updated_at or "", reverse=True)
+    return packs
+
+
+def list_packs_raw(db: Session, project_id: str) -> list[ExecutionPlan]:
+    """List packs without reconciling Job rows."""
     from ...db import ProjectTraitRow
 
     rows = (
@@ -114,16 +127,38 @@ def list_packs(db: Session, project_id: str, active_only: bool = False) -> list[
         .order_by(ProjectTraitRow.id.desc())
         .all()
     )
-    packs: list[ExecutionPlan] = []
-    for row in rows:
+    return _packs_from_rows(rows)
+
+
+def list_all_packs(db: Session) -> list[ExecutionPlan]:
+    """List every project's execution packs. Used by startup reconcile."""
+    from ...db import ProjectTraitRow
+
+    rows = (
+        db.query(ProjectTraitRow)
+        .filter(ProjectTraitRow.category == PACK_CATEGORY)
+        .order_by(ProjectTraitRow.id.desc())
+        .all()
+    )
+    return _packs_from_rows(rows)
+
+
+def list_packs(db: Session, project_id: str, active_only: bool = False) -> list[ExecutionPlan]:
+    """List execution packs for a project.
+
+    ``active_only=True`` first reconciles packs against Job rows so a GET
+    cannot keep a finished still as the live work surface.
+    """
+    if active_only:
         try:
-            data = json.loads(row.value)
-            pack = ExecutionPlan(**data)
-            if active_only and pack.is_terminal:
-                continue
-            packs.append(pack)
+            from .advance import reconcile_non_terminal_packs
+
+            reconcile_non_terminal_packs(db, project_id, persist_artifacts=False)
         except Exception:
-            continue
+            logger.debug("active list reconcile skipped", exc_info=True)
+    packs = list_packs_raw(db, project_id)
+    if active_only:
+        packs = [pack for pack in packs if not pack.is_terminal]
     return packs
 
 

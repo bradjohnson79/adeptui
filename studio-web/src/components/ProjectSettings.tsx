@@ -9,6 +9,9 @@ import { LanguageSettings } from "../i18n";
 import { ASPECT_PRESETS, FPS_OPTIONS } from "../workspacePrefs";
 import { PRIMARY_PROJECT_TYPES } from "../projectTypes";
 import { HostedProvidersPanel } from "./HostedProvidersPanel";
+import { EngineAuthoritySelect } from "./generation/EngineAuthoritySelect";
+import { VideoResolutionSelect } from "./generation/VideoResolutionSelect";
+import { inferVideoTier, legalCanvasSize, normalizeVideoTier, type VideoTier } from "../video/legalCanvas";
 
 const TABS = [
   ["general", "general"],
@@ -237,16 +240,10 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
           <p className="muted">Seeds new Txt2Vid / ImageGen / Director scenes.</p>
           <div className="field">
             <label>Default engine</label>
-            <select
+            <EngineAuthoritySelect
               value={String(defaults.engine || project.engine_default)}
-              onChange={(e) => saveDefaults({ ...defaults, engine: e.target.value })}
-            >
-              {["auto", "ltx", "wan", "fal_seedance", "fal_kling", "fal_veo", "fal_runway"].map((e) => (
-                <option key={e} value={e}>
-                  {e === "ltx" ? "LTX 2.5" : e === "wan" ? "WAN 2.2" : e === "fal_seedance" ? "Seedance" : e === "fal_kling" ? "Kling" : e === "fal_veo" ? "Veo" : e === "fal_runway" ? "Runway" : e}
-                </option>
-              ))}
-            </select>
+              onChange={(engine) => saveDefaults({ ...defaults, engine })}
+            />
           </div>
           <div className="field">
             <label>Aspect</label>
@@ -280,17 +277,31 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
             </select>
           </div>
           <div className="field">
-            <label>Resolution label</label>
-            <select
-              value={String(defaults.resolution || "720p")}
-              onChange={(e) => saveDefaults({ ...defaults, resolution: e.target.value })}
-            >
-              {["720p", "1080p", "1440p", "4K"].map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
+            <label htmlFor="settings-resolution">Resolution</label>
+            <VideoResolutionSelect
+              id="settings-resolution"
+              engine={project.engine_default || "minimax-h3"}
+              aspect={String(defaults.aspect || "16:9")}
+              value={normalizeVideoTier(
+                String(defaults.resolution || inferVideoTier(project.width, project.height)),
+              )}
+              onChange={(tier: VideoTier, width, height) => {
+                void saveDefaults({ ...defaults, resolution: tier });
+                void api.updateProject(project.id, { width, height }).then(onChange);
+              }}
+            />
+            {(() => {
+              const canvas = legalCanvasSize(
+                project.engine_default || "minimax-h3",
+                String(defaults.resolution || inferVideoTier(project.width, project.height)),
+                String(defaults.aspect || "16:9"),
+              );
+              return canvas.available ? (
+                <p className="muted">New shots will use {canvas.width}×{canvas.height}.</p>
+              ) : (
+                <p className="muted">{canvas.honestyLabel}</p>
+              );
+            })()}
           </div>
           <div className="field">
             <label>Prompt style</label>

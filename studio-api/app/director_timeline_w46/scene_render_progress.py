@@ -21,6 +21,9 @@ COMPLETE_STATUSES = frozenset(
 )
 # RENDER != SCENE_FINISHED: dialogue QC fail keeps the batch incomplete.
 INCOMPLETE_DIALOGUE_STATUSES = frozenset({"NeedsDialogueRetake"})
+# Omni infra miss: media may exist, but SCENE_FINISHED blocked — not a dialogue retake.
+INCOMPLETE_QC_INFRA_STATUSES = frozenset({"QC_Pending", "QC_RetryRequired"})
+INCOMPLETE_QC_STATUSES = INCOMPLETE_DIALOGUE_STATUSES | INCOMPLETE_QC_INFRA_STATUSES
 ACTIVE_STATUSES = frozenset({"Generating", "Queued", "Waiting"})
 FAILED_STATUSES = frozenset({"Failed", "Cancelled"})
 _PROVIDER_LIVE_JOB = frozenset({"running", "submitted", "pending"})
@@ -35,15 +38,26 @@ def _batch_has_provider_live_job(batch: Any) -> bool:
     return False
 
 
+def _batch_awaiting_sequential_slot(batch: Any) -> bool:
+    """Staged for Generate Scene; waiting on Omni / last-frame / the next slot."""
+    if str(getattr(batch, "status", "") or "") != "Queued":
+        return False
+    if _batch_has_provider_live_job(batch):
+        return False
+    return bool(str(getattr(batch, "pendingSnapshotId", None) or "").strip())
+
+
 def _scene_queue_is_live(batches: list[Any]) -> bool:
-    """Queued-only without Generating or a provider job is leftover queue state."""
+    """Queued-only without Generating, a provider job, or a staged snapshot is leftover."""
     generating = False
     queued_live = False
     for batch in batches:
         status = str(getattr(batch, "status", "") or "")
         if status in {"Generating", "Waiting"}:
             generating = True
-        if status == "Queued" and _batch_has_provider_live_job(batch):
+        if status == "Queued" and (
+            _batch_has_provider_live_job(batch) or _batch_awaiting_sequential_slot(batch)
+        ):
             queued_live = True
     return generating or queued_live
 
@@ -79,6 +93,9 @@ def derive_scene_render_progress(master: Any) -> dict[str, Any]:
         return {
             "totalBatches": 0,
             "completedBatches": 0,
+            "dialogueNeedsRetake": 0,
+            "qcInfraPending": 0,
+            "qcInfraBlocking": False,
             "failedBatches": 0,
             "activeBatchIndex": None,
             "activeBatchId": None,
@@ -95,6 +112,7 @@ def derive_scene_render_progress(master: Any) -> dict[str, Any]:
     completed = 0
     failed = 0
     dialogue_needs_retake = 0
+    qc_infra_pending = 0
     active_idx = None
     active_batch = None
     for i, batch in enumerate(batches):
@@ -102,16 +120,21 @@ def derive_scene_render_progress(master: Any) -> dict[str, Any]:
         if status in COMPLETE_STATUSES:
             completed += 1
         elif status in INCOMPLETE_DIALOGUE_STATUSES:
-            # Media may exist; scene/batch is NOT FINISHED until dialogue QC PASS.
+            # Content speech/lang fail — retake path (NOT Omni infra).
             dialogue_needs_retake += 1
+        elif status in INCOMPLETE_QC_INFRA_STATUSES:
+            # Omni infra miss — keep asset; retry QC only; never NeedsDialogueRetake.
+            qc_infra_pending += 1
         elif status in FAILED_STATUSES:
             failed += 1
         if status == "Generating" and active_batch is None:
             active_idx = i + 1
             active_batch = batch
         elif status == "Queued" and active_batch is None:
-            # Prefer Generating; else first live Queued is the waiting slot.
-            if active_idx is None and _batch_has_provider_live_job(batch):
+            # Prefer Generating; else first live or staged-Queued is the waiting slot.
+            if active_idx is None and (
+                _batch_has_provider_live_job(batch) or _batch_awaiting_sequential_slot(batch)
+            ):
                 active_idx = i + 1
                 active_batch = batch
 
@@ -125,7 +148,8 @@ def derive_scene_render_progress(master: Any) -> dict[str, Any]:
     queue_active = _scene_queue_is_live(batches)
     halted = failed > 0 and any(str(getattr(b, "status", "") or "") == "Failed" for b in batches) and not queue_active
     all_complete = completed == total and total > 0
-    dialogue_blocking = dialogue_needs_retake > 0 and not queue_active and (completed + dialogue_needs_retake + failed) == total
+    dialogue_blocking = dialogue_needs_retake > 0 and not queue_active and (completed + dialogue_needs_retake + qc_infra_pending + failed) == total
+    qc_infra_blocking = qc_infra_pending > 0 and not queue_active and (completed + dialogue_needs_retake + qc_infra_pending + failed) == total
     # Stitch still requires Approved takes for every batch (Scene 12 HOLD).
     stitch_ready = all(
         str(getattr(b, "status", "") or "") in ("Approved", "ApprovedConfigurationChanged", "RegenerationRecommended")
@@ -158,8 +182,12 @@ def derive_scene_render_progress(master: Any) -> dict[str, Any]:
         pct_bit = f" — {progress_pct}%" if progress_pct is not None else ""
         status_label = f"Render Batch {active_idx}/{total} — In Progress{pct_bit}"
     elif active_batch is not None and str(getattr(active_batch, "status", "") or "") == "Queued":
-        phase = "queued"
-        status_label = f"Render Batch {active_idx}/{total} — Queued"
+        if _batch_awaiting_sequential_slot(active_batch):
+            phase = "preparing"
+            status_label = f"Render Batch {active_idx}/{total} — Preparing"
+        else:
+            phase = "queued"
+            status_label = f"Render Batch {active_idx}/{total} — Queued"
     elif queue_active:
         phase = "rendering"
         status_label = f"Render Batch {completed + 1}/{total} — In Progress"
@@ -171,7 +199,9 @@ def derive_scene_render_progress(master: Any) -> dict[str, Any]:
         "totalBatches": total,
         "completedBatches": completed,
         "dialogueNeedsRetake": dialogue_needs_retake,
-        "sceneFinished": bool(total and completed == total and dialogue_needs_retake == 0 and failed == 0),
+        "qcInfraPending": qc_infra_pending,
+        "qcInfraBlocking": qc_infra_blocking,
+        "sceneFinished": bool(total and completed == total and dialogue_needs_retake == 0 and qc_infra_pending == 0 and failed == 0),
         "failedBatches": failed,
         "activeBatchIndex": active_idx,
         "activeBatchId": getattr(active_batch, "id", None) if active_batch else None,

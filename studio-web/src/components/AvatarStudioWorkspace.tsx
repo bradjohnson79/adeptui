@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import {
@@ -390,6 +390,8 @@ export function AvatarStudioWorkspace({
   const [sessions, setSessions] = useState<AvatarSession[]>([]);
   const [session, setSession] = useState<AvatarSession | null>(null);
   const [characters, setCharacters] = useState<ProfileItem[]>([]);
+  const [charactersError, setCharactersError] = useState("");
+  const [previewMissing, setPreviewMissing] = useState(false);
   const [audioAssets, setAudioAssets] = useState<any[]>([]);
   const [videoAssets, setVideoAssets] = useState<any[]>([]);
   const [imageAssets, setImageAssets] = useState<any[]>([]);
@@ -412,23 +414,37 @@ export function AvatarStudioWorkspace({
   const [, setScriptScenes] = useState<ScriptSceneChoice[]>([]);
 
   const loadLists = async () => {
-    const [chars, charProfiles, lib, list] = await Promise.all([
-      api.listProfiles("character").catch(() => []),
-      api.listCharacterProfiles(project.id).catch(() => ({ items: [] as any[] })),
+    // Canonical project character authority (Character Creator / M3.3). Avatar
+    // Studio must not keep a second character registry: project characters come
+    // from THIS project's CharacterProfile rows. The legacy /api/profiles pool is
+    // consulted only when the canonical authority is unreachable, so the dropdown
+    // degrades honestly instead of inventing a parallel source.
+    const [charProfiles, legacyProfiles, lib, list] = await Promise.all([
+      api.listCharacterProfiles(project.id).catch((error) => error as Error),
+      api.listProfiles("character").catch(() => [] as any[]),
       api.library(project.id).catch(() => null),
       api.listAvatarSessions(project.id).catch(() => []),
     ]);
-    const fromProfiles = (chars || []) as ProfileItem[];
-    const fromCharacterProfiles = ((charProfiles as any)?.items || []).map((c: any) => ({
-      id: String(c.id),
-      name: String(c.name || "Character"),
-      kind: "character",
-    }));
-    const merged = new Map<string, ProfileItem>();
-    for (const item of [...fromProfiles, ...fromCharacterProfiles]) {
-      if (item?.id) merged.set(String(item.id), item);
+    const canonicalAvailable = !(charProfiles instanceof Error);
+    let normalizedCharacters: ProfileItem[] = [];
+    let nextCharactersError = "";
+    if (canonicalAvailable) {
+      normalizedCharacters = (((charProfiles as any)?.items || []) as any[])
+        .map((c: any) => ({
+          id: String(c.id || ""),
+          name: String(c.name || "Character"),
+          kind: "character",
+        }))
+        .filter((item: ProfileItem) => item.id);
+    } else {
+      // Canonical authority unreachable. Fall back to the legacy pool rather than
+      // showing an empty dropdown, and state clearly what the creator can do.
+      normalizedCharacters = ((legacyProfiles || []) as ProfileItem[]).filter((item) => item?.id);
+      nextCharactersError =
+        "Character Creator could not be reached, so this project's characters may be incomplete. " +
+        "Open AI Guided Setup, or refresh once the Studio service is available.";
     }
-    const normalizedCharacters = [...merged.values()];
+    setCharactersError(nextCharactersError);
     const stillEntries = await Promise.all(
       normalizedCharacters.map(async (item) => {
         const identity = await resolveCharacterIdentity(item.id, item.name).catch(() => null);
@@ -565,6 +581,9 @@ export function AvatarStudioWorkspace({
     const identity = await resolveCharacterIdentity(characterId, listed?.name);
     const existing = availableSessions.find((item) => item.character_profile_id === characterId);
     if (existing) {
+      // The character exists canonically. If no Avatar-compatible still resolves,
+      // surface that honestly instead of hiding the character from the dropdown.
+      setPreviewMissing(!(existing.source_still_asset_id || identity.stillAssetId));
       setNeedsCharacter(false);
       let next = applyApprovedIdentityToSession(normalizeSession(existing), {
         characterId,
@@ -588,6 +607,7 @@ export function AvatarStudioWorkspace({
       setMsg("That character is not in this project.");
       return;
     }
+    setPreviewMissing(!identity.stillAssetId);
     const boot = applyApprovedIdentityToSession(
       normalizeSession(emptyAvatarSession(project.id, `${identity.name} Presenter Session`)),
       {
@@ -1154,6 +1174,11 @@ export function AvatarStudioWorkspace({
             Open Character Creator
           </button>
         </div>
+        {charactersError ? (
+          <p className="avatar-inline-tip" data-testid="avatar-characters-error" role="status">
+            {charactersError}
+          </p>
+        ) : null}
         {characters.length ? (
           <label style={{ display: "block", marginTop: "1.25rem", maxWidth: "24rem" }}>
             Or pick from this project
@@ -1194,10 +1219,18 @@ export function AvatarStudioWorkspace({
   }
 
   const activeSession = normalizeSession(session);
+  // Canonical preview binding: a Character-source session previews the project
+  // character's approved/canonical still. It must NOT silently fall back to an
+  // unrelated take or Library image that merely exists.
+  const characterPreviewId = activeSession.character_profile_id
+    ? characterStills[activeSession.character_profile_id] || null
+    : null;
   const previewAssetId =
-    activeSession.source_still_asset_id ||
-    activeSession.takes.find((item) => item.asset_id)?.asset_id ||
-    null;
+    activeSession.source_kind === "character"
+      ? activeSession.source_still_asset_id || characterPreviewId || null
+      : activeSession.source_still_asset_id ||
+        activeSession.takes.find((item) => item.asset_id)?.asset_id ||
+        null;
   const previewSrc = previewAssetId ? api.assetUrl(previewAssetId) : null;
   const scriptText = activeSession.dialogue_spoken || activeSession.dialogue_original || "";
   const estimatedSeconds = estimateDialogueSeconds(scriptText);
@@ -1222,7 +1255,11 @@ export function AvatarStudioWorkspace({
         id: selectedProvider.id,
         name: selectedProvider.name,
         label: selectedRuntimeStatus.label,
-        certifiedReady: false,
+        // Honest gate: Experimental/ready means inspect runtimeReady (executable local runtime).
+        // Lifecycle certified still counts; soft flash_attn/triton must not block planning.
+        // Live section execution may still return PROVIDER_NOT_CERTIFIED until a live path exists.
+        certifiedReady:
+          selectedProvider.certified === true || selectedRuntimeStatus.label === "Experimental",
       }
     : { label: "Choose Runtime", certifiedReady: false };
   const generateBlockers = avatarGenerateBlockers(activeSession, selectedRuntimeGate);
@@ -1315,8 +1352,10 @@ export function AvatarStudioWorkspace({
                 <img
                   src={previewSrc}
                   alt={`${activeSession.character_name || "Avatar"} preview`}
-                  onError={(event) => {
-                    (event.currentTarget as HTMLImageElement).style.display = "none";
+                  onError={() => {
+                    // Never fail silently: the canonical still resolved but could
+                    // not be loaded. Tell the creator what is missing.
+                    setPreviewMissing(true);
                   }}
                 />
                 {speakerOverlayActive
@@ -1350,10 +1389,10 @@ export function AvatarStudioWorkspace({
             ) : (
               <div className="avatar-preview-empty">
                 <strong>{activeSession.character_name || "Presenter"}</strong>
-                <span>
-                  {activeSession.source_still_asset_id
-                    ? "Preview still is unavailable."
-                    : "Pick a character, Library image, or existing still to preview."}
+                <span data-testid="avatar-preview-missing">
+                  {previewMissing || !activeSession.source_still_asset_id
+                    ? "This character has no approved Avatar image yet. Approve a front still in Character Creator, or switch Source to Library Image."
+                    : "Preview still is unavailable."}
                 </span>
               </div>
             )}
@@ -1407,6 +1446,7 @@ export function AvatarStudioWorkspace({
           session={activeSession}
           patchSession={patchSession}
           characters={characters}
+          charactersError={charactersError}
           characterStills={characterStills}
           imageAssets={imageAssets}
           videoAssets={videoAssets}

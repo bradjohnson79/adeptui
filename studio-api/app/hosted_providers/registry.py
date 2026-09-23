@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-ProviderId = Literal["kie", "wavespeed", "fal"]
+ProviderId = Literal["kie", "wavespeed", "fal", "elevenlabs"]
 RecommendationRole = Literal["primary", "secondary", "third"]
 
 HOSTED_PROVIDER_VERSION = "m42.hosted.1"
@@ -84,10 +84,31 @@ PROVIDERS: dict[str, HostedProviderDefinition] = {
         certified_models=("Seedance", "Kling", "Veo", "Runway"),
         estimated_pricing_notes="BYOK credits on fal.ai — see fal.ai dashboard billing.",
     ),
+
+    "elevenlabs": HostedProviderDefinition(
+        provider_id="elevenlabs",
+        display_name="ElevenLabs (via fal/kie/wavespeed)",
+        role="third",
+        recommended=False,
+        secret_name="elevenlabs_api_key",
+        env_keys=("ELEVENLABS_API_KEY", "ELEVEN_LABS_API_KEY"),
+        keys_url="https://elevenlabs.io/app/settings/api-keys",
+        dashboard_url="https://elevenlabs.io/app",
+        billing_url="https://elevenlabs.io/app/subscription",
+        docs_url="https://elevenlabs.io/docs",
+        adapter_version="elevenlabs.2-routed",
+        integration_status="Available but Uncertified",
+        supported_modalities=("audio",),
+        certified_models=("eleven_multilingual_v2", "eleven_text_to_sound_v2"),
+        estimated_pricing_notes="DEMOTED: capability ElevenLabs routes via USER fal/kie/wavespeed keys. No Adept-owner EL key. Direct elevenlabs_api_key is optional personal BYOK only.",
+    ),
 }
 
-# Recommendation order for Automatic mode
+# Recommendation order for Automatic mode (image/video/llm — ElevenLabs is audio BYOK, listed in catalog only)
 PRIORITY_ORDER: tuple[ProviderId, ...] = ("kie", "wavespeed", "fal")
+
+# Full Setup /api/hosted-providers catalog order (includes ElevenLabs audio card)
+CATALOG_ORDER: tuple[str, ...] = ("kie", "wavespeed", "fal", "elevenlabs")
 
 
 def list_providers() -> list[dict[str, Any]]:

@@ -657,6 +657,76 @@ def resolve_shot_characters(
         "crs_only": crs_only,
     }
 
+
+def _union_bound_crs_into_shot(
+    shot: dict[str, Any],
+    bound_assets: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Master-bound CRS rows are cast even when prompt-name match missed."""
+    characters = list(shot.get("characters") or [])
+    have_ids = {str(row.get("characterId") or "").strip() for row in characters}
+    have_ids.discard("")
+    have_assets = {str(row.get("assetId") or "").strip() for row in characters}
+    have_assets.discard("")
+    for item in bound_assets or []:
+        if not isinstance(item, dict) or not _is_character_crs_ref(item):
+            continue
+        cid = str(item.get("identityId") or item.get("characterId") or "").strip()
+        aid = str(item.get("assetId") or "").strip()
+        if not aid:
+            continue
+        if cid and cid in have_ids:
+            continue
+        if not cid and aid in have_assets:
+            continue
+        if aid in have_assets and cid:
+            continue
+        name = str(
+            item.get("promptName")
+            or item.get("label")
+            or item.get("tag")
+            or "character"
+        ).strip().lstrip("@#%*~")
+        characters.append(
+            {
+                "characterId": cid or None,
+                "name": name or "character",
+                "assetId": aid,
+            }
+        )
+        if cid:
+            have_ids.add(cid)
+        have_assets.add(aid)
+    out = dict(shot)
+    out["characters"] = characters
+    return out
+
+
+def _bound_characters_missing_from_shot(
+    bound_assets: list[dict[str, Any]] | None,
+    shot: dict[str, Any],
+) -> list[str]:
+    have_ids = {
+        str(row.get("characterId") or "").strip()
+        for row in (shot.get("characters") or [])
+    }
+    have_assets = {
+        str(row.get("assetId") or "").strip()
+        for row in (shot.get("characters") or [])
+    }
+    missing: list[str] = []
+    for item in bound_assets or []:
+        if not isinstance(item, dict) or not _is_character_crs_ref(item):
+            continue
+        cid = str(item.get("identityId") or item.get("characterId") or "").strip()
+        aid = str(item.get("assetId") or "").strip()
+        tag = str(item.get("tag") or item.get("promptName") or item.get("label") or aid)
+        if cid and cid not in have_ids:
+            missing.append(tag or cid)
+        elif (not cid) and aid and aid not in have_assets:
+            missing.append(tag or aid)
+    return missing
+
 def _asset_file(db: Session, project_id: str, asset_id: str) -> Path | None:
     asset = db.get(Asset, asset_id)
     if not asset or asset.project_id != project_id:
@@ -968,7 +1038,12 @@ def _apply_i2v_start_identity(
             # Validate the fallback character asset is also an image.
             if start_id and not _asset_is_image(db, start_id):
                 start_id = None  # Non-image fallback — don't use it
-        if is_h3 and last_id and start_id == last_id:
+        bridge_open = bool(str(getattr(request, "continuityBridgeId", None) or "").strip() and last_id)
+        if is_h3 and bridge_open:
+            # Continuation begins on the previous window's last frame.
+            # Character and place sheets stay as later pictures.
+            start_id = last_id
+        elif is_h3 and last_id and start_id == last_id:
             start_id = _place_environment_id(db, request, batch, hero_ids, batches=batches)
     if not start_id and not (is_h3 and last_id):
         start_id = next((str(c["assetId"]) for c in characters if c.get("assetId")), None)
@@ -1037,6 +1112,7 @@ def _apply_i2v_start_identity(
         place_asset_id=start_id if start_id not in hero_ids else None,
         method=method,
         joining=joining,
+        batch=batch,
     )
     _bind_identity_ref(
         batch,
@@ -1119,13 +1195,21 @@ def _restrict_to_creator_bound_cast(
         if isinstance(item, dict) and _is_character_crs_ref(item)
     }
     bound_ids.discard("")
-    if not bound_ids:
+    bound_asset_ids = {
+        str(item.get("assetId") or "").strip()
+        for item in (bound_assets or [])
+        if isinstance(item, dict) and _is_character_crs_ref(item)
+    }
+    bound_asset_ids.discard("")
+    if not bound_ids and not bound_asset_ids:
         return shot
     # Bindings present: Picture/Audio slots may only include bound identities.
+    # Keep Master-bound CRS even when the row is asset-only (no identityId).
     kept = [
         row
         for row in characters
         if str(row.get("characterId") or "").strip() in bound_ids
+        or str(row.get("assetId") or "").strip() in bound_asset_ids
     ]
     out = dict(shot)
     out["characters"] = kept
@@ -1156,7 +1240,20 @@ def apply_character_identity(
             prefer_front=False,
             bound_assets=bound_assets,
         )
+        shot = _union_bound_crs_into_shot(shot, bound_assets)
         shot = _restrict_to_creator_bound_cast(shot, bound_assets, texts)
+        dropped = _bound_characters_missing_from_shot(bound_assets, shot)
+        if dropped:
+            return {
+                "ok": False,
+                "error": "CHARACTER_REFERENCE_DROPPED",
+                "message": (
+                    f"{', '.join(dropped)} is bound on Timeline but did not reach "
+                    "MiniMax identity slots. Adept did not substitute another person."
+                ),
+                "dropped": dropped,
+                "mock": False,
+            }
         # H3 Timeline: creator CRS is authoritative (no silent Front remap). Front stills
         # remain valid when the creator attached Front explicitly; do not call _drop_front_still_character_refs.
         crs_only = list(shot.get("crs_only") or [])
@@ -1220,7 +1317,20 @@ def apply_character_identity(
         prefer_sheet=product in LTX_25_ADAPTER_IDS,
         bound_assets=bound_assets,
     )
+    shot = _union_bound_crs_into_shot(shot, bound_assets)
     shot = _restrict_to_creator_bound_cast(shot, bound_assets, texts)
+    dropped = _bound_characters_missing_from_shot(bound_assets, shot)
+    if dropped:
+        return {
+            "ok": False,
+            "error": "CHARACTER_REFERENCE_DROPPED",
+            "message": (
+                f"{', '.join(dropped)} is bound on Timeline but did not reach "
+                "identity slots. Adept did not substitute another person."
+            ),
+            "dropped": dropped,
+            "mock": False,
+        }
     if shot["missing"]:
         names = ", ".join(shot["missing"])
         return {

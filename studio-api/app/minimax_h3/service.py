@@ -89,6 +89,26 @@ def retry(project_id: str, plan_id: str, *, approval_id: str | None = None) -> H
     return plan
 
 
+def _ensure_route_a_for_generation() -> tuple[bool, str]:
+    """Start isolated Route A via the Runtime Supervisor when Generate is requested."""
+    from .preflight import _route_a_ready
+
+    if _route_a_ready():
+        return True, ""
+    try:
+        from ..runtime_manager.service import _start_route_a_sync
+
+        _start_route_a_sync()
+    except Exception as exc:
+        return False, f"Could not prepare Video Runtime: {exc}"
+    deadline = time.time() + 150
+    while time.time() < deadline:
+        if _route_a_ready():
+            return True, ""
+        time.sleep(2)
+    return False, "Video Runtime did not become ready after automatic start."
+
+
 def readiness() -> dict[str, Any]:
     """Probe the isolated Route A runtime readiness for the owner-only path."""
     if not private_local_enabled():
@@ -107,10 +127,16 @@ def readiness() -> dict[str, Any]:
     # only a plain-language gpu name plus the creator-facing readiness fields.
     health = raw.get("health") or {}
     gpu_name = health.get("gpu") if isinstance(health, dict) else None
+    ready = bool(raw.get("ready"))
+    on_demand = (not ready) and bool(raw.get("modelRootConfigured", True)) and not (raw.get("missingFiles") or [])
+    creator_status = raw.get("creatorStatus")
+    if on_demand and not ready:
+        creator_status = "Available on demand — Adept will start Video Runtime when you Generate."
     result = {
-        "ok": bool(raw.get("ok")),
-        "ready": bool(raw.get("ready")),
-        "creatorStatus": raw.get("creatorStatus"),
+        "ok": bool(raw.get("ok")) or on_demand,
+        "ready": ready,
+        "onDemand": on_demand,
+        "creatorStatus": creator_status,
         "gpu": gpu_name,
         "missingFiles": raw.get("missingFiles") or [],
         "missingNodes": raw.get("missingNodes") or [],
@@ -193,6 +219,15 @@ def create_job_or_block(project_id: str, plan_id: str, *, approval_id: str | Non
             "message": str(exc),
         }
 
+    prepared, prepare_error = _ensure_route_a_for_generation()
+    if not prepared:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "planId": plan.planId,
+            "message": prepare_error or "Video Runtime could not be prepared.",
+        }
+
     adapter = RouteARuntimeAdapter()
     if plan.request.mode == "one-frame":
         start_asset_id = next(
@@ -233,6 +268,52 @@ def create_job_or_block(project_id: str, plan_id: str, *, approval_id: str | Non
             prompt=plan.request.prompt,
             seed=424242,
         )
+    elif plan.request.mode in {"first-last", "three-frame"}:
+        roles = {a.role: a for a in plan.request.referenceAssignments}
+        start_a = roles.get("start")
+        end_a = roles.get("end")
+        mid_a = roles.get("middle")
+        start_asset_id = start_a.assetId if start_a else None
+        end_asset_id = end_a.assetId if end_a else None
+        middle_asset_id = mid_a.assetId if mid_a else None
+        if not start_asset_id or not end_asset_id:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "planId": plan.planId,
+                "message": "Add First and Last frames before MiniMax H3 3 Frame.",
+            }
+        start_path = _resolve_project_asset_path(project_id, start_asset_id)
+        end_path = _resolve_project_asset_path(project_id, end_asset_id)
+        middle_path = (
+            _resolve_project_asset_path(project_id, middle_asset_id) if middle_asset_id else None
+        )
+        if start_path is None or end_path is None:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "planId": plan.planId,
+                "message": "First or Last frame could not be found in this project.",
+            }
+        if middle_asset_id and middle_path is None:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "planId": plan.planId,
+                "message": "Middle frame could not be found in this project.",
+            }
+        state = adapter.submit_i2va(
+            project_id=project_id,
+            plan_id=plan_id,
+            prompt=plan.request.prompt,
+            start_image_path=start_path,
+            end_image_path=end_path,
+            middle_image_path=middle_path,
+            seed=424242,
+            start_image_asset_id=start_asset_id,
+            end_image_asset_id=end_asset_id,
+            middle_image_asset_id=middle_asset_id,
+        )
     else:
         return {
             "ok": False,
@@ -240,7 +321,7 @@ def create_job_or_block(project_id: str, plan_id: str, *, approval_id: str | Non
             "planId": plan.planId,
             "message": (
                 "MiniMax H3 Route A refused this mode. "
-                "Only text-to-video and one-frame image-to-video are executable."
+                "Executable modes: text-to-video, one-frame, first-last, and three-frame."
             ),
         }
     if state.status != "running":

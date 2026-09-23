@@ -6,6 +6,7 @@ import {
   ERS_GPT_OFFICIAL_ID,
   ERS_GPT_T2I_ID,
   ERS_NO_SOURCE_MESSAGE,
+  ERS_PROMPT_OR_SOURCE_MESSAGE,
   ERS_QWEN_OFFICIAL_ID,
   ERS_QWEN_PROVIDER_ID,
   ERS_QWEN_WORKFLOW_KEY,
@@ -26,11 +27,10 @@ import {
 } from "./ersGenerator";
 
 describe("ERS generator selector", () => {
-  it("defaults to Qwen Image local with the catalog official id", () => {
-    expect(ERS_GENERATOR_DEFAULT).toBe("qwen2512");
+  it("defaults Environment Reference Sheets to GPT Image 2 API", () => {
+    expect(ERS_GENERATOR_DEFAULT).toBe("gpt-image-2");
     expect(ERS_QWEN_OFFICIAL_ID).toBe("qwen2512");
     expect(ERS_QWEN_PROVIDER_ID).toBe("qwen-image-2512-local");
-    expect(ERS_GENERATOR_OPTIONS[0]?.id).toBe("qwen2512");
     expect(ERS_GENERATOR_OPTIONS.map((o) => o.id)).toEqual(["qwen2512", "gpt-image-2"]);
   });
 
@@ -51,6 +51,11 @@ describe("ERS generator selector", () => {
     expect(gpt.kie_image_model_id).not.toBe(ERS_GPT_T2I_ID);
     expect(gpt.source).toBe("api");
     expect(gpt.modelFamilyPreference).toBeUndefined();
+    expect(gpt.forceFull).toBe(true);
+    expect(gpt.ers_pipeline).toBe("full_sheet");
+    expect(gpt.generationMode).toBe("full_sheet_api");
+    expect(gpt.templateId).toBe("ers.original.v1");
+    expect(gpt.panel_task).toBe("whole_sheet");
   });
 
   it("changing the dropdown only changes the selected context — it is not a generate POST", () => {
@@ -147,7 +152,7 @@ describe("ERS generator selector", () => {
       hasAuthoritativeEnvironmentSource({ originalEnvironmentReferenceAssetId: "src-1" }),
     ).toBe(true);
     expect(generatorBlockReason("qwen2512", true, true, true, true, false)).toBe(
-      ERS_NO_SOURCE_MESSAGE,
+      ERS_PROMPT_OR_SOURCE_MESSAGE,
     );
   });
 
@@ -161,5 +166,33 @@ describe("ERS generator selector", () => {
     expect(ersGeneratorOptionDisabled("gpt-image-2", true, true)).toBe(false);
     // Unknown readiness never disables (honest unknown -> keep selectable, block reason shows).
     expect(ersGeneratorOptionDisabled("qwen2512", undefined, undefined)).toBe(false);
+  });
+});
+
+describe("generatorBlockReason — prompt-only vs source", () => {
+  it("prompt-only allows gptReady (T2I) without gptI2IReady", () => {
+    expect(
+      generatorBlockReason("gpt-image-2", true, true, true, false, false, true),
+    ).toBeNull();
+  });
+
+  it("prompt-only blocks when gptReady is false", () => {
+    const reason = generatorBlockReason("gpt-image-2", true, false, true, false, false, true);
+    expect(reason).toBeTruthy();
+    expect(String(reason)).toMatch(/Requires Setup|text prompt|Kie/i);
+  });
+
+  it("with source still requires gptI2IReady", () => {
+    expect(
+      generatorBlockReason("gpt-image-2", true, true, true, false, true, false),
+    ).toBeTruthy();
+    expect(
+      generatorBlockReason("gpt-image-2", true, true, true, true, true, false),
+    ).toBeNull();
+  });
+
+  it("no source and no prompt asks for prompt or source", () => {
+    const reason = generatorBlockReason("gpt-image-2", true, true, true, true, false, false);
+    expect(String(reason)).toMatch(/prompt|source/i);
   });
 });

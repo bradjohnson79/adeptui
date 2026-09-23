@@ -233,18 +233,33 @@ function expectNoDuplicateActionSentences(prompt: string) {
   // echoes like MOTION restating an ACTION sentence are by design and are
   // not checked).
   const LEADING_MARKER = /^(?:suddenly|slowly|then|next|finally|meanwhile|afterwards?|gradually|abruptly|quietly|quickly|immediately|instantly)[,\s]+/i;
+  // Reveal gates and camera-continuity language intentionally persist across
+  // batch windows; discrete event sentences must not (peer round-8: a
+  // boundary-spanning beat was staged in BOTH batches' ACTION).
+  const CROSS_BATCH_EXEMPT = /hidden|remains?|do not reveal|not yet visible|stays|keeps?|continu|preserve|maintain|segment covers/i;
   const blocks = [...prompt.matchAll(/ACTION\n([\s\S]*?)(?=\n\n[A-Z ]{3,}\n|$)/g)].map((m) => m[1] || "");
-  for (const block of blocks) {
-    const sentences = block
-      .split(/(?<=[.!?])\s+/)
+  const blockSentences: string[][] = blocks.map((block) =>
+    block
+      .split(/(?<=[.!?]["'”’]?)\s+/)
       .map((s) => s.trim().toLowerCase().replace(/\s+/g, " ").replace(LEADING_MARKER, ""))
-      .filter((s) => s.length > 12);
+      .filter((s) => s.length > 12),
+  );
+  const globalSeen = new Map<string, number>();
+  blockSentences.forEach((sentences, blockIndex) => {
     const seen = new Set<string>();
     for (const sentence of sentences) {
       expect(seen.has(sentence), `duplicate ACTION sentence: ${sentence}`).toBeFalsy();
       seen.add(sentence);
+      if (!CROSS_BATCH_EXEMPT.test(sentence)) {
+        const prior = globalSeen.get(sentence);
+        expect(
+          prior,
+          `event sentence staged in multiple batches (blocks ${prior} and ${blockIndex}): ${sentence}`,
+        ).toBeUndefined();
+        globalSeen.set(sentence, blockIndex);
+      }
     }
-  }
+  });
 }
 
 function expectRuntimeSeparated(prompt: string) {
@@ -528,17 +543,18 @@ test("Sample F: multi-beat cinematic scene across two batches", async ({ page, r
       (b: any) => b.migrationMetadata?.sourceProductionRequestId,
     );
     expect(batches.length).toBe(2);
-    const text0 = String(batches[0].promptSegments?.[0]?.text || "");
-    const text1 = String(batches[1].promptSegments?.[0]?.text || "");
-    expect(text0).not.toBe(text1);
-    expect(text0).toContain("@JunPark");
-    expect(text1).toContain("@JunPark");
-    expect(text0).toMatch(/story seconds 0–10/);
-    expect(text1).toMatch(/story seconds 10–20/);
-    // End state lands in the closing batch
-    expect(text1.toLowerCase()).toMatch(/wide shot|kite climbs|camera rises/);
+    const timed = (run.master?.batchBlocks || []).flatMap((b: any) =>
+      (b.promptSegments || []).filter((s: any) => String(s.text || "").trim()),
+    );
+    expect(timed.length, "one Timed Prompt regardless of batch count").toBe(1);
+    expect(Number(timed[0].start || 0)).toBe(0);
+    expect(Number(timed[0].length)).toBe(20);
+    const scenePrompt = String(timed[0].text || "");
+    expect(scenePrompt).toContain("@JunPark");
+    expect(scenePrompt.toLowerCase()).toMatch(/wide shot|kite climbs|camera rises|walks/);
     expect(batches[0].duration?.plannedDuration).toBe(10);
     expect(batches[1].duration?.plannedDuration).toBe(10);
+    expectNoDuplicateActionSentences(scenePrompt);
     writeEvidence("f", baseEvidence("F", message, run));
   } finally {
     await deleteProject(request, project.id);

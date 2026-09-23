@@ -6,12 +6,18 @@ import json
 from typing import Any
 
 from ....director_timeline import CameraClip
-from ....director_references.tags import find_clip_by_tag, format_display_tag, parse_tag_number
+from ....director_references.tags import format_display_tag, parse_tag_number
 from ....director_timeline_w46.camera_catalog import describe_camera_clip, get_motion_entry, get_rig_entry
 from ....director_timeline_w46.capabilities import disclose_inpaint_strategy
 from ....director_timeline_w46 import orchestrator, service, store
 from ....director_timeline_w46.contracts import CancelRequest, SceneTimelineMaster, _now
-from ....lipsync_tracks import LipSyncClip, LipSyncTrack, LipSyncTracks, parse_lipsync_tracks
+from ....lipsync_tracks import LipSyncClip, LipSyncTrack, LipSyncTracks, dumps_lipsync_tracks, parse_lipsync_tracks
+from ....director_timeline_w46.master_lookup import (
+    find_master_visual_by_tag,
+    find_master_visual_clip,
+    iter_master_visual_clips,
+    visual_clip_public,
+)
 from ...errors import (
     CONCURRENT_MODIFICATION,
     TOOL_ARGUMENTS_INVALID,
@@ -53,6 +59,143 @@ def _require_bundle(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     if not bundle.get("ok"):
         raise _target_not_found("Scene timeline not found.", sceneId=args.get("sceneId"))
     return bundle
+
+
+def _master_scene_duration(master: Any, fallback: float = 5.0) -> float:
+    total = 0.0
+    for batch in getattr(master, "batchBlocks", None) or []:
+        dur = getattr(batch, "duration", None)
+        total += float(
+            getattr(dur, "plannedDuration", None) or getattr(dur, "timelineVisibleDuration", None) or 0.0
+        )
+    return total if total > 0 else max(0.1, float(fallback or 5.0))
+
+
+def _start_containing_batch(master: Any, start: float):
+    blocks = sorted(
+        list(getattr(master, "batchBlocks", None) or []),
+        key=lambda b: int(getattr(b, "order", 0) or 0),
+    )
+    if not blocks:
+        raise _argument_error(
+            "Timeline Master has no execution windows yet. Rematerialize windows before editing clips.",
+            toolId="timeline.master_clip",
+        )
+    cursor = 0.0
+    target = blocks[0]
+    for batch in blocks:
+        dur = getattr(batch, "duration", None)
+        planned = float(
+            getattr(dur, "plannedDuration", None) or getattr(dur, "timelineVisibleDuration", None) or 0.0
+        )
+        planned = max(0.1, planned)
+        end = cursor + planned
+        if start + 1e-6 >= cursor and start < end - 1e-9:
+            return batch
+        cursor = end
+        target = batch
+    return target
+
+
+def _clip_attr_for_kind(kind: str) -> str:
+    if kind in {"imageClip", "videoClip"}:
+        return "visualClips"
+    if kind == "audioClip":
+        return "audioClips"
+    if kind == "sfxClip":
+        return "sfxClips"
+    if kind == "cameraClip":
+        return "cameraInstructions"
+    raise _argument_error("Unsupported clip kind.", kind=kind)
+
+
+def _find_master_clip(master: Any, item_id: str, kind: str | None = None):
+    attrs = (
+        [_clip_attr_for_kind(kind)]
+        if kind and kind != "promptSegment"
+        else ["visualClips", "audioClips", "sfxClips", "cameraInstructions"]
+    )
+    for batch in getattr(master, "batchBlocks", None) or []:
+        for attr in attrs:
+            for clip in list(getattr(batch, attr, None) or []):
+                if str(getattr(clip, "id", "") or "") == str(item_id) or str(
+                    getattr(clip, "legacyClipId", "") or ""
+                ) == str(item_id):
+                    return batch, attr, clip
+    return None, None, None
+
+
+def _payload_to_batch_clip(kind: str, payload: dict[str, Any]):
+    from ....director_timeline_w46.contracts import BatchClip
+
+    clip_kind = {
+        "imageClip": "image",
+        "videoClip": "video",
+        "audioClip": "audio",
+        "sfxClip": "sfx",
+        "cameraClip": "camera",
+    }.get(kind, "image")
+    data = dict(payload or {})
+    if data.get("kind") or data.get("assetId") is not None or "visualClips" in data:
+        data.setdefault("kind", clip_kind)
+        return BatchClip.model_validate(data)
+    clip_id = str(data.get("id") or "").strip()
+    fields: dict[str, Any] = {
+        "kind": clip_kind,
+        "assetId": data.get("assetId") or data.get("asset_id"),
+        "start": float(data.get("start") or 0.0),
+        "length": float(data.get("length") or 0.1),
+        "label": str(data.get("label") or clip_kind.title()),
+        "role": data.get("role"),
+        "volume": float(data.get("volume") or 1.0),
+        "muted": bool(data.get("muted") or False),
+        "legacyClipId": clip_id or None,
+        "motion_type": data.get("motion_type") or data.get("motionType"),
+        "rig": data.get("rig"),
+        "text": str(data.get("text") or ""),
+    }
+    if clip_id:
+        fields["id"] = clip_id
+    return BatchClip.model_validate(fields)
+
+
+def _master_batch_window_start(master: Any, batch_id: str) -> float:
+    """Scene-absolute start of the given batch's execution window."""
+    blocks = sorted(
+        list(getattr(master, "batchBlocks", None) or []),
+        key=lambda b: int(getattr(b, "order", 0) or 0),
+    )
+    cursor = 0.0
+    for batch in blocks:
+        if str(getattr(batch, "id", "")) == str(batch_id):
+            return cursor
+        dur = getattr(batch, "duration", None)
+        planned = float(
+            getattr(dur, "plannedDuration", None) or getattr(dur, "timelineVisibleDuration", None) or 0.0
+        )
+        cursor += max(0.1, planned)
+    return 0.0
+
+
+def _append_master_clip(master: Any, clip: Any, start: float, attr: str):
+    target = _start_containing_batch(master, float(start or 0.0))
+    # BATCH-LOCAL COORDINATE LAW: BatchClip.start is stored batch-local (0 =
+    # the owning batch's window start). Tool payloads arrive scene-absolute.
+    window_start = _master_batch_window_start(master, str(getattr(target, "id", "")))
+    local_start = max(0.0, float(start or 0.0) - window_start)
+    try:
+        clip = clip.model_copy(update={"start": local_start})
+    except Exception:  # noqa: BLE001 - non-pydantic doubles in tests
+        try:
+            clip.start = local_start
+        except Exception:  # noqa: BLE001
+            pass
+    setattr(target, attr, list(getattr(target, attr, None) or []) + [clip])
+    return target
+
+
+def _master_visual_count(master: Any) -> int:
+    return sum(len(getattr(b, "visualClips", None) or []) for b in getattr(master, "batchBlocks", None) or [])
 
 
 def _revision_stale(expected: Any, actual: int) -> CoDirectorError:
@@ -128,7 +271,6 @@ def build_timeline_context(db: Any, project_id: str, scene_id: str) -> dict[str,
     if not bundle.get("ok"):
         return bundle
     master: SceneTimelineMaster = bundle["master"]
-    director_tl = bundle["directorTimeline"]
     workspace = bundle["workspace"]
     batches = [
         {
@@ -147,13 +289,15 @@ def build_timeline_context(db: Any, project_id: str, scene_id: str) -> dict[str,
     ]
     empty_tracks = {
         "batchBlocks": len(master.batchBlocks) == 0,
-        "imageClips": len(director_tl.image_clips) == 0,
-        "promptSegments": len(director_tl.prompt_segments) == 0,
-        "videoClips": len(director_tl.video_clips) == 0,
+        "imageClips": _master_visual_count(master) == 0,
+        "promptSegments": not any(
+            getattr(b, "promptSegments", None) for b in getattr(master, "batchBlocks", None) or []
+        ),
+        "videoClips": _master_visual_count(master) == 0,
         "honestMessage": (
             "Timeline tracks are empty — add a Batch or clip before generating."
-            if not master.batchBlocks and not director_tl.image_clips and not director_tl.prompt_segments
-            else "Batch Blocks present; legacy Director tracks may still be empty."
+            if not master.batchBlocks
+            else "Batch Blocks present."
         ),
     }
     return {
@@ -318,8 +462,8 @@ def _find_lipsync_clip(tracks: list[LipSyncTrack], clip_id: str) -> tuple[int, i
     raise _target_not_found("Lip Sync clip not found.", clipId=clip_id)
 
 
-def _validate_lipsync_state(scene: Any, director_tl: Any) -> list[dict[str, Any]]:
-    tracks = _normalize_lipsync_state(director_tl.lipsync).tracks
+def _validate_lipsync_state(scene: Any, lipsync: Any) -> list[dict[str, Any]]:
+    tracks = _normalize_lipsync_state(lipsync).tracks
     findings: list[dict[str, Any]] = []
     if not tracks:
         return [
@@ -566,9 +710,16 @@ async def get_playhead(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]
     scene_id = bundle["sceneId"]
     revision = int(bundle["workspace"].get("timelineRevision") or 1)
     playhead = float(bundle.get("playhead") or 0.0)
+    # SINGLE-STORE: durationSec reads Master window durations (fallback: scene
+    # row duration_sec), never the retired legacy directorTimeline.duration_sec.
+    scene_row = store.get_scene(ctx.db, ctx.project_id, scene_id)
+    duration_sec = _master_scene_duration(
+        bundle["master"],
+        fallback=float(getattr(scene_row, "duration_sec", None) or 0.0),
+    )
     return {
         "playhead": playhead,
-        "durationSec": float(bundle["directorTimeline"].duration_sec or 0.0),
+        "durationSec": duration_sec,
         "_evidence": _receipt(
             ctx,
             tool_id="timeline.get_playhead",
@@ -613,6 +764,45 @@ async def get_guidance_priority(ctx: ToolContext, args: dict[str, Any]) -> dict[
     }
 
 
+def _resolve_scene_take_arg(master: SceneTimelineMaster, args: dict[str, Any]):
+    from ....director_timeline_w46.scene_takes import scene_take_display
+
+    tid = str(args.get("takeId") or "").strip()
+    label = str(args.get("takeLabel") or "").strip()
+    takes = list(getattr(master, "sceneTakes", None) or [])
+    if tid:
+        hit = next((t for t in takes if t.id == tid), None)
+        if hit is not None:
+            return hit
+    if label:
+        want = label.lower().removeprefix("take ").strip()
+        hit = next((t for t in takes if str(t.label or "").lower() == want or scene_take_display(t.label).lower() == label.lower()), None)
+        if hit is not None:
+            return hit
+    return None
+
+
+async def inspect_scene_takes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....director_timeline_w46.scene_takes import list_scene_takes_payload
+
+    bundle = _require_bundle(ctx, args)
+    master: SceneTimelineMaster = bundle["master"]
+    scene_id = bundle["sceneId"]
+    revision = int(bundle["workspace"].get("timelineRevision") or 1)
+    payload = list_scene_takes_payload(master)
+    return {
+        **payload,
+        "timelineRevision": revision,
+        "_evidence": _receipt(
+            ctx,
+            tool_id="timeline.inspect_scene_takes",
+            scene_id=scene_id,
+            revision_before=revision,
+            revision_after=revision,
+        ),
+    }
+
+
 async def inspect_batches(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     context = build_timeline_context(ctx.db, ctx.project_id, _scene_id(ctx, args))
     if not context.get("ok"):
@@ -634,10 +824,15 @@ async def inspect_batches(ctx: ToolContext, args: dict[str, Any]) -> dict[str, A
 async def preflight(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     bundle = _require_bundle(ctx, args)
     master: SceneTimelineMaster = bundle["master"]
-    director_timeline = bundle["directorTimeline"]
     scene_id = bundle["sceneId"]
     revision = int(bundle["workspace"].get("timelineRevision") or 1)
-    findings = orchestrator.run_preflight(master, director_timeline=director_timeline)
+    findings = orchestrator.run_preflight(
+        master,
+        lipsync_tracks=bundle.get("lipsyncTracks"),
+        db=ctx.db,
+        project_id=ctx.project_id,
+        scene_id=scene_id,
+    )
     blocking = [f for f in findings if f.get("severity") == "error"]
     return {
         "ok": len(blocking) == 0,
@@ -661,14 +856,14 @@ async def explain_asset_reference_name(ctx: ToolContext, args: dict[str, Any]) -
     name = str(args.get("name") or args.get("displayTag") or "").strip()
     if not name:
         raise _argument_error("name or displayTag is required.", parameter="name")
-    clip = find_clip_by_tag(bundle["directorTimeline"].image_clips, name)
+    clip = find_master_visual_by_tag(bundle["master"], name)
     parsed = parse_tag_number(name if name.startswith("@") else f"@{name.lstrip('@')}")
     explanation = {
         "input": name,
         "normalizedTag": format_display_tag(parsed) if parsed else None,
         "format": "@ImageN — stable display tag for timeline image clips (N is monotonic, never renumbered).",
         "matchedClipId": clip.id if clip else None,
-        "matchedAssetId": clip.asset_id if clip else None,
+        "matchedAssetId": getattr(clip, "assetId", None) if clip else None,
         "policyNote": store.OPTIONAL_REFS_POLICY_NOTE,
     }
     return {
@@ -716,6 +911,8 @@ async def focus_ui(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         "playheadSec": args.get("playheadSec"),
         "findingCode": args.get("findingCode"),
         "jobId": args.get("jobId"),
+        "takeId": args.get("takeId"),
+        "takeLabel": args.get("takeLabel"),
         "openRightTab": "inspector",
     }
     return {
@@ -757,7 +954,7 @@ async def inspect_lipsync(ctx: ToolContext, args: dict[str, Any]) -> dict[str, A
     scene_id = bundle["sceneId"]
     workspace = bundle["workspace"]
     revision = int(workspace.get("timelineRevision") or 1)
-    tracks = _normalize_lipsync_state(bundle["directorTimeline"].lipsync).tracks
+    tracks = _normalize_lipsync_state(bundle.get("lipsyncTracks")).tracks
     protected_track_id = tracks[0].id if tracks else None
     return {
         "trackCount": len(tracks),
@@ -781,7 +978,7 @@ async def validate_lipsync(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
     scene = store.get_scene(ctx.db, ctx.project_id, scene_id)
     if not scene:
         raise _target_not_found("Scene timeline not found.", sceneId=scene_id)
-    findings = _validate_lipsync_state(scene, bundle["directorTimeline"])
+    findings = _validate_lipsync_state(scene, bundle.get("lipsyncTracks"))
     blocking = [item for item in findings if item.get("severity") == "error"]
     return {
         "ok": len(blocking) == 0,
@@ -825,14 +1022,14 @@ def apply_set_playhead(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]
     playhead = float(args.get("playhead") or args.get("time") or 0.0)
     if playhead < 0:
         raise _argument_error("playhead must be >= 0.", playhead=playhead)
-    director_tl = bundle["directorTimeline"]
-    director_tl.playhead = playhead
+    # SINGLE-STORE: save_master persists Master + workspace only. The playhead
+    # lives on the workspace — a director_tl.playhead assignment is a dead write.
+    workspace["playhead"] = playhead
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=director_tl,
         workspace=workspace,
         bump_revision=True,
     )
@@ -880,7 +1077,6 @@ def apply_update_settings(ctx: ToolContext, args: dict[str, Any]) -> dict[str, A
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=bundle["directorTimeline"],
         workspace=workspace,
         bump_revision=True,
     )
@@ -932,7 +1128,6 @@ def apply_set_guidance_priority(ctx: ToolContext, args: dict[str, Any]) -> dict[
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=bundle["directorTimeline"],
         workspace=workspace,
         bump_revision=True,
     )
@@ -971,7 +1166,7 @@ def preview_remove_item(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
         summary=f"Remove {kind} {item_id} from the Timeline.",
         lines=[
             "Batch Blocks move to removedItems for restore.",
-            "Track clips are removed from Director Timeline JSON.",
+            "Track clips are removed from Timeline Master clip arrays.",
             "Does not delete library assets.",
         ],
     )
@@ -993,7 +1188,6 @@ def apply_remove_item(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
             itemKind=kind,
         )
     master: SceneTimelineMaster = bundle["master"]
-    director_tl = bundle["directorTimeline"]
     if kind == "batchBlock":
         batch = next((b for b in master.batchBlocks if b.id == item_id), None)
         if not batch:
@@ -1009,59 +1203,105 @@ def apply_remove_item(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         )
     else:
         payload: dict[str, Any] | None = None
-        if kind == "imageClip":
-            match = next((c for c in (director_tl.image_clips or []) if c.id == item_id), None)
-            if not match:
-                raise _target_not_found("Image clip not found.", itemId=item_id)
+        if kind in {"imageClip", "videoClip", "audioClip", "sfxClip", "cameraClip"}:
+            batch, attr, match = _find_master_clip(master, item_id, kind)
+            if match is None or batch is None or attr is None:
+                raise _target_not_found("Clip not found.", itemId=item_id, itemKind=kind)
             payload = match.model_dump() if hasattr(match, "model_dump") else dict(match)
-            director_tl.image_clips = [c for c in director_tl.image_clips if c.id != item_id]
-        elif kind == "videoClip":
-            match = next((c for c in (director_tl.video_clips or []) if c.id == item_id), None)
-            if not match:
-                raise _target_not_found("Video clip not found.", itemId=item_id)
-            payload = match.model_dump() if hasattr(match, "model_dump") else dict(match)
-            director_tl.video_clips = [c for c in director_tl.video_clips if c.id != item_id]
+            setattr(
+                batch,
+                attr,
+                [
+                    c
+                    for c in (getattr(batch, attr, None) or [])
+                    if str(getattr(c, "id", "") or "") != str(item_id)
+                    and str(getattr(c, "legacyClipId", "") or "") != str(item_id)
+                ],
+            )
         elif kind == "promptSegment":
-            match = next((c for c in (director_tl.prompt_segments or []) if c.id == item_id), None)
-            if not match:
+            # SINGLE-STORE: find in Master batch.promptSegments only.
+            match = None
+            for batch in getattr(master, "batchBlocks", None) or []:
+                for s in getattr(batch, "promptSegments", None) or []:
+                    if str(getattr(s, "id", "") or "") == str(item_id) or str(
+                        getattr(s, "legacyPromptSegmentId", "") or ""
+                    ) == str(item_id):
+                        match = s
+                        break
+                if match is not None:
+                    break
+            if match is None:
                 raise _target_not_found("Timed Instruction not found.", itemId=item_id)
             payload = match.model_dump() if hasattr(match, "model_dump") else dict(match)
-            director_tl.prompt_segments = [c for c in director_tl.prompt_segments if c.id != item_id]
-        elif kind == "audioClip":
-            match = next((c for c in (director_tl.audio_clips or []) if c.id == item_id), None)
-            if not match:
-                raise _target_not_found("Audio clip not found.", itemId=item_id)
-            payload = match.model_dump() if hasattr(match, "model_dump") else dict(match)
-            director_tl.audio_clips = [c for c in director_tl.audio_clips if c.id != item_id]
-        elif kind == "sfxClip":
-            match = next((c for c in (director_tl.sfx_clips or []) if c.id == item_id), None)
-            if not match:
-                raise _target_not_found("SFX clip not found.", itemId=item_id)
-            payload = match.model_dump() if hasattr(match, "model_dump") else dict(match)
-            director_tl.sfx_clips = [c for c in director_tl.sfx_clips if c.id != item_id]
-        elif kind == "cameraClip":
-            match = next((c for c in (director_tl.camera_clips or []) if c.id == item_id), None)
-            if not match:
-                raise _target_not_found("Camera clip not found.", itemId=item_id)
-            payload = match.model_dump() if hasattr(match, "model_dump") else dict(match)
-            director_tl.camera_clips = [c for c in (director_tl.camera_clips or []) if c.id != item_id]
         workspace = store.stash_removed_item(
             workspace,
             kind=kind,
             item_id=item_id,
             payload=payload or {},
         )
+    # SINGLE-STACK: remove Timed Prompt from Master batch.promptSegments directly.
+    if kind == "promptSegment":
+        for batch in getattr(master, "batchBlocks", None) or []:
+            segs = list(getattr(batch, "promptSegments", None) or [])
+            kept = [
+                s
+                for s in segs
+                if str(getattr(s, "id", "") or "") != str(item_id)
+                and str(getattr(s, "legacyPromptSegmentId", "") or "") != str(item_id)
+            ]
+            if len(kept) != len(segs):
+                batch.promptSegments = kept
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
         master,
-        director_tl=director_tl,
         workspace=workspace,
         bump_revision=True,
     )
     revision_after = revision_before + 1
     removed = workspace.get("removedItems") or []
+    # BOT2: Instant Update / STEP0 — verify destination readback (ids gone).
+    verified = True
+    remaining_ids: list[str] = []
+    if kind == "promptSegment":
+        try:
+            # Re-load Master from persistence — do not trust in-memory only.
+            rb = service.load_timeline_bundle(ctx.db, ctx.project_id, scene_id)
+            rel_master = (rb or {}).get("master")
+            remaining_ids = []
+            for batch in getattr(rel_master, "batchBlocks", None) or []:
+                for s in getattr(batch, "promptSegments", None) or []:
+                    remaining_ids.append(str(getattr(s, "id", "") or ""))
+                    remaining_ids.append(str(getattr(s, "legacyPromptSegmentId", "") or ""))
+            verified = item_id not in remaining_ids
+        except Exception:
+            remaining_ids = []
+            for batch in getattr(master, "batchBlocks", None) or []:
+                for s in getattr(batch, "promptSegments", None) or []:
+                    remaining_ids.append(str(getattr(s, "id", "") or ""))
+            verified = item_id not in remaining_ids
+        if not verified:
+            raise _argument_error(
+                f"Timed Prompt remove did not verify: {item_id} still present after save.",
+                field="itemId",
+                toolId="timeline.remove_item",
+                itemId=item_id,
+                remainingIds=remaining_ids,
+            )
+    elif kind in {"imageClip", "videoClip", "audioClip", "sfxClip", "cameraClip"}:
+        rb = service.load_timeline_bundle(ctx.db, ctx.project_id, scene_id)
+        rel_master = (rb or {}).get("master")
+        _batch, _attr, still = _find_master_clip(rel_master, item_id, kind)
+        verified = still is None
+        if not verified:
+            raise _argument_error(
+                f"Clip remove did not verify: {item_id} still present on Master.",
+                field="itemId",
+                toolId="timeline.remove_item",
+                itemId=item_id,
+                itemKind=kind,
+            )
     ui_focus = {
         "target": "inspectorField",
         "sceneId": scene_id,
@@ -1071,7 +1311,11 @@ def apply_remove_item(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     }
     return {
         "ok": True,
-        "removedItemId": removed[-1]["id"] if removed else None,
+        "verified": verified,
+        "itemId": item_id,
+        "itemKind": kind,
+        "removedItemId": removed[-1]["id"] if removed else item_id,
+        "destinationSceneId": scene_id,
         "timelineRevision": revision_after,
         "uiFocus": ui_focus,
         "_uiFocus": ui_focus,
@@ -1081,7 +1325,12 @@ def apply_remove_item(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
             scene_id=scene_id,
             revision_before=revision_before,
             revision_after=revision_after,
-            extra={"itemKind": kind, "itemId": item_id},
+            extra={
+                "itemKind": kind,
+                "itemId": item_id,
+                "verified": verified,
+                "remainingPromptIds": remaining_ids if kind == "promptSegment" else None,
+            },
         ),
     }
 
@@ -1110,7 +1359,6 @@ def apply_restore_removed_item(ctx: ToolContext, args: dict[str, Any]) -> dict[s
     if not match:
         raise _target_not_found("Removed item not found in restore stash.", removedItemId=removed_id)
     master: SceneTimelineMaster = bundle["master"]
-    director_tl = bundle["directorTimeline"]
     kind = str(match.get("kind") or "")
     payload = match.get("payload") or {}
     if kind == "batchBlock":
@@ -1122,22 +1370,26 @@ def apply_restore_removed_item(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         master.batchBlocks.append(batch)
         master.batchBlocks.sort(key=lambda b: b.order)
     else:
-        from ....director_timeline import CameraClip, ImageClip, PromptSegment, TimelineClip
+        from ....director_timeline_w46.contracts import TimelinePromptSegment
 
-        if kind == "imageClip":
-            director_tl.image_clips = list(director_tl.image_clips or []) + [ImageClip.model_validate(payload)]
-        elif kind == "videoClip":
-            director_tl.video_clips = list(director_tl.video_clips or []) + [TimelineClip.model_validate(payload)]
-        elif kind == "promptSegment":
-            director_tl.prompt_segments = list(director_tl.prompt_segments or []) + [
-                PromptSegment.model_validate(payload)
-            ]
-        elif kind == "audioClip":
-            director_tl.audio_clips = list(director_tl.audio_clips or []) + [TimelineClip.model_validate(payload)]
-        elif kind == "sfxClip":
-            director_tl.sfx_clips = list(director_tl.sfx_clips or []) + [TimelineClip.model_validate(payload)]
-        elif kind == "cameraClip":
-            director_tl.camera_clips = list(director_tl.camera_clips or []) + [CameraClip.model_validate(payload)]
+        if kind == "promptSegment":
+            # SINGLE-STORE: restore into Master batch.promptSegments only.
+            seg = TimelinePromptSegment.model_validate(payload)
+            target = None
+            for batch in getattr(master, "batchBlocks", None) or []:
+                if any(
+                    str(getattr(s, "id", "") or "") == str(seg.id)
+                    or str(getattr(s, "legacyPromptSegmentId", "") or "") == str(seg.id)
+                    for s in getattr(batch, "promptSegments", None) or []
+                ):
+                    target = batch
+                    break
+            if target is None:
+                target = _start_containing_batch(master, float(getattr(seg, "start", 0.0) or 0.0))
+            target.promptSegments = list(getattr(target, "promptSegments", None) or []) + [seg]
+        elif kind in {"imageClip", "videoClip", "audioClip", "sfxClip", "cameraClip"}:
+            clip = _payload_to_batch_clip(kind, payload if isinstance(payload, dict) else {})
+            _append_master_clip(master, clip, float(getattr(clip, "start", 0.0) or 0.0), _clip_attr_for_kind(kind))
         else:
             raise _argument_error("Unsupported removed item kind.", kind=kind)
     workspace = store.normalize_timeline_workspace(workspace)
@@ -1147,7 +1399,6 @@ def apply_restore_removed_item(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         ctx.project_id,
         scene_id,
         master,
-        director_tl=director_tl,
         workspace=workspace,
         bump_revision=True,
     )
@@ -1232,43 +1483,41 @@ def preview_propose_add_image_clip(ctx: ToolContext, args: dict[str, Any]) -> To
         ctx,
         args,
         summary="Add an Image clip to the Visual track.",
-        lines=["Persists to Director Timeline image_clips.", "Does not invent library assets."],
+        lines=["Persists to Timeline Master visual clips.", "Does not invent library assets."],
     )
 
 
 def apply_propose_add_image_clip(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    from uuid import uuid4
-
-    from ....director_timeline import ImageClip
+    from ....director_timeline_w46.contracts import BatchClip
 
     bundle = _require_bundle(ctx, args)
     workspace = bundle["workspace"]
     _check_revision(args, workspace)
     scene_id = bundle["sceneId"]
     revision_before = int(workspace.get("timelineRevision") or 1)
-    director_tl = bundle["directorTimeline"]
-    duration = float(director_tl.duration_sec or 5.0)
-    clips = list(director_tl.image_clips or [])
+    master = bundle["master"]
+    duration = _master_scene_duration(master)
+    existing = []
+    for batch in getattr(master, "batchBlocks", None) or []:
+        existing.extend(getattr(batch, "visualClips", None) or [])
     start = float(args["start"]) if args.get("start") is not None else (
-        max((c.start + c.length for c in clips), default=0.0)
+        max((float(getattr(c, "start", 0) or 0) + float(getattr(c, "length", 0) or 0) for c in existing), default=0.0)
     )
     length = float(args.get("length") or min(2.0, duration))
-    clip = ImageClip(
-        id=f"img_{uuid4().hex[:8]}",
-        start=max(0.0, min(start, max(0.0, duration - 0.1))),
+    clip = BatchClip(
+        kind="image",
+        start=max(0.0, start),
         length=max(0.1, min(length, duration)),
-        label=str(args.get("label") or f"Image {len(clips) + 1}"),
+        label=str(args.get("label") or f"Image {len(existing) + 1}"),
         role="guide",
-        asset_id=args.get("assetId"),
+        assetId=args.get("assetId"),
     )
-    director_tl.media_mode = "image"
-    director_tl.image_clips = clips + [clip]
+    _append_master_clip(master, clip, float(clip.start), "visualClips")
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
-        bundle["master"],
-        director_tl=director_tl,
+        master,
         workspace=workspace,
         bump_revision=True,
     )
@@ -1286,7 +1535,7 @@ def apply_propose_add_image_clip(ctx: ToolContext, args: dict[str, Any]) -> dict
             subject_kind="image_clip",
             subject_id=clip.id,
             summary=f"Image clip {clip.label} added at {round(clip.start, 3)}s for {round(clip.length, 3)}s",
-            payload={"clipId": clip.id, "start": clip.start, "length": clip.length, "assetId": clip.asset_id},
+            payload={"clipId": clip.id, "start": clip.start, "length": clip.length, "assetId": clip.assetId},
 
         )
     except Exception:  # noqa: BLE001 - event recording never breaks the operation
@@ -1316,86 +1565,294 @@ def apply_propose_add_image_clip(ctx: ToolContext, args: dict[str, Any]) -> dict
     }
 
 
+
+def _timed_prompt_requested_coverage_sec(text: str) -> float | None:
+    """Max end-time claimed by Timed Prompt text (markers and coverage phrases).
+
+    BOT2 / Creator Spec Fidelity: refuse when coverage exceeds scene duration.
+    Never treat a clamped length=scene_dur as success when text still claims longer.
+    """
+    import re as _re
+
+    raw = str(text or "")
+    max_end: float | None = None
+    for m in _re.finditer(
+        r"\[(\d+(?:\.\d+)?)\s*s\s*(?:[-–—to]+\s*(\d+(?:\.\d+)?)\s*s)?\]",
+        raw,
+        _re.I,
+    ):
+        a = float(m.group(1))
+        b = float(m.group(2) or m.group(1))
+        end = max(a, b)
+        max_end = end if max_end is None else max(max_end, end)
+    for m in _re.finditer(
+        r"(?:covers?|full|spanning|across)\s+(?:the\s+)?(?:full\s+)?(\d+(?:\.\d+)?)\s*-?\s*seconds?\b"
+        r"|\b(\d+(?:\.\d+)?)\s*-\s*second(?:\s+(?:multi-beat|narrative|dialogue|arc|prompt))?\b"
+        r"|\b(\d+(?:\.\d+)?)\s+seconds?\s+(?:multi-beat|narrative|dialogue|arc)\b",
+        raw,
+        _re.I,
+    ):
+        val = next((float(g) for g in m.groups() if g is not None), None)
+        if val is not None and val >= 1.0:
+            max_end = val if max_end is None else max(max_end, val)
+    return max_end
+
+
 def preview_propose_add_prompt_segment(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     return _preview_mutation(
         ctx,
         args,
         summary="Add a Timed Instruction to the Prompt track.",
-        lines=["Persists to Director Timeline prompt_segments.", "Scene Prompt remains authoritative in Inspector."],
+        lines=["Persists to the Timed Prompt track.", "The Inspector shows the same prompt after save."],
     )
 
 
+
+def _upsert_master_timed_prompt(
+    master: Any,
+    *,
+    text: str,
+    start: float,
+    length: float,
+    legacy_id: str | None = None,
+    user_direction: str | None = None,
+    production_prompt: str | None = None,
+    dialogue: str | None = None,
+    weight: float = 1.0,
+    explicit_start: bool = True,
+) -> tuple[Any, str]:
+    """Write Timed Prompt into Master batch.promptSegments by start-containment.
+
+    Root batch (contains start) owns scene-level prompt. Never clones into every window.
+    Returns (target_batch, segment_id).
+    """
+    from ....director_timeline_w46.contracts import TimelinePromptSegment
+
+    blocks = sorted(
+        list(getattr(master, "batchBlocks", None) or []),
+        key=lambda b: int(getattr(b, "order", 0) or 0),
+    )
+    if not blocks:
+        raise _argument_error(
+            "Timeline Master has no execution windows yet. Rematerialize windows before adding a Timed Prompt.",
+            field="text",
+            toolId="timeline.propose_add_prompt_segment",
+        )
+
+    # Cumulative plannedDuration windows — start-containment (charter).
+    cursor = 0.0
+    target = blocks[0]
+    for b in blocks:
+        dur = getattr(b, "duration", None)
+        planned = float(getattr(dur, "plannedDuration", None) or getattr(dur, "timelineVisibleDuration", None) or 0.0)
+        planned = max(0.1, planned)
+        end = cursor + planned
+        if start + 1e-6 >= cursor and start < end - 1e-9:
+            target = b
+            break
+        cursor = end
+        target = b
+
+    segs = list(getattr(target, "promptSegments", None) or [])
+    # Transaction law (pre-dual-stack parity): more than one empty Timed Prompt
+    # is ambiguous — refuse to add another beside them.
+    empty_segs = [s for s in segs if not str(getattr(s, "text", "") or "").strip()]
+    if len(empty_segs) >= 2:
+        raise _argument_error(
+            "This scene has more than one empty Timed Prompt. I will not add another beside them.",
+            field="text",
+            toolId="timeline.propose_add_prompt_segment",
+        )
+    # Prefer updating empty primary or matching legacy id
+    hit = None
+    if legacy_id:
+        hit = next((s for s in segs if getattr(s, "legacyPromptSegmentId", None) == legacy_id or getattr(s, "id", None) == legacy_id), None)
+    if hit is None and len(empty_segs) == 1:
+        hit = empty_segs[0]
+    if (
+        hit is None
+        and not explicit_start
+        and segs
+        and int(getattr(target, "order", 0) or 0) == 0
+        and len(segs) == 1
+    ):
+        # Single root segment + no explicit start — scene-owned re-placement
+        # replaces text. An explicit start on a multi-beat scene APPENDS
+        # instead of destroying the existing segment.
+        hit = segs[0]
+
+    if hit is None:
+        hit = TimelinePromptSegment(
+            start=float(start),
+            length=float(length),
+            text=text,
+            strength=float(weight),
+            legacyPromptSegmentId=legacy_id,
+            userDirection=user_direction,
+            productionPrompt=production_prompt,
+            dialogue=dialogue,
+        )
+        segs.append(hit)
+    else:
+        hit.text = text
+        hit.start = float(start)
+        hit.length = float(length)
+        hit.strength = float(weight)
+        if legacy_id:
+            try:
+                hit.legacyPromptSegmentId = legacy_id
+            except Exception:
+                pass
+        if user_direction is not None:
+            hit.userDirection = user_direction
+        if production_prompt is not None:
+            hit.productionPrompt = production_prompt
+        if dialogue is not None:
+            hit.dialogue = dialogue
+    target.promptSegments = segs
+    return target, str(getattr(hit, "id", "") or "")
+
+
+def _master_prompt_text_by_id(master: Any, segment_id: str) -> str:
+    for b in getattr(master, "batchBlocks", None) or []:
+        for s in getattr(b, "promptSegments", None) or []:
+            if str(getattr(s, "id", "") or "") == segment_id:
+                return str(getattr(s, "text", "") or "")
+            if str(getattr(s, "legacyPromptSegmentId", None) or "") == segment_id:
+                return str(getattr(s, "text", "") or "")
+    return ""
+
+
+
 def apply_propose_add_prompt_segment(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    from uuid import uuid4
+    from hashlib import sha256
 
-    from ....director_timeline import PromptSegment
-
+    authored = str(args.get("text") or "")
+    if not authored.strip():
+        raise _argument_error(
+            "Timed Prompt text is required and must be non-empty after trim.",
+            field="text",
+            toolId="timeline.propose_add_prompt_segment",
+        )
+    authored_sha = sha256(authored.encode("utf-8")).hexdigest()
     bundle = _require_bundle(ctx, args)
     workspace = bundle["workspace"]
     _check_revision(args, workspace)
     scene_id = bundle["sceneId"]
     revision_before = int(workspace.get("timelineRevision") or 1)
-    director_tl = bundle["directorTimeline"]
-    duration = float(director_tl.duration_sec or 5.0)
-    segments = list(director_tl.prompt_segments or [])
-    last = segments[-1] if segments else None
-    start = float(args["start"]) if args.get("start") is not None else (
-        min(duration - 0.5, last.start + last.length) if last else 0.0
+    # SINGLE-STORE: the duration fence reads SceneTimelineMaster window
+    # durations (fallback: scene row duration_sec). The retired legacy
+    # directorTimeline.duration_sec is frozen COW data and fenced a 45s scene
+    # at 5s — never a fence authority.
+    master = bundle["master"]
+    scene_row = store.get_scene(ctx.db, ctx.project_id, scene_id)
+    duration = _master_scene_duration(
+        master,
+        fallback=float(getattr(scene_row, "duration_sec", None) or 5.0),
     )
+    # BOT2_DURATION_FENCE: Timeline scene duration beats CD estimate / coverage claim.
+    # REFUSE when requested length OR text coverage exceeds scene duration.
+    # Never silently clamp (Creator Spec Fidelity / MATRIX Case C).
+    start_arg = float(args["start"]) if args.get("start") is not None else 0.0
+    length_arg = float(args["length"]) if args.get("length") is not None else None
+    coverage = _timed_prompt_requested_coverage_sec(authored)
+    over_bits: list[str] = []
+    if length_arg is not None and length_arg > duration + 1e-6:
+        over_bits.append(f"length={length_arg:g}s")
+    if length_arg is not None and (start_arg + length_arg) > duration + 1e-6:
+        over_bits.append(f"start+length={start_arg:g}+{length_arg:g}s")
+    if coverage is not None and coverage > duration + 1e-6:
+        over_bits.append(f"text coverage ends at {coverage:g}s")
+    if over_bits:
+        detail = ", ".join(over_bits)
+        raise _argument_error(
+            f"Timed Prompt requested coverage exceeds this scene's duration {duration:g}s "
+            f"({detail}). Shorten the prompt to fit the scene, or extend/split the scene "
+            f"before placing it. I will not silently compress a longer Timed Prompt into "
+            f"{duration:g}s.",
+            field="length",
+            toolId="timeline.propose_add_prompt_segment",
+        )
+    # SINGLE-STORE: Master is sole SoT — write batch.promptSegments directly.
+    # Do NOT call reconcile_legacy_to_master (forbidden on live CD path).
+    # Do NOT write director_tl.prompt_segments (legacy store retired).
+    start = float(args["start"]) if args.get("start") is not None else 0.0
     length = float(args.get("length") or min(2.0, duration))
-    segment = PromptSegment(
-        id=f"ps_{uuid4().hex[:8]}",
+    batch_target, master_seg_id = _upsert_master_timed_prompt(
+        master,
+        text=authored,
         start=max(0.0, start),
-        length=max(0.1, min(length, duration)),
-        text=str(args.get("text") or ""),
+        length=max(0.1, length),
+        legacy_id=None,
+        user_direction=str(args.get("userDirection")) if args.get("userDirection") is not None else None,
+        production_prompt=str(args.get("productionPrompt")) if args.get("productionPrompt") is not None else None,
+        dialogue=str(args.get("dialogue")) if args.get("dialogue") is not None else None,
         weight=float(args.get("weight") if args.get("weight") is not None else 1.0),
+        explicit_start=args.get("start") is not None,
     )
-    if args.get("userDirection") is not None:
-        segment.user_direction = str(args.get("userDirection"))
-    if args.get("productionPrompt") is not None:
-        segment.production_prompt = str(args.get("productionPrompt"))
-    if args.get("dialogue") is not None:
-        segment.dialogue = str(args.get("dialogue"))
-    director_tl.prompt_segments = segments + [segment]
+    segment_id = master_seg_id
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
-        bundle["master"],
-        director_tl=director_tl,
+        master,
         workspace=workspace,
         bump_revision=True,
     )
+    wrote = True
     revision_after = revision_before + 1
+    if wrote:
+        try:
+            from ....production_events import ACTOR_CODIRECTOR, record_production_event
+
+            record_production_event(
+                ctx.db,
+                project_id=ctx.project_id,
+                scene_id=scene_id,
+                event_type="timeline.prompt_added",
+                actor=ACTOR_CODIRECTOR,
+                actor_detail="tool:timeline.propose_add_prompt_segment",
+                subject_kind="prompt_segment",
+                subject_id=segment_id,
+                summary=f"Timed prompt added at {round(start, 3)}s for {round(length, 3)}s",
+                payload={"segmentId": segment_id, "start": start, "length": length},
+            )
+        except Exception:  # noqa: BLE001 - event recording never breaks the operation
+            pass
+
+    stored_text = ""
+    stored_sha = ""
+    verified = False
     try:
-        from ....production_events import ACTOR_CODIRECTOR, record_production_event
-
-        record_production_event(
-            ctx.db,
-            project_id=ctx.project_id,
-            scene_id=scene_id,
-            event_type="timeline.prompt_added",
-            actor=ACTOR_CODIRECTOR,
-            actor_detail="tool:timeline.propose_add_prompt_segment",
-            subject_kind="prompt_segment",
-            subject_id=segment.id,
-            summary=f"Timed prompt added at {round(segment.start, 3)}s for {round(segment.length, 3)}s",
-            payload={"segmentId": segment.id, "start": segment.start, "length": segment.length},
-
+        reloaded = service.load_timeline_bundle(ctx.db, ctx.project_id, scene_id)
+        rel_master = reloaded.get("master") if isinstance(reloaded, dict) else None
+        if rel_master is None and isinstance(reloaded, dict):
+            rel_master = (reloaded.get("bundle") or {}).get("master")
+        stored_text = _master_prompt_text_by_id(rel_master or master, segment_id)
+        stored_sha = sha256(stored_text.encode("utf-8")).hexdigest() if stored_text else ""
+        verified = bool(
+            str(reloaded.get("sceneId") or scene_id) == scene_id
+            and stored_text.strip()
+            and stored_sha == authored_sha
         )
-    except Exception:  # noqa: BLE001 - event recording never breaks the operation
-        pass
+    except Exception:  # noqa: BLE001 - verify failure is reported, not hidden
+        verified = False
+
     ui_focus = {
         "target": "trackItem",
         "sceneId": scene_id,
         "selectionKind": "promptSeg",
-        "selectionId": segment.id,
+        "selectionId": segment_id,
         "openRightTab": "inspector",
     }
     return {
         "ok": True,
-        "segmentId": segment.id,
+        "verified": verified,
+        "segmentId": segment_id,
         "timelineRevision": revision_after,
+        "authoredSha256": authored_sha,
+        "storedSha256": stored_sha,
+        "destinationSceneId": scene_id,
         "uiFocus": ui_focus,
         "_uiFocus": ui_focus,
         "mock": False,
@@ -1405,7 +1862,13 @@ def apply_propose_add_prompt_segment(ctx: ToolContext, args: dict[str, Any]) -> 
             scene_id=scene_id,
             revision_before=revision_before,
             revision_after=revision_after,
-            extra={"segmentId": segment.id},
+            extra={
+                "segmentId": segment_id,
+                "textLen": len(authored),
+                "textSha256": authored_sha,
+                "storedSha256": stored_sha,
+                "verified": verified,
+            },
         ),
     }
 
@@ -1431,9 +1894,7 @@ def apply_build_shot(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     5. Optionally add a Prompt segment aligned to the same interval, storing
        userDirection vs productionPrompt and verbatim dialogue.
     """
-    from uuid import uuid4
-
-    from ....director_timeline import ImageClip, PromptSegment
+    from ....director_timeline_w46.contracts import BatchClip
     from ....db import Asset as StudioAsset
 
     bundle = _require_bundle(ctx, args)
@@ -1441,8 +1902,8 @@ def apply_build_shot(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     _check_revision(args, workspace)
     scene_id = bundle["sceneId"]
     revision_before = int(workspace.get("timelineRevision") or 1)
-    director_tl = bundle["directorTimeline"]
-    duration = float(director_tl.duration_sec or 5.0)
+    master = bundle["master"]
+    duration = _master_scene_duration(master)
 
     asset_id = str(args.get("assetId") or "").strip()
     if not asset_id:
@@ -1460,26 +1921,33 @@ def apply_build_shot(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         pass
 
-    clips = list(director_tl.image_clips or [])
+    existing = []
+    for batch in getattr(master, "batchBlocks", None) or []:
+        existing.extend(getattr(batch, "visualClips", None) or [])
     length = float(args.get("length") or min(5.0, duration))
     length = max(0.1, min(length, duration))
     start = float(args["start"]) if args.get("start") is not None else (
-        round(max((c.start + c.length for c in clips), default=0.0), 6)
+        round(
+            max(
+                (float(getattr(c, "start", 0) or 0) + float(getattr(c, "length", 0) or 0) for c in existing),
+                default=0.0,
+            ),
+            6,
+        )
     )
     # Sequential placement is canonical: no clamp to scene duration, so
     # shot 2 lands exactly at the end of shot 1 (mission Part 22, no drift).
     start = max(0.0, start)
-    label = str(args.get("label") or f"Shot {len(clips) + 1}")
-    clip = ImageClip(
-        id=f"img_{uuid4().hex[:8]}",
+    label = str(args.get("label") or f"Shot {len(existing) + 1}")
+    clip = BatchClip(
+        kind="image",
         start=start,
         length=length,
         label=label,
         role="guide",
-        asset_id=asset_id,
+        assetId=asset_id,
     )
-    director_tl.media_mode = "image"
-    director_tl.image_clips = clips + [clip]
+    _append_master_clip(master, clip, float(start), "visualClips")
 
     segment_id = None
     prompt_text = str(args.get("prompt") or "")
@@ -1488,32 +1956,26 @@ def apply_build_shot(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     dialogue = str(args.get("dialogue") or "")
     want_prompt = bool(args.get("addPromptSegment")) if args.get("addPromptSegment") is not None else bool(prompt_text or production_prompt or user_direction or dialogue)
     if want_prompt:
-        segments = list(director_tl.prompt_segments or [])
+        # SINGLE-STORE: write Timed Prompt into Master batch.promptSegments only.
         text = production_prompt or prompt_text or user_direction or dialogue
-        segment = PromptSegment(
-            id=f"ps_{uuid4().hex[:8]}",
-            start=start,
-            length=length,
+        master = bundle["master"]
+        _batch_target, segment_id = _upsert_master_timed_prompt(
+            master,
             text=text,
+            start=float(start),
+            length=float(length),
+            legacy_id=None,
+            user_direction=user_direction or None,
+            production_prompt=production_prompt or None,
+            dialogue=dialogue or None,
             weight=1.0,
         )
-        # Provenance: keep the user direction and dialogue verbatim beside the
-        # compiled text (mission Parts 13-16, 19-20).
-        if user_direction:
-            segment.user_direction = user_direction
-        if production_prompt:
-            segment.production_prompt = production_prompt
-        if dialogue:
-            segment.dialogue = dialogue
-        segment_id = segment.id
-        director_tl.prompt_segments = segments + [segment]
 
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=director_tl,
         workspace=workspace,
         bump_revision=True,
     )
@@ -1722,13 +2184,31 @@ def apply_propose_retake(ctx: ToolContext, args: dict[str, Any]) -> dict[str, An
     if not batch_id:
         raise _argument_error("batchBlockId is required.", parameter="batchBlockId")
     guidance = str(workspace.get("guidancePriority") or "") or None
-    result = orchestrator.submit_batch_generation(
-        ctx.db,
-        ctx.project_id,
-        scene_id,
-        batch_id,
-        guidance_priority=guidance,
-    )
+    start = args.get("start")
+    length = args.get("length")
+    prompt = str(args.get("prompt") or args.get("delta") or "").strip()
+    if start is not None and length is not None and prompt:
+        result = orchestrator.retake_range(
+            ctx.db,
+            ctx.project_id,
+            scene_id,
+            batch_id,
+            start=float(start),
+            length=float(length),
+            prompt=prompt,
+            mask_png_base64=args.get("maskPngBase64"),
+            reference_frame_time=args.get("referenceFrameTime"),
+            frame_asset_id=args.get("frameAssetId"),
+            remove_background=bool(args.get("removeBackground")),
+        )
+    else:
+        result = orchestrator.submit_batch_generation(
+            ctx.db,
+            ctx.project_id,
+            scene_id,
+            batch_id,
+            guidance_priority=guidance,
+        )
     revision_after = _persist_revision_bump(ctx, scene_id, workspace, revision_before)
     return {
         **result,
@@ -1780,7 +2260,6 @@ def apply_attach_optional_reference(ctx: ToolContext, args: dict[str, Any]) -> d
         ctx.project_id,
         scene_id,
         master,
-        director_tl=bundle["directorTimeline"],
         workspace=workspace,
         bump_revision=True,
     )
@@ -1904,7 +2383,6 @@ def apply_propose_layout_preset(ctx: ToolContext, args: dict[str, Any]) -> dict[
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=bundle["directorTimeline"],
         workspace=ws,
         bump_revision=True,
     )
@@ -1955,7 +2433,6 @@ def apply_propose_viewer_fullscreen(ctx: ToolContext, args: dict[str, Any]) -> d
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=bundle["directorTimeline"],
         workspace=ws,
         bump_revision=True,
     )
@@ -2004,7 +2481,6 @@ def apply_propose_layout_reset(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=bundle["directorTimeline"],
         workspace=ws,
         bump_revision=True,
     )
@@ -2064,7 +2540,6 @@ def apply_propose_zoom(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=bundle["directorTimeline"],
         workspace=ws,
         bump_revision=True,
     )
@@ -2093,124 +2568,51 @@ def apply_propose_zoom(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]
 
 
 def preview_propose_add_camera(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
-    label = str(args.get("label") or args.get("motionId") or args.get("motionType") or "camera move")
+    """Phase 0: CAMERA lane removed — Timed Prompt is sole camera authority."""
     return _preview_mutation(
         ctx,
         args,
-        summary=f"Add camera direction “{label}”.",
-        lines=["Creates a camera clip on the Timeline camera track.", "Catalog motion/rig ids are validated before apply."],
+        summary="Camera track removed — write camera direction in Timed Prompt.",
+        lines=[
+            "The Timeline Camera track is no longer a creator surface.",
+            "Write shot movement and motion direction in Timed Prompt.",
+            "Do not add a Camera clip.",
+        ],
     )
 
 
 def apply_propose_add_camera(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    bundle = _require_bundle(ctx, args)
-    workspace = bundle["workspace"]
-    _check_revision(args, workspace)
-    scene_id = bundle["sceneId"]
-    revision_before = int(workspace.get("timelineRevision") or 1)
-    director_tl = bundle["directorTimeline"]
-    clips = list(director_tl.camera_clips or [])
-    clip = _resolve_camera_clip(args, duration=float(director_tl.duration_sec or 5.0))
-    director_tl.camera_clips = clips + [clip]
-    store.save_master(
-        ctx.db,
-        ctx.project_id,
-        scene_id,
-        bundle["master"],
-        director_tl=director_tl,
-        workspace=workspace,
-        bump_revision=True,
+    """Phase 0: refuse — dual camera authority must not reappear."""
+    raise _argument_error(
+        "timeline.propose_add_camera is disabled. Timed Prompt is the sole camera authority — "
+        "write camera direction in a Timed Prompt clip instead of adding a Camera clip.",
+        parameter="tool",
+        toolId="timeline.propose_add_camera",
     )
-    revision_after = revision_before + 1
-    ui_focus = {
-        "target": "trackItem",
-        "sceneId": scene_id,
-        "selectionKind": "camera",
-        "selectionId": clip.id,
-        "openRightTab": "inspector",
-    }
-    return {
-        "ok": True,
-        "cameraClipId": clip.id,
-        "cameraClip": clip.model_dump(),
-        "cameraSummary": describe_camera_clip(clip),
-        "timelineRevision": revision_after,
-        "uiFocus": ui_focus,
-        "_uiFocus": ui_focus,
-        "_evidence": _receipt(
-            ctx,
-            tool_id="timeline.propose_add_camera",
-            scene_id=scene_id,
-            revision_before=revision_before,
-            revision_after=revision_after,
-            extra={"cameraClipId": clip.id},
-        ),
-    }
 
 
 def preview_propose_update_camera(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
-    clip_id = str(args.get("cameraClipId") or "")
+    """Phase 0: CAMERA lane removed — Timed Prompt is sole camera authority."""
     return _preview_mutation(
         ctx,
         args,
-        summary=f"Update camera clip {clip_id}.",
-        lines=["Patches timing or motion details on an existing camera clip.", "Catalog motion/rig ids are validated before apply."],
+        summary="Camera track removed — update camera direction in Timed Prompt.",
+        lines=[
+            "The Timeline Camera track is no longer a creator surface.",
+            "Write or edit camera direction inside Timed Prompt.",
+            "Do not update Camera clips.",
+        ],
     )
 
 
 def apply_propose_update_camera(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    bundle = _require_bundle(ctx, args)
-    workspace = bundle["workspace"]
-    _check_revision(args, workspace)
-    scene_id = bundle["sceneId"]
-    revision_before = int(workspace.get("timelineRevision") or 1)
-    director_tl = bundle["directorTimeline"]
-    clip_id = str(args.get("cameraClipId") or "").strip()
-    if not clip_id:
-        raise _argument_error("cameraClipId is required.", parameter="cameraClipId")
-    current = next((item for item in (director_tl.camera_clips or []) if item.id == clip_id), None)
-    if not current:
-        raise _target_not_found("Camera clip not found.", cameraClipId=clip_id)
-    updated = _resolve_camera_clip(
-        args,
-        duration=float(director_tl.duration_sec or 5.0),
-        existing=current.model_dump(),
+    """Phase 0: refuse — dual camera authority must not reappear."""
+    raise _argument_error(
+        "timeline.propose_update_camera is disabled. Timed Prompt is the sole camera authority — "
+        "edit camera direction in Timed Prompt instead of updating a Camera clip.",
+        parameter="tool",
+        toolId="timeline.propose_update_camera",
     )
-    director_tl.camera_clips = [updated if item.id == clip_id else item for item in (director_tl.camera_clips or [])]
-    store.save_master(
-        ctx.db,
-        ctx.project_id,
-        scene_id,
-        bundle["master"],
-        director_tl=director_tl,
-        workspace=workspace,
-        bump_revision=True,
-    )
-    revision_after = revision_before + 1
-    ui_focus = {
-        "target": "trackItem",
-        "sceneId": scene_id,
-        "selectionKind": "camera",
-        "selectionId": updated.id,
-        "openRightTab": "inspector",
-    }
-    return {
-        "ok": True,
-        "cameraClipId": updated.id,
-        "cameraClip": updated.model_dump(),
-        "cameraSummary": describe_camera_clip(updated),
-        "timelineRevision": revision_after,
-        "uiFocus": ui_focus,
-        "_uiFocus": ui_focus,
-        "_evidence": _receipt(
-            ctx,
-            tool_id="timeline.propose_update_camera",
-            scene_id=scene_id,
-            revision_before=revision_before,
-            revision_after=revision_after,
-            extra={"cameraClipId": updated.id},
-        ),
-    }
 
 
 def preview_propose_add_lipsync_track(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
@@ -2228,17 +2630,19 @@ def apply_propose_add_lipsync_track(ctx: ToolContext, args: dict[str, Any]) -> d
     _check_revision(args, workspace)
     scene_id = bundle["sceneId"]
     revision_before = int(workspace.get("timelineRevision") or 1)
-    director_tl = bundle["directorTimeline"]
-    lipsync = _normalize_lipsync_state(director_tl.lipsync)
+    lipsync = _normalize_lipsync_state(bundle.get("lipsyncTracks"))
     track = LipSyncTrack(slot=len(lipsync.tracks) + 1, label=f"Lip Sync {len(lipsync.tracks) + 1}", enabled=False)
     lipsync.tracks.append(track)
-    director_tl.lipsync = _normalize_lipsync_state(lipsync)
+    lipsync = _normalize_lipsync_state(lipsync)
+    scene = store.get_scene(ctx.db, ctx.project_id, scene_id)
+    if not scene:
+        raise _target_not_found("Scene timeline not found.", sceneId=scene_id)
+    scene.lipsync_tracks_json = dumps_lipsync_tracks(lipsync)
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=director_tl,
         workspace=workspace,
         bump_revision=True,
     )
@@ -2284,8 +2688,7 @@ def apply_propose_remove_lipsync_track(ctx: ToolContext, args: dict[str, Any]) -
     _check_revision(args, workspace)
     scene_id = bundle["sceneId"]
     revision_before = int(workspace.get("timelineRevision") or 1)
-    director_tl = bundle["directorTimeline"]
-    lipsync = _normalize_lipsync_state(director_tl.lipsync)
+    lipsync = _normalize_lipsync_state(bundle.get("lipsyncTracks"))
     track_id = str(args.get("trackId") or "").strip()
     if not track_id:
         raise _argument_error("trackId is required.", parameter="trackId")
@@ -2293,13 +2696,16 @@ def apply_propose_remove_lipsync_track(ctx: ToolContext, args: dict[str, Any]) -
     if track_index == 0 or track.slot == 1:
         raise _argument_error("Lip Sync 1 is protected and cannot be removed.", trackId=track_id)
     lipsync.tracks = [item for item in lipsync.tracks if item.id != track_id]
-    director_tl.lipsync = _normalize_lipsync_state(lipsync)
+    lipsync = _normalize_lipsync_state(lipsync)
+    scene = store.get_scene(ctx.db, ctx.project_id, scene_id)
+    if not scene:
+        raise _target_not_found("Scene timeline not found.", sceneId=scene_id)
+    scene.lipsync_tracks_json = dumps_lipsync_tracks(lipsync)
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=director_tl,
         workspace=workspace,
         bump_revision=True,
     )
@@ -2340,12 +2746,16 @@ def apply_propose_add_lipsync_clip(ctx: ToolContext, args: dict[str, Any]) -> di
     scene = store.get_scene(ctx.db, ctx.project_id, scene_id)
     if not scene:
         raise _target_not_found("Scene timeline not found.", sceneId=scene_id)
-    director_tl = bundle["directorTimeline"]
-    lipsync = _normalize_lipsync_state(director_tl.lipsync)
+    lipsync = _normalize_lipsync_state(bundle.get("lipsyncTracks"))
     _, track = _find_lipsync_track(lipsync.tracks, str(args.get("trackId") or "").strip() or None)
     clips = sorted(list(track.clips or []), key=lambda item: item.start)
     last = clips[-1] if clips else None
-    duration = float(director_tl.duration_sec or 5.0)
+    # SINGLE-STORE: placement fence reads Master window durations (fallback:
+    # scene row duration_sec), never the frozen legacy duration_sec.
+    duration = _master_scene_duration(
+        bundle["master"],
+        fallback=float(getattr(scene, "duration_sec", None) or 5.0),
+    )
     start = (
         _coerce_float(args.get("start"), name="start")
         if args.get("start") is not None
@@ -2368,13 +2778,16 @@ def apply_propose_add_lipsync_clip(ctx: ToolContext, args: dict[str, Any]) -> di
     track.enabled = True
     track.audio_asset_id = clip.audio_asset_id or track.audio_asset_id
     track.clips = clips + [clip]
-    director_tl.lipsync = _normalize_lipsync_state(lipsync)
+    lipsync = _normalize_lipsync_state(lipsync)
+    scene = store.get_scene(ctx.db, ctx.project_id, scene_id)
+    if not scene:
+        raise _target_not_found("Scene timeline not found.", sceneId=scene_id)
+    scene.lipsync_tracks_json = dumps_lipsync_tracks(lipsync)
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=director_tl,
         workspace=workspace,
         bump_revision=True,
     )
@@ -2421,8 +2834,7 @@ def apply_propose_bind_lipsync_clip(ctx: ToolContext, args: dict[str, Any]) -> d
     _check_revision(args, workspace)
     scene_id = bundle["sceneId"]
     revision_before = int(workspace.get("timelineRevision") or 1)
-    director_tl = bundle["directorTimeline"]
-    lipsync = _normalize_lipsync_state(director_tl.lipsync)
+    lipsync = _normalize_lipsync_state(bundle.get("lipsyncTracks"))
     clip_id = str(args.get("clipId") or "").strip()
     if not clip_id:
         raise _argument_error("clipId is required.", parameter="clipId")
@@ -2447,13 +2859,16 @@ def apply_propose_bind_lipsync_clip(ctx: ToolContext, args: dict[str, Any]) -> d
         track.audio_asset_id = clip.audio_asset_id
     track.clips[clip_index] = clip
     lipsync.tracks[track_index] = track
-    director_tl.lipsync = _normalize_lipsync_state(lipsync)
+    lipsync = _normalize_lipsync_state(lipsync)
+    scene = store.get_scene(ctx.db, ctx.project_id, scene_id)
+    if not scene:
+        raise _target_not_found("Scene timeline not found.", sceneId=scene_id)
+    scene.lipsync_tracks_json = dumps_lipsync_tracks(lipsync)
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=director_tl,
         workspace=workspace,
         bump_revision=True,
     )
@@ -2488,8 +2903,8 @@ def preview_propose_open_inpaint(ctx: ToolContext, args: dict[str, Any]) -> Tool
     return _preview_mutation(
         ctx,
         args,
-        summary="Open the Timeline inpaint workspace.",
-        lines=["Approval emits a Viewer directive so the web client opens Video Inpaint.", "The selected repair or video clip is preserved on the scene workspace."],
+        summary="Open the Timeline Re-Take workspace.",
+        lines=["Approval emits a Viewer directive so the web client opens video Re-Take.", "The selected video clip is preserved on the scene workspace."],
     )
 
 
@@ -2506,7 +2921,10 @@ def apply_propose_open_inpaint(ctx: ToolContext, args: dict[str, Any]) -> dict[s
     if selection_kind not in {"videoClip", "repair"}:
         raise _argument_error("selectionKind must be videoClip or repair.", selectionKind=selection_kind)
     if selection_kind == "videoClip":
-        if not any(item.id == selection_id for item in (bundle["directorTimeline"].video_clips or [])):
+        if not any(
+            str(clip.id) == selection_id
+            for _batch, clip in iter_master_visual_clips(bundle["master"])
+        ):
             raise _target_not_found("Video clip not found.", selectionId=selection_id)
     else:
         if not any(selection_id == repair.id for batch in bundle["master"].batchBlocks for repair in (batch.repairRanges or [])):
@@ -2516,13 +2934,13 @@ def apply_propose_open_inpaint(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         "selectionKind": selection_kind,
         "selectionId": selection_id,
         "playheadSec": args.get("playheadSec"),
+        "mode": "retake",
     }
     store.save_master(
         ctx.db,
         ctx.project_id,
         scene_id,
         bundle["master"],
-        director_tl=bundle["directorTimeline"],
         workspace=workspace,
         bump_revision=True,
     )
@@ -2533,7 +2951,8 @@ def apply_propose_open_inpaint(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         "selectionKind": selection_kind,
         "selectionId": selection_id,
         "playheadSec": args.get("playheadSec"),
-        "openInpaint": True,
+        "openInpaint": False,
+        "openRetake": True,
         "openRightTab": "inspector",
     }
     return {
@@ -2882,5 +3301,146 @@ def apply_propose_restore_inpaint(ctx: ToolContext, args: dict[str, Any]) -> dic
             revision_before=revision_before,
             revision_after=revision_after,
             extra={"batchBlockId": batch_id, "repairId": repair.id, "candidateId": candidate_id},
+        ),
+    }
+
+
+def preview_propose_new_scene_take(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return _preview_mutation(
+        ctx,
+        args,
+        summary="Create a new whole-scene Take and render every batch from start to finish.",
+        lines=[
+            "Uses the scene's current production configuration (snapshot at launch).",
+            "This is New Take, not Re-Take. Earlier Takes stay intact.",
+        ],
+    )
+
+
+def apply_propose_new_scene_take(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....director_timeline_w46.scene_takes import start_new_take
+
+    bundle = _require_bundle(ctx, args)
+    workspace = bundle["workspace"]
+    _check_revision(args, workspace)
+    scene_id = bundle["sceneId"]
+    revision_before = int(workspace.get("timelineRevision") or 1)
+    result = start_new_take(ctx.db, ctx.project_id, scene_id)
+    if not result.get("ok"):
+        raise _argument_error(str(result.get("message") or result.get("error") or "New Take failed."), result=result)
+    revision_after = _persist_revision_bump(ctx, scene_id, workspace, revision_before)
+    take = result.get("take") or {}
+    ui_focus = {
+        "target": "viewer",
+        "sceneId": scene_id,
+        "takeId": take.get("id"),
+        "takeLabel": take.get("label"),
+        "openRightTab": "inspector",
+    }
+    return {
+        **result,
+        "timelineRevision": revision_after,
+        "uiFocus": ui_focus,
+        "_uiFocus": ui_focus,
+        "_evidence": _receipt(
+            ctx,
+            tool_id="timeline.propose_new_scene_take",
+            scene_id=scene_id,
+            revision_before=revision_before,
+            revision_after=revision_after,
+            extra={"takeId": take.get("id"), "takeLabel": take.get("label")},
+        ),
+    }
+
+
+def preview_propose_make_scene_take_current(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    label = str(args.get("takeLabel") or args.get("takeId") or "the selected take")
+    return _preview_mutation(
+        ctx,
+        args,
+        summary=f"Make {label} the current whole-scene Take.",
+        lines=["Preview Monitor and Publish will use this Take.", "Other Takes stay in history."],
+    )
+
+
+def apply_propose_make_scene_take_current(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....director_timeline_w46.scene_takes import make_current_take
+
+    bundle = _require_bundle(ctx, args)
+    workspace = bundle["workspace"]
+    _check_revision(args, workspace)
+    scene_id = bundle["sceneId"]
+    revision_before = int(workspace.get("timelineRevision") or 1)
+    take = _resolve_scene_take_arg(bundle["master"], args)
+    if take is None:
+        raise _argument_error("Name a Take (for example Take B).", parameter="takeLabel")
+    result = make_current_take(ctx.db, ctx.project_id, scene_id, take.id)
+    if not result.get("ok"):
+        raise _argument_error(str(result.get("message") or "Could not make that Take current."), result=result)
+    revision_after = _persist_revision_bump(ctx, scene_id, workspace, revision_before)
+    ui_focus = {
+        "target": "viewer",
+        "sceneId": scene_id,
+        "takeId": take.id,
+        "takeLabel": take.label,
+        "openRightTab": "inspector",
+    }
+    return {
+        **result,
+        "timelineRevision": revision_after,
+        "uiFocus": ui_focus,
+        "_uiFocus": ui_focus,
+        "_evidence": _receipt(
+            ctx,
+            tool_id="timeline.propose_make_scene_take_current",
+            scene_id=scene_id,
+            revision_before=revision_before,
+            revision_after=revision_after,
+            extra={"takeId": take.id, "takeLabel": take.label},
+        ),
+    }
+
+
+def preview_propose_preview_scene_take(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    label = str(args.get("takeLabel") or args.get("takeId") or "the selected take")
+    return _preview_mutation(
+        ctx,
+        args,
+        summary=f"Load {label} into the Preview Monitor.",
+        lines=["Does not change the current Take or published master."],
+    )
+
+
+def apply_propose_preview_scene_take(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    bundle = _require_bundle(ctx, args)
+    workspace = bundle["workspace"]
+    _check_revision(args, workspace)
+    scene_id = bundle["sceneId"]
+    revision = int(workspace.get("timelineRevision") or 1)
+    take = _resolve_scene_take_arg(bundle["master"], args)
+    if take is None:
+        raise _argument_error("Name a Take to preview (for example Take B).", parameter="takeLabel")
+    ui_focus = {
+        "target": "viewer",
+        "sceneId": scene_id,
+        "takeId": take.id,
+        "takeLabel": take.label,
+        "openRightTab": "inspector",
+    }
+    return {
+        "ok": True,
+        "takeId": take.id,
+        "takeLabel": take.label,
+        "previewOnly": True,
+        "uiFocus": ui_focus,
+        "_uiFocus": ui_focus,
+        "timelineRevision": revision,
+        "_evidence": _receipt(
+            ctx,
+            tool_id="timeline.propose_preview_scene_take",
+            scene_id=scene_id,
+            revision_before=revision,
+            revision_after=revision,
+            extra={"takeId": take.id, "takeLabel": take.label},
         ),
     }

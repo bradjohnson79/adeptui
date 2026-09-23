@@ -4,6 +4,7 @@ import { formatDurationSeconds } from "../../lib/formatDuration";
 import type { BatchBlock, BatchStatus, ModalityMode, SceneTimelineMaster } from "../../timelineMaster/contracts";
 import { formatBatchStatus } from "../../timelineMaster/contracts";
 import { timelineActionError } from "../../timelineMaster/timelineErrors";
+import { rematerializeThenGenerateScene } from "../../timelineMaster/rematerializeThenGenerate";
 import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
 import { HelpTip } from "../HelpTip";
 import { MiniMaxH3PlanPanel } from "../minimax-h3/MiniMaxH3PlanPanel";
@@ -66,7 +67,7 @@ export function TimelineMasterPanel({
   };
 
   if (!projectId || !sceneId) {
-    return <p className="production-dock-muted">Select a scene to manage Batch Blocks.</p>;
+    return <p className="production-dock-muted">Select a scene to view Generation Details.</p>;
   }
 
   const batches = master?.batchBlocks ?? [];
@@ -76,7 +77,7 @@ export function TimelineMasterPanel({
       <header className="timeline-master-panel__header">
         <div>
           <h3>Timeline Master</h3>
-          <p>Scene mode, generation status, and Batch inspector. Add Batch and Preflight live in the top toolbar.</p>
+          <p>Scene mode and read-only Generation Details (execution windows from the CD plan). Timed Prompt is authored on the scene timeline.</p>
         </div>
         <div className="timeline-master-panel__modes" role="group" aria-label="Timeline mode">
           {(["image_planning", "video_finishing"] as ModalityMode[]).map((mode) => (
@@ -89,7 +90,7 @@ export function TimelineMasterPanel({
               onClick={() =>
                 void run(async () => {
                   await api.directorTimelineSetMode(projectId, sceneId, mode);
-                  setMessage(`Mode: ${mode.replace("_", " ")} (Batch state preserved).`);
+                  setMessage(`Mode: ${mode.replace("_", " ")} (execution windows unchanged).`);
                 })
               }
             >
@@ -136,74 +137,17 @@ export function TimelineMasterPanel({
         <span className="scene-meta">Scene Actions</span>
         <button
           type="button"
-          disabled={busy || !(selection?.kind === "batch" && selection.id)}
-          title={
-            selection?.kind === "batch" && selection.id
-              ? "Generate only the selected batch"
-              : "Select a batch on the timeline first — Generate Current runs just that one batch"
-          }
-          data-testid="timeline-master-generate-current"
-          onClick={() =>
-            void run(async () => {
-              // GENERATE_CURRENT_USES_SELECTED_BATCH: only the explicitly
-              // selected batch — never a silent batches[0] fallback for a
-              // chargeable generation (NO_SILENT_BEHAVIOR).
-              const selectedBatchId =
-                selection?.kind === "batch" && selection.id ? selection.id : null;
-              if (!selectedBatchId) return;
-              const result = await api.directorTimelineGenerateBatch(projectId, sceneId, selectedBatchId);
-              const err = timelineActionError(result);
-              if (err) {
-                setMessage(err);
-                return;
-              }
-              setMessage(`Generate Current → snapshot ${String(result.executionSnapshotId || "")}`);
-            })
-          }
-        >
-          Generate Current <HelpBtn id="generate_current" />
-        </button>
-        <button
-          type="button"
-          disabled={busy || !(selection?.kind === "batch" && selection.id)}
-          title={
-            selection?.kind === "batch" && selection.id
-              ? "Generate the selected batch through the scene queue"
-              : "Select a batch on the timeline first — Generate Selected runs just that batch"
-          }
-          data-testid="timeline-generate-selected"
-          onClick={() =>
-            void run(async () => {
-              // GENERATE_SELECTED_IS_SELECTION_SCOPED: pass only the selected
-              // batch id — previously this passed every batch id, making it a
-              // silent Generate Full Scene.
-              const selectedBatchId =
-                selection?.kind === "batch" && selection.id ? selection.id : null;
-              if (!selectedBatchId) return;
-              const result = await api.directorTimelineGenerateScene(projectId, sceneId, {
-                scope: "selected",
-                batchBlockIds: [selectedBatchId],
-              });
-              const err = timelineActionError(result);
-              if (err) {
-                setMessage(err);
-                return;
-              }
-              setMessage(String(result.message || "Generate Selected submitted."));
-            })
-          }
-        >
-          Generate Selected <HelpBtn id="generate_selected" />
-        </button>
-        <button
-          type="button"
           className="primary"
           data-testid="timeline-master-generate-scene"
           disabled={busy}
-          title={busy ? "Working — please wait" : "Generate every ready batch in this scene, in order"}
+          title={busy ? "Working — please wait" : "Rematerialize execution windows from the CD plan, then generate the full scene"}
           onClick={() =>
             void run(async () => {
-              const result = await api.directorTimelineGenerateScene(projectId, sceneId, { scope: "full" });
+              const result = await rematerializeThenGenerateScene({
+                projectId,
+                sceneId,
+                generatorId: master?.sceneGeneratorId,
+              });
               const err = timelineActionError(result);
               if (err) {
                 setMessage(err);
@@ -272,7 +216,7 @@ export function TimelineMasterPanel({
         </ul>
       ) : null}
 
-      <ul className="timeline-master-batches" data-testid="timeline-master-batches">
+      <ul className="timeline-master-batches" data-testid="timeline-generation-details" aria-label="Generation Details">
         {batches.map((batch: BatchBlock) => {
           const open = expanded[batch.id] ?? false;
           const promptMissing = !batch.promptSegments.some((p) => p.text.trim());
@@ -318,51 +262,6 @@ export function TimelineMasterPanel({
                     </p>
                   ) : null}
                   <div className="timeline-master-batch__actions">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          const result = await api.directorTimelineGenerateBatch(projectId, sceneId, batch.id);
-                          const err = timelineActionError(result);
-                          if (err) {
-                            setMessage(err);
-                            return;
-                          }
-                          setMessage(
-                            `Submitted ${batch.label} → snapshot ${String(result.executionSnapshotId || "")}`,
-                          );
-                        })
-                      }
-                    >
-                      Generate
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          await api.directorTimelinePatchBatch(projectId, sceneId, batch.id, {
-                            plannedDuration: (batch.duration.plannedDuration || 5) + 0.5,
-                          });
-                          setMessage(`Updated ${batch.label} duration.`);
-                        })
-                      }
-                    >
-                      Edit Duration <HelpBtn id="edit_duration" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          await api.directorTimelineDuplicateBatch(projectId, sceneId, batch.id);
-                          setMessage(`Duplicated ${batch.label}.`);
-                        })
-                      }
-                    >
-                      Duplicate
-                    </button>
                     <button
                       type="button"
                       disabled={busy}

@@ -4,7 +4,8 @@
  * previously duplicated in CharacterCompactView.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../../api";
+import { ApiError, api } from "../../api";
+import { PROFILE_NAME_ALREADY_EXISTS, characterOwnedByProject } from "../../creatorScope";
 import type { CharacterProfile, CharacterReference } from "./types";
 
 /**
@@ -118,6 +119,11 @@ export function pendingPatchForCurrentCharacter(
   return pending.fields;
 }
 
+/** True when this load started before a newer load or an explicit save. */
+export function characterLoadIsStale(loadGeneration: number, currentGeneration: number): boolean {
+  return loadGeneration !== currentGeneration;
+}
+
 export function applyLoadedCharacterState(args: {
   requestedCharacterId: string;
   currentCharacterId: string | null;
@@ -136,6 +142,8 @@ const SAVE_FIELD_KEYS = [
   "gender_presentation",
   "visual_style",
   "description",
+  "is_global",
+  "isGlobal",
 ] as const;
 
 export type CharacterSaveIntent =
@@ -176,7 +184,24 @@ export function characterSaveIntent(args: {
       }
     }
   }
-  const name = String(merged.name ?? args.profile?.name ?? "").trim();
+  const storedName = String(args.profile?.name ?? "").trim();
+  let name = String(merged.name ?? storedName).trim();
+  if (
+    cid &&
+    storedName &&
+    name &&
+    /^new character$/i.test(name) &&
+    !/^new character$/i.test(storedName)
+  ) {
+    name = storedName;
+    merged.name = storedName;
+  }
+  if (cid && args.profile && !characterOwnedByProject(args.profile, args.projectId)) {
+    return {
+      ok: false,
+      error: "Global characters can only be edited from the project that created them.",
+    };
+  }
   if (!cid) {
     if (!name) {
       return { ok: false, error: "Give the character a name, then Save Character." };
@@ -212,7 +237,7 @@ export type UseCharacterProfileResult = {
    */
   save: (fields?: Record<string, unknown>) => Promise<CharacterProfile | null>;
   reset: () => void;
-  remove: () => Promise<boolean>;
+  remove: (opts?: { confirmCrossProject?: boolean }) => Promise<boolean>;
   refresh: () => Promise<void>;
   setLocal: (fields: Record<string, unknown>) => void;
 };
@@ -223,7 +248,7 @@ export function useCharacterProfile(
 ): UseCharacterProfileResult {
   const [profile, setProfile] = useState<CharacterProfile | null>(null);
   const [references, setReferences] = useState<CharacterReference[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => Boolean(String(characterId || "").trim()));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -249,7 +274,7 @@ export function useCharacterProfile(
         api.getCharacterProfile(projectId, cid),
         api.listCharacterReferences(projectId, cid).catch(() => ({ items: [] as CharacterReference[] })),
       ]);
-      if (gen !== loadGenRef.current) return;
+      if (characterLoadIsStale(gen, loadGenRef.current)) return;
       const applied = applyLoadedCharacterState({
         requestedCharacterId: cid,
         currentCharacterId: idRef.current,
@@ -260,7 +285,7 @@ export function useCharacterProfile(
       setProfile(applied.profile);
       setReferences(applied.references);
     } catch (e) {
-      if (gen !== loadGenRef.current) return;
+      if (characterLoadIsStale(gen, loadGenRef.current)) return;
       setError(e instanceof Error ? e.message : "Failed to load character.");
     } finally {
       if (gen === loadGenRef.current) setLoading(false);
@@ -313,11 +338,21 @@ export function useCharacterProfile(
       try {
         const created = await api.createCharacterProfile(projectId, { name: name.trim(), ...(extra || {}) });
         const p = created as CharacterProfile;
+        idRef.current = p.id;
         setProfile(p);
+        pendingRef.current = null;
+        if (timerRef.current) clearTimeout(timerRef.current);
         setSavedAt(new Date().toISOString());
+        notifyCharacterProfileSaved(projectId, p);
         return p.id;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to create character.");
+        const message =
+          e instanceof ApiError && e.code === PROFILE_NAME_ALREADY_EXISTS
+            ? e.message
+            : e instanceof Error
+              ? e.message
+              : "Failed to create character.";
+        setError(message);
         return null;
       } finally {
         setSaving(false);
@@ -341,6 +376,9 @@ export function useCharacterProfile(
       }
       setSaving(true);
       setError("");
+      // Drop a profile GET that started before this save. That response is the
+      // pre-save row and would wipe the details the creator just wrote.
+      loadGenRef.current += 1;
       try {
         if (intent.method === "POST") {
           const created = await api.createCharacterProfile(projectId, {
@@ -375,7 +413,13 @@ export function useCharacterProfile(
         notifyCharacterProfileSaved(projectId, savedProfile);
         return savedProfile;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to save character.");
+        const message =
+          e instanceof ApiError && e.code === PROFILE_NAME_ALREADY_EXISTS
+            ? e.message
+            : e instanceof Error
+              ? e.message
+              : "Failed to save character.";
+        setError(message);
         return null;
       } finally {
         setSaving(false);
@@ -390,13 +434,13 @@ export function useCharacterProfile(
     void refresh();
   }, [refresh]);
 
-  const remove = useCallback(async (): Promise<boolean> => {
+  const remove = useCallback(async (opts?: { confirmCrossProject?: boolean }): Promise<boolean> => {
     const cid = idRef.current;
     if (!projectId || !cid) return false;
     setSaving(true);
     setError("");
     try {
-      await api.deleteCharacterProfile(projectId, cid);
+      await api.deleteCharacterProfile(projectId, cid, opts?.confirmCrossProject ?? false);
       setProfile(null);
       setReferences([]);
       return true;
@@ -409,7 +453,7 @@ export function useCharacterProfile(
   }, [projectId]);
 
   const setLocal = useCallback((fields: Record<string, unknown>) => {
-    setProfile((prev) => (prev ? ({ ...prev, ...fields } as CharacterProfile) : prev));
+    setProfile((prev) => ({ ...(prev || { id: "", name: "" }), ...fields } as CharacterProfile));
   }, []);
 
   useEffect(

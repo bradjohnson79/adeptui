@@ -76,16 +76,15 @@ def build_scene_creator_readiness(
         if not prop_ok:
             issues.append({"type": "blocking", "code": "prop", "message": "An approved prop picture is missing."})
     env_id = str(env.get("assetId") or ctx.get("ersLibraryAssetId") or "").strip() if ctx else str(env.get("assetId") or "").strip()
+    # Spatial Map is shelved for Scene Creator Standard. ERS package is environment authority.
     map_id = str((ctx or {}).get("spatialMapId") or env.get("spatialMapId") or "").strip()
     checks["environment"] = _pass_fail(bool(env_id))
     if not env_id:
         issues.append({"type": "blocking", "code": "environment", "message": "The environment picture is missing."})
-    checks["spatial"] = _pass_fail(bool(map_id) and (bool(pkt.get("spatialConsumed")) or bool((pkt.get("spatial") or {}).get("lines")) or True))
     if map_id:
         checks["spatial"] = "pass"
     else:
-        checks["spatial"] = "fail"
-        issues.append({"type": "blocking", "code": "spatial", "message": "Spatial Map is not connected."})
+        checks["spatial"] = "idle"
 
     hash_val = str(camera_hash or (pkt.get("cinematography") or {}).get("cameraStateHash") or "").strip()
     checks["camera"] = _pass_fail(bool(hash_val))
@@ -95,23 +94,18 @@ def build_scene_creator_readiness(
         checks["camera"] = "idle"
 
     slots = family_pixel_slots(family)
-    visual_assets = [str(r.get("assetId") or "").strip() for r in (pkt.get("roles") or chars + props + ([env] if env else [])) if str(r.get("assetId") or "").strip()]
-    if visual_assets and slots <= 0:
+    visual_assets = [
+        str(r.get("assetId") or "").strip()
+        for r in (pkt.get("roles") or chars + props + ([env] if env else []))
+        if str(r.get("assetId") or "").strip()
+    ]
+    if visual_assets and (slots <= 0 or len(visual_assets) > slots):
         checks["provider"] = "fail"
         issues.append(
             {
                 "type": "blocking",
                 "code": "provider",
-                "message": "This generator cannot use the character and prop pictures already chosen.",
-            }
-        )
-    elif any(str(r.get("consumption") or "") == "semantic_only" for r in (pkt.get("roles") or [])):
-        checks["provider"] = "pass"
-        issues.append(
-            {
-                "type": "advisory",
-                "code": "provider_slot",
-                "message": "This generator can load only one picture. Extra pictures stay as production notes.",
+                "message": "Unavailable for current reference package. This generator cannot consume every attached CRS/PRS/ERS picture.",
             }
         )
     else:
@@ -192,12 +186,33 @@ def readiness_from_workspace(
         ers = str(production_context.get("ersLibraryAssetId") or "")
         if not pkg:
             pkg = str(production_context.get("ersPackageId") or "")
+    prs_meta: list[dict[str, Any]] = []
+    ers_view = "auto"
+    pose_id = ""
+    story_theme = ""
+    style = ""
+    if shot is not None:
+        ers_view = str(getattr(shot, "ers_view", "") or "auto")
+        pose_id = str(getattr(shot, "posecraft_asset_id", "") or "")
+        story_theme = str(getattr(shot, "story_theme", "") or "")
+        style = str(getattr(shot, "style", "") or "")
+        try:
+            prs_ids = list(getattr(shot, "prs_ids", None) or [])
+            if prs_ids:
+                prs_meta = _prop_metadata(db, project_id, prs_ids)
+        except Exception:
+            prs_meta = []
     packet = compile_reference_packet(
         char_meta=char_meta,
         prop_meta=prop_meta,
+        prs_meta=prs_meta,
         ers_composite_asset_id=ers,
         ers_package_id=pkg,
+        ers_view=ers_view,
         spatial_map_id=str((production_context or {}).get("spatialMapId") or "") if production_context else "",
+        posecraft_asset_id=pose_id,
+        story_theme=story_theme,
+        style=style,
         structured_blocking=blocking,
         cinematographer=cine,
         aspect_ratio=str((production_context or {}).get("aspectRatio") or "") if production_context else "",

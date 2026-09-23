@@ -10,10 +10,10 @@ const KORRI_NAME = process.env.ADEPT_KORRI_PROJECT_NAME || "Korri Character Prod
 
 const CATEGORIES = [
   "create",
-  "profiles",
   "pre-production",
   "creative-studios",
   "post-production",
+  "recent-projects",
 ] as const;
 
 async function openProductionMenu(page: Page): Promise<Locator> {
@@ -92,21 +92,23 @@ test.describe("M42 Production categorized menu", () => {
     await expect(create.getByTestId("production-item-timeline")).toContainText("Timeline Generator");
 
     const profiles = menu.getByTestId("production-cat-profiles");
-    await expect(profiles.getByTestId("production-item-characters")).toContainText("Character Creator");
-    await expect(profiles.getByTestId("production-item-profiles")).toContainText("Project Profile");
-    await expect(profiles.getByTestId("production-item-bible")).toHaveCount(0);
+    await expect(profiles).toHaveCount(0);
+    await expect(menu.getByRole("menuitem", { name: "Project Profile" })).toHaveCount(0);
 
     const pre = menu.getByTestId("production-cat-pre-production");
-    await expect(pre.getByTestId("production-item-continuity")).toContainText("Continuity");
     await expect(pre.getByTestId("production-item-scriptwriter")).toContainText("Scriptwriter");
-    await expect(pre.getByTestId("production-item-mastersheet")).toContainText("Scene Master Sheet");
-    await expect(pre.getByTestId("production-item-spatial")).toContainText("Spatial Map");
+    await expect(pre.getByTestId("production-item-environmentcreator")).toContainText("Environment Creator");
+    // Scene Creator is retired from the Production menu (Image Generator v1.1 triad)
+    await expect(pre.getByTestId("production-item-scenecreator")).toHaveCount(0);
+    await expect(pre.getByTestId("production-item-propcreator")).toContainText("Prop Creator");
+    await expect(pre.getByTestId("production-item-posecraft")).toContainText("PoseCraft");
     // Storyboard moved out of Pre-Production into Create
     await expect(pre.getByTestId("production-item-script")).toHaveCount(0);
 
     const studios = menu.getByTestId("production-cat-creative-studios");
+    await expect(studios.getByTestId("production-item-characters")).toContainText("Character Creator");
     await expect(studios.getByTestId("production-item-avatar")).toContainText("Avatar Studio");
-    await expect(studios.getByTestId("production-item-brandstudio")).toContainText("Brand Studio");
+    await expect(studios.getByTestId("production-item-voicestudio")).toContainText("Voice Studio");
     await expect(studios.getByTestId("production-item-audiostudio")).toContainText("Audio Studio");
     await expect(menu.getByTestId("production-item-magi")).toContainText("MAGI Editor");
 
@@ -207,15 +209,44 @@ test.describe("M42 Production categorized menu", () => {
     await expect(trigger).toBeFocused();
   });
 
-  test("Character Creator navigation preserves projectId and records Recent", async ({ page }) => {
+  test("Character Creator relocates under Creative Studios and navigates", async ({ page }) => {
     await page.goto(`/project/${projectId}?workspace=home`);
     const menu = await openProductionMenu(page);
-    await menu.getByTestId("production-item-characters").click();
+    const studios = menu.getByTestId("production-cat-creative-studios");
+    await expect(studios.getByTestId("production-item-characters")).toContainText("Character Creator");
+    await studios.getByTestId("production-item-characters").click();
     await expect(page).toHaveURL(new RegExp(`/project/${projectId}.*workspace=characters`));
     await expect(page.getByTestId("character-profile-workspace")).toBeVisible({ timeout: 30_000 });
+  });
 
-    const menu2 = await openProductionMenu(page);
-    await expect(menu2.getByTestId("production-menu-recent")).toBeVisible();
-    await expect(menu2.getByTestId("production-recent-characters")).toBeVisible();
+  test("Recent Projects: real server projects, current indicator, canonical switch", async ({ page }) => {
+    await page.goto(`/project/${projectId}?workspace=home`);
+    const menu = await openProductionMenu(page);
+    const recent = menu.getByTestId("production-menu-recent-projects");
+    await expect(recent).toBeVisible();
+
+    const rows = recent.locator('[data-testid^="production-recent-project-"]');
+    const count = await rows.count();
+    expect(count).toBeGreaterThan(0);
+    expect(count).toBeLessThanOrEqual(5);
+
+    // Recency order is server-sorted (updated_at desc) — first row must be the
+    // most recent project. The current project may appear with Current state.
+    const currentRow = rows.first({ has: page.getByText("Current") });
+    await expect(currentRow).toHaveCount(1);
+
+    // Clicking a non-current recent project switches via canonical flow.
+    const other = rows.filter({ hasNotText: "Current" }).first();
+    if ((await other.count()) > 0) {
+      await other.click();
+      await expect(page.getByTestId("app-chrome")).toBeVisible({ timeout: 30_000 });
+      await expect(page).not.toHaveURL(new RegExp(`/project/${projectId}.*workspace=home`));
+    }
+  });
+
+  test("legacy ?workspace=profiles deep link lands on project home (no blank page)", async ({ page }) => {
+    await page.goto(`/project/${projectId}?workspace=profiles`);
+    await expect(page.getByTestId("app-chrome")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("project-home")).toBeVisible({ timeout: 30_000 });
   });
 });

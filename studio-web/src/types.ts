@@ -1,10 +1,9 @@
 export type EngineName =
   | "auto"
   | "minimax-h3"
-  | "ltx"
-  | "wan"
-  | "hunyuan15"
-  | "hunyuan13b"
+  | "ltx-2.5"
+  | "seedance-2.0"
+  | "seedance-2.5"
   | "fal_seedance"
   | "fal_kling"
   | "fal_veo"
@@ -120,6 +119,14 @@ export interface Job {
   output_path?: string | null;
   created_at: string;
   updated_at: string;
+  phase?: string;
+  phase_label?: string;
+  progress_grounded?: boolean;
+  last_progress_at?: string | null;
+  last_runtime_event_at?: string | null;
+  elapsed_active_time?: number | null;
+  generation_stalled?: boolean;
+  current_node?: string | null;
 }
 
 export interface SpatialPoint {
@@ -143,6 +150,7 @@ export interface SpatialMap {
 export interface Health {
   ok: boolean;
   comfy_reachable: boolean;
+  comfy_probed?: boolean;
   missing_model_component_ids?: string[];
   comfy_status?: string;
   comfy_version?: string | null;
@@ -153,6 +161,7 @@ export interface Health {
   message: string;
   comfy?: {
     reachable?: boolean;
+    probed?: boolean;
     models?: Array<{
       componentId?: string;
       name?: string;
@@ -170,7 +179,8 @@ export interface Health {
     provider?: {
       id?: string;
       status?: string;
-      reachable?: boolean;
+      reachable?: boolean | null;
+      probed?: boolean;
       modelAvailable?: boolean;
       selectedModel?: string | null;
     };

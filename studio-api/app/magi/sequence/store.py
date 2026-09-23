@@ -7,21 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from ...config import settings
-from .validation import ensure_asset_lineage_fields, parse_sequence
+from .validation import ensure_asset_lineage_fields, parse_sequence, strip_projected_graphics_clips
 
 DEFAULT_TRACKS = [
-    ("video", "V1"),
-    ("video", "V2"),
-    ("video", "V3"),
-    ("image", "I1"),
-    ("image", "I2"),
-    ("audio", "A1"),
-    ("audio", "A2"),
-    ("audio", "A3"),
-    ("text", "T1"),
-    ("fx", "FX"),
-    ("mask", "M"),
-    ("adjustment", "ADJ"),
+    ("objects", "OBJECTS 1", 1),
+    ("video", "VIDEO", None),
+    ("audio", "AUDIO", None),
+    ("music", "MUSIC", None),
+    ("sfx", "SFX", None),
 ]
 
 
@@ -38,15 +31,21 @@ def _seq_path(project_id: str) -> Path:
 
 
 def empty_sequence(project_id: str, frame_rate: int = 24) -> dict[str, Any]:
-    tracks = [
-        {
-            "id": f"trk_{label.lower()}_{uuid.uuid4().hex[:6]}",
+    tracks = []
+    for index, (kind, label, slot) in enumerate(DEFAULT_TRACKS):
+        track = {
+            "id": (
+                f"trk_objects_{slot}_{uuid.uuid4().hex[:6]}"
+                if kind == "objects"
+                else f"trk_{label.lower()}_{uuid.uuid4().hex[:6]}"
+            ),
             "kind": kind,
             "label": label,
             "order": index,
         }
-        for index, (kind, label) in enumerate(DEFAULT_TRACKS)
-    ]
+        if slot is not None:
+            track["objectsSlot"] = slot
+        tracks.append(track)
     return {
         "id": f"seq_{uuid.uuid4().hex[:10]}",
         "projectId": project_id,
@@ -178,6 +177,7 @@ def save_sequence(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
     payload.setdefault("recipeId", None)
     payload.setdefault("exportLedger", current.get("exportLedger") or {})
     payload.setdefault("finishing", current.get("finishing") or {})
+    payload["clips"] = strip_projected_graphics_clips(list(payload.get("clips") or []))
 
     # Strict schema + reference validation (rejects cross-track and malformed
     # payloads instead of persisting them).

@@ -6,10 +6,94 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ...director_timeline import TimelineClip
 from .. import orchestrator, store
-from ..contracts import ApprovedClip, SceneTimelineMaster
+from ..contracts import ApprovedClip, BatchClip, SceneTimelineMaster
 from .contracts import NormalizedJobSubmission, TimelineGenerationResult
+
+MANAGED_DIRECTOR_CLIP_PREFIX = "bbclip_"
+MANAGED_BATCH_VISUAL_PREFIX = "bbvclip_"
+
+
+def _latest_candidate_with_asset(batch: Any) -> Any | None:
+    cands = [c for c in (batch.candidateVersions or []) if getattr(c, "assetId", None)]
+    if not cands:
+        return None
+    return max(cands, key=lambda c: (getattr(c, "createdAt", None) or "", getattr(c, "id", None) or ""))
+
+
+def _playable_take_for_batch(
+    batch: Any,
+    preferred_assets: dict[str, str] | None = None,
+) -> tuple[str, float] | None:
+    # OWNER-PROTECTED (Timeline Batch Architecture Guard). CURRENT TAKE's member
+    # asset takes precedence over a stale approvedClip — this is the 12B visual
+    # track model. Fences: tests/test_timeline_architecture_guard.py
+    """Latest viewable take for Visual: approved clip, else newest candidate asset.
+
+    Approve stays a separate creator action. A finished generate still belongs
+    on the Visual track so the take can be watched without a Library drag.
+
+    12B working-Timeline precedence: the CURRENT whole-scene Take's member
+    asset wins over a stale approvedClip. An approvedClip left from a
+    historical Take (e.g. Take A) must not shadow the take the creator is
+    actually looking at — that placed a dead Take A asset on the Visual track
+    while Take N was current (Cade Scene 3 regression).
+    """
+    approved_id = (
+        batch.approvedClip.assetId
+        if batch.approvedClip and getattr(batch.approvedClip, "assetId", None)
+        else None
+    )
+    preferred = str((preferred_assets or {}).get(str(batch.id or "")) or "").strip()
+    latest = _latest_candidate_with_asset(batch)
+    duration_hint = None
+    # A09: when a current-take preferred map is supplied, never borrow another
+    # take's candidate/approved asset under the current-take stamp.
+    if preferred_assets is not None:
+        if not preferred:
+            return None
+        asset_id = preferred
+        if latest and latest.assetId == preferred:
+            duration_hint = latest.generatedDuration
+    elif preferred:
+        # Current take membership is the display authority.
+        asset_id = preferred
+        if latest and latest.assetId == preferred:
+            duration_hint = latest.generatedDuration
+    elif approved_id:
+        asset_id = str(approved_id)
+        if latest and latest.assetId == approved_id:
+            duration_hint = latest.generatedDuration
+    elif latest and latest.assetId:
+        asset_id = str(latest.assetId)
+        duration_hint = latest.generatedDuration
+    else:
+        return None
+    length = float(
+        batch.duration.timelineVisibleDuration
+        or batch.duration.generatedDuration
+        or duration_hint
+        or batch.duration.plannedDuration
+        or 5.0
+    )
+    return asset_id, length
+
+
+def _upsert_managed_visual_take(batch: Any, asset_id: str, length: float) -> None:
+    clip_id = f"{MANAGED_BATCH_VISUAL_PREFIX}{batch.id}"
+    kept = [c for c in (batch.visualClips or []) if c.id != clip_id]
+    kept.append(
+        BatchClip(
+            id=clip_id,
+            kind="video",
+            assetId=asset_id,
+            start=0.0,
+            length=length,
+            label=batch.label or "Take",
+            role="take",
+        )
+    )
+    batch.visualClips = kept
 
 
 def _label_draft_library_asset(db: Session, asset_id: str) -> None:
@@ -68,7 +152,10 @@ def _stash_generation_lineage(
             if job:
                 j.queueJobId = job.queueJobId or j.queueJobId
                 if hasattr(j, "providerJobId"):
-                    j.providerJobId = job.providerJobId  # type: ignore[attr-defined]
+                    # Prefer fal request id from result when hosted adapter promoted it.
+                    j.providerJobId = (  # type: ignore[attr-defined]
+                        result.providerJobId or job.providerJobId or j.providerJobId
+                    )
                 if hasattr(j, "generatorId"):
                     j.generatorId = result.generatorId  # type: ignore[attr-defined]
                 if hasattr(j, "apiUsed"):
@@ -84,6 +171,8 @@ def _stash_generation_lineage(
         "providerJobId": result.providerJobId,
         "queueJobId": result.queueJobId,
         "generatorId": result.generatorId,
+        "generationMode": meta.get("generationMode") or getattr(result, "generationMode", None),
+        "adapterKind": meta.get("adapterKind") or getattr(result, "adapterKind", None),
         "outputAssetId": asset_id,
         "apiUsed": result.apiUsed,
         "startImageAssetId": meta.get("startImageAssetId"),
@@ -96,6 +185,8 @@ def _stash_generation_lineage(
         "aspectRatio": meta.get("aspectRatio"),
         "resolution": meta.get("resolution"),
         "quality": quality,
+        "falModelId": meta.get("falModelId"),
+        "falRequestId": meta.get("falRequestId") or result.providerJobId,
     }
     refs = [
         r
@@ -139,7 +230,7 @@ def apply_shared_completion(
         }
 
     asset_id = str(result.outputAssetIds[0])
-    duration = float(result.duration or 5.0)
+    measured = float(result.duration) if result.duration else 0.0
 
     payload = store.load_master(db, project_id, scene_id)
     if not payload.get("ok"):
@@ -148,6 +239,44 @@ def apply_shared_completion(
     batch = next((b for b in master.batchBlocks if b.id == batch_id), None)
     if not batch:
         return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
+    duration = measured if measured > 0 else float(batch.duration.plannedDuration or 5.0)
+
+    snap = master.executionSnapshots.get(execution_snapshot_id)
+    range_rep = dict((snap.continuityState or {}).get("rangeReplacement") or {}) if snap else {}
+    existing_for_snap = next(
+        (c for c in batch.candidateVersions if c.executionSnapshotId == execution_snapshot_id),
+        None,
+    )
+    # Range retake: keep the generated SLICE as replacementAssetId.
+    # Visual authority is replace_visual_range (A|Retake|B) — not Library MP4 stitch.
+    is_range_retake = bool(range_rep.get("length"))
+    range_source_id = ""
+    if is_range_retake:
+        range_source_id = str(
+            range_rep.get("sourceAssetId")
+            or (batch.approvedClip.assetId if batch.approvedClip else "")
+            or ""
+        )
+        if not range_source_id and not existing_for_snap:
+            return {
+                "ok": False,
+                "error": "SOURCE_VIDEO_MISSING",
+                "message": "Bounded Re-take needs the current take to keep the unmarked parts.",
+                "mock": False,
+            }
+        if existing_for_snap and existing_for_snap.assetId:
+            asset_id = existing_for_snap.assetId
+            duration = float(
+                existing_for_snap.generatedDuration
+                or range_rep.get("length")
+                or duration
+            )
+        else:
+            # Candidate duration is the marked slice — do not stretch to full planned.
+            duration = float(measured if measured > 0 else range_rep.get("length") or duration)
+    elif existing_for_snap and existing_for_snap.assetId:
+        asset_id = existing_for_snap.assetId
+        duration = float(batch.duration.plannedDuration or existing_for_snap.generatedDuration or duration)
 
     # Idempotency: if already approved with same asset + snapshot, only ensure placement.
     if (
@@ -156,7 +285,19 @@ def apply_shared_completion(
         and batch.approvedClip.executionSnapshotId == execution_snapshot_id
         and batch.status == "Approved"
     ):
-        place = place_approved_batches_on_timeline(db, project_id, scene_id)
+        if is_range_retake:
+            place = _apply_range_visual_replacement(
+                db,
+                project_id=project_id,
+                scene_id=scene_id,
+                batch_id=batch_id,
+                range_rep=range_rep,
+                replacement_asset_id=asset_id,
+                replacement_duration=duration,
+                source_asset_id=range_source_id,
+            )
+        else:
+            place = place_approved_batches_on_timeline(db, project_id, scene_id)
         return {
             "ok": True,
             "idempotent": True,
@@ -201,12 +342,27 @@ def apply_shared_completion(
     payload_now = store.load_master(db, project_id, scene_id)
     live = SceneTimelineMaster.model_validate(payload_now["master"]) if payload_now.get("ok") else master
     live_batch = next((b for b in live.batchBlocks if b.id == batch_id), batch)
+    repair_id = str(range_rep.get("repairId") or "")
+    if repair_id:
+        for repair in live_batch.repairRanges:
+            if repair.id == repair_id:
+                repair.status = "ready"
+                repair.executionSnapshotId = execution_snapshot_id
+                repair.candidateId = cand_id
+                store.save_master(db, project_id, scene_id, live)
+                break
     new_cand = next((c for c in live_batch.candidateVersions if c.id == cand_id), None)
     take_state = dict(new_cand.takeState or {}) if new_cand else {}
     is_draft = str(take_state.get("quality") or "").lower() == "draft"
     if is_draft:
         auto_approve = False
         _label_draft_library_asset(db, asset_id)
+    if (
+        getattr(live, "activeSceneTakeId", None)
+        and live.activeSceneTakeId
+        and live.activeSceneTakeId != getattr(live, "currentSceneTakeId", None)
+    ):
+        auto_approve = False
     if (
         auto_approve
         and live_batch.approvedClip
@@ -245,7 +401,33 @@ def apply_shared_completion(
             )
             store.save_master(db, project_id, scene_id, master2)
 
-    placement = place_approved_batches_on_timeline(db, project_id, scene_id)
+    # Range retake complete: always insert via replace_visual_range even when
+    # auto_approve is False (insertion is Timeline composition, not approve).
+    if is_range_retake:
+        # Batch visible span stays the full take (A|R|B); candidate holds slice duration.
+        payload_vis = store.load_master(db, project_id, scene_id)
+        if payload_vis.get("ok"):
+            live_vis = SceneTimelineMaster.model_validate(payload_vis["master"])
+            live_b = next((b for b in live_vis.batchBlocks if b.id == batch_id), None)
+            if live_b:
+                planned = float(live_b.duration.plannedDuration or 0.0)
+                if planned > 0:
+                    live_b.duration.timelineVisibleDuration = planned
+                    store.save_master(db, project_id, scene_id, live_vis)
+        placement = _apply_range_visual_replacement(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            batch_id=batch_id,
+            range_rep=range_rep,
+            replacement_asset_id=asset_id,
+            replacement_duration=duration,
+            source_asset_id=range_source_id,
+        )
+        if not placement.get("ok"):
+            return placement
+    else:
+        placement = place_approved_batches_on_timeline(db, project_id, scene_id)
     return {
         "ok": True,
         "idempotent": False,
@@ -267,12 +449,74 @@ def apply_shared_completion(
     }
 
 
+
+def _apply_range_visual_replacement(
+    db: Session,
+    *,
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    range_rep: dict[str, Any],
+    replacement_asset_id: str,
+    replacement_duration: float | None = None,
+    source_asset_id: str | None = None,
+) -> dict[str, Any]:
+    """Visual A|Retake|B write for range retake complete. Never bbclip_ whole-take.
+
+    SINGLE-STORE: replace_visual_range resolves the active take from Master
+    batch.visualClips (managed bbvclip_ take, prior A|Middle|B composition, or
+    the batch playable take). No legacy director_json video_clips seeding —
+    save_master persists Master only, so a legacy seed would be a dead write.
+    """
+    from ..visual_range import replace_visual_range
+
+    start = float(range_rep.get("start") or 0.0)
+    length = float(range_rep.get("length") or 0.0)
+    mark_in = start
+    mark_out = start + length
+    repair_id = str(range_rep.get("repairId") or "") or None
+    src = str(
+        source_asset_id
+        or range_rep.get("sourceAssetId")
+        or ""
+    )
+
+    ref_img = str(
+        range_rep.get('referenceImageAssetId')
+        or range_rep.get('startImageAssetId')
+        or ''
+    ).strip() or None
+    return replace_visual_range(
+        db,
+        project_id,
+        scene_id,
+        mark_in=mark_in,
+        mark_out=mark_out,
+        replacement_asset_id=replacement_asset_id,
+        retake_id=repair_id,
+        source_batch_id=batch_id,
+        source_asset_id=src or None,
+        replacement_duration=replacement_duration,
+        reference_image_asset_id=ref_img,
+    )
+
+
 def place_approved_batches_on_timeline(
     db: Session,
     project_id: str,
     scene_id: str,
 ) -> dict[str, Any]:
-    """Place/update video_clips from approved batches in batch order (not completion order)."""
+    """Place/update Master batch.visualClips managed takes from playable takes.
+
+    Approved takes win when present so a Re-Take candidate does not overwrite
+    the active take. Otherwise the latest finished candidate is placed so a
+    draft generate appears on Visual without Approve or a Library drag.
+    Idempotent upsert by bbvclip_{batchId} (batch-local start=0.0).
+    Batches with an active A|Middle|B range composition are never overwritten.
+
+    SINGLE-STORE: Master batch.visualClips is the sole Visual authority. The
+    retired legacy video_clips array is never read or written here.
+    """
     bundle = store.load_master(db, project_id, scene_id)
     if not bundle.get("ok"):
         return bundle
@@ -281,50 +525,71 @@ def place_approved_batches_on_timeline(
     if not scene:
         return {"ok": False, "error": "SCENE_NOT_FOUND", "mock": False}
 
-    from ...director_timeline import parse_director_timeline
+    from ..visual_range import clip_belongs_to_range_batch, range_retake_batch_ids
 
-    director_tl = parse_director_timeline(
-        scene.director_json,
-        fallback_duration=float(scene.duration_sec or 5.0),
-        fallback_prompt=scene.prompt or "",
-    )
-
-    # Keep non-batch-managed clips (manual) — replace only clips tagged with batch ids.
-    managed_prefix = "bbclip_"
-    retained = [c for c in (director_tl.video_clips or []) if not str(c.id).startswith(managed_prefix)]
-    placed: list[TimelineClip] = []
+    range_batches = range_retake_batch_ids(master)
+    placed_ids: list[str] = []
     cursor = 0.0
+    # 12B working-Timeline precedence: the CURRENT whole-scene Take's member
+    # assets are the Visual display authority (see _playable_take_for_batch).
+    current_take = next(
+        (
+            t
+            for t in (master.sceneTakes or [])
+            if t.id == getattr(master, "currentSceneTakeId", None)
+        ),
+        None,
+    )
+    # A09: only enter current-take fail-closed mode when a current scene take exists.
+    # None keeps legacy approved/latest placement for scenes without sceneTakes.
+    preferred_assets = (
+        {
+            str(m.batchId): str(m.assetId or "").strip()
+            for m in (current_take.batches or [])
+            if getattr(m, "assetId", None)
+        }
+        if current_take is not None
+        else None
+    )
     for batch in sorted(master.batchBlocks, key=lambda b: b.order):
-        if not batch.approvedClip or not batch.approvedClip.assetId:
+        if batch.id in range_batches:
+            # A|Middle|B composition active on Master — never overwrite with a
+            # whole-take managed clip. Advance the cursor by the composition end.
+            related = [
+                c
+                for c in (batch.visualClips or [])
+                if clip_belongs_to_range_batch(c, str(batch.id))
+            ]
+            if related:
+                end = max(float(c.start or 0.0) + float(c.length or 0.0) for c in related)
+                cursor = max(cursor, end)
+            else:
+                take = _playable_take_for_batch(batch, preferred_assets)
+                if take:
+                    cursor += float(take[1])
             continue
-        length = float(
-            batch.duration.timelineVisibleDuration
-            or batch.duration.generatedDuration
-            or batch.duration.plannedDuration
-            or 5.0
-        )
-        clip_id = f"{managed_prefix}{batch.id}"
-        # Idempotent upsert by stable id
-        clip = TimelineClip(
-            id=clip_id,
-            asset_id=batch.approvedClip.assetId,
-            start=cursor,
-            length=length,
-            label=batch.label or f"Batch {batch.order + 1}",
-        )
-        placed.append(clip)
+        take = _playable_take_for_batch(batch, preferred_assets)
+        if not take:
+            # A09: missing window asset still advances the placement cursor so
+            # later batches keep scene-absolute starts (no collapse/borrow).
+            planned = float(
+                getattr(getattr(batch, "duration", None), "timelineVisibleDuration", None)
+                or getattr(getattr(batch, "duration", None), "generatedDuration", None)
+                or getattr(getattr(batch, "duration", None), "plannedDuration", None)
+                or 5.0
+            )
+            cursor += max(0.1, planned)
+            continue
+        asset_id, length = take
+        _upsert_managed_visual_take(batch, asset_id, length)
+        placed_ids.append(f"{MANAGED_BATCH_VISUAL_PREFIX}{batch.id}")
         cursor += length
 
-    director_tl.video_clips = retained + placed
-    director_tl.media_mode = "video"
-    if placed:
-        director_tl.duration_sec = max(float(director_tl.duration_sec or 0.0), cursor)
-
-    store.save_master(db, project_id, scene_id, master, director_tl=director_tl, bump_revision=True)
+    store.save_master(db, project_id, scene_id, master, bump_revision=True)
     return {
         "ok": True,
-        "placedCount": len(placed),
-        "clipIds": [c.id for c in placed],
+        "placedCount": len(placed_ids),
+        "clipIds": placed_ids,
         "totalDuration": cursor,
         "mock": False,
     }

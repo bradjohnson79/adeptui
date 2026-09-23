@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 
-from ..director_timeline import DirectorTimeline, parse_director_timeline
+from ..lipsync_tracks import LipSyncTracks, parse_lipsync_tracks
 from .camera_catalog import detect_camera_contradictions, summarize_camera_strategy
 from .capabilities import (
     disclose_inpaint_strategy,
@@ -98,36 +98,36 @@ def _batch_map(master: SceneTimelineMaster) -> dict[str, BatchBlock]:
     return {b.id: b for b in master.batchBlocks}
 
 
-def _load_director_timeline(
+def _load_lipsync_tracks(
     db: Session | None,
     project_id: str | None,
     scene_id: str | None,
-) -> DirectorTimeline | None:
+) -> LipSyncTracks | None:
     if not db or not project_id or not scene_id:
         return None
     scene = store.get_scene(db, project_id, scene_id)
     if not scene:
         return None
-    return parse_director_timeline(
-        scene.director_json,
-        fallback_duration=float(scene.duration_sec or 5.0),
-        fallback_prompt=scene.prompt or "",
-    )
+    return parse_lipsync_tracks(getattr(scene, "lipsync_tracks_json", None))
 
 
 def _bind_video_reference_anchor(
     batch: BatchBlock,
-    director_timeline: DirectorTimeline | None,
+    director_timeline: Any | None,
     db: Session | None = None,
     project_id: str | None = None,
     master: SceneTimelineMaster | None = None,
+    scene_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Bind Prompt-clip references by canonical ID. Never consume alias text."""
     from .generation.reference_compile import apply_compiled_references
     from .generation.speech_compile import apply_compiled_speech
     from .reconcile import batch_time_windows
 
-    warnings = apply_compiled_references(batch, director_timeline, db=db, project_id=project_id)
+    lipsync = director_timeline
+    if lipsync is None:
+        lipsync = _load_lipsync_tracks(db, project_id, scene_id)
+    warnings = apply_compiled_references(batch, None, db=db, project_id=project_id, master=master)
     window_start = 0.0
     window_end = None
     if master is not None:
@@ -137,7 +137,7 @@ def _bind_video_reference_anchor(
                 break
     speech_errors = apply_compiled_speech(
         batch,
-        director_timeline,
+        lipsync,
         db=db,
         project_id=project_id,
         window_start=window_start,
@@ -298,13 +298,15 @@ def _prepare_and_store_snapshot(
     if gen is not None:
         locality = gen.locality
     resolved_guidance = _resolve_guidance_priority(guidance_priority, db, project_id, scene_id)
-    director_timeline = _load_director_timeline(db, project_id, scene_id)
     pi_record = _load_prompt_intelligence_record(db, project_id, scene_id)
     snap = create_execution_snapshot(
         batch,
         continuity=continuity,
         guidance_priority=resolved_guidance,
-        camera_clips=(director_timeline.camera_clips if director_timeline else None),
+        # SINGLE-STORE: camera strategy reads Master batch.cameraInstructions
+        # (BatchClip carries motion_id/rig/subject_lock natively). The retired
+        # legacy camera_clips array is never generation authority.
+        camera_clips=list(batch.cameraInstructions or []),
         prompt_intelligence=pi_record,
     )
     snap.runtime = locality
@@ -436,294 +438,370 @@ def submit_batch_generation(
             guidance_priority=guidance_priority,
         )
 
-    scene_row = store.get_scene(db, project_id, scene_id)
-    aspect_ratio = getattr(scene_row, "aspect_ratio", None) if scene_row else None
-    director_timeline = _load_director_timeline(db, project_id, scene_id)
-    bind_notes = _bind_video_reference_anchor(
-        batch, director_timeline, db=db, project_id=project_id, master=master
-    )
-    if any(n.get("code") == "LIPSYNC_SPEAKER_REQUIRED" for n in bind_notes):
-        return {
-            "ok": False,
-            "error": "LIPSYNC_SPEAKER_REQUIRED",
-            "message": "Assign a character to this Lip Sync clip.",
-            "findings": bind_notes,
-            "mock": False,
-        }
+    take_id = str(getattr(master, "activeSceneTakeId", None) or getattr(master, "currentSceneTakeId", None) or "")
+    from .generation.submit_identity import find_live_studio_job, single_flight
 
-    try:
-        from .continuity import active_bridge_for_target
-        from ..codirector.video_intelligence.service import (
-            ensure_temporal_packet_before_submit,
-            packet_blocks_submit,
+    with single_flight(scene_id, take_id, batch.id, snap.id):
+        existing_job_id = find_live_studio_job(
+            scene_id=scene_id,
+            take_id=take_id,
+            batch_id=batch.id,
+            snapshot_id=snap.id,
         )
-
-        incoming = active_bridge_for_target(master, batch.id)
-        temporal_packet = ensure_temporal_packet_before_submit(
-            db, project_id, scene_id, master, batch.id
-        )
-        # WAVE2 dual-authority purge: do NOT reconcile legacy→master on generate.
-        # batch.promptSegments is sole generate prompt authority.
-        store.save_master(db, project_id, scene_id, master, touch_batches=False)
-        if packet_blocks_submit(master, batch.id):
+        if existing_job_id:
+            fresh = store.load_master(db, project_id, scene_id)
+            if fresh.get("ok"):
+                fresh_master = SceneTimelineMaster.model_validate(fresh["master"])
+                fresh_batch = _batch_map(fresh_master).get(batch.id)
+                if fresh_batch is not None and fresh_batch.status != "Generating":
+                    fresh_batch.status = "Generating"
+                    store.save_master(
+                        db, project_id, scene_id, fresh_master, touch_batches=False
+                    )
             return {
-                "ok": False,
-                "error": "TEMPORAL_REVIEW_PENDING",
-                "message": "Co-Director is still reviewing the previous shot. The next generation has not been sent.",
+                "ok": True,
+                "idempotent": True,
+                "batchBlockId": batch.id,
+                "executionSnapshotId": snap.id,
+                "queueJobId": existing_job_id,
+                "internalJobId": existing_job_id,
+                "jobId": existing_job_id,
+                "generatorId": adapter.id,
+                "message": "This window is already rendering.",
                 "mock": False,
             }
-        from .generation.direct_reference import (
-            build_direct_reference_payload,
-            delivery_error,
+        scene_row = store.get_scene(db, project_id, scene_id)
+        aspect_ratio = getattr(scene_row, "aspect_ratio", None) if scene_row else None
+        bind_notes = _bind_video_reference_anchor(
+            batch, None, db=db, project_id=project_id, master=master, scene_id=scene_id
         )
+        if any(n.get("code") == "LIPSYNC_SPEAKER_REQUIRED" for n in bind_notes):
+            return {
+                "ok": False,
+                "error": "LIPSYNC_SPEAKER_REQUIRED",
+                "message": "Assign a character to this Lip Sync clip.",
+                "findings": bind_notes,
+                "mock": False,
+            }
 
-        direct_refs = build_direct_reference_payload(
-            db,
-            project_id=project_id,
-            scene_id=scene_id,
-            batch=batch,
-            generator_id=adapter.id,
-        )
-        blocked = delivery_error(direct_refs)
-        if blocked is not None:
-            return blocked
-        request = build_timeline_generation_request(
-            project_id=project_id,
-            scene_id=scene_id,
-            batch=batch,
-            snapshot=snap,
-            fallback_allowed=fallback_allowed,
-            incoming_bridge=incoming if incoming and incoming.status in ("Ready", "Applied") else None,
-            aspect_ratio=aspect_ratio,
-            draft_mode=draft_mode,
-            temporal_packet=temporal_packet,
-            turbo_lora=bool(getattr(master, "turboLora", False)),
-            direct_references=direct_refs,
-        )
-        if incoming and incoming.status == "Ready" and request.continuityStrategy:
-            incoming.continuityStrategy = request.continuityStrategy  # type: ignore[assignment]
-            incoming.status = "Applied"
-        # EXTENSION OBSERVABILITY (mission §14): debug-level evidence per cycle.
-        _log_extension_cycle(
-            batch=batch,
-            request=request,
-            incoming_bridge=incoming,
-            temporal_packet=temporal_packet,
-        )
-    except Exception as exc:
-        return {"ok": False, "error": "REQUEST_BUILD_FAILED", "message": str(exc), "mock": False}
-
-    # Direct Reference Route remains the only *visual* cast authority.
-    # Do NOT re-enable apply_character_identity here (it must not replace DR
-    # picture refs). Approved project voices are attached as H3 ref_audios /
-    # characterVoice audio slots only — voice timbre conditioning, not
-    # exact-script TTS and not a prompt translation layer.
-    from .generation.voice_bind import apply_approved_voices
-
-    voices = apply_approved_voices(db, request, batch, caps=adapter.capabilities)
-    if voices.get("applied"):
         try:
+            from .continuity import active_bridge_for_target
+            from ..codirector.video_intelligence.service import (
+                ensure_temporal_packet_before_submit,
+                packet_blocks_submit,
+            )
+
+            incoming = active_bridge_for_target(master, batch.id)
+            if incoming is not None:
+                from .continuity import bridge_source_stale
+
+                source_batch = next(
+                    (b for b in master.batchBlocks if b.id == incoming.sourceBatchId),
+                    None,
+                )
+                if source_batch is not None and bridge_source_stale(incoming, source_batch, master):
+                    incoming.status = "Superseded"
+                    incoming = None
+            temporal_packet = ensure_temporal_packet_before_submit(
+                db, project_id, scene_id, master, batch.id
+            )
+            # WAVE2 dual-authority purge: do NOT reconcile legacy→master on generate.
+            # batch.promptSegments is sole generate prompt authority.
             store.save_master(db, project_id, scene_id, master, touch_batches=False)
-        except Exception:
-            pass
+            if packet_blocks_submit(master, batch.id):
+                return {
+                    "ok": False,
+                    "error": "TEMPORAL_REVIEW_PENDING",
+                    "message": "Co-Director is still reviewing the previous shot. The next generation has not been sent.",
+                    "mock": False,
+                }
+            from .generation.direct_reference import (
+                build_direct_reference_payload,
+                delivery_error,
+            )
 
-    # A-H / C: honest preflight — locked Manifest requires explicit spoken authority.
-    # Generator does not own words/language/speaker; post-gen Omni QC is mandatory.
-    # CRITICAL: do NOT wrap this gate in except Exception: pass.
-    # SPOKEN_LANGUAGE_AUTHORITY_MISSING must reach the caller; unexpected errors
-    # on locked script fail closed.
-    from .generation.dialogue_authority import (
-        compile_dialogue_authority_for_batch,
-        get_manifest_from_batch,
-        manifest_needs_authority_recompile,
-        submit_dialogue_authority_preflight,
-    )
-
-    manifest = None
-    compile_error = None
-    try:
-        manifest = get_manifest_from_batch(batch)
-        if manifest_needs_authority_recompile(manifest):
-            manifest = compile_dialogue_authority_for_batch(
+            direct_refs = build_direct_reference_payload(
                 db,
                 project_id=project_id,
                 scene_id=scene_id,
                 batch=batch,
-                master=master,
+                generator_id=adapter.id,
             )
+            blocked = delivery_error(direct_refs)
+            if blocked is not None:
+                return blocked
+            request = build_timeline_generation_request(
+                project_id=project_id,
+                scene_id=scene_id,
+                batch=batch,
+                snapshot=snap,
+                fallback_allowed=fallback_allowed,
+                incoming_bridge=incoming if incoming and incoming.status in ("Ready", "Applied") else None,
+                aspect_ratio=aspect_ratio,
+                draft_mode=draft_mode,
+                temporal_packet=temporal_packet,
+                turbo_lora=bool(getattr(master, "turboLora", False)),
+                direct_references=direct_refs,
+            )
+            if incoming and incoming.status == "Ready" and request.continuityStrategy:
+                incoming.continuityStrategy = request.continuityStrategy  # type: ignore[assignment]
+                incoming.status = "Applied"
+            # EXTENSION OBSERVABILITY (mission §14): debug-level evidence per cycle.
+            _log_extension_cycle(
+                batch=batch,
+                request=request,
+                incoming_bridge=incoming,
+                temporal_packet=temporal_packet,
+            )
+        except Exception as exc:
+            return {"ok": False, "error": "REQUEST_BUILD_FAILED", "message": str(exc), "mock": False}
+
+        # Direct Reference Route remains the only *visual* cast authority.
+        # Do NOT re-enable apply_character_identity here (it must not replace DR
+        # picture refs). Approved project voices are attached as H3 ref_audios /
+        # characterVoice audio slots only — voice timbre conditioning, not
+        # exact-script TTS and not a prompt translation layer.
+        from .generation.voice_bind import apply_approved_voices
+
+        voices = apply_approved_voices(db, request, batch, caps=adapter.capabilities)
+        if voices.get("applied"):
             try:
                 store.save_master(db, project_id, scene_id, master, touch_batches=False)
             except Exception:
                 pass
-    except Exception as _dlg_pre_exc:  # noqa: BLE001
-        compile_error = _dlg_pre_exc
+
+        # A-H / C: honest preflight — locked Manifest requires explicit spoken authority.
+        # Generator does not own words/language/speaker; post-gen Omni QC is mandatory.
+        # CRITICAL: do NOT wrap this gate in except Exception: pass.
+        # SPOKEN_LANGUAGE_AUTHORITY_MISSING must reach the caller; unexpected errors
+        # on locked script fail closed.
+        from .generation.dialogue_authority import (
+            compile_dialogue_authority_for_batch,
+            get_manifest_from_batch,
+            manifest_needs_authority_recompile,
+            submit_dialogue_authority_preflight,
+        )
+
+        manifest = None
+        compile_error = None
         try:
-            if manifest is None:
-                manifest = get_manifest_from_batch(batch)
+            manifest = get_manifest_from_batch(batch)
+            if manifest_needs_authority_recompile(manifest):
+                manifest = compile_dialogue_authority_for_batch(
+                    db,
+                    project_id=project_id,
+                    scene_id=scene_id,
+                    batch=batch,
+                    master=master,
+                )
+                try:
+                    store.save_master(db, project_id, scene_id, master, touch_batches=False)
+                except Exception:
+                    pass
+        except Exception as _dlg_pre_exc:  # noqa: BLE001
+            compile_error = _dlg_pre_exc
+            try:
+                if manifest is None:
+                    manifest = get_manifest_from_batch(batch)
+            except Exception:
+                pass
+        blocked = submit_dialogue_authority_preflight(
+            manifest, compile_error=compile_error, batch=batch
+        )
+        if blocked is not None:
+            return blocked
+        # Honesty: H3 cannot guarantee exact script at Comfy sockets — QC will verify.
+        if manifest and manifest.get("lockedScript") and manifest.get("lines"):
+            opts = dict(request.providerOptions or {})
+            opts["dialoguePreflight"] = {
+                "lockedScript": True,
+                "generatorOwnsDialogue": False,
+                "exactSpeechGuaranteedByGenerator": False,
+                "mandatoryPostGenOmniQc": True,
+                "spokenLanguage": manifest.get("language"),
+                "comfyLanguageWidget": "absent_on_h3",
+            }
+            request.providerOptions = opts
+
+        # Hard lock: never silently change generator
+        if request.generatorId != adapter.id:
+            return {
+                "ok": False,
+                "error": "GENERATOR_MISMATCH",
+                "message": "Resolved generator does not match adapter — refusing silent substitution.",
+                "mock": False,
+            }
+        if not fallback_allowed and request.fallbackAllowed:
+            return {
+                "ok": False,
+                "error": "FALLBACK_NOT_AUTHORIZED",
+                "message": "Generator fallback requires explicit authorization.",
+                "mock": False,
+            }
+
+        validation = adapter.validate(request)
+        if not validation.ok:
+            return {
+                "ok": False,
+                "error": "CAPABILITY_VALIDATION_FAILED",
+                "errors": validation.errors,
+                "warnings": validation.warnings,
+                "generatorId": adapter.id,
+                "mock": False,
+            }
+
+        from .generation.runtime_dependency_preflight import preflight_generation_dependencies
+
+        ready = preflight_generation_dependencies(db, request)
+        if not ready.get("ok"):
+            return {**ready, "generatorId": adapter.id, "mock": False}
+        db.commit()
+
+        draft_used = bool(request.providerOptions.get("draftMode"))
+        st = dict(snap.continuityState or {})
+        if request.temporalContinuityPacketId:
+            st["temporalContinuityPacketId"] = request.temporalContinuityPacketId
+            st["temporalContinuation"] = request.providerOptions.get("temporalContinuation")
+        st["takeState"] = {
+            "quality": "draft" if draft_used else "final",
+            "draftPathway": request.providerOptions.get("draftPathway"),
+            "finalRequiresNewGeneration": request.providerOptions.get("finalRequiresNewGeneration"),
+            "aspectRatio": request.aspectRatio,
+            "resolution": request.resolution,
+            "videoReferenceAssetId": request.videoReferenceAssetId,
+        }
+        snap.continuityState = st
+        request.providerOptions["sceneTakeId"] = take_id
+        request.providerOptions["draftMode"] = draft_used
+
+        from .generation.submit_identity import scene_flight, scene_slot_for
+
+        with scene_flight(scene_id):
+            slot = scene_slot_for(
+                scene_id=scene_id,
+                take_id=take_id,
+                batch_id=batch.id,
+                snapshot_id=snap.id,
+            )
+            if slot["action"] == "reuse":
+                return {
+                    "ok": True,
+                    "idempotent": True,
+                    "batchBlockId": batch.id,
+                    "executionSnapshotId": snap.id,
+                    "queueJobId": slot["jobId"],
+                    "internalJobId": slot["jobId"],
+                    "jobId": slot["jobId"],
+                    "generatorId": adapter.id,
+                    "message": "This window is already rendering.",
+                    "mock": False,
+                }
+            if slot["action"] == "defer":
+                return {
+                    "ok": True,
+                    "deferred": True,
+                    "reason": "scene_window_in_progress",
+                    "batchBlockId": batch.id,
+                    "executionSnapshotId": snap.id,
+                    "queueJobId": slot["jobId"],
+                    "generatorId": adapter.id,
+                    "message": "The previous window is still rendering.",
+                    "mock": False,
+                }
+            try:
+                submission = adapter.submit(request)
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "error": "ADAPTER_SUBMIT_FAILED",
+                    "message": str(exc),
+                    "generatorId": adapter.id,
+                    "mock": False,
+                }
+
+        # Bind projectId for MiniMax status polling
+        meta = dict(submission.providerMetadata or {})
+        meta["projectId"] = project_id
+        meta["draftMode"] = draft_used
+        meta["draftPathway"] = request.providerOptions.get("draftPathway")
+        meta["aspectRatio"] = request.aspectRatio
+        meta["resolution"] = request.resolution
+        meta["videoReferenceAssetId"] = request.videoReferenceAssetId
+        submission.providerMetadata = meta
+
+        hosted_cancel: HostedCancelSupport = (
+            "supported"
+            if (adapter.capabilities.supportsQueuedCancel or adapter.capabilities.supportsRunningCancel)
+            else "unsupported"
+        )
+
+        job = GenerationJobRef(
+            executionSnapshotId=snap.id,
+            status=submission.status,
+            locality=locality,
+            hostedCancelSupport=hosted_cancel,
+            queueJobId=submission.queueJobId,
+            providerJobId=submission.providerJobId,
+            generatorId=adapter.id,
+            apiUsed=submission.apiUsed,
+            progress=0.0,
+        )
+        try:
+            from .scene_takes import bind_generation_to_active_take
+
+            bind_generation_to_active_take(master, job)
         except Exception:
             pass
-    blocked = submit_dialogue_authority_preflight(
-        manifest, compile_error=compile_error, batch=batch
-    )
-    if blocked is not None:
-        return blocked
-    # Honesty: H3 cannot guarantee exact script at Comfy sockets — QC will verify.
-    if manifest and manifest.get("lockedScript") and manifest.get("lines"):
-        opts = dict(request.providerOptions or {})
-        opts["dialoguePreflight"] = {
-            "lockedScript": True,
-            "generatorOwnsDialogue": False,
-            "exactSpeechGuaranteedByGenerator": False,
-            "mandatoryPostGenOmniQc": True,
-            "spokenLanguage": manifest.get("language"),
-            "comfyLanguageWidget": "absent_on_h3",
-        }
-        request.providerOptions = opts
+        batch.generationJobs.append(job)
+        batch.status = "Generating"
+        batch.pendingSnapshotId = None
+        batch.configFingerprint = compute_config_fingerprint(batch)
+        store.save_master(db, project_id, scene_id, master)
 
-    # Hard lock: never silently change generator
-    if request.generatorId != adapter.id:
-        return {
-            "ok": False,
-            "error": "GENERATOR_MISMATCH",
-            "message": "Resolved generator does not match adapter — refusing silent substitution.",
-            "mock": False,
-        }
-    if not fallback_allowed and request.fallbackAllowed:
-        return {
-            "ok": False,
-            "error": "FALLBACK_NOT_AUTHORIZED",
-            "message": "Generator fallback requires explicit authorization.",
-            "mock": False,
-        }
-
-    validation = adapter.validate(request)
-    if not validation.ok:
-        return {
-            "ok": False,
-            "error": "CAPABILITY_VALIDATION_FAILED",
-            "errors": validation.errors,
-            "warnings": validation.warnings,
-            "generatorId": adapter.id,
-            "mock": False,
-        }
-
-    from .generation.runtime_dependency_preflight import preflight_generation_dependencies
-
-    ready = preflight_generation_dependencies(db, request)
-    if not ready.get("ok"):
-        return {**ready, "generatorId": adapter.id, "mock": False}
-    db.commit()
-
-    draft_used = bool(request.providerOptions.get("draftMode"))
-    st = dict(snap.continuityState or {})
-    if request.temporalContinuityPacketId:
-        st["temporalContinuityPacketId"] = request.temporalContinuityPacketId
-        st["temporalContinuation"] = request.providerOptions.get("temporalContinuation")
-    st["takeState"] = {
-        "quality": "draft" if draft_used else "final",
-        "draftPathway": request.providerOptions.get("draftPathway"),
-        "finalRequiresNewGeneration": request.providerOptions.get("finalRequiresNewGeneration"),
-        "aspectRatio": request.aspectRatio,
-        "resolution": request.resolution,
-        "videoReferenceAssetId": request.videoReferenceAssetId,
-    }
-    snap.continuityState = st
-    request.providerOptions["draftMode"] = draft_used
-
-    try:
-        submission = adapter.submit(request)
-    except Exception as exc:
-        return {
-            "ok": False,
-            "error": "ADAPTER_SUBMIT_FAILED",
-            "message": str(exc),
-            "generatorId": adapter.id,
-            "mock": False,
-        }
-
-    # Bind projectId for MiniMax status polling
-    meta = dict(submission.providerMetadata or {})
-    meta["projectId"] = project_id
-    meta["draftMode"] = draft_used
-    meta["draftPathway"] = request.providerOptions.get("draftPathway")
-    meta["aspectRatio"] = request.aspectRatio
-    meta["resolution"] = request.resolution
-    meta["videoReferenceAssetId"] = request.videoReferenceAssetId
-    submission.providerMetadata = meta
-
-    hosted_cancel: HostedCancelSupport = (
-        "supported"
-        if (adapter.capabilities.supportsQueuedCancel or adapter.capabilities.supportsRunningCancel)
-        else "unsupported"
-    )
-
-    job = GenerationJobRef(
-        executionSnapshotId=snap.id,
-        status=submission.status,
-        locality=locality,
-        hostedCancelSupport=hosted_cancel,
-        queueJobId=submission.queueJobId,
-        providerJobId=submission.providerJobId,
-        generatorId=adapter.id,
-        apiUsed=submission.apiUsed,
-        progress=0.0,
-    )
-    try:
-        from .scene_takes import bind_generation_to_active_take
-
-        bind_generation_to_active_take(master, job)
-    except Exception:
-        pass
-    batch.generationJobs.append(job)
-    batch.status = "Generating"
-    batch.pendingSnapshotId = None
-    batch.configFingerprint = compute_config_fingerprint(batch)
-    store.save_master(db, project_id, scene_id, master)
-
-    start_completion_watcher(
-        project_id=project_id,
-        scene_id=scene_id,
-        batch_id=batch.id,
-        execution_snapshot_id=snap.id,
-        submission=submission,
-    )
-
-    try:
-        from ..production_events import ACTOR_SYSTEM, record_production_event
-
-        record_production_event(
-            db,
+        start_completion_watcher(
             project_id=project_id,
             scene_id=scene_id,
-            event_type="timeline.generation_started",
-            actor=ACTOR_SYSTEM,
-            actor_detail="timeline:submit_batch_generation",
-            subject_kind="batch",
-            subject_id=batch.id,
-            summary=f"Generation started for batch {batch.label} via {adapter.id}",
-            payload={"batchId": batch.id, "generatorId": adapter.id, "snapshotId": snap.id},
-
+            batch_id=batch.id,
+            execution_snapshot_id=snap.id,
+            submission=submission,
         )
-    except Exception:  # noqa: BLE001 - event recording never breaks the operation
-        pass
 
-    return {
-        "ok": True,
-        "batchBlockId": batch.id,
-        "job": job.model_dump(),
-        "executionSnapshotId": snap.id,
-        "generatorId": adapter.id,
-        "queueJobId": submission.queueJobId,
-        "providerJobId": submission.providerJobId,
-        "internalJobId": submission.internalJobId,
-        "apiUsed": submission.apiUsed,
-        "normalizedRequest": request.model_dump(),
-        "hostedCancelSupport": hosted_cancel,
-        "message": (
-            f"Job submitted via {adapter.id} adapter with immutable execution snapshot."
-        ),
-        "mock": False,
-    }
+        try:
+            from ..production_events import ACTOR_SYSTEM, record_production_event
+
+            record_production_event(
+                db,
+                project_id=project_id,
+                scene_id=scene_id,
+                event_type="timeline.generation_started",
+                actor=ACTOR_SYSTEM,
+                actor_detail="timeline:submit_batch_generation",
+                subject_kind="batch",
+                subject_id=batch.id,
+                summary=f"Generation started for batch {batch.label} via {adapter.id}",
+                payload={"batchId": batch.id, "generatorId": adapter.id, "snapshotId": snap.id},
+
+            )
+        except Exception:  # noqa: BLE001 - event recording never breaks the operation
+            pass
+
+        return {
+            "ok": True,
+            "batchBlockId": batch.id,
+            "job": job.model_dump(),
+            "executionSnapshotId": snap.id,
+            "generatorId": adapter.id,
+            "queueJobId": submission.queueJobId,
+            "providerJobId": submission.providerJobId,
+            "internalJobId": submission.internalJobId,
+            "apiUsed": submission.apiUsed,
+            "normalizedRequest": request.model_dump(),
+            "hostedCancelSupport": hosted_cancel,
+            "message": (
+                f"Job submitted via {adapter.id} adapter with immutable execution snapshot."
+            ),
+            "mock": False,
+        }
 
 
 def complete_batch_candidate(
@@ -750,8 +828,11 @@ def complete_batch_candidate(
         return {"ok": False, "error": "SNAPSHOT_NOT_IMMUTABLE", "mock": False}
 
     from .generation.comfy_release import release_comfy_after_timeline_generation
+    from .generation.window_handoff import open_completion_handoff
 
-    release_comfy_after_timeline_generation(reason=f"timeline-batch-complete:{batch_id}")
+    opened_handoff = open_completion_handoff(master, batch)
+    if not opened_handoff.get("observe"):
+        release_comfy_after_timeline_generation(reason=f"timeline-batch-complete:{batch_id}")
 
     from .continuity import active_bridge_for_target, compile_retake_memory
 
@@ -820,11 +901,21 @@ def complete_batch_candidate(
     seen_manifest = None
     try:
         from .generation.dialogue_authority import (
+            EXPECTED_SPEECH_NONE,
+            STATUS_QC_PENDING,
+            STATUS_QC_RETRY_REQUIRED,
+            attach_authority_packet,
             apply_qc_to_batch_status,
             batch_has_locked_script_lines,
             build_retake_repair_from_manifest,
             compile_dialogue_authority_for_batch,
+            ensure_silence_locked_manifest,
+            freeze_language_authority_packet,
+            get_frozen_authority_packet,
             get_manifest_from_batch,
+            is_omni_infra_unavailable,
+            manifest_from_frozen_packet,
+            resolve_expected_speech,
             run_omni_dialogue_qc,
         )
 
@@ -837,19 +928,48 @@ def complete_batch_candidate(
                 batch=batch,
                 master=master,
             )
+        # P6 fail-closed: empty dialogue authority => silence-locked Manifest; always QC.
+        manifest = ensure_silence_locked_manifest(
+            project_id=project_id,
+            scene_id=scene_id,
+            batch_id=str(getattr(batch, "id", "") or "") or None,
+            manifest=manifest,
+        )
+        # P6 hygiene: QC retry uses frozen per-window authority — no recompile drift.
+        frozen = get_frozen_authority_packet(batch)
+        if frozen is not None:
+            manifest = manifest_from_frozen_packet(frozen, fallback=manifest)
+        else:
+            packet = freeze_language_authority_packet(manifest)
+            attach_authority_packet(batch, packet)
         seen_manifest = manifest
         locked_scripted = batch_has_locked_script_lines(batch, manifest)
-        if manifest and manifest.get("lockedScript") and manifest.get("lines"):
-            locked_scripted = True
+        expected = resolve_expected_speech(
+            lines=manifest.get("lines") or [],
+            allow_adlibs=bool(manifest.get("allowAdLibs")),
+            explicit=manifest.get("expectedSpeech"),
+        )
+        silence_locked = expected == EXPECTED_SPEECH_NONE
+        if manifest and (silence_locked or (manifest.get("lockedScript") and manifest.get("lines"))):
+            if manifest.get("lockedScript") and manifest.get("lines"):
+                locked_scripted = True
+            if silence_locked:
+                locked_scripted = True  # silence lock also blocks CandidateReady on fail
             dialogue_qc = run_omni_dialogue_qc(
                 db,
                 project_id=project_id,
                 scene_id=scene_id,
                 asset_id=asset_id,
                 manifest=manifest,
+                batch=batch,
             )
             new_status = apply_qc_to_batch_status(batch, dialogue_qc)
-            if new_status != "CandidateReady":
+            # Content fail + scripted lines → retake repair. Infra miss → keep asset, no retake.
+            if (
+                new_status == "NeedsDialogueRetake"
+                and manifest.get("lines")
+                and not is_omni_infra_unavailable(dialogue_qc)
+            ):
                 repair = build_retake_repair_from_manifest(manifest, dialogue_qc)
                 refs = [
                     r
@@ -877,65 +997,64 @@ def complete_batch_candidate(
         else:
             batch.status = "CandidateReady"
     if locked_scripted:
-        if batch.status not in ("CandidateReady", "NeedsDialogueRetake"):
+        _ok = (
+            "CandidateReady",
+            "NeedsDialogueRetake",
+            "QC_Pending",
+            "QC_RetryRequired",
+        )
+        if batch.status not in _ok:
             from .generation.dialogue_authority import STATUS_NEEDS_DIALOGUE_RETAKE
             batch.status = STATUS_NEEDS_DIALOGUE_RETAKE
-    elif batch.status not in ("CandidateReady", "NeedsDialogueRetake"):
+    elif batch.status not in (
+        "CandidateReady",
+        "NeedsDialogueRetake",
+        "QC_Pending",
+        "QC_RetryRequired",
+    ):
         batch.status = "CandidateReady"
 
 
-    # --- Omni Continuity + Unauthorized Equipment producers (Final Check ingest) ---
+    # One Omni residency for continuity and equipment, then a separately gated
+    # temporal review. The next window stays queued unless this gate is green.
     continuity_qc = None
     equipment_qc = None
-    try:
-        from .generation.omni_continuity_qc import (
-            persist_continuity_qc_diagnostics,
-            run_omni_continuity_qc,
-        )
-        from .generation.omni_equipment_qc import (
-            persist_equipment_qc_diagnostics,
-            run_omni_equipment_qc,
-        )
-
-        continuity_qc = run_omni_continuity_qc(
-            db,
-            project_id=project_id,
-            scene_id=scene_id,
-            asset_id=asset_id,
-            batch=batch,
-            master=master,
-        )
-        persist_continuity_qc_diagnostics(batch, continuity_qc)
-        equipment_qc = run_omni_equipment_qc(
-            db,
-            project_id=project_id,
-            scene_id=scene_id,
-            asset_id=asset_id,
-        )
-        persist_equipment_qc_diagnostics(batch, equipment_qc)
-    except Exception as _vis_exc:  # noqa: BLE001
-        # Fail soft for visual producers — never invent PASS; leave not_run when no packet.
-        # Dialogue QC already owns finish gate for locked script.
+    if opened_handoff.get("observe"):
+        continuity_qc = None
+        equipment_qc = None
+    else:
         try:
-            from ..production_events import ACTOR_SYSTEM, record_production_event
+            from .generation.window_handoff import run_completion_reviews
 
-            record_production_event(
+            handoff = run_completion_reviews(
                 db,
                 project_id=project_id,
                 scene_id=scene_id,
-                event_type="timeline.omni_visual_qc_error",
-                actor=ACTOR_SYSTEM,
-                actor_detail="timeline:complete_batch_candidate",
-                subject_kind="batch",
-                subject_id=batch_id,
-                summary=f"Omni continuity/equipment QC error: {str(_vis_exc)[:200]}",
-                payload={"batchId": batch_id, "error": str(_vis_exc)[:400]},
+                asset_id=asset_id,
+                batch=batch,
+                master=master,
+                owner=True,
             )
-        except Exception:
-            pass
-    from .continuity import prepare_outgoing_bridge
+            continuity_qc = handoff.get("continuityQc")
+            equipment_qc = handoff.get("equipmentQc")
+        except Exception as _vis_exc:  # noqa: BLE001
+            try:
+                from ..production_events import ACTOR_SYSTEM, record_production_event
 
-    prepare_outgoing_bridge(db, project_id, scene_id, master, batch_id)
+                record_production_event(
+                    db,
+                    project_id=project_id,
+                    scene_id=scene_id,
+                    event_type="timeline.omni_visual_qc_error",
+                    actor=ACTOR_SYSTEM,
+                    actor_detail="timeline:complete_batch_candidate",
+                    subject_kind="batch",
+                    subject_id=batch_id,
+                    summary=f"Omni continuity/equipment QC error: {str(_vis_exc)[:200]}",
+                    payload={"batchId": batch_id, "error": str(_vis_exc)[:400]},
+                )
+            except Exception:
+                pass
 
     # Bounded Final Check reverify after repair take completes (local auto-loop).
     try:
@@ -1171,8 +1290,81 @@ def touch_batch_config(
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
     batch = _batch_map(master).get(batch_id)
+    if not batch and len(master.batchBlocks) == 1:
+        # The on-screen window was minted by a read that had not been saved yet.
+        # Keep the creator's id instead of rejecting the edit against a new one.
+        batch = master.batchBlocks[0]
+        batch.id = batch_id
     if not batch:
         return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
+
+
+    # Gen P4: creator resize / topology-changing generator switch blocked.
+    if "plannedDuration" in patch and patch.get("plannedDuration") is not None:
+        from .execution_window_materialize import creator_batch_mutation_blocked
+
+        return creator_batch_mutation_blocked(
+            "plannedDuration resize — duration comes from rematerialize plan only"
+        )
+
+    if "generatorId" in patch and patch.get("generatorId") is not None:
+        new_gid = patch.get("generatorId")
+        old_gid = batch.generatorId or master.sceneGeneratorId
+        if new_gid != old_gid:
+            from .execution_window_materialize import (
+                GENERATOR_SWITCH_REQUIRES_NEW_SCENE_TAKE,
+                _build_switch_handoff,
+                current_window_topology,
+                topology_changed,
+            )
+
+            prev_topo = current_window_topology(master)
+            dur = (
+                sum(float(w.get("end", 0) - w.get("start", 0)) for w in prev_topo)
+                if prev_topo
+                else None
+            )
+            if dur is None:
+                try:
+                    scene_row = store.get_scene(db, project_id, scene_id)
+                    dur = float(scene_row.duration_sec or 0.0) if scene_row else None
+                except Exception:
+                    dur = None
+            handoff = _build_switch_handoff(
+                previous_generator_id=old_gid,
+                new_generator_id=new_gid,
+                duration_seconds=dur,
+                previous_windows=prev_topo,
+            )
+            new_windows = handoff.get("newWindows") or handoff.get("new_windows") or []
+            requires = bool(
+                handoff.get("requiresNewSceneTake", handoff.get("requires_new_scene_take"))
+            ) or bool(
+                handoff.get("requiresRevisionBump", handoff.get("requires_revision_bump"))
+            )
+            if new_windows and topology_changed(prev_topo, new_windows):
+                requires = True
+            if requires or (new_windows and topology_changed(prev_topo, new_windows)):
+                return {
+                    "ok": False,
+                    "error": GENERATOR_SWITCH_REQUIRES_NEW_SCENE_TAKE,
+                    "message": (
+                        "Generator switch changes execution window topology. "
+                        "Systems must put_master/replace_master to mint new stk_/executionRevision, "
+                        "then call rematerialize_execution_windows with allow_scene_take_id."
+                    ),
+                    "requiresNewSceneTake": True,
+                    "requiresRevisionBump": bool(
+                        handoff.get("requiresRevisionBump", handoff.get("requires_revision_bump"))
+                    ),
+                    "newWindows": new_windows,
+                    "newBatchCount": len(new_windows) if new_windows else handoff.get("newBatchCount"),
+                    "handoff": handoff,
+                    "pendingGeneratorSwitch": {"from": old_gid, "to": new_gid},
+                    "mock": False,
+                }
+            # Same-topology generator preference: allow storing generatorId only.
+
 
     prior_fp = batch.configFingerprint
     had_approval = batch.approvedClip is not None and batch.status in (
@@ -1534,7 +1726,8 @@ def add_repair_range(
 def run_preflight(
     master: SceneTimelineMaster,
     *,
-    director_timeline: DirectorTimeline | None = None,
+    director_timeline: Any | None = None,
+    lipsync_tracks: LipSyncTracks | None = None,
     db: Session | None = None,
     project_id: str | None = None,
     scene_id: str | None = None,
@@ -1713,8 +1906,16 @@ def run_preflight(
                     fixProposal="Add an End Frame anchor.",
                 )
             )
-    if director_timeline and director_timeline.camera_clips:
-        strategy = summarize_camera_strategy(director_timeline.camera_clips)
+    # SINGLE-STORE: camera preflight reads Master batch.cameraInstructions
+    # (batch-owned BatchClips carry motion_id/rig natively). The retired legacy
+    # camera_clips array is never readiness authority.
+    master_camera_clips = [
+        clip
+        for batch in master.batchBlocks
+        for clip in (batch.cameraInstructions or [])
+    ]
+    if master_camera_clips:
+        strategy = summarize_camera_strategy(master_camera_clips)
         if strategy["capability"] in ("Approximate", "Unsupported"):
             findings.append(
                 PreflightFinding(
@@ -1727,7 +1928,7 @@ def run_preflight(
                     fixProposal="Choose a Native or Workflow-Mapped camera move for stronger execution fidelity.",
                 )
             )
-        for item in detect_camera_contradictions(director_timeline.camera_clips):
+        for item in detect_camera_contradictions(master_camera_clips):
             findings.append(
                 PreflightFinding(
                     severity=item["severity"],
@@ -1737,8 +1938,11 @@ def run_preflight(
                     fixProposal=item.get("fixProposal"),
                 )
             )
-    if director_timeline:
-        for item in lipsync_speaker_errors(director_timeline):
+    tracks = lipsync_tracks
+    if tracks is None and db is not None and project_id and scene_id:
+        tracks = _load_lipsync_tracks(db, project_id, scene_id)
+    if tracks is not None:
+        for item in lipsync_speaker_errors(tracks):
             findings.append(
                 PreflightFinding(
                     severity="error",
@@ -1749,7 +1953,7 @@ def run_preflight(
             )
         for batch in master.batchBlocks:
             ref_notes = apply_compiled_references(
-                batch, director_timeline, db=db, project_id=project_id
+                batch, None, db=db, project_id=project_id, master=master
             )
             for note in ref_notes:
                 code = str(note.get("code") or "")
@@ -1889,18 +2093,46 @@ def submit_next_queued_batch(
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
+    from ..runtime_session import current_runtime_session_id
+
+    if str(getattr(master, "renderSessionId", None) or "") != current_runtime_session_id():
+        return {"ok": True, "submitted": False, "reason": "previous_session", "mock": False}
     if any(b.status == "Generating" for b in master.batchBlocks):
         return {"ok": True, "submitted": False, "reason": "generation_in_progress", "mock": False}
-    queued = [b for b in master.batchBlocks if b.status == "Queued"]
+    from .scene_takes import batch_has_unsubmitted_snapshot, reopen_take_for_staged_window
+
+    queued = [
+        b
+        for b in master.batchBlocks
+        if b.status == "Queued" or batch_has_unsubmitted_snapshot(b)
+    ]
     if not queued:
         return {"ok": True, "submitted": False, "reason": "no_queued_batches", "mock": False}
     nxt = sorted(queued, key=lambda b: b.order)[0]
+    from .generation.submit_identity import live_scene_batch_ids
+
+    live_batches = live_scene_batch_ids(scene_id, db)
+    if live_batches and nxt.id not in live_batches:
+        return {"ok": True, "submitted": False, "reason": "generation_in_progress", "mock": False}
+    if reopen_take_for_staged_window(master):
+        store.save_master(db, project_id, scene_id, master, touch_batches=False)
     from .continuity import analyze_bridge, bridge_blocks_submit
     from ..codirector.video_intelligence.service import (
         ensure_temporal_packet_before_submit,
         packet_blocks_submit,
     )
 
+    from .generation.window_handoff import handoff_submit_block
+
+    memory_block = handoff_submit_block(master, nxt)
+    if memory_block:
+        return {
+            "ok": True,
+            "submitted": False,
+            "reason": memory_block,
+            "message": "Waiting to start the next part. Memory is not ready.",
+            "mock": False,
+        }
     blocker = bridge_blocks_submit(master, nxt.id)
     if blocker is not None:
         if blocker.status == "Failed":
@@ -1983,6 +2215,9 @@ def generate_scene(
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
+    from ..runtime_session import current_runtime_session_id
+
+    master.renderSessionId = current_runtime_session_id()
     from .continuity import ensure_policy
     from .scene_takes import (
         allocate_rendering_take,
@@ -2003,13 +2238,12 @@ def generate_scene(
 
     gid = master.sceneGeneratorId or (master.batchBlocks[0].generatorId if master.batchBlocks else None)
     ensure_policy(master, gid)
+    from .generation.window_script import assign_later_window_scripts
+
+    assign_later_window_scripts(master)
     store.save_master(db, project_id, scene_id, master, touch_batches=False)
-    director_timeline = _load_director_timeline(db, project_id, scene_id)
-    # WAVE2 dual-authority purge: generate_scene must not reconcile legacy→master.
-    # Master batch.promptSegments already own per-window prompts.
     findings = run_preflight(
         master,
-        director_timeline=director_timeline,
         db=db,
         project_id=project_id,
         scene_id=scene_id,
@@ -2020,25 +2254,10 @@ def generate_scene(
     selected = batch_ids or []
     jobs = []
     errors = []
-    # ORCHESTRATOR_MODE_HONORED + SEQUENTIAL_SUBMISSION_CHAIN:
-    # Sequential (default): the first eligible batch is submitted to the
-    # provider; every later eligible batch gets an immutable snapshot staged
-    # (status=Queued) and is submitted only when the active batch reaches a
-    # terminal state — provider submission concurrency = 1. Parallel intent
-    # submits one immutable request per batch in order immediately (each
-    # batch = its own request/snapshot — GENERATION_ISOLATION).
+    # One window is sent to the provider at a time. Later windows are staged
+    # and advance only after the live window finishes. A multi-batch scene
+    # does not enqueue those windows together.
     mode = getattr(master, "orchestratorMode", "sequential_continuity") or "sequential_continuity"
-    # MULTI-BATCH QUEUE: ordered B1..Bn. Sequential mode stages later batches
-    # (Queued) and advances after prior SUCCESS + continuity readiness — not
-    # after creator Approve. Parallel enqueue is still staged when Continuity ON.
-    cd_policy = getattr(master, "coDirectorContinuityPolicy", None)
-    if isinstance(cd_policy, dict):
-        cd_enabled = bool(cd_policy.get("enabled", True))
-    elif cd_policy is None:
-        cd_enabled = True
-    else:
-        cd_enabled = bool(getattr(cd_policy, "enabled", True))
-    sequential = mode != "parallel" or cd_enabled
 
     eligible: list[BatchBlock] = []
     for batch in sorted(master.batchBlocks, key=lambda b: b.order):
@@ -2061,8 +2280,15 @@ def generate_scene(
         eligible.append(batch)
 
     any_generating = any(b.status == "Generating" for b in master.batchBlocks)
+    from .generation.submit_identity import live_scene_batch_ids
+
+    live_batches = live_scene_batch_ids(scene_id, db)
+    # One window in the provider at a time. Later windows stay staged until
+    # the live window finishes, including when continuity is off.
     for idx, batch in enumerate(eligible):
-        if sequential and (idx > 0 or any_generating):
+        if batch.id in live_batches:
+            continue
+        if idx > 0 or any_generating or bool(live_batches):
             result = stage_batch_snapshot(db, project_id, scene_id, batch.id)
             if result.get("ok"):
                 jobs.append(result)
@@ -2234,6 +2460,9 @@ def retake_range(
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
+    from ..runtime_session import current_runtime_session_id
+
+    master.renderSessionId = current_runtime_session_id()
     batch = _batch_map(master).get(batch_id)
     if not batch:
         return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
@@ -2325,22 +2554,17 @@ def retake_range(
     reference_image_asset_id = None
 
     # Image-frame Visual window: prefer imgclip_* / role=image_frame as I2V start.
-    from ..director_timeline import parse_director_timeline
+    # SINGLE-STORE: read Master batch.visualClips (batch-local == take-relative
+    # for the take composition, same coordinate space as start/length here).
+    # The retired legacy video_clips array is never generation authority.
     from .visual_range import find_image_frame_asset_in_range
 
-    scene_row = store.get_scene(db, project_id, scene_id)
-    if scene_row is not None:
-        director_tl = parse_director_timeline(
-            scene_row.director_json,
-            fallback_duration=float(scene_row.duration_sec or planned or 5.0),
-            fallback_prompt=scene_row.prompt or "",
-        )
-        reference_image_asset_id = find_image_frame_asset_in_range(
-            director_tl.video_clips,
-            mark_in=start,
-            mark_out=start + length,
-            source_batch_id=batch_id,
-        )
+    reference_image_asset_id = find_image_frame_asset_in_range(
+        list(batch.visualClips or []),
+        mark_in=start,
+        mark_out=start + length,
+        source_batch_id=batch_id,
+    )
 
     from .generation.registry import get_registry
 
@@ -2508,6 +2732,9 @@ def retake_batch(
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
+    from ..runtime_session import current_runtime_session_id
+
+    master.renderSessionId = current_runtime_session_id()
     batch = _batch_map(master).get(batch_id)
     if not batch:
         return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
@@ -2678,3 +2905,105 @@ def keep_existing_downstream(
     store.save_master(db, project_id, scene_id, master, touch_batches=False)
     return {"ok": True, "kept": ids, "mock": False}
 
+
+
+def qc_retry_batch(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+) -> dict[str, Any]:
+    """Re-run dialogue Omni QC on the same Take/asset — no H3 regen, no rematerialize."""
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    batch = _batch_map(master).get(batch_id)
+    if not batch:
+        return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
+    asset_id = getattr(batch, "currentTakeAssetId", None)
+    if not asset_id:
+        cands = list(getattr(batch, "candidateVersions", None) or [])
+        if cands:
+            asset_id = getattr(cands[-1], "assetId", None)
+    if not asset_id:
+        return {"ok": False, "error": "NO_ASSET_FOR_QC_RETRY", "mock": False}
+    try:
+        from .generation.dialogue_authority import (
+            apply_qc_to_batch_status,
+            attach_authority_packet,
+            freeze_language_authority_packet,
+            get_frozen_authority_packet,
+            get_manifest_from_batch,
+            manifest_from_frozen_packet,
+            run_omni_dialogue_qc,
+            ensure_silence_locked_manifest,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": "DIALOGUE_AUTHORITY_UNAVAILABLE", "detail": str(exc), "mock": False}
+
+    frozen = get_frozen_authority_packet(batch)
+    if frozen is not None:
+        manifest = manifest_from_frozen_packet(frozen, fallback=get_manifest_from_batch(batch))
+    else:
+        manifest = get_manifest_from_batch(batch)
+        manifest = ensure_silence_locked_manifest(
+            project_id=project_id,
+            scene_id=scene_id,
+            batch_id=batch_id,
+            manifest=manifest,
+        )
+        packet = freeze_language_authority_packet(manifest)
+        attach_authority_packet(batch, packet)
+    # Prefer CD QC-resume helper (frozen languageAuthorityPacket, no regen).
+    new_status = None
+    dialogue_qc = None
+    try:
+        from app.codirector.dialogue_authority import resume_dialogue_qc_against_existing_asset
+        resumed = resume_dialogue_qc_against_existing_asset(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            asset_id=str(asset_id),
+            batch=batch,
+            master=master,
+            force=True,
+        )
+        if isinstance(resumed, dict):
+            dialogue_qc = resumed.get('qc') or resumed.get('dialogueQc') or resumed
+            new_status = resumed.get('status') or apply_qc_to_batch_status(batch, dialogue_qc)
+            if resumed.get('status'):
+                batch.status = resumed['status']
+    except Exception:
+        dialogue_qc = run_omni_dialogue_qc(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            asset_id=str(asset_id),
+            manifest=manifest,
+            batch=batch,
+        )
+        new_status = apply_qc_to_batch_status(batch, dialogue_qc)
+    if new_status is None:
+        new_status = getattr(batch, 'status', None)
+    store.save_master(db, project_id, scene_id, master)
+    return {
+        "ok": True,
+        "batchId": batch_id,
+        "assetId": asset_id,
+        "status": new_status,
+        "takeId": getattr(batch, "currentTakeId", None),
+        "regenerated": False,
+        "mock": False,
+    }
+
+
+def reconcile_timeline_generation(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+) -> dict[str, Any]:
+    """Explicit bounce/recovery reconcile for one scene."""
+    from .generation.timeline_reconciler import reconcile_scene
+
+    return reconcile_scene(db, project_id, scene_id)

@@ -94,6 +94,20 @@ def build_session_context(
         )
     )
 
+    snapshot = None
+    if project_id:
+        try:
+            from app.codirector.project_grounding import build_project_grounding_snapshot
+
+            snapshot = build_project_grounding_snapshot(
+                db,
+                project_id,
+                active_scene_id,
+                workspace=active_workspace,
+            )
+        except Exception:
+            snapshot = None
+
     return {
         "projectId": project_id,
         "projectName": resolved_name,
@@ -116,4 +130,5 @@ def build_session_context(
         "planReadiness": plan_fields.get("planReadiness"),
         "openPlanBlockers": list(plan_fields.get("openPlanBlockers") or []),
         "lastPlanCommand": plan_fields.get("lastPlanCommand"),
+        "projectSnapshot": snapshot,
     }

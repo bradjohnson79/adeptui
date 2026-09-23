@@ -7,12 +7,13 @@ type Props = {
   canSave: boolean;
   saving?: boolean;
   dirty?: boolean;
+  deleteDisabled?: boolean;
   onSave: () => void;
   onReset: () => void;
   onDelete: () => void;
 };
 
-export function CharacterActions({ isSaved, canSave, saving, dirty, onSave, onReset, onDelete }: Props) {
+export function CharacterActions({ isSaved, canSave, saving, dirty, deleteDisabled, onSave, onReset, onDelete }: Props) {
   return (
     <div className="character-core__actions">
       <button
@@ -38,7 +39,7 @@ export function CharacterActions({ isSaved, canSave, saving, dirty, onSave, onRe
           type="button"
           className="character-core__button danger"
           data-testid="character-delete"
-          disabled={saving}
+          disabled={saving || deleteDisabled}
           onClick={onDelete}
         >
           Delete Character

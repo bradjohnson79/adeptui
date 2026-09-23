@@ -90,6 +90,57 @@ def test_negation_timeline():
     assert result.writeAllowed is False
 
 
+def test_cinematic_exclusions_do_not_negate_production_request():
+    """Scene-spec exclusion constraints are story content, not negated actions.
+
+    Regression: the original Scene 3 request ('Do not reveal Cade before the
+    laser blast', 'No additional characters', 'Cade is NOT yet visible') was
+    classified DISCUSS ('Negation detected') and the scene was never prepared.
+    """
+    message = (
+        "For Scene 3, I would like to create a Timeline prompt for the Character reference of "
+        "Cade O'Connor, and using the Venture Corridor Scene environment reference sheet as the "
+        "setting.\n\n"
+        "ACTION: The sealed door suddenly buckles inward. Cade is NOT yet visible.\n\n"
+        "CADE: \u201cWhere is the Adept?\u201d\n\n"
+        "IMPORTANT CONTINUITY: Do not reveal Cade before the laser blast. Cade remains fully "
+        "masked for the entire shot. No additional characters. No handheld weapons. No costume "
+        "changes. No extra dialogue. No subtitles or on-screen text. Maintain the same Venture "
+        "corridor throughout the shot.\n\n"
+        "The scene will be 30 seconds long with 2 batches. 21:9, 1.0 MegaPixels using MiniMax H3."
+    )
+    result = classify_deterministic(message, active_workspace="timeline")
+    assert result is None or result.actionClass != RouteActionClass.DISCUSS
+
+
+def test_cinematic_show_gating_does_not_negate_production_request():
+    """"Do not show <subject> before <event>" is reveal gating, not a negated
+    production action. Regression: Sample E's 'Do not show Echo Nine before
+    the energy ring flares' was classified DISCUSS and the scene never ran."""
+    message = (
+        "Prepare a Timeline scene in the Obsidian Gate environment reference sheet with the "
+        "Character reference of Echo Nine. A ring of blue energy ignites above the gate platform. "
+        "Do not show Echo Nine before the energy ring flares. Echo Nine steps out of the smoke "
+        "as the light fades. 10 seconds, 1 batch, MiniMax H3, 21:9, 1.0 MP."
+    )
+    result = classify_deterministic(message, active_workspace="timeline")
+    assert result is None or result.actionClass != RouteActionClass.DISCUSS
+
+
+def test_genuine_negated_actions_still_discuss():
+    for message in [
+        "Don't generate that scene.",
+        "Do not create the shot.",
+        "Never run this batch.",
+        "Please don't delete the scene.",
+        "Don't save that to the wiki.",
+    ]:
+        result = classify_deterministic(message)
+        assert result is not None, message
+        assert result.actionClass == RouteActionClass.DISCUSS, message
+        assert result.writeAllowed is False, message
+
+
 def test_false_positive_discuss_not_navigate():
     result = classify_deterministic("What do you think about using Script Writer for this?")
     assert result is not None

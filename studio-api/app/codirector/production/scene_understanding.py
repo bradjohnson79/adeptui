@@ -292,7 +292,18 @@ def _understanding_via_llm(message: str, llm_fn: LlmFn) -> SceneUnderstanding:
     if data is None:
         raise ValueError("LLM scene understanding returned no JSON object.")
     understanding = SceneUnderstanding.model_validate(data)
-    return _dedupe_llm_beats(_sanitize_understanding(understanding))
+    understanding = _dedupe_llm_beats(_sanitize_understanding(understanding))
+    # Dialogue-coverage backstop: "do not lose dialogue during prompt
+    # synthesis" applies to the LLM path too. Any quoted line the LLM dropped
+    # from its dialogue array is restored by the deterministic extractor
+    # (exact line, attributed speaker).
+    have = {re.sub(r"\s+", " ", line.line.strip().lower()) for line in understanding.dialogue}
+    for line in _dialogue_from_text(message):
+        key = re.sub(r"\s+", " ", line.line.strip().lower())
+        if key and key not in have:
+            understanding.dialogue.append(line)
+            have.add(key)
+    return understanding
 
 
 # ---------------------------------------------------------------------------
@@ -333,11 +344,26 @@ _DIALOGUE_NAME_RE = re.compile(
     r"(?P<speaker>[A-Z][A-Za-z'’]*(?:\s+[A-Z][A-Za-z'’]*){0,3})\s*:\s*[\"“](?P<line>[^\"”]+)[\"”]"
 )
 _SAYS_RE = re.compile(
-    r"(?P<speaker>[A-Z][A-Za-z'’]*(?:\s+[A-Z][A-Za-z'’]*){0,3})\s+"
+    r"(?P<speaker>[A-Z][A-Za-z'’]*(?:\s+[A-Z][A-Za-z'’]*){0,3})"
+    # Optional action lead-in between speaker and speech verb ("Iris stands
+    # by a stall and says: …") — no capitals (a new name), quotes, or
+    # sentence ends may intervene.
+    r"(?:\s+[^.!?\"“”A-Z]{0,60}?)?\s+"
     r"(?P<verb>(?i:says|said|asks|asked|whispers|whispered|shouts|shouted|replies|replied|"
     r"answers|answered|mutters|muttered|growls|growled|murmurs|murmured|calls out|called out))\b"
-    r"(?P<delivery>[^\"“:]*?)[\"“](?P<line>[^\"”]+)[\"”]"
+    # Delivery may carry a colon/comma ("says: "…"", "says, softly, "…"") —
+    # any non-quote span up to the opening quote.
+    r"(?P<delivery>[^\"“]*?)[\"“](?P<line>[^\"”]+)[\"”]"
 )
+# Verb + opening quote of a says-style line — used to split the spoken line
+# away from a fused action prefix ("Iris stands by a stall and says: "…"").
+_SAYS_VERB_QUOTE_RE = re.compile(
+    r"\b(?:says|said|asks|asked|whispers|whispered|shouts|shouted|replies|replied|"
+    r"answers|answered|mutters|muttered|growls|growled|murmurs|murmured|calls?\s+out|called\s+out)"
+    r"\b[^\"“]*?[\"“]",
+    re.I,
+)
+_NAME_ONLY_RE = re.compile(r"^[A-Z][A-Za-z'’]*(?:\s+[A-Z][A-Za-z'’]*){0,3}\.?$")
 _VOICE_RE = re.compile(
     r"\bin\s+(?:a|an)\s+([^.;]*?\bvoice)\b|\bvoice\s+(?:is|sounds?)\s+([^.,;]+)", re.I
 )
@@ -483,8 +509,22 @@ def _split_sections(text: str) -> tuple[dict[str, list[str]], list[str]]:
     return sections, preamble
 
 
+# A sentence ends at terminal punctuation INCLUDING when a closing quote
+# follows it ('…go." She runs.') — otherwise a quoted line fuses with the
+# next sentence: the fused sentence then either double-stages the dialogue
+# (says-style stays in the event pool) or silently drops the trailing event
+# (colon-style is excluded wholesale). Python `re` lookbehinds are
+# fixed-width, so tokenize with findall instead of split.
+_SENTENCE_RE = re.compile(
+    r".+?(?:[.!?]+[\"'”’]+(?=\s|$)|[.!?]+(?=\s|$)|\s*$)", re.S
+)
+
+
 def _sentences(text: str) -> list[str]:
-    parts = re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", (text or "").strip()))
+    blob = re.sub(r"\s+", " ", (text or "").strip())
+    if not blob:
+        return []
+    parts = _SENTENCE_RE.findall(blob)
     return [part.strip() for part in parts if part and part.strip()]
 
 
@@ -582,7 +622,7 @@ def _dialogue_from_text(text: str) -> list[UnderstandingDialogue]:
         if not line or key in seen_lines:
             continue
         seen_lines.add(key)
-        delivery = re.sub(r"\s+", " ", (match.group("delivery") or "")).strip(" ,;")
+        delivery = re.sub(r"\s+", " ", (match.group("delivery") or "")).strip(" ,;:")
         lines.append(UnderstandingDialogue(speaker=speaker, line=line, delivery=delivery))
     return lines
 
@@ -698,6 +738,18 @@ def _salient_event_sentences(text: str) -> tuple[list[str], list[str]]:
         if _is_meta_or_runtime(sentence):
             continue
         if _DIALOGUE_NAME_RE.search(sentence):
+            continue
+        says = _SAYS_VERB_QUOTE_RE.search(sentence)
+        if says:
+            # Says-style dialogue is extracted into `dialogue`, not staged as
+            # an on-screen event — otherwise the line is staged twice (beat +
+            # dialogue sentence). A fused action prefix ("Iris stands by a
+            # stall and says: "…"") survives as its own event; a bare speaker
+            # name ("Mara says: "…"") does not.
+            residue = sentence[: says.start()].strip()
+            residue = re.sub(r"\b(?:and\s+then|and|then)\s*$", "", residue, flags=re.I).strip(" ,;.")
+            if residue and not _NAME_ONLY_RE.match(residue):
+                events.append(residue + ".")
             continue
         if _DO_NOT_REVEAL_RE.search(sentence) or _EXCLUSION_RE.match(sentence.strip()):
             # Reveal gates / exclusions are captured in their own structures,
@@ -907,32 +959,65 @@ _MULTIPLICITY_UNBOUNDED_RE = re.compile(
 )
 
 
-def _cluster_multiplicity_capacity(blob: str, shared: set[str]) -> int | None:
-    """Staging capacity a beat claims for ONE event cluster via multiplicity
-    language.
+def _stem5(word: str) -> str:
+    """Crude inflection stem: coverage matching is substring-based ("impact"
+    matches "impacts"), so the repetition pass must compare the same way —
+    exact-token matching lets a merged beat ("Two impacts buckle and
+    shatter…") fail containment for every event it legitimately covers."""
+    return word[:5] if len(word) >= 5 else word
+
+
+def _stem_set(words) -> set[str]:
+    return {_stem5(word) for word in words}
+
+
+def _assign_multiplicity_capacities(blob: str, shared_list: list[set[str]]) -> list[int | None]:
+    """Staging capacities a beat claims via multiplicity language, one per
+    event cluster.
 
     Multiplicity is action-scoped: "the door buckles while Mara raises her
-    hand twice" claims two RAISES, not two buckles — the count word must sit
-    near the cluster's shared vocabulary to apply to it. None = unbounded
-    ("repeatedly"); 0 = no multiplicity claimed for this cluster; otherwise
-    the finite count ("twice" -> 2).
+    hand twice" claims two RAISES, not two buckles. Each count/unbounded word
+    is assigned to the cluster whose shared vocabulary sits NEAREST to it
+    (ties assign to all tied clusters — "two impacts buckle and shatter…"
+    legitimately claims both impact events). None = unbounded ("repeatedly");
+    0 = no multiplicity claimed for that cluster; otherwise the finite count.
     """
-    if not shared:
-        return 0
+    capacities: list[int | None] = [0] * len(shared_list)
+    if not any(shared_list):
+        return capacities
     tokens = re.findall(r"[a-z]+", blob)
+    stems = [_stem5(token) for token in tokens]
+    shared_stems = [_stem_set(shared) for shared in shared_list]
     for regex, unbounded in (
         (_MULTIPLICITY_UNBOUNDED_RE, True),
         (_MULTIPLICITY_FINITE_RE, False),
     ):
         for match in regex.finditer(blob):
             position = len(re.findall(r"[a-z]+", blob[: match.start()]))
-            if any(
-                abs(index - position) <= 4
-                for index, token in enumerate(tokens)
-                if token in shared
-            ):
-                return None if unbounded else _MULTIPLICITY_COUNTS[match.group(1).lower()]
-    return 0
+            best_distance: int | None = None
+            for index, stems_for_cluster in enumerate(shared_stems):
+                distances = [
+                    abs(token_index - position)
+                    for token_index, stem in enumerate(stems)
+                    if stem in stems_for_cluster
+                ]
+                if not distances:
+                    continue
+                nearest = min(distances)
+                if best_distance is None or nearest < best_distance:
+                    best_distance = nearest
+            if best_distance is None:
+                continue
+            value = None if unbounded else _MULTIPLICITY_COUNTS[match.group(1).lower()]
+            for index, stems_for_cluster in enumerate(shared_stems):
+                distances = [
+                    abs(token_index - position)
+                    for token_index, stem in enumerate(stems)
+                    if stem in stems_for_cluster
+                ]
+                if distances and min(distances) == best_distance:
+                    capacities[index] = value
+    return capacities
 
 
 # An explicit source duration ("hold for one second") is hard continuity.
@@ -1039,25 +1124,56 @@ _SYNONYM_GROUPS: tuple[frozenset[str], ...] = (
 )
 
 
+# Antonym pairs: a beat that states the OPPOSITE of a clause word does not
+# realize it, no matter how many other words match — "massive smooth breach"
+# must not count as realizing "large jagged hole" (2/3 of the words match
+# via synonyms, but "smooth" contradicts "jagged").
+_ANTONYM_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"jagged", "smooth"}),
+    frozenset({"hot", "cold", "freezing"}),
+    frozenset({"open", "opened", "closed", "shut"}),
+    frozenset({"bright", "dim", "dark"}),
+    frozenset({"fast", "slow", "slowly", "quickly"}),
+    frozenset({"loud", "loudly", "quiet", "quietly", "silent"}),
+    frozenset({"rising", "falling", "sinking"}),
+    frozenset({"intact", "broken", "destroyed", "shattered"}),
+    frozenset({"full", "empty"}),
+    frozenset({"visible", "invisible", "hidden"}),
+)
+
+
 def _word_realized(word: str, blob_words: set[str]) -> bool:
     if word in blob_words:
         return True
     return any(word in group and bool(group & blob_words) for group in _SYNONYM_GROUPS)
 
 
+def _word_contradicted(word: str, blob_words: set[str]) -> bool:
+    """The beat states an antonym of the word without stating the word."""
+    if word in blob_words:
+        return False
+    return any(
+        word in group and bool((group - {word}) & blob_words) for group in _ANTONYM_GROUPS
+    )
+
+
 def _clause_realized(clause_words: set[str], description: str) -> bool:
     """A consequence clause is realized when its distinctive content — or a
-    close paraphrase of it — appears in some beat's prose."""
+    close paraphrase of it — appears in some beat's prose. A beat that
+    contradicts an unrealized clause word (antonym present, word absent)
+    never realizes the clause."""
     if not clause_words:
         return True
     blob_words = set(re.findall(r"[a-z]+", (description or "").lower()))
+    if any(_word_contradicted(word, blob_words) for word in clause_words):
+        return False
     hits = sum(1 for word in clause_words if _word_realized(word, blob_words))
     return hits == len(clause_words) or hits / len(clause_words) >= 2 / 3
 
 
 _LEADING_ADVERB_RE = re.compile(
     r"^\s*(?:suddenly|slowly|then|next|finally|meanwhile|afterwards?|"
-    r"gradually|abruptly|quietly|quickly|immediately|instantly)\s*,\s*",
+    r"gradually|abruptly|quietly|quickly|immediately|instantly)\s*,?\s*",
     re.I,
 )
 
@@ -1291,31 +1407,36 @@ def _coverage_backfill(understanding: SceneUnderstanding, message: str) -> Scene
                     break
             else:
                 clusters.append([i])
-        for cluster in clusters:
-            shared = set.intersection(*(signature[i] for i in cluster))
-            capacity = _cluster_multiplicity_capacity(blob, shared)
+        # Multiplicity capacities are assigned across ALL clusters of this
+        # beat at once: each count word belongs to the cluster whose shared
+        # vocabulary sits nearest to it (action-scoped).
+        capacities = _assign_multiplicity_capacities(
+            blob, [set.intersection(*(signature[i] for i in cluster)) for cluster in clusters]
+        )
+        blob_stems = _stem_set(blob_words)
+        blob_token_stems = [_stem5(token) for token in re.findall(r"[a-z]+", blob)]
+        for cluster, capacity in zip(clusters, capacities):
             if capacity is None:
                 continue  # unbounded repetition scoped to this cluster
+            # Flavor words ("harder") are not a third event when the beat
+            # already claims the cluster via explicit multiplicity
+            # ("buckles twice" covers "buckles" + "buckles again, harder").
+            # Containment only runs when NO count is claimed — otherwise a
+            # merged "twice" beat is split back into a duplicate staging.
             if capacity == 0:
-                # No claimed multiplicity: a member whose distinguishing
-                # detail is absent from the prose ("…buckles again, HARDER")
-                # is silently dropped — uncover it for backfill. This check
-                # applies to EVERY covered event, including singleton
-                # clusters (distinct events legitimately sharing the beat).
                 for i in cluster:
-                    if distinctive[i] and not distinctive[i] <= blob_words:
+                    if distinctive[i] and not _stem_set(distinctive[i]) <= blob_stems:
                         coverage[i] = None
                 cluster = [i for i in cluster if coverage[i] is not None]
-                if len(cluster) <= 1:
-                    continue
-                # Derive capacity from how often the cluster's shared
-                # vocabulary is staged in the beat prose ("buckles … then
-                # buckles …" stages two).
+            if len(cluster) <= 1:
+                continue
+            shared = set.intersection(*(signature[i] for i in cluster))
+            if capacity == 0:
+                # No claimed multiplicity: derive capacity from how often the
+                # cluster's shared vocabulary is staged in the beat prose
+                # ("buckles … then buckles …" stages two).
                 cap = max(
-                    (
-                        len(re.findall(r"\b" + re.escape(word) + r"\b", blob))
-                        for word in shared
-                    ),
+                    (blob_token_stems.count(_stem5(word)) for word in shared),
                     default=0,
                 )
                 cap = max(cap, 1)
@@ -1329,7 +1450,7 @@ def _coverage_backfill(understanding: SceneUnderstanding, message: str) -> Scene
             # lowest-scored, then the LATER staging (the first staging of a
             # repetition stays canonical).
             def _drop_priority(i: int) -> tuple[int, float, int]:
-                missing_detail = bool(distinctive[i]) and not distinctive[i] <= blob_words
+                missing_detail = bool(distinctive[i]) and not _stem_set(distinctive[i]) <= blob_stems
                 return (0 if missing_detail else 1, scores[i], -i)
 
             for i in sorted(cluster, key=_drop_priority)[: len(cluster) - cap]:
@@ -1338,12 +1459,29 @@ def _coverage_backfill(understanding: SceneUnderstanding, message: str) -> Scene
     # Explicit-duration preservation: a staged duration ("hold for one
     # second") is hard continuity. A covering beat that kept the event but
     # dropped/weakened the duration ("a brief hold") silently loses the
-    # timing — uncover the event so the backfill re-stages it verbatim.
+    # timing — uncover the event so the backfill re-stages it verbatim. A
+    # covering beat that states a DIFFERENT duration ("for two seconds") is
+    # aligned in place instead — re-staging alongside it would hand the
+    # generator two contradictory timings.
     for i, sentence in enumerate(events):
         if coverage[i] is None:
             continue
-        if not _duration_realized(sentence, beats[coverage[i]].description or ""):
-            coverage[i] = None
+        source_duration = _DURATION_SOURCE_RE.search(sentence)
+        if not source_duration:
+            continue
+        beat = beats[coverage[i]]
+        beat_text = beat.description or ""
+        if _duration_realized(sentence, beat_text):
+            continue
+        if _DURATION_SOURCE_RE.search(beat_text):
+            beat.description = _DURATION_SOURCE_RE.sub(
+                source_duration.group(0), beat_text, count=1
+            )
+            staged = _beat_from_sentence(sentence)
+            if staged is not None and staged.hold_seconds is not None:
+                beat.hold_seconds = staged.hold_seconds
+            continue
+        coverage[i] = None
 
     # Consequence-clause coverage: a trailing participial result clause
     # (", sending a wave across the arcade") stages its own on-screen event.

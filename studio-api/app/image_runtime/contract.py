@@ -228,6 +228,13 @@ def _normalize_family(engine: str | None, model_family: str | None) -> str:
     fam = (model_family or engine or "zimage").strip().lower()
     if fam in {"z-image", "z_image", "zimg"}:
         return "zimage"
+    if fam in {
+        "qwen-image-edit-2509",
+        "qwen_image_edit_2509",
+        "qwen_edit_2509",
+        "qwen-edit-2509",
+    }:
+        return "qwen_edit_2509"
     if fam in {"qwen-image-2512", "qwen_image_2512", "qwen2512"}:
         return "qwen2512"
     if fam in {"krea-2", "krea_2", "krea 2", "krea2"}:
@@ -300,6 +307,8 @@ def resolve_image_workflow(
     elif intent_n in {"image.reference_edit", "reference_guided", "image.reference", "img2img", "image.edit"}:
         if family == "flux":
             key = "flux.reference" if "reference" in intent_n else "flux.edit"
+        elif family == "qwen_edit_2509":
+            key = "qwen_edit_2509.edit"
         elif family == "qwen":
             key = "qwen.reference" if "reference" in intent_n else "qwen.edit"
         elif family == "imagen":
@@ -311,6 +320,8 @@ def resolve_image_workflow(
     elif intent_n in {"txt2img", "image.generate", "image.storyboard_frame"}:
         if family == "flux":
             key = "flux.txt2img"
+        elif family == "qwen_edit_2509":
+            key = "qwen_edit_2509.edit"
         elif family == "qwen2512":
             key = "qwen2512.txt2img"
         elif family == "qwen":

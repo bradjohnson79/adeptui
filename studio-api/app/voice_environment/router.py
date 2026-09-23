@@ -133,7 +133,11 @@ def list_renders(
 
 @router.post("/renders/{render_id}/approve")
 def approve_render(render_id: str, body: ApproveRenderRequest, db: Session = Depends(get_db)):
-    return _handle(lambda: service.approve_render(db, render_id, body.approved).model_dump())
+    return _handle(
+        lambda: service.approve_render(
+            db, render_id, body.approved, is_global=bool(getattr(body, "isGlobal", False))
+        ).model_dump()
+    )
 
 
 @router.post("/renders/{render_id}/apply-to-scene")

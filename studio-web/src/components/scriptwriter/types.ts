@@ -50,12 +50,13 @@ export type SaveState =
   | "save_failed";
 
 /**
- * Script Writer is a screenplay surface: the script itself plus a first-class
- * Revisions view (Compare is folded under Revisions). Story planning lives in
- * the Story workspace — never duplicated here.
+ * Script Writer Standard: Script (screenplay) and Story (project story
+ * document). Story uses the same canonical story_entries row as Co-Director
+ * Story Express — never a second story store. Revisions stay script-only.
  */
 export type StudioView =
   | "script"
+  | "story"
   | "revisions";
 
 export type WritingMode =

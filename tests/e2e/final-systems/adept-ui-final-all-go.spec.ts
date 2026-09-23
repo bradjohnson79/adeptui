@@ -86,14 +86,16 @@ test.describe("@critical @final-systems Adept UI Final All-GO", () => {
       writeJson(ARTIFACT_DIR, "1-project.json", { projectId, name: projectName });
       ctx.phases["1-project"] = { projectId, name: projectName };
 
-      // —— Phase 2: Brand Studio ——
-      const brand = await openWorkspace(page, projectId, "brandstudio", "brand-studio");
-      if (brand.ok) {
-        const brief = page.getByTestId("brand-brief");
-        if (await brief.isVisible().catch(() => false)) {
-          await brief.fill("Finale brand campaign — glossy product hero with headline space.");
-        }
-      }
+      // —— Phase 2: Brand Studio retired — stale route must not remount ——
+      await page.goto(`/project/${projectId}?workspace=brandstudio`);
+      await page.waitForLoadState("domcontentloaded");
+      const brandShell = await page.getByTestId("brand-studio").count();
+      const brand = {
+        ok: brandShell === 0,
+        retired: true,
+        workspace: "brandstudio",
+      };
+      expect(brandShell, "Brand Studio must not remount after v1.1 retirement").toBe(0);
       writeJson(ARTIFACT_DIR, "2-brand.json", brand);
       ctx.phases["2-brand"] = brand;
 

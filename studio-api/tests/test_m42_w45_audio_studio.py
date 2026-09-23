@@ -85,17 +85,41 @@ def test_provider_resolver_blocks_cpu_without_explicit_fallback(monkeypatch):
     assert allowed["recommendation"]["cpuFallbackUsed"] is True
 
 
+def _silence_wav(path: Path) -> Path:
+    import struct
+    import wave
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "w") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16000)
+        frames = [0] * 1600
+        handle.writeframes(struct.pack("<" + "h" * len(frames), *frames))
+    return path
+
+
 def test_select_not_approve(tmp_path, monkeypatch):
     from app.audio_studio import store, service
+    from app.db import Base, Project, SessionLocal, engine
 
+    Base.metadata.create_all(bind=engine)
     monkeypatch.setattr("app.audio_studio.store.settings.data_dir", str(tmp_path))
     pid = "proj-w45"
+    wav = _silence_wav(tmp_path / "take.wav")
+    db = SessionLocal()
+    try:
+        if not db.get(Project, pid):
+            db.add(Project(id=pid, name="W45 Audio Studio"))
+            db.commit()
+    finally:
+        db.close()
     batch = {
         "id": "b1",
         "project_id": pid,
         "method": "music",
         "candidates": [
-            {"id": "c1", "asset_id": "a1", "status": "ready"},
+            {"id": "c1", "asset_id": "a1", "status": "ready", "m29": {"assetPath": str(wav), "sandboxOnly": True}},
             {"id": "c2", "asset_id": "a2", "status": "ready"},
         ],
     }
@@ -107,8 +131,14 @@ def test_select_not_approve(tmp_path, monkeypatch):
     assert batch2["candidates"][0]["status"] == "selected"
     approved = service.approve_candidate(pid, "b1", "c1")
     assert approved["approved"] is True
+    assert approved["ingested"] is True
+    assert approved["approvedAssetInLibrary"] is True
+    assert approved["assetId"]
+    assert approved["assetId"] != "a1"
+    assert approved["libraryCount"] >= 1
     batch3 = store.get_batch(pid, "b1")
     assert batch3["candidates"][0]["status"] == "approved"
+    assert batch3["candidates"][0]["asset_id"] == approved["assetId"]
 
 
 def test_mix_persistence_reload(tmp_path, monkeypatch):
@@ -245,7 +275,7 @@ def test_async_batch_progress_updates(tmp_path, monkeypatch):
         lambda *a, **k: _gpu_ready_resolution("music"),
     )
 
-    def fake_generate(db, *, project_id, kind, prompt, duration_sec=4.0, seed=None):
+    def fake_generate(db, *, project_id, kind, prompt, duration_sec=4.0, seed=None, **_kwargs):
         return {"assetId": f"asset-{seed or prompt[-1]}", "m29": {"fixture": False, "sha256": f"h-{seed}"}}
 
     monkeypatch.setattr("app.generation_tools.ops.run_audio_generate", fake_generate)
@@ -285,7 +315,7 @@ def test_cancel_batch_marks_source_cancel(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "app.audio_studio.process_registry.terminate_orphan_audio_workers",
-        lambda: {"ok": True, "killed": [], "count": 0, "sourceCancel": True},
+        lambda **_kwargs: {"ok": True, "killed": [], "count": 0, "sourceCancel": True},
     )
     batch = service.begin_generate_batch(
         "proj-cancel",
@@ -332,6 +362,93 @@ def test_codirector_generate_starts_async(tmp_path, monkeypatch):
     batch = store.get_batch("proj-cd-async", out["batchId"])
     assert batch is not None
     assert len({c.get("seed") for c in batch["candidates"]}) == 3
+
+
+def test_workspace_library_lists_durable_audio(tmp_path, monkeypatch):
+    from app.audio_studio import service
+    from app.db import Asset, Base, Project, SessionLocal, engine
+
+    Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr("app.audio_studio.store.settings.data_dir", str(tmp_path))
+    monkeypatch.setattr(
+        "app.audio_studio.service.resolve_execution",
+        lambda *a, **k: _gpu_ready_resolution("music"),
+    )
+    pid = "proj-w45-lib"
+    wav = _silence_wav(tmp_path / "lib.wav")
+    db = SessionLocal()
+    try:
+        if not db.get(Project, pid):
+            db.add(Project(id=pid, name="W45 Library"))
+            db.commit()
+        db.add(
+            Asset(
+                id="asset-lib-1",
+                project_id=pid,
+                kind="audio",
+                filename="lib.wav",
+                path=str(wav),
+                tag="sfx_gen",
+                prompt_meta_json='{"library":{"folderSystemKey":"audio.sfx"}}',
+            )
+        )
+        db.commit()
+        items = service._library_audio(db, pid)
+        assert any(i.get("id") == "asset-lib-1" for i in items)
+        workspace = service.workspace(db, pid)
+        assert workspace["libraryCount"] >= 1
+        assert any(i.get("id") == "asset-lib-1" for i in workspace["library"])
+    finally:
+        db.close()
+
+
+def test_approve_ingests_sandbox_path_as_project_asset(tmp_path, monkeypatch):
+    from app.audio_studio import store, service
+    from app.db import Asset, Base, Project, SessionLocal, engine
+
+    Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr("app.audio_studio.store.settings.data_dir", str(tmp_path))
+    pid = "proj-w45-ingest"
+    sandbox = tmp_path / "m210b-sandbox" / "providers" / "m2101-sfx-031" / "output" / "take.wav"
+    wav = _silence_wav(sandbox)
+    db = SessionLocal()
+    try:
+        if not db.get(Project, pid):
+            db.add(Project(id=pid, name="W45 Ingest"))
+            db.commit()
+    finally:
+        db.close()
+    store.save_batch(
+        pid,
+        {
+            "id": "b-ingest",
+            "project_id": pid,
+            "method": "sfx",
+            "candidates": [
+                {
+                    "id": "c-ingest",
+                    "asset_id": "missing-studio-id",
+                    "status": "ready",
+                    "summary": "sfx",
+                    "m29": {"assetPath": str(wav), "sandboxOnly": True, "assetId": "m210b-m2101-sfx-031-x"},
+                }
+            ],
+        },
+    )
+    approved = service.approve_candidate(pid, "b-ingest", "c-ingest")
+    assert approved["approvedAssetInLibrary"] is True
+    assert approved["libraryCount"] >= 1
+    durable_id = approved["assetId"]
+    assert durable_id != "missing-studio-id"
+    db = SessionLocal()
+    try:
+        asset = db.get(Asset, durable_id)
+        assert asset is not None
+        assert asset.project_id == pid
+        assert asset.production_approval == "approved"
+        assert "m210b-sandbox" not in str(asset.path).replace("\\", "/").lower()
+    finally:
+        db.close()
 
 
 def test_shared_contracts_doc_exists():

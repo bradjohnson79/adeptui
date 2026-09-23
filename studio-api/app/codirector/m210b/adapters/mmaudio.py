@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import subprocess
 import uuid
@@ -72,17 +73,26 @@ class MMAudioSandboxAdapter(BaseSandboxAudioAdapter):
                     device_name = lines[2]
             except Exception as exc:
                 base["cudaProbeError"] = str(exc)
+        warm = {}
+        try:
+            from ....audio_studio.mmaudio_runtime import status as warm_status
+
+            warm = warm_status()
+        except Exception:
+            warm = {}
         base.update(
             {
                 "provider": "mmaudio",
                 "capabilities": self.capabilities,
                 "venvPython": str(py) if py else None,
                 "runtimeReady": bool(py) and self.is_installed(),
-                "route": "isolated_worker_subprocess",
+                "route": "warm_serve" if warm.get("resident") else "isolated_worker_subprocess",
                 "cuda": cuda,
                 "device": device_name,
                 "torchVersion": torch_version,
                 "accelerator": "cuda" if cuda else "cpu",
+                "warmResident": bool(warm.get("resident")),
+                "warmPid": warm.get("pid"),
             }
         )
         base["ok"] = bool(py) and self.is_installed()
@@ -106,7 +116,67 @@ class MMAudioSandboxAdapter(BaseSandboxAudioAdapter):
         self.ensure_dirs()
         out = self.sandbox_root / "output" / f"mmaudio_{uuid.uuid4().hex[:10]}.wav"
         duration = max(1.0, min(20.0, float(request.durationSec or 3.0)))
+        seed = int(request.seed) if request.seed is not None else secrets.randbelow(2_147_483_647) or 1
+        negative = str(request.negativePrompt or "")
+        cfg = float(request.cfgStrength) if request.cfgStrength is not None else 4.5
+        try:
+            event_count = int(request.eventCount) if getattr(request, "eventCount", None) is not None else None
+        except (TypeError, ValueError):
+            event_count = None
         repo = self.sandbox_root / "src" / "MMAudio"
+        try:
+            from ....audio_studio import process_registry as preg
+
+            ctx = preg.current_execution()
+        except Exception:
+            ctx = None
+
+        warm_payload: dict[str, Any] | None = None
+        try:
+            from ....audio_studio.mmaudio_runtime import WarmUnavailable, generate_warm
+
+            warm_payload = generate_warm(
+                prompt=str(request.prompt),
+                out=out,
+                duration=duration,
+                seed=seed,
+                negative=negative,
+                cfg_strength=cfg,
+                batch_id=str(ctx.batch_id) if ctx is not None else None,
+                event_count=event_count,
+            )
+        except WarmUnavailable:
+            warm_payload = None
+        except Exception as exc:
+            raise ProviderUnavailable(f"MMAudio warm generate failed: {exc}") from exc
+
+        if warm_payload and out.is_file() and out.stat().st_size >= 1000:
+            device = str(warm_payload.get("device") or "")
+            return self._result(
+                path=out,
+                request=request,
+                duration_sec=duration,
+                sample_rate=int(warm_payload.get("sampleRate") or request.sampleRate or 16000),
+                extra_provenance={
+                    "provider": "mmaudio",
+                    "capability": "sfx.generate",
+                    "route": "warm_serve",
+                    "warmResident": True,
+                    "device": device,
+                    "accelerator": "cuda" if device.startswith("cuda") else device,
+                    "gpuProven": device.startswith("cuda"),
+                    "inferenceMs": warm_payload.get("inferenceMs"),
+                    "saveMs": warm_payload.get("saveMs"),
+                    "totalMs": warm_payload.get("totalMs"),
+                    "loadMs": warm_payload.get("loadMs"),
+                    "cfgStrength": cfg,
+                    "negativeUsed": bool(negative.strip()),
+                    "eventCount": event_count,
+                    "model": warm_payload.get("model"),
+                    "accelerators": warm_payload.get("accelerators") or {},
+                },
+            )
+
         cmd = [
             str(py),
             str(worker),
@@ -117,16 +187,16 @@ class MMAudioSandboxAdapter(BaseSandboxAudioAdapter):
             "--out",
             str(out),
             "--seed",
-            str(int(request.seed) if request.seed is not None else secrets.randbelow(2_147_483_647) or 1),
+            str(seed),
             "--repo",
             str(repo),
+            "--negative",
+            negative,
+            "--cfg-strength",
+            str(cfg),
         ]
-        try:
-            from ....audio_studio import process_registry as preg
-
-            ctx = preg.current_execution()
-        except Exception:
-            ctx = None
+        if event_count is not None:
+            cmd.extend(["--event-count", str(int(event_count))])
         if ctx is not None:
             proc = preg.run_tracked(
                 cmd,
@@ -144,15 +214,29 @@ class MMAudioSandboxAdapter(BaseSandboxAudioAdapter):
                 f"MMAudio generate failed (code={proc.returncode}): "
                 f"{(proc.stderr or proc.stdout or '')[-1500:]}"
             )
+        stdout_meta: dict[str, Any] = {}
+        try:
+            stdout_meta = json.loads((proc.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            stdout_meta = {}
+        device = str(stdout_meta.get("device") or "")
         return self._result(
             path=out,
             request=request,
             duration_sec=duration,
-            sample_rate=int(request.sampleRate or 48000),
+            sample_rate=int(stdout_meta.get("sampleRate") or request.sampleRate or 16000),
             extra_provenance={
                 "provider": "mmaudio",
                 "capability": "sfx.generate",
                 "route": "isolated_worker_subprocess",
+                "warmResident": False,
+                "device": device,
+                "accelerator": "cuda" if device.startswith("cuda") else (device or "unknown"),
+                "gpuProven": device.startswith("cuda"),
+                "inferenceMs": stdout_meta.get("inferenceMs"),
+                "saveMs": stdout_meta.get("saveMs"),
+                "cfgStrength": cfg,
+                "negativeUsed": bool(negative.strip()),
                 "stdoutTail": (proc.stdout or "")[-500:],
             },
         )

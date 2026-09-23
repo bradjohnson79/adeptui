@@ -1,4 +1,23 @@
-﻿# Environment Reference Sheet (ERS) — Product Spec
+﻿---
+id: ers-spec
+kind: workflow
+modality: image
+registry_ids:
+  - gpt-image-2-fal
+  - gpt-image-2-kie
+aliases:
+  - ers
+  - environment reference sheet
+  - environment sheet
+spoken: An Environment Reference Sheet is one production page for a place. Adept makes it with GPT Image 2 only.
+workspace_tags:
+  - spatial-map
+  - scene-creator
+version: "2026.09.04"
+authority: adept-integrated
+---
+
+# Environment Reference Sheet (ERS) — Product Spec
 
 This folder is the Co-Director knowledgebase for Environment Reference Sheets.
 It is a **unified production-design document**, not a four-image variation collage
@@ -79,10 +98,11 @@ A result that is any of the above is `ERS_LAYOUT_NONCOMPLIANT`.
 ## Runtime
 
 - Purpose: `environment_reference_sheet`.
-- Default generator: **Qwen Image** (local Comfy). One prompt, one image.
-- Optional generator: **GPT Image 2** (paid API). Fires only when the user
-  explicitly selects it and presses Generate.
-- No silent model substitution. No silent cloud fallback if Qwen fails.
+- Generator: **GPT Image 2 API** exclusively. One prompt, one image.
+- Qwen local, Qwen Edit, Flux, SDXL, Scene Creator Mini, and Auto Select
+  are not ERS generators. If GPT Image 2 is unconfigured, report
+  Requires Setup — never fall back to Qwen.
+- No silent model substitution.
 - Reference images (these exemplars) attach only if the chosen model path
   supports image refs **and** attaching them is useful. They are layout
   conditioning, never content to reproduce.

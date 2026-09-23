@@ -13,13 +13,22 @@ function makeHealth(over: Partial<Health> = {}): Health {
   } as Health;
 }
 
+test("unprobed comfy is checking, not offline", () => {
+  const avail = resolveProductionAvailability(
+    makeHealth({ comfy_reachable: false, comfy_probed: false }),
+    null,
+  );
+  assert.equal(avail.textToVideo.status, "Requires setup");
+  assert.equal(avail.textToVideo.reason, "Checking local runtime…");
+});
+
 test("runtime offline blocks generation", () => {
   const avail = resolveProductionAvailability(makeHealth({ comfy_reachable: false }), null);
   assert.equal(avail.textToVideo.status, "Local runtime offline");
   assert.equal(avail.imageGeneration.status, "Local runtime offline");
 });
 
-test("required-missing blocks generation with setup reason", () => {
+test("required-missing blocks video generation with setup reason", () => {
   const avail = resolveProductionAvailability(
     makeHealth({
       comfy: {
@@ -32,7 +41,9 @@ test("required-missing blocks generation with setup reason", () => {
     null,
   );
   assert.equal(avail.textToVideo.status, "Requires setup");
-  assert.equal(avail.imageGeneration.status, "Requires setup");
+  // Image Gen is NOT blanketed by missing video checkpoints — image families
+  // gate via their own preflight / Source Manager components.
+  assert.equal(avail.imageGeneration.status, "Available");
 });
 
 test("optional-missing does NOT block generation (only affected generator gates)", () => {

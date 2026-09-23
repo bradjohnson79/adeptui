@@ -10,6 +10,7 @@ from .models import StoryEntry, StoryEntryCreate, StoryEntryUpdate, StoryReorder
 from .store import (
     create_entry,
     delete_entry,
+    ensure_primary_entry,
     get_entry,
     list_entries,
     reorder_entries,
@@ -38,6 +39,12 @@ def _row_to_model(row) -> StoryEntry:
 def get_entries(project_id: str, db: Session = Depends(get_db)):
     rows = list_entries(db, project_id)
     return [_row_to_model(r) for r in rows]
+
+
+@router.post("/ensure", response_model=StoryEntry)
+def ensure_story_entry(project_id: str, body: StoryEntryCreate | None = None, db: Session = Depends(get_db)):
+    row = ensure_primary_entry(db, project_id, title=(body.title if body else "") or "")
+    return _row_to_model(row)
 
 
 @router.post("", response_model=StoryEntry, status_code=201)

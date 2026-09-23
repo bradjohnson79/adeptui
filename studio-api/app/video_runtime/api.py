@@ -66,6 +66,63 @@ async def preflight(body: PreflightBody) -> dict[str, Any]:
     )
 
 
+@router.get("/legal-canvas")
+def legal_canvas(
+    engine: str = Query(...),
+    aspect: str = Query("16:9"),
+    surface: str = Query("t2v"),
+    tier: str | None = None,
+) -> dict[str, Any]:
+    from .legal_canvas import SpecFidelityError, list_legal_canvases, resolve_legal_canvas
+
+    if surface not in {"t2v", "i2v", "multiFrame", "r2v"}:
+        raise HTTPException(400, "surface must be t2v, i2v, multiFrame, or r2v")
+    if tier:
+        try:
+            canvas = resolve_legal_canvas(engine, tier=tier, aspect=aspect, surface=surface)  # type: ignore[arg-type]
+        except SpecFidelityError as exc:
+            raise HTTPException(400, exc.to_dict()) from exc
+        return {"ok": True, "canvas": canvas.to_dict(), "mutatesRequest": False}
+    return {
+        "ok": True,
+        "engine": engine,
+        "aspect": aspect,
+        "surface": surface,
+        "tiers": list_legal_canvases(engine, aspect=aspect, surface=surface),  # type: ignore[arg-type]
+        "mutatesRequest": False,
+    }
+
+
+@router.get("/viability")
+def viability(
+    engine: str = Query(...),
+    aspect: str = Query("16:9"),
+    surface: str = Query("t2v"),
+    fps: int = Query(24),
+    durationSec: float = Query(5.0),
+    width: int | None = None,
+    height: int | None = None,
+) -> dict[str, Any]:
+    from .vram_viability import evaluate, evaluate_ladder
+
+    if width and height:
+        return evaluate(
+            engine,
+            width=int(width),
+            height=int(height),
+            fps=int(fps),
+            duration_sec=float(durationSec),
+            surface=surface,
+        )
+    return evaluate_ladder(
+        engine,
+        aspect=aspect,
+        fps=int(fps),
+        duration_sec=float(durationSec),
+        surface=surface,
+    )
+
+
 @router.get("/vram-estimate")
 def vram_estimate(
     workflowKey: str = Query(...),
@@ -195,89 +252,71 @@ def wave6p_gate() -> dict[str, Any]:
     return evaluate_wave6p_gate()
 
 
+_HUNYUAN_VIDEO_RETIRED = {
+    "ok": False,
+    "retired": True,
+    "code": "retired_video_generator",
+    "message": (
+        "Hunyuan Video is retired as a local video generator. "
+        "Adept UI local video is MiniMax H3 and LTX 2.5 only. "
+        "Hunyuan Image is unchanged."
+    ),
+}
+
+
+def _hunyuan_video_retired() -> None:
+    raise HTTPException(status_code=410, detail=_HUNYUAN_VIDEO_RETIRED)
+
+
 @router.get("/hunyuan/library")
 def hunyuan_library() -> dict[str, Any]:
-    """Video Model Library matrix — LTX default, dual Hunyuan, WAN optional, MiniMax Coming Soon."""
-    from .hunyuan_providers import video_library_matrix
-
-    return video_library_matrix()
+    _hunyuan_video_retired()
+    return _HUNYUAN_VIDEO_RETIRED
 
 
 @router.get("/hunyuan/providers")
 def hunyuan_providers() -> dict[str, Any]:
-    from .hunyuan_providers import list_hunyuan_providers
-
-    return {"ok": True, "providers": list_hunyuan_providers(), "mock": False}
+    _hunyuan_video_retired()
+    return _HUNYUAN_VIDEO_RETIRED
 
 
 @router.get("/hunyuan/providers/{provider_id}/preflight")
 def hunyuan_preflight(provider_id: str) -> dict[str, Any]:
-    from .hunyuan_install import hardware_preflight
-    from .hunyuan_providers import OFFICIAL_SOURCES
-
-    if provider_id not in OFFICIAL_SOURCES:
-        raise HTTPException(404, f"Unknown Hunyuan provider {provider_id}")
-    return hardware_preflight(provider_id)
+    _hunyuan_video_retired()
+    return _HUNYUAN_VIDEO_RETIRED
 
 
 @router.get("/hunyuan/providers/{provider_id}/health")
 def hunyuan_health(provider_id: str) -> dict[str, Any]:
-    from .hunyuan_install import health_check
-    from .hunyuan_providers import OFFICIAL_SOURCES
-
-    if provider_id not in OFFICIAL_SOURCES:
-        raise HTTPException(404, f"Unknown Hunyuan provider {provider_id}")
-    return health_check(provider_id)
+    _hunyuan_video_retired()
+    return _HUNYUAN_VIDEO_RETIRED
 
 
 @router.post("/hunyuan/providers/{provider_id}/install")
 def hunyuan_install(provider_id: str) -> dict[str, Any]:
-    """Queue one independent install job (never both models)."""
-    from .hunyuan_install import enqueue_install
-    from .hunyuan_providers import COMPONENT_BY_PROVIDER, OFFICIAL_SOURCES
-
-    if provider_id not in OFFICIAL_SOURCES:
-        raise HTTPException(404, f"Unknown Hunyuan provider {provider_id}")
-    return enqueue_install(COMPONENT_BY_PROVIDER[provider_id])
+    _hunyuan_video_retired()
+    return _HUNYUAN_VIDEO_RETIRED
 
 
 @router.post("/hunyuan/providers/{provider_id}/remove")
 def hunyuan_remove(provider_id: str) -> dict[str, Any]:
-    from .hunyuan_install import remove_provider
-    from .hunyuan_providers import OFFICIAL_SOURCES
-
-    if provider_id not in OFFICIAL_SOURCES:
-        raise HTTPException(404, f"Unknown Hunyuan provider {provider_id}")
-    result = remove_provider(provider_id)
-    return {"ok": result.ok, "message": result.message, "evidence": result.evidence}
+    _hunyuan_video_retired()
+    return _HUNYUAN_VIDEO_RETIRED
 
 
 @router.post("/hunyuan/providers/{provider_id}/repair")
 def hunyuan_repair(provider_id: str) -> dict[str, Any]:
-    from .hunyuan_install import repair_component
-    from .hunyuan_providers import COMPONENT_BY_PROVIDER, OFFICIAL_SOURCES
-
-    if provider_id not in OFFICIAL_SOURCES:
-        raise HTTPException(404, f"Unknown Hunyuan provider {provider_id}")
-    result = repair_component(COMPONENT_BY_PROVIDER[provider_id])
-    return {"ok": result.ok, "message": result.message, "evidence": result.evidence}
+    _hunyuan_video_retired()
+    return _HUNYUAN_VIDEO_RETIRED
 
 
 @router.post("/hunyuan/providers/{provider_id}/benchmark")
 def hunyuan_benchmark(provider_id: str) -> dict[str, Any]:
-    from .hunyuan_benchmark import run_benchmark
-    from .hunyuan_providers import OFFICIAL_SOURCES
-
-    if provider_id not in OFFICIAL_SOURCES:
-        raise HTTPException(404, f"Unknown Hunyuan provider {provider_id}")
-    return run_benchmark(provider_id)
+    _hunyuan_video_retired()
+    return _HUNYUAN_VIDEO_RETIRED
 
 
 @router.get("/hunyuan/providers/{provider_id}/benchmark")
 def hunyuan_benchmark_get(provider_id: str) -> dict[str, Any]:
-    from .hunyuan_benchmark import latest_benchmark
-    from .hunyuan_providers import OFFICIAL_SOURCES
-
-    if provider_id not in OFFICIAL_SOURCES:
-        raise HTTPException(404, f"Unknown Hunyuan provider {provider_id}")
-    return latest_benchmark(provider_id)
+    _hunyuan_video_retired()
+    return _HUNYUAN_VIDEO_RETIRED

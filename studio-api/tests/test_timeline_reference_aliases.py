@@ -59,6 +59,7 @@ def test_alias_sanitizes_prefix_and_spaces():
     assert sanitize_alias("@Korri Pose") == "KorriPose"
     assert sanitize_alias("*KorriPoseVideo") == "KorriPoseVideo"
     assert sanitize_alias("#Schnick Counter Wide") == "SchnickCounterWide"
+    assert sanitize_alias("%Coffee Mug") == "CoffeeMug"
 
 
 def test_attach_project_scoped_typed_alias(db):
@@ -334,3 +335,12 @@ def test_unique_alias_helper(db):
     token, adjusted = unique_alias(db, "proj-ref", "Hello")
     assert token == "Hello2"
     assert adjusted is True
+    other_scene, other_adjusted = unique_alias(
+        db,
+        "proj-ref",
+        "Hello",
+        scope_type="scene",
+        scope_id="scene-other",
+    )
+    assert other_scene == "Hello"
+    assert other_adjusted is False

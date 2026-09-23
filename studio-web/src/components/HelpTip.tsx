@@ -39,7 +39,7 @@ function clampBubblePosition(anchor: DOMRect, bubble: DOMRect | null): BubblePos
   return { top, left, arrowLeft, placeAbove };
 }
 
-type HelpTipProps = {
+export type HelpTipProps = {
   /** Legacy short tip body (also used as aria-label when `label` omitted). */
   text?: string;
   /** Accessible question label, e.g. "What is Production DNA Profile?" */
@@ -47,6 +47,22 @@ type HelpTipProps = {
   /** Explanation body shown in the bubble. */
   content?: string;
 };
+
+/** Primary action + sibling HelpTip. Never nest HelpTip inside another button. */
+export function ActionWithHelp({
+  children,
+  help,
+}: {
+  children: ReactNode;
+  help: HelpTipProps;
+}) {
+  return (
+    <span className="action-with-help" role="group">
+      {children}
+      <HelpTip {...help} />
+    </span>
+  );
+}
 
 /** Circular (?) help tip — hover, focus, touch/click; Escape dismisses. Not title-only. */
 export function HelpTip({ text, label, content }: HelpTipProps) {

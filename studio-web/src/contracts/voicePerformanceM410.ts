@@ -146,6 +146,9 @@ export type VoicePerformanceCapabilities = {
   directionModes: VoicePerformanceDirectionMode[];
   presetsAvailable: number;
   message: string;
+  qwenReady?: boolean;
+  indexTts2Ready?: boolean;
+  sharedWarmWorker?: boolean;
   mock?: boolean;
 };
 

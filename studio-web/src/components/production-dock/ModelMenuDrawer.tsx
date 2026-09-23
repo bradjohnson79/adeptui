@@ -11,6 +11,8 @@ import { buildAiGuidedSetupPath } from "../../setup/navigation";
 import { StatusBadge } from "../ui";
 import { InstallStatusChip } from "../install/InstallStatusChip";
 import type { ProductionDockApi } from "./useProductionDock";
+import { modelsForModality } from "../../modelRegistry/filterByModality";
+import { formatAudioMenuRowLabel } from "./dockLabels";
 
 function setupComponentIdForModel(modelId: string): string | null {
   if (modelId === "hunyuan-video-15" || (modelId.includes("hunyuan") && modelId.includes("15"))) {
@@ -211,25 +213,32 @@ function ApiModelRow({
   model,
   activeId,
   onSelect,
+  modality,
 }: {
   model: DiscoveredApiModel;
   activeId: string | null;
   onSelect: () => void;
+  modality: Modality;
 }) {
   const active = activeId === model.id;
   const selectable = model.selectable !== false && Boolean(model.executable);
   const readiness = model.readiness || model.capabilityLabel;
   const provider = providerDisplayName(model.providerId);
+  const displayLabel =
+    modality === "audio"
+      ? formatAudioMenuRowLabel(model)
+      : model.label.replace(/\s*—\s*.+$/, "") || model.label;
 
   return (
     <li>
       <button
         type="button"
         className={`production-dock-model-item${active ? " is-active" : ""}${selectable ? "" : " is-disabled"}`}
-        aria-label={selectable ? `Select ${model.label}` : `${model.label} — ${readiness}`}
+        aria-label={selectable ? `Select ${displayLabel}` : `${displayLabel} — ${readiness}`}
         aria-pressed={active}
         aria-disabled={!selectable}
         disabled={!selectable}
+        data-modality={modality}
         onClick={() => {
           if (!selectable) return;
           onSelect();
@@ -238,7 +247,7 @@ function ApiModelRow({
         <div className="production-dock-model-item__row">
           <span className="production-dock-model-item__label">
             {active ? "✓ " : "○ "}
-            {model.label.replace(/\s*—\s*.+$/, "") || model.label}
+            {displayLabel}
           </span>
           <StatusBadge kind={readinessKind(model)} label={String(readiness)} compact />
         </div>
@@ -307,10 +316,13 @@ export function ModelMenuDrawer({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const sections = dock.sections[modality];
-  const localModels = sections?.local ?? (dock.models[modality] ?? []).filter((m) => m.locality === "local");
+  const localModels = modelsForModality(
+    sections?.local ?? (dock.models[modality] ?? []).filter((m) => m.locality === "local"),
+    modality,
+  );
   const nativeModels = localModels.filter((m) => (m.executionClass || "native_local") === "native_local");
   const dockerModels = localModels.filter((m) => m.executionClass === "docker_local");
-  const apiModels = sections?.api ?? [];
+  const apiModels = modelsForModality(sections?.api ?? [], modality);
   const apiMeta = sections?.apiMeta ?? dock.apiMeta[modality];
   const resolved = dock.resolved[modality] ?? dock.status?.modalities?.[modality] ?? null;
   const activeId = resolved?.activeModelId ?? null;
@@ -422,8 +434,14 @@ export function ModelMenuDrawer({
             )}
           </section>
 
-          <section className="production-dock-model-section" aria-label="Hosted API Models" data-testid={`dock-hosted-${modality}`}>
-            <h4 className="production-dock-model-section__title">Hosted API</h4>
+          <section
+            className="production-dock-model-section"
+            aria-label={modality === "audio" ? "API—ElevenLabs Models" : "Hosted API Models"}
+            data-testid={`dock-hosted-${modality}`}
+          >
+            <h4 className="production-dock-model-section__title">
+              {modality === "audio" ? "API—ElevenLabs" : "Hosted API"}
+            </h4>
             {apiModels.length === 0 ? (
               <ApiEmptyState
                 meta={apiMeta}
@@ -440,6 +458,7 @@ export function ModelMenuDrawer({
                     key={model.id}
                     model={model}
                     activeId={activeId}
+                    modality={modality}
                     onSelect={() => {
                       void dock.selectModel(modality, model.id).then(onClose);
                     }}

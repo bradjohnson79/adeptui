@@ -128,8 +128,16 @@ def process_environment(
     out_room_tone: Path | None,
     out_walla: Path | None,
     dsp_plan: dict[str, Any],
+    *,
+    preview: bool = False,
+    preview_max_seconds: float = 4.0,
 ) -> VoiceEnvironmentTiming:
     dry, sr = _read_wav_mono(dry_path)
+    # ORDER 4: preview is a fast hear of current filters — trim long dry takes.
+    if preview and preview_max_seconds > 0:
+        max_samples = int(sr * float(preview_max_seconds))
+        if len(dry) > max_samples:
+            dry = dry[:max_samples]
     speech_start = _detect_speech_start_ms(dry, sr)
     dry_duration_ms = (len(dry) / sr) * 1000.0
 

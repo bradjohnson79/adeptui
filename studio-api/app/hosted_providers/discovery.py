@@ -15,7 +15,7 @@ from .model_store import load_catalog, save_catalog
 from .preferences import load_preferences
 from .registry import PROVIDERS
 
-Modality = Literal["llm", "video", "image", "audio"]
+Modality = Literal["llm", "video", "image", "audio", "vision"]
 Readiness = Literal[
     "Ready",
     "Requires Adapter",
@@ -205,11 +205,11 @@ _PROVIDER_CATALOG: dict[str, list[dict[str, Any]]] = {
     "fal": [
         {
             "providerModelId": 'fal-ai/bytedance/seedance/v1/pro/text-to-video',
-            "displayName": 'Seedance 1 Pro',
+            "displayName": 'Seedance 1 Pro (legacy — not Adept 2.0 or 2.5)',
             "modality": 'video',
             "capabilities": ['text_to_video', 'image_to_video'],
-            "adapterAvailable": True,
-            "dockModelId": 'seedance-fal',
+            "adapterAvailable": False,
+            "dockModelId": 'seedance-1-pro-fal',
         },
         {
             "providerModelId": 'fal-ai/kling-video/v3/pro/text-to-video',
@@ -300,6 +300,14 @@ _PROVIDER_CATALOG: dict[str, list[dict[str, Any]]] = {
             "dockModelId": 'nano-banana-2-fal',
         },
         {
+            "providerModelId": 'openai/gpt-image-2',
+            "displayName": 'GPT Image 2',
+            "modality": 'image',
+            "capabilities": ['text_to_image', 'edit'],
+            "adapterAvailable": True,
+            "dockModelId": 'gpt-image-2-fal',
+        },
+        {
             "providerModelId": 'fal-ai/minimax/speech-02-hd',
             "displayName": 'MiniMax Speech 02 HD',
             "modality": 'audio',
@@ -314,6 +322,15 @@ _PROVIDER_CATALOG: dict[str, list[dict[str, Any]]] = {
             "capabilities": ['chat'],
             "adapterAvailable": True,
             "dockModelId": 'any-llm-fal',
+        },
+        {
+            "providerModelId": 'fal-ai/any-llm/vision',
+            "displayName": 'Co-Director Vision',
+            "modality": 'vision',
+            "capabilities": ['vision'],
+            "adapterAvailable": True,
+            "dockModelId": 'codirector-vision-fal',
+            "nestedModelId": 'google/gemini-2.5-flash-lite',
         },
     ],
 }

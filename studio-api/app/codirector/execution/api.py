@@ -31,6 +31,19 @@ from ..routing.unified_intent import UnifiedIntent, UnifiedIntentKind, DispatchS
 router = APIRouter(prefix="/projects/{project_id}/executions", tags=["codirector-execution"])
 
 
+def merge_start_execution_attachments(
+    body_ids: list[str] | None,
+    context_ids: list[str] | None,
+) -> list[str]:
+    """Keep context attachments when the top-level list is empty. Never drop a source."""
+    seen: list[str] = []
+    for raw in list(body_ids or []) + list(context_ids or []):
+        aid = str(raw or "").strip()
+        if aid and aid not in seen:
+            seen.append(aid)
+    return seen
+
+
 class StartExecutionRequest(BaseModel):
     """Request body for starting an execution."""
 
@@ -65,6 +78,9 @@ async def start_execution(project_id: str, body: StartExecutionRequest, db: Sess
         classifier_source="deterministic",
     )
 
+    context_attachments = list(body.context.get("attachment_asset_ids") or []) + list(
+        body.context.get("attachmentAssetIds") or []
+    )
     ctx = {
         **body.context,
         "character_name": body.character_name,
@@ -73,7 +89,10 @@ async def start_execution(project_id: str, body: StartExecutionRequest, db: Sess
         "count": body.count,
         "prompt": body.prompt,
         "visual_style": body.visual_style,
-        "attachment_asset_ids": body.attachment_asset_ids,
+        "attachment_asset_ids": merge_start_execution_attachments(
+            body.attachment_asset_ids,
+            context_attachments,
+        ),
         "user_instructions": body.user_instructions,
         "project_style": body.project_style,
         "scene_context": body.scene_context,
@@ -108,7 +127,7 @@ async def cancel_execution_endpoint(project_id: str, execution_id: str, db: Sess
 @router.get("/{execution_id}")
 async def get_execution(project_id: str, execution_id: str, db: Session = Depends(get_db)) -> dict:
     """Get the current state of an execution pack."""
-    plan = load_pack(db, project_id, execution_id)
+    plan = advance_execution_pack(db, project_id, execution_id) or load_pack(db, project_id, execution_id)
     if not plan:
         raise HTTPException(status_code=404, detail={"code": "EXECUTION_NOT_FOUND", "message": "Execution not found."})
     return plan.model_dump(mode="json")

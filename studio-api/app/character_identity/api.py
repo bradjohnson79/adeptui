@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -69,11 +69,39 @@ def get_character(project_id: str, character_id: str, db: Session = Depends(get_
     return service.get_profile(db, project_id, character_id).model_dump()
 
 
-@router.delete("/projects/{project_id}/characters/{character_id}")
-def delete_character(project_id: str, character_id: str, db: Session = Depends(get_db)):
+@router.get("/projects/{project_id}/characters/{character_id}/delete-preview")
+def delete_character_preview(project_id: str, character_id: str, db: Session = Depends(get_db)):
     _require_flag()
     _project(db, project_id)
-    return service.delete_profile(db, project_id, character_id)
+    from ..creator_scope.contract import ENTITY_CHARACTER, CreatorScopeError
+    from ..creator_scope.service import delete_preview_payload
+    from .service import get_profile
+    profile = get_profile(db, project_id, character_id)
+    if profile.project_id != project_id:
+        raise HTTPException(403, detail={"code":"OWNER_REQUIRED","message":"Global characters can only be deleted from the project that created them."})
+    payload = delete_preview_payload(
+        db,
+        entity_type=ENTITY_CHARACTER,
+        entity_id=character_id,
+        name=profile.name,
+        is_global=profile.is_global,
+        owning_project_id=profile.project_id,
+    )
+    return payload
+
+
+@router.delete("/projects/{project_id}/characters/{character_id}")
+def delete_character(
+    project_id: str,
+    character_id: str,
+    confirm_cross_project: bool = False,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    return service.delete_profile(
+        db, project_id, character_id, confirm_cross_project=confirm_cross_project
+    )
 
 
 @router.patch("/projects/{project_id}/characters/{character_id}")
@@ -193,7 +221,18 @@ def get_character_crs(project_id: str, character_id: str, db: Session = Depends(
     _project(db, project_id)
     from .crs_service import get_crs_summary
 
-    summary = get_crs_summary(db, project_id, character_id)
+    try:
+        summary = get_crs_summary(db, project_id, character_id)
+    except Exception:
+        return {
+            "character_id": character_id,
+            "name": "",
+            "tag": None,
+            "crs_revision": 0,
+            "has_approved_reference": False,
+            "approved_reference_asset_id": None,
+            "reference_coverage": "none",
+        }
     if summary is None:
         raise HTTPException(
             status_code=404,
@@ -378,7 +417,12 @@ def get_character_voice_approved_status(project_id: str, character_id: str, db: 
             VoiceProfileRow.id == p.active_voice_profile_id
         ).first()
         if vp and vp.approval_status == "approved":
-            return {"hasApprovedVoice": True, "voiceProfileId": vp.id, "previewAssetId": vp.approved_preview_asset_id}
+            return {
+                "hasApprovedVoice": True,
+                "voiceProfileId": vp.id,
+                "voiceProfileName": vp.name,
+                "previewAssetId": vp.approved_preview_asset_id,
+            }
     return {"hasApprovedVoice": False}
 
 
@@ -468,6 +512,14 @@ class VoiceDesignGenerateBody(BaseModel):
     method: str = "design"
     parentCandidateId: Optional[str] = None
     appendToVoiceId: Optional[str] = None
+    sex: Optional[str] = None
+    age: Optional[str] = None
+    script: Optional[str] = None
+    prompt: Optional[str] = None
+    sampleCount: Optional[int] = Field(default=None, ge=1, le=6)
+    archetype: Optional[str] = None
+    accent: Optional[str] = None
+    asyncJob: bool = False
 
 
 @router.post("/projects/{project_id}/characters/{character_id}/voice/design/generate")
@@ -475,20 +527,28 @@ def voice_design_generate(project_id: str, character_id: str, body: VoiceDesignG
     _require_flag()
     _project(db, project_id)
     from .voice_creator import generate_voice_candidates
+    from .voice_generate_job import start_job
+
+    if body.asyncJob:
+        wanted = int(body.sampleCount or body.candidateCount or 3)
+        payload = body.model_dump(exclude={"asyncJob"})
+        payload["candidateCount"] = wanted
+        payload["sampleCount"] = wanted
+        job = start_job(
+            db,
+            project_id,
+            character_id,
+            mode="design",
+            payload=payload,
+            sample_count=wanted,
+        )
+        return {"async": True, **job}
 
     return generate_voice_candidates(
         db,
         project_id,
         character_id,
-        brief=body.designBrief,
-        candidate_count=body.candidateCount,
-        test_line=body.testLine,
-        name=body.name,
-        master_prompt=body.masterPrompt,
-        prompt_document=body.promptDocument,
-        method=body.method,
-        parent_candidate_id=body.parentCandidateId,
-        append_to_voice_id=body.appendToVoiceId,
+        request_body=body,
     )
 
 
@@ -770,10 +830,15 @@ def voice_provenance(project_id: str, character_id: str, voiceId: str, db: Sessi
 
 class CloneVoiceBody(BaseModel):
     name: str = "Cloned voice"
-    reference_path: str
-    transcript: str
-    test_line: str
+    reference_path: str = ""
+    reference_asset_id: str = ""
+    transcript: str = ""
+    test_line: str = ""
+    testLine: Optional[str] = None
+    candidateCount: int = Field(default=4, ge=1, le=6)
+    sampleCount: Optional[int] = Field(default=None, ge=1, le=6)
     consent: VoiceConsentCreate
+    asyncJob: bool = False
 
 
 @router.post("/projects/{project_id}/characters/{character_id}/voice-profiles/clone")
@@ -790,8 +855,34 @@ def voice_clone_generate(project_id: str, character_id: str, body: CloneVoiceBod
     _require_flag()
     _project(db, project_id)
     from .voice_creator import clone_with_workspace
+    from .voice_generate_job import start_job
+
+    if body.asyncJob:
+        wanted = int(body.sampleCount or body.candidateCount or 1)
+        payload = body.model_dump(exclude={"asyncJob"})
+        payload["candidateCount"] = wanted
+        payload["sampleCount"] = wanted
+        job = start_job(
+            db,
+            project_id,
+            character_id,
+            mode="clone",
+            payload=payload,
+            sample_count=wanted,
+        )
+        return {"async": True, **job}
 
     return clone_with_workspace(db, project_id, character_id, body)
+
+
+@router.get("/projects/{project_id}/characters/{character_id}/voice/generate/status")
+def voice_generate_status(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    from .voice_generate_job import load_job
+
+    service.get_profile(db, project_id, character_id)
+    return load_job(db, character_id)
 
 
 @router.post("/projects/{project_id}/characters/{character_id}/voice-profiles/{voice_id}/generate-dialogue")
@@ -987,13 +1078,168 @@ class CCV2ApproveBody(BaseModel):
     ownerConfirmed: bool = True
 
 
+class CCV2AdoptFrontBody(BaseModel):
+    assetId: str
+    sourceType: str = "library"
+
+
+class CCV2AngleApprovalBody(BaseModel):
+    approved: bool = True
+
+
+class CCV2AdoptAngleBody(BaseModel):
+    assetId: str
+    sourceType: str = "uploaded"
+
+
 @router.get("/projects/{project_id}/characters/{character_id}/cc-v2")
 def get_cc_v2(project_id: str, character_id: str, db: Session = Depends(get_db)):
     _require_flag()
     _project(db, project_id)
-    from .cc_v2 import get_status
+    from .cc_v2 import empty_state, get_status, load_state
 
-    return get_status(db, project_id, character_id)
+    try:
+        return get_status(db, project_id, character_id)
+    except HTTPException:
+        raise
+    except Exception:
+        try:
+            state = load_state(db, character_id)
+        except Exception:
+            state = empty_state()
+        state["characterId"] = character_id
+        state.setdefault("sheetGate", {"ready": False, "missing": []})
+        return state
+
+
+@router.get("/projects/{project_id}/characters/{character_id}/cc-v2/generators")
+def list_cc_v2_generators(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v2 import get_status
+    from .cc_v2_generators import list_v2_generators
+
+    state = get_status(db, project_id, character_id)
+    has_ref = bool(str(state["views"]["front"].get("assetId") or "").strip())
+    if not has_ref:
+        from . import service
+
+        has_ref = bool(service.list_references(db, project_id, character_id))
+    return list_v2_generators(has_reference=has_ref)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/front/adopt")
+def adopt_cc_v2_front(
+    project_id: str,
+    character_id: str,
+    body: CCV2AdoptFrontBody,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v2 import adopt_front_from_asset
+
+    return adopt_front_from_asset(
+        db,
+        project_id,
+        character_id,
+        body.assetId,
+        source_type=body.sourceType,
+    )
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/multiview/generate")
+def generate_cc_v3_multiview(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v3_multiview import generate_multiview
+
+    return generate_multiview(db, project_id, character_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/multiview/regenerate")
+def regenerate_cc_v3_multiview(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v3_multiview import regenerate_multiview
+
+    return regenerate_multiview(db, project_id, character_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/multiview/angles/{angle}/regenerate")
+def regenerate_cc_v3_angle(
+    project_id: str,
+    character_id: str,
+    angle: str,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v3_multiview import regenerate_angle
+
+    return regenerate_angle(db, project_id, character_id, angle)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/multiview/angles/{angle}/upload")
+async def upload_cc_v3_angle(
+    project_id: str,
+    character_id: str,
+    angle: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v3_multiview import upload_angle_from_bytes
+
+    payload = await file.read()
+    return upload_angle_from_bytes(
+        db,
+        project_id,
+        character_id,
+        angle,
+        data=payload,
+        filename=file.filename or "",
+        content_type=file.content_type or "",
+    )
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/multiview/angles/{angle}/adopt")
+def adopt_cc_v3_angle(
+    project_id: str,
+    character_id: str,
+    angle: str,
+    body: CCV2AdoptAngleBody,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v3_multiview import adopt_angle_from_asset
+
+    return adopt_angle_from_asset(
+        db,
+        project_id,
+        character_id,
+        angle,
+        body.assetId,
+        source_type=body.sourceType,
+    )
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/multiview/angles/{angle}/approve")
+def approve_cc_v3_angle(
+    project_id: str,
+    character_id: str,
+    angle: str,
+    body: CCV2AngleApprovalBody | None = None,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v3_multiview import set_angle_approval
+
+    payload = body or CCV2AngleApprovalBody()
+    return set_angle_approval(db, project_id, character_id, angle, approved=payload.approved)
 
 
 @router.post("/projects/{project_id}/characters/{character_id}/views/{view}/generate")
@@ -1065,14 +1311,28 @@ async def retry_cc_v2_revision_2(project_id: str, character_id: str, db: Session
     return await retry_revision_2(db, project_id, character_id)
 
 
+class ComposeSheetBody(BaseModel):
+    regenerate: bool = False
+
+
 @router.post("/projects/{project_id}/characters/{character_id}/sheet/compose")
-def compose_cc_v2_sheet(project_id: str, character_id: str, db: Session = Depends(get_db)):
+async def compose_cc_v2_sheet(
+    project_id: str,
+    character_id: str,
+    body: ComposeSheetBody = ComposeSheetBody(),
+    db: Session = Depends(get_db),
+):
     _require_flag()
     _project(db, project_id)
     from .cc_v2 import compose_sheet
 
     try:
-        return compose_sheet(db, project_id, character_id)
+        return await compose_sheet(
+            db,
+            project_id,
+            character_id,
+            regenerate=bool(body.regenerate),
+        )
     except HTTPException:
         raise
     except ValueError as exc:

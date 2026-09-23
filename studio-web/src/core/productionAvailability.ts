@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Named Production menu availability — resolved outside the declarative catalog.
  * Each key maps to a concrete dependency; never blanket one signal onto unrelated tools.
  */
@@ -38,6 +38,9 @@ function comfyOffline(health: Health | null, healthError: unknown): ProductAvail
   if (!health) {
     return { status: "Requires setup", reason: "Checking local runtime…" };
   }
+  if (health.comfy_probed === false) {
+    return { status: "Requires setup", reason: "Checking local runtime…" };
+  }
   if (!health.comfy_reachable) {
     return {
       status: "Local runtime offline",
@@ -75,6 +78,26 @@ function comfyOffline(health: Health | null, healthError: unknown): ProductAvail
   return null;
 }
 
+/** Comfy process reachable — excludes generator-specific required-model gaps. */
+function comfyRuntimeGate(health: Health | null, healthError: unknown): ProductAvailability | null {
+  if (healthError) {
+    return { status: "Local runtime offline", reason: "Studio API unreachable" };
+  }
+  if (!health) {
+    return { status: "Requires setup", reason: "Checking local runtime…" };
+  }
+  if (health.comfy_probed === false) {
+    return { status: "Requires setup", reason: "Checking local runtime…" };
+  }
+  if (!health.comfy_reachable) {
+    return {
+      status: "Local runtime offline",
+      reason: "ComfyUI is offline — start ComfyUI for local generation",
+    };
+  }
+  return null;
+}
+
 function audioAvailability(health: Health | null, healthError: unknown): ProductAvailability {
   if (healthError) {
     return { status: "Local runtime offline", reason: "Studio API unreachable" };
@@ -100,15 +123,19 @@ export function resolveProductionAvailability(
   health: Health | null,
   healthError: unknown = null,
 ): ProductionAvailability {
-  const comfy = comfyOffline(health, healthError);
-  const comfyOrAvailable = comfy || AVAILABLE;
+  const comfyRuntime = comfyRuntimeGate(health, healthError);
+  const comfyWithRequiredModels = comfyOffline(health, healthError);
+  const videoOrAvailable = comfyWithRequiredModels || AVAILABLE;
+  // Image Gen must not be blanketed by missing video checkpoints (e.g. a purged LTX 2.5).
+  // Image families gate via their own preflight / Source Manager components.
+  const imageOrAvailable = comfyRuntime || AVAILABLE;
 
   return {
-    // Local diffusion / video paths that enqueue through Comfy
-    textToVideo: comfyOrAvailable,
-    imageGeneration: comfyOrAvailable,
-    oneFrame: comfyOrAvailable,
-    threeFrame: comfyOrAvailable,
+    // Local video paths that enqueue through Comfy — still honor required-model gaps
+    textToVideo: videoOrAvailable,
+    imageGeneration: imageOrAvailable,
+    oneFrame: videoOrAvailable,
+    threeFrame: videoOrAvailable,
     // Timeline planning UI is available without Comfy; generation steps gate later
     timeline: healthError
       ? { status: "Local runtime offline", reason: "Studio API unreachable" }

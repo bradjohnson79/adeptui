@@ -19,7 +19,28 @@ export function useStudioHealth() {
     fetchInFlightRef.current = true;
     try {
       const data = await api.health();
-      setHealth(data);
+      let merged = data;
+      try {
+        const comfy = await api.comfyHealth();
+        merged = {
+          ...data,
+          comfy_probed: true,
+          comfy_reachable: Boolean(comfy.reachable),
+          comfy_status: comfy.status || data.comfy_status,
+          comfy_version: comfy.version ?? data.comfy_version,
+          node_catalog_available: Boolean(comfy.nodeCatalogAvailable),
+          comfy: {
+            ...(data.comfy || {}),
+            ...comfy,
+            reachable: Boolean(comfy.reachable),
+            probed: true,
+          },
+          missing_model_component_ids: comfy.missingRequiredModelComponentIds || data.missing_model_component_ids,
+        };
+      } catch {
+        merged = { ...data, comfy_probed: false, comfy_reachable: false };
+      }
+      setHealth(merged);
       setError(null);
     } catch {
       // Connection monitor handles outage state; don't override its error.

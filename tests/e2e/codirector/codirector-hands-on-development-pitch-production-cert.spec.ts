@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { API, BETA_TARGET, createTempProject, deleteProject, waitForAppReady } from "../helpers/app";
-import { openCoDirectorFullScreen, sendChatTurn } from "./helpers/audit";
+import { openCoDirectorContentTab, openCoDirectorFullScreen, sendChatTurn } from "./helpers/audit";
 
 const RUN_ID = `hands-on-partnership-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const ARTIFACT_DIR = path.join(
@@ -341,11 +341,11 @@ test.describe("@critical @beta hands-on development pitch production cert", () =
       expect(partReloadBody.partnership?.vision?.primary_destination).toBeTruthy();
 
       // UI surfaces
-      await page.getByTestId("codirector-content-tab-development").click();
+      await openCoDirectorContentTab(page, "development");
       await expect(page.getByTestId("codirector-content-development")).toBeVisible({ timeout: 15_000 });
-      await page.getByTestId("codirector-content-tab-vision").click();
+      await openCoDirectorContentTab(page, "vision");
       await expect(page.getByTestId("codirector-content-vision")).toBeVisible({ timeout: 15_000 });
-      await page.getByTestId("codirector-content-tab-pitch").click();
+      await openCoDirectorContentTab(page, "pitch");
       await expect(page.getByTestId("codirector-content-pitch")).toBeVisible({ timeout: 15_000 });
       await page.screenshot({ path: path.join(ARTIFACT_DIR, "stage12-ui-workspaces.png"), fullPage: true });
 

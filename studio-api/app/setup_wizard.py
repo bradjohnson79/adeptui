@@ -38,7 +38,7 @@ CATALOG: list[SetupComponent] = [
     SetupComponent(
         id="comfyui",
         name="ComfyUI",
-        description="Local node graph runtime for LTX / WAN / lip sync.",
+        description="Local node graph runtime for MiniMax H3 / LTX 2.5 / lip sync.",
         purpose="Powers local video generation in 1 Frame, 3 Frame, and Director.",
         required=True,
         download_size_mb=0,
@@ -96,21 +96,6 @@ CATALOG: list[SetupComponent] = [
         install_kind="detect_only",
     ),
     SetupComponent(
-        id="ltx_checkpoint",
-        name="LTX Video Checkpoint",
-        description="Primary local image-to-video model weights.",
-        purpose="1 Frame / 3 Frame / Director local renders.",
-        required=True,
-        download_size_mb=12000,
-        installed_size_mb=12000,
-        min_vram_gb=8,
-        recommended_vram_gb=24,
-        modes=["1 Frame", "3 Frame", "Director"],
-        source_repo="https://huggingface.co",
-        license="Model-specific",
-        install_kind="path_link",
-    ),
-    SetupComponent(
         id="ltx_2_5_checkpoint",
         name="LTX 2.5 Checkpoint",
         description="Required for LTX 2.5 video generation. 25 GB download. Recommended: 16 GB VRAM. Distilled BF16 delivers high quality with fast inference.",
@@ -141,21 +126,6 @@ CATALOG: list[SetupComponent] = [
         license="Gated model license (Hugging Face)",
         install_kind="path_link",
         category="Video Models",
-    ),
-    SetupComponent(
-        id="wan_models",
-        name="WAN 2.2 Models",
-        description="High/low noise WAN diffusion pair + VAE.",
-        purpose="Action / longer motion local generation.",
-        required=False,
-        download_size_mb=20000,
-        installed_size_mb=20000,
-        min_vram_gb=16,
-        recommended_vram_gb=32,
-        modes=["Director", "3 Frame"],
-        source_repo="https://huggingface.co",
-        license="Model-specific",
-        install_kind="path_link",
     ),
     SetupComponent(
         id="fal_key",
@@ -216,22 +186,6 @@ CATALOG: list[SetupComponent] = [
         source_repo="adept://marketplace/pack_essential_cinematic",
         license="Curated / check sources",
         install_kind="asset_pack",
-    ),
-    SetupComponent(
-        id="ltx23_ic_lora_ingredients",
-        name="LTX 2.3 Ingredients IC-LoRA",
-        description="Gated Ingredients IC-LoRA for Director reference-sheet conditioning (not a style LoRA).",
-        purpose="Director 2.0 Ingredients / continuity reference conditioning.",
-        required=False,
-        download_size_mb=2000,
-        installed_size_mb=2000,
-        min_vram_gb=16,
-        recommended_vram_gb=24,
-        modes=["Director"],
-        source_repo="https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients",
-        license="Gated model license (Hugging Face)",
-        install_kind="path_link",
-        category="Reference & Identity Models",
     ),
 ]
 
@@ -339,6 +293,17 @@ def approve_install(component_id: str, *, action: str, path: str | None = None) 
     Record an approved install/link action. Does not silently download multi-GB weights.
     For path_link / detect_only: verify path exists and mark installed.
     """
+    if component_id in {
+        "wan_models",
+        "hunyuan_video_15",
+        "hunyuan_video_13b",
+        "ltx_checkpoint",
+        "ltx23_ic_lora_ingredients",
+        "comfyui_hunyuan_nodes",
+    }:
+        raise KeyError(
+            f"{component_id} is retired from local video generation and is not installable"
+        )
     comp = next((c for c in CATALOG if c.id == component_id), None)
     if not comp:
         raise KeyError(f"Unknown component {component_id}")
@@ -358,6 +323,18 @@ def approve_install(component_id: str, *, action: str, path: str | None = None) 
         "musetalk-1-5-local",
         "echomimic-v2-local",
     }:
+        # Avatar Studio temporarily retired — refuse install/probe/repair from current flows.
+        # Allow remove only (does not delete model weights unless caller uses remove_runtime explicitly).
+        if action not in {"remove"}:
+            entry["status"] = "retired"
+            entry["message"] = (
+                "Avatar Studio is not available in this version. "
+                "Avatar runtimes (InfiniteTalk / LongCat / MuseTalk / EchoMimic) are retired from "
+                "current Adept UI production flows. Model weights were not deleted."
+            )
+            comps[component_id] = entry
+            save_setup_state(state)
+            return entry
         from .avatar_runtimes import benchmark_runtime, link_existing_runtime, remove_runtime, verify_runtime
 
         if action == "remove":

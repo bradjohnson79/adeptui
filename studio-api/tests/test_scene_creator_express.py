@@ -515,3 +515,96 @@ def test_workspace_api_models_exclude_non_selectable(monkeypatch) -> None:
         assert "flux-kontext-fal" not in ids
     finally:
         db.close()
+
+
+def test_candidate_plans_pin_selected_family_across_all(monkeypatch) -> None:
+    monkeypatch.setattr(
+        gen_mod,
+        "list_local_generator_families",
+        lambda has_reference=False: [
+            {"id": "zimage", "label": "Z-Image Turbo", "executable": True, "supportsReferences": True},
+            {"id": "flux", "label": "FLUX", "executable": True, "supportsReferences": True},
+            {"id": "qwen2512", "label": "Qwen", "executable": True, "supportsReferences": False},
+        ],
+    )
+    plans = build_candidate_plans(
+        local_enabled=True, api_enabled=False, local_family="zimage", candidate_count=4, seed=11
+    )
+    assert len(plans) == 4
+    assert {p["family"] for p in plans} == {"zimage"}
+    assert len({p["seed"] for p in plans}) == 4
+
+
+def test_approve_stamps_scene_image_provenance(monkeypatch) -> None:
+    from app.db import Asset, Job
+    from app.scene_creator.service import approve_candidate, create_or_update_shot, generate_candidates
+
+    project_id = _create_project("Scene Image Provenance")
+    sheet = _save_sheet(project_id)
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", lambda *a, **k: SimpleNamespace(id=str(uuid.uuid4())))
+    monkeypatch.setattr(
+        gen_mod,
+        "list_local_generator_families",
+        lambda has_reference=False: [
+            {"id": "zimage", "label": "Z-Image Turbo", "executable": True, "supportsReferences": True}
+        ],
+    )
+    db = _session()
+    try:
+        shot = create_or_update_shot(
+            db,
+            project_id,
+            sheet_id=sheet.sheetId,
+            intent="Korri at the bar",
+            character_ids=["char-1"],
+            prs_ids=["prs-1"],
+            ers_view="center",
+            posecraft_asset_id="pose-1",
+            story_theme="noir",
+            style="cinematic",
+        )
+        generated = generate_candidates(
+            db, project_id, shot.id, local_enabled=True, api_enabled=False, candidate_count=1
+        )
+        take = generated.candidates[0]
+        asset = Asset(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            tag="scene_shot",
+            kind="image",
+            filename="take.png",
+            path="take.png",
+            production_approval="none",
+            labels_json="[]",
+            prompt_meta_json="{}",
+        )
+        db.add(asset)
+        db.add(
+            Job(
+                id=take.job_id,
+                project_id=project_id,
+                kind="imagegen",
+                status="done",
+                params_json=json.dumps({"output_asset_id": asset.id}),
+            )
+        )
+        db.commit()
+        approved = approve_candidate(db, project_id, generated.id, take.id)
+        assert approved.approved_candidate_id == take.id
+        db.refresh(asset)
+        labels = json.loads(asset.labels_json or "[]")
+        assert "scene_image" in labels
+        assert "approved_scene_image" in labels
+        meta = json.loads(asset.prompt_meta_json or "{}")
+        prov = meta.get("sceneImageProvenance") or {}
+        assert prov.get("assetType") == "scene_image"
+        assert prov.get("ersView") == "center"
+        assert prov.get("storyTheme") == "noir"
+        assert "char-1" in (prov.get("characters") or [])
+        assert "prs-1" in (prov.get("prs") or [])
+        assert prov.get("posecraft") == "pose-1"
+        assert prov.get("generator")
+        assert prov.get("approvedAt")
+    finally:
+        db.close()
+

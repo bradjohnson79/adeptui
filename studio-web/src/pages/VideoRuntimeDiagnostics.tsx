@@ -7,7 +7,7 @@ type Diagnostics = {
   comfyui?: { connected?: boolean; version?: string | null; status?: string; message?: string };
   gpu?: { name?: string | null; availableGb?: number | null; currentGb?: number | null };
   nodeInventory?: { installed?: number; missingVsRegistry?: number };
-  modelInventory?: { wan?: boolean; ltx?: boolean; ltx_2_5?: boolean; zimage?: boolean; icLora?: boolean };
+  modelInventory?: { ltx_2_5?: boolean; zimage?: boolean; icLora?: boolean };
   queue?: {
     comfyRunning?: number;
     comfyWaiting?: number;
@@ -47,9 +47,7 @@ function generatorReadiness(comfy: ComfyHealth | null) {
   add("ltx_2_5", "LTX 2.5", "ltx_2_5_checkpoint");
   add("ltx_2_5", "LTX 2.5", "ltx_2_5_text_encoder");
   add("ltx_2_5", "LTX 2.5", "ltx_2_5_video_vae");
-  add("wan", "WAN", "wan_models");
   add("zimage", "Z-Image", "zimage_models");
-  add("ltx_23", "LTX 2.3", "ltx_checkpoint");
   return Object.values(byGen);
 }
 
@@ -275,9 +273,7 @@ export default function VideoRuntimeDiagnostics() {
           <section style={card}>
             <h2 style={h2}>Average Render Time</h2>
             <ul style={{ listStyle: "none", padding: 0, margin: 0, lineHeight: 1.7 }}>
-              <li>LTX: {fmtSec(data.averageRenderSeconds?.ltx)}</li>
               <li>LTX 2.5: {fmtSec(data.averageRenderSeconds?.ltx_2_5)}</li>
-              <li>WAN: {fmtSec(data.averageRenderSeconds?.wan)}</li>
               <li>fal: {fmtSec(data.averageRenderSeconds?.fal)}</li>
             </ul>
           </section>

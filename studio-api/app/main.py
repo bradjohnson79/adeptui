@@ -36,6 +36,7 @@ from .codirector.vision.engine import set_engine_enabled
 from .posecraft.router import router as posecraft_router
 from .runtime_manager.router import router as runtime_manager_router
 from .story_entries.api import router as story_entries_router
+from .scene_prompt_templates.api import router as scene_prompt_templates_router
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,12 @@ async def lifespan(_: FastAPI):
     except Exception:
         logger.exception("M3.3 character identity table ensure failed")
     try:
+        from .creator_scope import ensure_creator_scope_tables
+
+        ensure_creator_scope_tables()
+    except Exception:
+        logger.exception("Creator asset scope table ensure failed")
+    try:
         from .project_security.service import ensure_tables as ensure_project_security_tables
 
         ensure_project_security_tables()
@@ -259,8 +266,30 @@ async def lifespan(_: FastAPI):
                 len(job_recovery.get("resumed") or []),
                 len(job_recovery.get("interrupted") or []),
             )
+        try:
+            from .director_timeline_w46.scene_takes import close_all_previous_session_renders
+
+            closed = close_all_previous_session_renders()
+            if closed:
+                logger.warning("Previous-session Timeline renders closed=%s", closed)
+        except Exception:
+            logger.exception("Previous-session Timeline close failed")
     except Exception:
         logger.exception("Studio job queue recovery failed")
+    # P6: Timeline Generation Reconciler — Job done must not leave batches Generating after bounce.
+    try:
+        from .director_timeline_w46.generation.timeline_reconciler import (
+            reconcile_all_open_timeline_jobs,
+        )
+
+        tl_rec = reconcile_all_open_timeline_jobs()
+        if tl_rec.get("count"):
+            logger.warning(
+                "Timeline generation reconcile count=%s",
+                tl_rec.get("count"),
+            )
+    except Exception:
+        logger.exception("Timeline generation reconcile failed")
     try:
         from .codirector.execution.advance import reconcile_non_terminal_packs
         from .db import SessionLocal as _ReconcileSessionLocal
@@ -397,6 +426,10 @@ try:
 except Exception:
     logger.exception("Story entries router failed to load")
 try:
+    app.include_router(scene_prompt_templates_router, prefix="/api")
+except Exception:
+    logger.exception("Scene prompt templates router failed to load")
+try:
     from .project_foundation.api import router as foundation_router
 
     app.include_router(foundation_router, prefix="/api")
@@ -527,6 +560,12 @@ try:
     app.include_router(scene_creator_region_edit_router, prefix="/api")
 except Exception as exc:  # pragma: no cover
     logger.warning("scene_creator region_edit router unavailable: %s", exc)
+try:
+    from .spatial_map.correction_router import router as spatial_map_correction_router
+
+    app.include_router(spatial_map_correction_router, prefix="/api")
+except Exception as exc:  # pragma: no cover
+    logger.warning("spatial_map correction router unavailable: %s", exc)
 try:
     from .image_core.router import router as image_core_router
 
@@ -690,84 +729,19 @@ async def root_health():
 
 
 @app.get("/api/assets/{asset_id}/file")
-def get_asset_file(asset_id: str):
-    from fastapi import HTTPException
+def get_asset_file_unscoped(asset_id: str):
+    """Retired unscoped file route. Canonical: /api/projects/{projectId}/assets/{assetId}/file."""
+    from .project_security.asset_file import unscoped_asset_route_forbidden
 
-    from .db import SessionLocal, Asset
-
-    db = SessionLocal()
-    try:
-        asset = db.get(Asset, asset_id)
-        if not asset:
-            raise HTTPException(status_code=404, detail={"error": "ASSET_NOT_FOUND", "assetId": asset_id})
-        if not asset.path:
-            raise HTTPException(status_code=404, detail={"error": "ASSET_FILE_MISSING", "assetId": asset_id, "reason": "Asset record exists but file path is not set."})
-        p = Path(asset.path)
-        if not p.exists() or not p.is_file():
-            raise HTTPException(status_code=404, detail={"error": "ASSET_FILE_MISSING", "assetId": asset_id, "path": str(p), "reason": "Backing file does not exist on disk."})
-        return FileResponse(p)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail={"error": "ASSET_STORAGE_ERROR", "assetId": asset_id, "type": type(exc).__name__, "message": str(exc)[:200]})
-    finally:
-        db.close()
+    unscoped_asset_route_forbidden("file")
 
 
 @app.get("/api/assets/{asset_id}/thumb")
-def get_asset_thumbnail(asset_id: str, w: int = 256):
-    """Generate and serve a thumbnail for an image asset.
+def get_asset_thumbnail_unscoped(asset_id: str, w: int = 256):
+    """Retired unscoped thumb route. Canonical: /api/projects/{projectId}/assets/{assetId}/thumb."""
+    from .project_security.asset_file import unscoped_asset_route_forbidden
 
-    On first request, generates a 256px (or custom ``w``) max-dimension WebP
-    thumbnail cached in a ``.thumbs/`` directory next to the source file.
-    Subsequent requests serve the cached derivative with strong caching headers.
-
-    Only supported for image-kind assets.  Non-image assets return a 404.
-    """
-    from fastapi import HTTPException, Response
-
-    from .db import SessionLocal, Asset
-
-    db = SessionLocal()
-    try:
-        asset = db.get(Asset, asset_id)
-        if not asset:
-            raise HTTPException(status_code=404, detail={"error": "ASSET_NOT_FOUND", "assetId": asset_id})
-        if asset.kind != "image":
-            raise HTTPException(status_code=404, detail={"error": "NOT_AN_IMAGE", "assetId": asset_id})
-        if not asset.path:
-            raise HTTPException(status_code=404, detail={"error": "ASSET_FILE_MISSING", "assetId": asset_id})
-        src = Path(asset.path)
-        if not src.exists() or not src.is_file():
-            raise HTTPException(status_code=404, detail={"error": "ASSET_FILE_MISSING", "assetId": asset_id, "path": str(src)})
-
-        thumb_dir = src.parent / ".thumbs"
-        thumb_dir.mkdir(parents=True, exist_ok=True)
-        thumb_path = thumb_dir / f"{src.stem}_{w}.webp"
-
-        if not thumb_path.exists():
-            try:
-                from PIL import Image
-                with Image.open(src) as im:
-                    im = im.convert("RGBA") if im.mode in ("RGBA", "P") else im.convert("RGB")
-                    im.thumbnail((w, w))
-                    im.save(thumb_path, "WEBP", quality=82, method=6)
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail={"error": "THUMBNAIL_FAILED", "message": str(exc)[:200]})
-
-        return FileResponse(
-            thumb_path,
-            headers={
-                "Cache-Control": "public, max-age=31536000, immutable",
-                "Content-Type": "image/webp",
-            },
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail={"error": "THUMBNAIL_STORAGE_ERROR", "type": type(exc).__name__, "message": str(exc)[:200]})
-    finally:
-        db.close()
+    unscoped_asset_route_forbidden("thumb")
 
 
 @app.get("/api/file")

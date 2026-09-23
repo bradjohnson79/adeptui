@@ -24,7 +24,25 @@ export function readPoseCraftHandoff(projectId: string, storage: Storage | null 
   }
 }
 
+export async function consumeBackendPoseCraftHandoff(projectId: string): Promise<PoseCraftHandoff | null> {
+  if (!projectId) return null;
+  try {
+    const { getImageGeneratorHandoff } = await import("../../posecraft/posecraftApi");
+    const payload = await getImageGeneratorHandoff(projectId);
+    if (!payload?.imageAssetId) return null;
+    return {
+      snapshotId: payload.snapshotId,
+      imageAssetId: payload.imageAssetId,
+      name: payload.name,
+      honestyLabel: payload.honestyLabel,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function consumePoseCraftHandoff(projectId: string, storage: Storage | null = defaultSessionStorage()): PoseCraftHandoff | null {
+  // Backend document is the SoT. sessionStorage is a leftover convenience only.
   const handoff = readPoseCraftHandoff(projectId, storage);
   if (!handoff || !storage) return handoff;
   try {

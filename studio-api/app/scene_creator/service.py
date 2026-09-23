@@ -559,6 +559,11 @@ def create_or_update_shot(
     intent: str = "",
     character_ids: list[str] | None = None,
     prop_entity_ids: list[str] | None = None,
+    prs_ids: list[str] | None = None,
+    ers_view: str = "auto",
+    posecraft_asset_id: str = "",
+    story_theme: str = "",
+    style: str = "",
     camera: dict[str, Any] | None = None,
     generator: dict[str, Any] | None = None,
 ) -> SceneShot:
@@ -587,6 +592,16 @@ def create_or_update_shot(
         shot.character_ids = list(character_ids)
     if prop_entity_ids is not None:
         shot.prop_entity_ids = list(prop_entity_ids)
+    if prs_ids is not None:
+        shot.prs_ids = list(prs_ids)
+    if ers_view is not None and str(ers_view).strip():
+        shot.ers_view = str(ers_view).strip()
+    if posecraft_asset_id is not None:
+        shot.posecraft_asset_id = str(posecraft_asset_id or "").strip()
+    if story_theme is not None:
+        shot.story_theme = str(story_theme or "").strip()
+    if style is not None:
+        shot.style = str(style or "").strip()
     if not shot.prop_entity_ids:
         shot.prop_entity_ids = _placed_project_prop_ids(db, project_id, sheet_id)
     if camera:
@@ -712,8 +727,43 @@ def _enqueue_shot_candidates(
         production_loaded = bool(pc and pc.get("loaded") is True)
     gate_body = dict(body_base)
     gate_ctx = gate_body.setdefault("creativeContext", {})
-    if isinstance(gate_ctx, dict) and composite:
-        gate_ctx["ers_composite_asset_id"] = composite
+    if isinstance(gate_ctx, dict):
+        if composite:
+            gate_ctx["ers_composite_asset_id"] = composite
+        gate_ctx["ersView"] = str(getattr(shot, "ers_view", "") or "auto")
+        gate_ctx["ers_view"] = gate_ctx["ersView"]
+        gate_ctx["ersPackageId"] = str(getattr(package, "id", "") or "")
+        gate_ctx["storyTheme"] = str(getattr(shot, "story_theme", "") or "")
+        gate_ctx["style"] = str(getattr(shot, "style", "") or "")
+        pose_aid = str(getattr(shot, "posecraft_asset_id", "") or "").strip()
+        if pose_aid:
+            gate_ctx["posecraftAssetId"] = pose_aid
+            gate_ctx["poseImageAssetId"] = pose_aid
+        prs_ids = list(getattr(shot, "prs_ids", None) or [])
+        if prs_ids:
+            try:
+                from ..codirector.entity_resolver import _prop_metadata
+
+                gate_ctx["prs"] = _prop_metadata(db, project_id, prs_ids)
+            except Exception:
+                gate_ctx["prs"] = [{"id": pid} for pid in prs_ids]
+        gate_body["storyTheme"] = gate_ctx["storyTheme"]
+        gate_body["style"] = gate_ctx["style"]
+        gate_body["ersView"] = gate_ctx["ersView"]
+        if pose_aid:
+            gate_body["posecraftAssetId"] = pose_aid
+        # Keep body_base in sync so per-candidate jobs inherit the same package facts.
+        base_ctx = body_base.setdefault("creativeContext", {})
+        if isinstance(base_ctx, dict):
+            base_ctx.update({k: gate_ctx[k] for k in (
+                "ersView", "ers_view", "ersPackageId", "storyTheme", "style",
+                "posecraftAssetId", "poseImageAssetId", "prs", "ers_composite_asset_id",
+            ) if k in gate_ctx})
+        body_base["storyTheme"] = gate_ctx["storyTheme"]
+        body_base["style"] = gate_ctx["style"]
+        body_base["ersView"] = gate_ctx["ersView"]
+        if pose_aid:
+            body_base["posecraftAssetId"] = pose_aid
     try:
         apply_reference_packet(
             gate_body,
@@ -1002,10 +1052,25 @@ def generate_candidates(
     api_model: str = "",
     candidate_count: int = 4,
     lora: dict[str, Any] | None = None,
+    ers_view: str | None = None,
+    prs_ids: list[str] | None = None,
+    posecraft_asset_id: str | None = None,
+    story_theme: str | None = None,
+    style: str | None = None,
 ) -> SceneShot:
     shot = _require_shot(db, project_id, shot_id)
     if _approved_candidate(shot) is not None:
         raise SceneCreatorError("Use Re-Take to change an approved look.")
+    if ers_view is not None and str(ers_view).strip():
+        shot.ers_view = str(ers_view).strip()
+    if prs_ids is not None:
+        shot.prs_ids = list(prs_ids)
+    if posecraft_asset_id is not None:
+        shot.posecraft_asset_id = str(posecraft_asset_id or "").strip()
+    if story_theme is not None:
+        shot.story_theme = str(story_theme or "").strip()
+    if style is not None:
+        shot.style = str(style or "").strip()
     package, _runtime = resolve_ers_for_sheet(db, project_id, shot.sheet_id)
     candidates = _enqueue_shot_candidates(
         db,
@@ -1132,6 +1197,7 @@ def approve_candidate(
     )
     shot.take_memory.takeState = _take_state
     _set_asset_approval(db, project_id, candidate.asset_id, approved=True)
+    _stamp_scene_image_provenance(db, project_id, shot, candidate)
     _sync_scene_shots_collection(db, project_id, shot, candidate)
     save_scene_shot(db, project_id, shot)
     return shot
@@ -1364,14 +1430,77 @@ def _set_asset_approval(db: Session, project_id: str, asset_id: str, *, approved
     if not isinstance(labels, list):
         labels = []
     labels = [str(x) for x in labels if x]
-    for tag in ("scene_shot", "scene_creator"):
+    for tag in ("scene_shot", "scene_creator", "scene_image"):
         if tag not in labels:
             labels.append(tag)
     if approved and "approved_take" not in labels:
         labels.append("approved_take")
+    if approved and "approved_scene_image" not in labels:
+        labels.append("approved_scene_image")
     if not approved:
-        labels = [x for x in labels if x != "approved_take"]
+        labels = [x for x in labels if x not in {"approved_take", "approved_scene_image"}]
     asset.labels_json = json.dumps(labels)
+    db.commit()
+
+
+def _stamp_scene_image_provenance(
+    db: Session,
+    project_id: str,
+    shot: SceneShot,
+    candidate: SceneShotCandidate,
+) -> None:
+    """Approved Scene Image provenance contract for Library."""
+    asset_id = str(getattr(candidate, "asset_id", "") or "").strip()
+    if not asset_id:
+        return
+    asset = db.get(Asset, asset_id)
+    if asset is None or asset.project_id != project_id:
+        return
+    try:
+        meta = json.loads(asset.prompt_meta_json or "{}")
+    except Exception:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    from datetime import datetime, timezone
+
+    aspect = ""
+    try:
+        from ..db import Scene as SceneRow
+        from ..aspect_fps import normalize_production_aspect
+
+        scene_row = db.get(SceneRow, shot.scene_id) if getattr(shot, "scene_id", None) else None
+        aspect = normalize_production_aspect(getattr(scene_row, "aspect_ratio", None) if scene_row else None)
+    except Exception:
+        aspect = ""
+    pose = str(getattr(shot, "posecraft_asset_id", "") or "").strip() or None
+    props = list(getattr(shot, "prop_entity_ids", None) or [])
+    prs = list(getattr(shot, "prs_ids", None) or [])
+    # Prefer explicit PRS ids when present; keep prop entities as props[].
+    stamp = {
+        "assetType": "scene_image",
+        "sourceERS": str(getattr(shot, "ers_package_id", "") or getattr(shot, "sheet_id", "") or ""),
+        "sheetId": str(getattr(shot, "sheet_id", "") or ""),
+        "ersView": str(getattr(shot, "ers_view", "") or "auto"),
+        "characters": list(getattr(shot, "character_ids", None) or []),
+        "props": props,
+        "prs": prs,
+        "posecraft": pose,
+        "prompt": str(getattr(shot, "prompt", "") or getattr(shot, "intent", "") or ""),
+        "compiled": str(getattr(candidate, "compiled_prompt", "") or "") or None,
+        "generator": str(getattr(candidate, "family", "") or ""),
+        "provider": str(getattr(candidate, "source", "") or ""),
+        "aspect": aspect,
+        "storyTheme": str(getattr(shot, "story_theme", "") or ""),
+        "style": str(getattr(shot, "style", "") or ""),
+        "approvedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "shotId": str(getattr(shot, "id", "") or ""),
+        "candidateId": str(getattr(candidate, "id", "") or ""),
+        "takeLabel": str(getattr(candidate, "take_label", "") or ""),
+    }
+    meta["sceneImageProvenance"] = stamp
+    meta["assetType"] = "scene_image"
+    asset.prompt_meta_json = json.dumps(meta)
     db.commit()
 
 

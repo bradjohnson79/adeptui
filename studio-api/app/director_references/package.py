@@ -7,8 +7,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from ..db import Scene
-from ..director_timeline import parse_director_timeline
-from ..director_references.tags import ensure_tags
+from ..director_timeline_w46.master_lookup import find_master_visual_clip, load_scene_master, visual_clip_public
 from ..feature_flags import feature_flags
 from .errors import FeatureDisabled, TimelineItemNotFound
 from .influence import INFLUENCE_TO_STRENGTH_PRESET
@@ -50,21 +49,16 @@ class ReferencePackageBuilder:
         scene = self.db.get(Scene, scene_id)
         if not scene or scene.project_id != project_id:
             raise TimelineItemNotFound(item_id)
-        tl = ensure_tags(
-            parse_director_timeline(
-                scene.director_json,
-                fallback_duration=scene.duration_sec or 5.0,
-                fallback_prompt=scene.prompt or "",
-            )
-        )
-        clip = next((c for c in tl.image_clips if c.id == item_id), None)
+        master = load_scene_master(self.db, project_id, scene_id)
+        clip = find_master_visual_clip(master, item_id) if master is not None else None
         if not clip:
             raise TimelineItemNotFound(item_id)
+        pub = visual_clip_public(clip)
 
         primary = {
             "timelineItemId": clip.id,
-            "displayTag": clip.display_tag,
-            "assetId": clip.asset_id,
+            "displayTag": pub["displayTag"],
+            "assetId": pub["assetId"],
             "role": "primary_frame",
         }
 

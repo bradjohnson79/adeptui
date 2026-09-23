@@ -11,6 +11,7 @@ from . import service
 from .production_gate import evaluate_m42_w6p_scene_reference_gate
 from .schemas import (
     ApplyRequest,
+    ApproveAsRequest,
     CopyFromSceneRequest,
     PreflightRequest,
     ReorderRequest,
@@ -36,12 +37,12 @@ def get_capabilities():
 @router.get("/projects/{project_id}/references")
 def list_references(
     project_id: str,
-    scope_type: str | None = None,
-    scope_id: str | None = None,
+    scope_type: str | None = Query(None),
+    scope_id: str | None = Query(None),
     include_inherited: bool = Query(False),
-    sequence_id: str | None = None,
-    scene_id: str | None = None,
-    shot_id: str | None = None,
+    sequence_id: str | None = Query(None),
+    scene_id: str | None = Query(None),
+    shot_id: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
     if scope_type and scope_id:
@@ -62,6 +63,29 @@ def list_references(
         require_project(db, project_id)
         items = [repo.binding_to_dict(r) for r in repo.list_bindings(db, project_id)]
     return {"items": items, "count": len(items)}
+
+
+@router.get("/projects/{project_id}/references/id/{binding_id}")
+def get_reference(project_id: str, binding_id: str, db: Session = Depends(get_db)):
+    return service.get_one(db, project_id, binding_id)
+
+
+@router.post("/projects/{project_id}/references/approve-as")
+def approve_reference_as(
+    project_id: str,
+    body: ApproveAsRequest,
+    db: Session = Depends(get_db),
+):
+    from .approve_as import approve_library_image_as
+
+    return approve_library_image_as(
+        db,
+        project_id,
+        asset_id=body.asset_id,
+        kind=body.kind,
+        scene_id=body.scene_id,
+        character_id=body.character_id,
+    )
 
 
 @router.post("/projects/{project_id}/references")

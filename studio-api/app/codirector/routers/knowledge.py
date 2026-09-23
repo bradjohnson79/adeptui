@@ -22,45 +22,27 @@ router = APIRouter(prefix="/knowledge-cards", tags=["knowledge-cards"])
 
 @router.get("/video-generators")
 def list_video_generators() -> list[dict]:
-    """Return available video generators from runtime detection.
-
-    Populates the Create Project / Project Settings dropdown.
-    'automatic' is always available as the default.
-    Local generators are detected from the video runtime.
-    """
+    """Create Project dropdown — same Production Control join as Timeline."""
     generators: list[dict] = [
         {"id": "automatic", "label": "Automatic / Best Available", "available": True},
     ]
-
-    # Check local video runtime gate for installed generators
     try:
-        from ...video_runtime.api import wave6_gate
-        gate = wave6_gate()
-        generators.append({"id": "minimax-h3-i2v-local", "label": "MiniMax H3 (Local)", "available": bool(gate.get("wave6WiringUnlocked") or gate.get("engineReady"))})
-    except Exception:
-        generators.append({"id": "minimax-h3-i2v-local", "label": "MiniMax H3 (Local)", "available": False})
+        from ...production_control.generator_authority import timeline_generator_snapshot
 
-    try:
-        from ...video_runtime.api import wave6_gate
-        gate = wave6_gate()
-        for engine_id in gate.get("availableEngines", []):
-            label = str(engine_id).replace("_", " ").replace("-", " ").title()
-            generators.append({"id": str(engine_id), "label": f"{label} (Local)", "available": True})
-    except Exception:
-        pass
-
-    try:
-        from ...fal_catalog import fal_catalog
-        catalog = fal_catalog()
-        for item in catalog:
-            if item.get("kind") == "video" or "video" in (item.get("name") or "").lower():
-                vid = item.get("id") or item.get("name", "api-video")
-                label = item.get("label") or item.get("name", vid)
-                available = item.get("available") or item.get("configured", False)
-                generators.append({"id": f"api:{vid}", "label": f"{label} (API)", "available": bool(available)})
+        for gen in timeline_generator_snapshot():
+            generators.append(
+                {
+                    "id": str(gen.id),
+                    "label": str(gen.label or gen.id),
+                    "available": bool(gen.executable),
+                    "readiness": str(gen.readiness or ""),
+                    "disabledReason": str(gen.disabledReason or ""),
+                    "supportsTextToVideo": bool(getattr(gen, "supportsTextToVideo", False)),
+                    "requiresLastFrame": bool(getattr(gen, "requiresLastFrame", False)),
+                }
+            )
     except Exception:
         pass
-
     return generators
 
 

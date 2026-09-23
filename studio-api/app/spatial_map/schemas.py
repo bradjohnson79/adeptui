@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import math
 import uuid
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+
+from .background_alignment import clamp_offset, clamp_scale, clamp_source_size, source_aspect
 
 from .attachment import (
     AttachmentPoint,
@@ -39,6 +42,7 @@ ShotSize = Literal[
     "medium_close",
     "close_up",
     "extreme_close",
+    "pov",
 ]
 # Camera-level shot-size field (Scene Creator Mini production fidelity).
 # AUTO lets Co-Director infer framing; explicit values are framing-only and
@@ -51,6 +55,7 @@ SHOT_SIZES: tuple[str, ...] = (
     "medium_close",
     "close_up",
     "extreme_close",
+    "pov",
 )
 PRIMARY_SUBJECT_AUTO = "auto"
 PRIMARY_SUBJECT_ENVIRONMENT = "environment"
@@ -85,6 +90,56 @@ REQUIRED_360_DIRECTIONS: tuple[str, ...] = (
     "left",
     "front_left",
 )
+
+
+class BackgroundAlignment(BaseModel):
+    """Atlas translation + uniform scale under a stationary grid.
+
+    Source width/height/aspect record the native image. They are not a square crop.
+    """
+
+    offsetX: float = 0.0
+    offsetY: float = 0.0
+    scale: float = 1.0
+    sourceWidth: float = 0.0
+    sourceHeight: float = 0.0
+    sourceAspectRatio: float = 1.0
+
+    @field_validator("offsetX", "offsetY", mode="before")
+    @classmethod
+    def _clamp_offsets(cls, value: Any) -> float:
+        return clamp_offset(value)
+
+    @field_validator("scale", mode="before")
+    @classmethod
+    def _clamp_scale(cls, value: Any) -> float:
+        return clamp_scale(value)
+
+    @field_validator("sourceWidth", "sourceHeight", mode="before")
+    @classmethod
+    def _clamp_source_size(cls, value: Any) -> float:
+        return clamp_source_size(value)
+
+    @field_validator("sourceAspectRatio", mode="before")
+    @classmethod
+    def _clamp_source_aspect(cls, value: Any) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return 1.0
+        if not math.isfinite(number) or number <= 0:
+            return 1.0
+        return number
+
+    @model_validator(mode="after")
+    def _fill_aspect_from_source(self) -> "BackgroundAlignment":
+        if self.sourceWidth > 0 and self.sourceHeight > 0 and (
+            self.sourceAspectRatio == 1.0 or self.sourceAspectRatio <= 0
+        ):
+            computed = source_aspect(self.sourceWidth, self.sourceHeight)
+            if abs(computed - 1.0) > 1e-6:
+                self.sourceAspectRatio = computed
+        return self
 
 
 class SpatialBounds(BaseModel):
@@ -216,6 +271,8 @@ class SpatialCamera(BaseModel):
     # (never camera relocation); primary subject is auto|environment|<characterId>.
     shotSize: str = "auto"
     primarySubject: str = "auto"
+    # Map glyph: free (default) = placeable entity; pov = attach to Primary Subject.
+    attachMode: str = "free"
     normalizedX: Optional[float] = None
     normalizedY: Optional[float] = None
     gridRow: int = -1
@@ -224,6 +281,21 @@ class SpatialCamera(BaseModel):
     targetMeters: Optional[Vec3Meters] = None
     gridCell: Optional[str] = None
     visible: bool = True  # false hides marker only; assignment and coords stay
+
+
+class SpinCameraPlacement(BaseModel):
+    """A dedicated Spin Camera origin, separate from scene-blocking cameras."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    x: float = 0.0
+    z: float = 0.0
+    sceneId: Optional[str] = None
+    mapId: Optional[str] = None
+    cameraHeight: float = 1.6
+    fov: float = 75.0
+    lensMm: float = 35.0
+    createdAt: str = ""
+    updatedAt: str = ""
 
 
 class SpatialMovementWaypoint(BaseModel):
@@ -241,6 +313,64 @@ class SpatialMovementPath(BaseModel):
     waypoints: list[SpatialMovementWaypoint] = Field(default_factory=list)
     notes: str = ""
     loop: bool = False
+
+
+
+class MovementDialogue(BaseModel):
+    speaker: str = ""
+    text: str = ""
+
+
+class MovementAction(BaseModel):
+    actor: str = ""
+    verb: str = ""
+    target: str = ""
+    hand: str = ""
+    emotion: str = ""
+
+
+class MovementContinuity(BaseModel):
+    requiredUnchanged: list[str] = Field(default_factory=list)
+    requiredChanged: list[str] = Field(default_factory=list)
+    notes: str = ""
+
+
+class MovementSegment(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    segmentNumber: int = 1
+    beatName: str = ""
+    characterStates: list[SpatialCharacterPlacement] = Field(default_factory=list)
+    propStates: list[SpatialPropPlacement] = Field(default_factory=list)
+    cameraStateRefs: list[str] = Field(default_factory=list)
+    cameraStates: list[SpatialCamera] = Field(default_factory=list)
+    userDirection: str = ""
+    productionPrompt: str = ""
+    actions: list[MovementAction] = Field(default_factory=list)
+    dialogue: list[MovementDialogue] = Field(default_factory=list)
+    continuity: MovementContinuity = Field(default_factory=MovementContinuity)
+    timingHintSeconds: Optional[float] = None
+    revision: int = 1
+    createdAt: str = ""
+    updatedAt: str = ""
+
+
+class MovementCreateBody(BaseModel):
+    beatName: str = ""
+    userDirection: str = ""
+    productionPrompt: str = ""
+    dialogue: list[MovementDialogue] = Field(default_factory=list)
+    actions: list[MovementAction] = Field(default_factory=list)
+    inheritFromId: Optional[str] = None
+
+
+class MovementUpdateBody(BaseModel):
+    beatName: Optional[str] = None
+    userDirection: Optional[str] = None
+    productionPrompt: Optional[str] = None
+    dialogue: Optional[list[MovementDialogue]] = None
+    actions: Optional[list[MovementAction]] = None
+    continuity: Optional[MovementContinuity] = None
+    timingHintSeconds: Optional[float] = None
 
 
 class Spatial360View(BaseModel):
@@ -341,18 +471,24 @@ class SpatialMapDocument(BaseModel):
     bounds: SpatialBounds = Field(default_factory=SpatialBounds)
     backgroundAssetId: Optional[str] = None
     masterEnvironmentPrompt: str = ""
+    # designed | reconstructed | supplied — supplied means imported pixels, never generated.
+    geometrySource: Optional[str] = None
     # Atlas Scene Intent lineage: semantic anchor snapshotted at Atlas creation.
     sceneIntent: Optional[SceneIntent] = None
     originalEnvironmentReferenceAssetId: Optional[str] = None
     originatingUserPrompt: str = ""
     providerHonesty: ProviderHonestyMode = "approximate_translation"
-    gridScale: int = 0  # -5 .. +5, 0 = Neutral (10x10)
+    gridScale: int = 0  # -8 .. +8, 0 = Neutral (10x10)
+    backgroundAlignment: BackgroundAlignment = Field(default_factory=BackgroundAlignment)
     placementGrid: str = ""  # cartesian-v1 after migration; empty triggers one-shot polar conversion
     anchors: list[SpatialAnchor] = Field(default_factory=list)
     characters: list[SpatialCharacterPlacement] = Field(default_factory=list)
     props: list[SpatialPropPlacement] = Field(default_factory=list)
     cameras: list[SpatialCamera] = Field(default_factory=list)
     paths: list[SpatialMovementPath] = Field(default_factory=list)
+    movementSegments: list[MovementSegment] = Field(default_factory=list)
+    activeMovementSegmentId: Optional[str] = None
+    movementSegmentRevision: int = 0
     collage: Optional[Spatial360Collage] = None
     warnings: list[str] = Field(default_factory=list)
     variantOfId: Optional[str] = None
@@ -365,6 +501,15 @@ class SpatialMapDocument(BaseModel):
     # version via _save_document; a fresh/unsaved map has savedVersion unset).
     savedAt: Optional[str] = None
     savedVersion: Optional[str] = None
+    # Dedicated Spin Camera origin — never mixed into the scene-blocking cameras list.
+    spinCamera: Optional[SpinCameraPlacement] = None
+
+    @field_validator("backgroundAlignment", mode="before")
+    @classmethod
+    def _hydrate_background_alignment(cls, value: Any) -> Any:
+        if value is None:
+            return BackgroundAlignment()
+        return value
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -385,6 +530,7 @@ class SpatialMapCreateBody(BaseModel):
     bounds: SpatialBounds = Field(default_factory=SpatialBounds)
     backgroundAssetId: Optional[str] = None
     masterEnvironmentPrompt: str = ""
+    geometrySource: Optional[str] = None
     providerHonesty: ProviderHonestyMode = "approximate_translation"
     # Scene Intent lineage. sceneDescription is validated + compiled into
     # sceneIntent server-side; sceneIntent may also be passed pre-compiled
@@ -414,8 +560,10 @@ class SpatialMapUpdateBody(BaseModel):
     bounds: Optional[SpatialBounds] = None
     backgroundAssetId: Optional[str] = None
     masterEnvironmentPrompt: Optional[str] = None
+    geometrySource: Optional[str] = None
     providerHonesty: Optional[ProviderHonestyMode] = None
     gridScale: Optional[int] = None
+    backgroundAlignment: Optional[BackgroundAlignment] = None
     anchors: Optional[list[SpatialAnchor]] = None
     sceneDescription: Optional[str] = None
     sceneIntent: Optional[SceneIntent] = None
@@ -518,6 +666,8 @@ class SpatialCameraCreateBody(BaseModel):
     fovPreset: str = "medium"
     shotSize: str = "auto"
     primarySubject: str = "auto"
+    # Map glyph: free (default) = placeable entity; pov = attach to Primary Subject.
+    attachMode: str = "free"
     normalizedX: Optional[float] = None
     normalizedY: Optional[float] = None
     gridRow: int = -1
@@ -549,6 +699,7 @@ class SpatialCharacterPlacementUpdateBody(BaseModel):
     miniPrompt: Optional[str] = None
     tag: Optional[str] = None
     visible: Optional[bool] = None
+    movementSegmentId: Optional[str] = None
 
 
 class SpatialPropPlacementUpdateBody(BaseModel):
@@ -580,6 +731,7 @@ class SpatialPropPlacementUpdateBody(BaseModel):
     attachedCharacterId: Optional[str] = None
     relationship: Optional[PropRelationship] = None
     attachmentPoint: Optional[AttachmentPoint] = None
+    movementSegmentId: Optional[str] = None
 
 
 
@@ -631,6 +783,7 @@ class SpatialCameraUpdateBody(BaseModel):
     fovPreset: Optional[str] = None
     shotSize: Optional[str] = None
     primarySubject: Optional[str] = None
+    attachMode: Optional[str] = None
     normalizedX: Optional[float] = None
     normalizedY: Optional[float] = None
     gridRow: Optional[int] = None
@@ -639,6 +792,7 @@ class SpatialCameraUpdateBody(BaseModel):
     lookAtId: Optional[str] = None
     raiseMeters: Optional[float] = None
     orbitDegrees: Optional[float] = None
+    movementSegmentId: Optional[str] = None
 
 
 class SpatialMovementPathCreateBody(BaseModel):

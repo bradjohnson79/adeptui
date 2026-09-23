@@ -16,7 +16,7 @@ _DEFERRED_TOOL_PREFIXES = (
     "propose_video_upscale",
     "propose_background",
     "propose_portrait",
-    "propose_brand",
+    "propose_brand",  # leftover v1.1 Brand Studio plans stay non-executable; do not remount the tool
 )
 
 _W6P_EXECUTABLE_PREFIXES = (

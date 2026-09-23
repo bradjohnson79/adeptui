@@ -3,7 +3,7 @@
 The visual resolver keeps a single activeSfx for preview inspection.
 Playback needs every overlapping dialogue and footstep clip.
 */
-import type { DirectorTimeline, LipSyncTrack, TimelineClip } from "../DirectorTracks";
+import type { TimelineBoardView, TimelineClip } from "../DirectorTracks";
 import type { BatchBlock, BatchClip } from "../../timelineMaster/contracts";
 import { resolveBatchAtTime } from "./resolveTimelineAtTime";
 
@@ -39,7 +39,7 @@ function pushClip(
   const assetId = String(args.assetId || "").trim();
   if (!assetId || !intersects(args.start, args.length, args.t)) return;
   const fallbackVolume = args.kind === "sfx" ? 0.32 : 1;
-  const storedVolume = Math.max(0, Math.min(1, Number(args.volume ?? fallbackVolume)));
+  const storedVolume = Math.max(0, Math.min(2, Number(args.volume ?? fallbackVolume)));
   out.push({
     clipId: args.clipId,
     assetId,
@@ -93,29 +93,9 @@ function addBatchClips(
   }
 }
 
-function addLipSync(
-  out: TimelineAudioLayer[],
-  tracks: LipSyncTrack[] | undefined,
-  t: number,
-) {
-  for (const track of tracks || []) {
-    for (const clip of track.clips || []) {
-      pushClip(out, {
-        clipId: clip.id,
-        assetId: clip.audio_asset_id || track.audio_asset_id,
-        label: clip.label || track.label,
-        kind: "dialogue",
-        start: Number(clip.start || 0),
-        length: Number(clip.length || 0),
-        volume: 1,
-        t,
-      });
-    }
-  }
-}
 
 export function collectTimelineAudioAtTime(
-  timeline: DirectorTimeline | null,
+  timeline: TimelineBoardView | null,
   master: { batchBlocks?: BatchBlock[] } | null,
   playheadSec: number,
 ): TimelineAudioLayer[] {
@@ -125,7 +105,8 @@ export function collectTimelineAudioAtTime(
   const batch = batchHit?.batch || null;
   const batchStart = batchHit ? t - batchHit.localTime : 0;
 
-  addLipSync(out, timeline?.lipsync?.tracks, t);
+  // LIPSYNC_TRACK_DEMOTION / MAGI quarantine: Lip Sync track dialogue is not
+  // Timeline Preview authority. Re-Take (rtclip_*) owns its AV window.
 
   // WYSIWYG: when any batch owns Music/SFX clips, only play clips that exist on
   // the active batch (no silent fall-through to stale scene-global tracks).
@@ -135,11 +116,11 @@ export function collectTimelineAudioAtTime(
 
   const batchAudio = batch?.audioClips || [];
   if (anyBatchAudio) addBatchClips(out, batchAudio, "audio", t, batchStart);
-  else addDirectorClips(out, timeline?.audio_clips, "audio", t);
+  else addDirectorClips(out, timeline?.audioClips, "audio", t);
 
   const batchSfx = batch?.sfxClips || [];
   if (anyBatchSfx) addBatchClips(out, batchSfx, "sfx", t, batchStart);
-  else addDirectorClips(out, timeline?.sfx_clips, "sfx", t);
+  else addDirectorClips(out, timeline?.sfxClips, "sfx", t);
 
   return out;
 }

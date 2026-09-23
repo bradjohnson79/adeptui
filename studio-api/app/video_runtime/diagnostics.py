@@ -154,10 +154,8 @@ async def build_diagnostics(db: Any | None = None) -> dict[str, Any]:
             "missingVsRegistry": missing_total,
         },
         "modelInventory": {
-            "wan": present("wan_models"),
-            "ltx": present("ltx_checkpoint"),
+            "ltx25": present("ltx_2_5_checkpoint"),
             "zimage": present("zimage_models"),
-            "icLora": present("ltx23_ic_lora_ingredients"),
         },
         "queue": {
             "comfyRunning": queue_running,

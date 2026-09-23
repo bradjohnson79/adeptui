@@ -157,11 +157,44 @@ _CAPABILITY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # "images from the ERS" / "shots using the saved cameras" → scene.generate
     (re.compile(r"\b(?:create|generate|make|render)\b.*\bimages?\b.*\bfrom\s+(?:the\s+)?(?:ers|environment\s+reference\s+(?:sheet|package))\b", re.I), "scene.generate"),
     (re.compile(r"\b(?:create|generate|make|render)\b.*\b(?:shots?|images?)\b.*\b(?:using|from|with)\s+(?:the\s+)?(?:[a-z]+\s+)?(?:saved\s+)?cameras?\b", re.I), "scene.generate"),
+    # ORDER19: visual/background attach patterns MUST precede generic add-to-timeline
+    # Order 11A — Timeline visual/background attach from chat (precedes ERS).
+    (re.compile(
+        r"\b(?:use|treat|keep|attach)\b.{0,40}\b(?:as\s+)?(?:the\s+)?"
+        r"(?:background|timeline\s+visual|visual\s+ref(?:erence)?|set\s+reference)\b",
+        re.I | re.S,
+    ), "timeline.attach_optional_reference"),
+    (re.compile(
+        r"\b(?:background\s+ref(?:erence)?|timeline\s+background|"
+        r"look\s+of\s+(?:the\s+)?(?:place|caf[eé]|location))\b",
+        re.I,
+    ), "timeline.attach_optional_reference"),
+    # Intelligence mission 2026-09-19 (Phase 5): timed-prompt PLACEMENT goes to
+    # the dedicated prompt-segment capability (existing tool
+    # `timeline.propose_add_prompt_segment`). A bare "timed prompt" mention is
+    # AUTHORING (the LLM writes the text) and resolves to NO capability here.
+    (re.compile(
+        r"\b(?:put|add|place|insert|attach|drop)\b[^.?!]{0,60}\b(?:timed\s+prompt|prompt\s+segment|prompt\s+clip|prompt\s+track)\b",
+        re.I,
+    ), "timeline.add_prompt_segment"),
+    # Timed-prompt content handoff (2026-09-20): AUTHOR + PLACE in one command
+    # ("Create the timed prompt for this scene and put it into Timeline.") —
+    # the authoring verb comes FIRST, so the placement entry above misses it
+    # and the generic add-to-timeline pattern used to misroute this to
+    # timeline.add_asset (empty ImageClip). The timed-prompt payload is a
+    # prompt segment, not an asset.
+    (re.compile(
+        r"^(?=.*\b(?:create|write|draft|compose|make)\b)"
+        r"(?=.*\b(?:timed\s+prompt|prompt\s+segment|prompt\s+clip|prompt\s+track)\b)"
+        r"(?=.*\btimeline\b)",
+        re.I | re.S,
+    ), "timeline.add_prompt_segment"),
     # Timeline edits → timeline.add_asset (TOOL capability; curated tools path)
     (re.compile(r"\b(?:put|add|place|move|insert|attach)\b.*\b(?:on|to|into|in|at|onto)\s+(?:the\s+)?timeline\b", re.I), "timeline.add_asset"),
-    (re.compile(r"\b(?:timed\s+prompt|prompt\s+clip|prompt\s+track)\b", re.I), "timeline.add_asset"),
     (re.compile(r"\b(?:create|make|add|build|start)\s+(?:a\s+|the\s+|another\s+|next\s+)?batch\b", re.I), "timeline.add_asset"),
-    (re.compile(r"\b(?:16\s*:\s*9|21\s*:\s*9|9\s*:\s*16|1\s*:\s*1)\b", re.I), "timeline.add_asset"),
+    # A bare aspect ratio is a FORMAT hint, not an operation. The previous
+    # mapping ("9:16" alone → timeline.add_asset) minted executions from
+    # format mentions and was removed in the 2026-09-19 intelligence repair.
 
     # --- m413 Spatial Map + Atlas + ERS + Scene Creator (specific first) ---
     # Atlas shot (roofless top-down environment reference) — must precede the
@@ -169,6 +202,7 @@ _CAPABILITY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b(?:create|generate|make|render|build)\b.*\batlas\s+shot\b", re.I), "atlas.generate"),
     (re.compile(r"\broofless\s+(?:shot|map|view)\b", re.I), "atlas.generate"),
     # ERS — environment reference sheet/package. Precedes generic image gen.
+    # Explicit generate/create/validate only — ordinary café photo is NOT ERS.
     (re.compile(r"\b(?:generate|create|make|build|assemble)\b.*\b(?:ers|environment\s+reference\s+(?:sheet|package|set))\b", re.I), "ers.generate"),
     # Scene Creator shot generation: "generate four shots", "generate N scene
     # shots", "make 3 scene images". Precedes generic image gen + storyboard.
@@ -250,6 +284,7 @@ _CONVERSATIONAL_FOUNDATION_INTENTS: frozenset[str] = frozenset(
         "CONTINUE_PREVIOUS_WORK",
         "CORRECT_ASSISTANT",
         "EXPRESS_DISSATISFACTION",
+        "PROMPT_AUTHORING",
         "UNKNOWN",
     }
 )
@@ -276,6 +311,72 @@ def _resolve_capability(message: str) -> tuple[str, list[str]]:
                 return capability_id, list(cap.tool_ids)
             return capability_id, []
     return "", []
+
+
+# Contextual follow-ups (Intelligence mission RC5, Phase 6): short referential
+# imperatives that must be resolved from real conversation context, not
+# guessed in isolation. This gate routes the turn to the LLM with the curated
+# catalog (and inherited context) — the MODEL resolves the referent and selects
+# the existing tool; execution stays deterministic after selection.
+_FOLLOWUP_IMPERATIVE_RE = re.compile(
+    r"^\s*(?:ok(?:ay)?|alright|yes|yep|yeah|sure|great|good|perfect|please|let'?s)?[\s,.!]*"
+    r"(?:please\s+)?(?:go\s+(?:with|ahead\s+with|on\s+with)|set\s+(?:that\s+|it\s+|this\s+|everything\s+)?up|"
+    r"prepare\s+(?:it|that|this|the\s+\w+)|do\s+(?:that|it|this)|use\s+(?:that|it|this|the\s+same)|"
+    r"keep\s+(?:him|her|it|them|that|cade|korri)\b|make\s+(?:it|that|him|her)\s+(?:tighter|wider|closer|faster|slower|darker|brighter)|"
+    r"move\s+(?:him|her|it|them|that)\b|generate\s+(?:it|that|this)|run\s+(?:it|that|this)|build\s+(?:it|that|this))\b",
+    re.I,
+)
+
+_VISUAL_FOLLOWUP_MAX_WORDS = 14
+
+
+def _resolve_followup_execution(
+    message: str,
+    recent_messages: Optional[list[Any]] = None,
+) -> Optional[UnifiedIntent]:
+    """Resolve a short contextual follow-up against real conversation context.
+
+    Returns an EXECUTION + CURATED_TOOLS intent so the LLM — with the inherited
+    context and the curated tool catalog — resolves the referent and selects
+    the existing tool. Returns None when the message is not a short contextual
+    follow-up (normal classification continues).
+    """
+
+    text = (message or "").strip()
+    if not text or len(text.split()) > _VISUAL_FOLLOWUP_MAX_WORDS:
+        return None
+
+    evidence: list[str] = []
+    inherited_prompt = ""
+    try:
+        from ..conversation.foundation.visual_generation import (
+            inherit_visual_prompt_from_history,
+            is_generate_now_followup,
+        )
+
+        if is_generate_now_followup(text, recent_messages):
+            inherited_prompt = inherit_visual_prompt_from_history(recent_messages)
+            evidence.append("visual generate-now follow-up — inherited prior brief from conversation")
+    except Exception:  # noqa: BLE001
+        pass
+
+    if not inherited_prompt and not _FOLLOWUP_IMPERATIVE_RE.match(text):
+        return None
+
+    capability_id, tool_ids = _resolve_capability(inherited_prompt or text)
+    if not inherited_prompt:
+        evidence.append("contextual follow-up — referent resolved by the model from conversation context")
+    if inherited_prompt:
+        evidence.append("inherited prior visual brief as generation context")
+    return UnifiedIntent(
+        intent=UnifiedIntentKind.EXECUTION,
+        capability=capability_id,
+        confidence=0.5,
+        dispatch=DispatchStrategy.CURATED_TOOLS,
+        classifier_source="deterministic",
+        evidence=evidence,
+        curated_tool_ids=tool_ids,
+    )
 
 
 def classify_intent(
@@ -306,9 +407,32 @@ def classify_intent(
     context = context or {}
     evidence: list[str] = []
 
+    recent_messages = context.get("recent_messages") or context.get("messages") or []
+    # Initialized BEFORE the early guards below — a guard must never reference
+    # a variable that is assigned later in this function (that raises
+    # UnboundLocalError, silently swallowed here — independent peer review
+    # objection 2, 2026-09-19).
+    classifier_source = "deterministic"
+
+    # Prompt authoring (Intelligence mission 2026-09-19, Phase 5): a request
+    # FOR prompt text is LLM authorship — never an execution, regardless of
+    # which verbs or scene nouns the sentence contains.
+    try:
+        from .deterministic import is_prompt_authoring
+
+        if is_prompt_authoring(message):
+            return UnifiedIntent(
+                intent=UnifiedIntentKind.CONVERSATION,
+                confidence=0.9,
+                dispatch=DispatchStrategy.LLM_ONLY,
+                classifier_source=classifier_source,
+                evidence=[*(evidence or []), "prompt authoring request — the model writes the prompt text"],
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
     action_value = "UNKNOWN"
     deterministic_confidence = 0.0
-    classifier_source = "deterministic"
     if route_decision is not None:
         action = getattr(route_decision, "actionClass", None)
         action_value = action.value if action else "UNKNOWN"
@@ -330,6 +454,27 @@ def classify_intent(
     # 1. High-confidence deterministic execution → EXECUTION + DETERMINISTIC.
     if action_value in {"EXECUTE_PRODUCTION"} and deterministic_confidence >= 0.7:
         capability_id, tool_ids = _resolve_capability(message)
+        # Timed-prompt content handoff (2026-09-20): when the placement command
+        # also carries AUTHORING language ("Create the timed prompt … and put
+        # it into Timeline"), the prompt text does not exist yet — the LLM must
+        # author it and emit it as the structured `text` tool argument through
+        # the curated-tools fence. A deterministic dispatch would place an
+        # empty segment.
+        if capability_id == "timeline.add_prompt_segment" and re.search(
+            r"\b(?:create|write|draft|compose)\b", message or "", re.I
+        ):
+            return UnifiedIntent(
+                intent=UnifiedIntentKind.EXECUTION,
+                capability=capability_id,
+                confidence=deterministic_confidence,
+                dispatch=DispatchStrategy.CURATED_TOOLS,
+                classifier_source=classifier_source,
+                evidence=[
+                    *(evidence or []),
+                    "author+place: the LLM authors the timed prompt and emits it as the structured text argument",
+                ],
+                curated_tool_ids=tool_ids,
+            )
         return UnifiedIntent(
             intent=UnifiedIntentKind.EXECUTION,
             capability=capability_id,
@@ -357,6 +502,14 @@ def classify_intent(
             evidence=evidence or [f"Foundation intent {foundation_value}"],
             curated_tool_ids=tool_ids,
         )
+
+    # 2b. Contextual follow-ups (Intelligence mission RC5, Phase 6): short
+    # referential imperatives resolve against the real conversation context.
+    # The LLM (curated catalog + inherited context) resolves the referent and
+    # selects the existing tool; execution remains deterministic afterwards.
+    followup = _resolve_followup_execution(message, recent_messages)
+    if followup is not None:
+        return followup
 
     # 3. Proposal-class (modify knowledge / propose creative change).
     if action_value in _PROPOSAL_ACTIONS:

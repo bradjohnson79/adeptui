@@ -211,10 +211,11 @@ def test_ers_generate_enqueues_image_product_jobs(monkeypatch) -> None:
     monkeypatch.setattr(ers_generate, "_enqueue_ers_image_product", _fake_enqueue)
     monkeypatch.setattr(
         "app.spatial_map.service.get_document",
-        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid),
+        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid, backgroundAssetId="atlas-ref-1"),
     )
     monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", lambda *a, **k: None)
     monkeypatch.setattr("app.environment_reference_sheet.store.save_sheet", lambda current: None)
+    monkeypatch.setattr(ers_generate, "_public_asset_url", lambda aid: f"https://assets.example/{aid}")
 
     result = ers_generate.handle(
         db=None,
@@ -310,6 +311,8 @@ def test_ers_body_local_flux_is_not_kie() -> None:
 
 
 def test_ers_handle_forwards_selected_model_not_zimage(monkeypatch) -> None:
+    import pytest
+
     from app.codirector.capabilities.handlers import ers_generate
     from app.environment_reference_sheet.contracts import SpatialMapReference
     from app.spatial_map.schemas import SpatialMapDocument
@@ -342,28 +345,22 @@ def test_ers_handle_forwards_selected_model_not_zimage(monkeypatch) -> None:
     monkeypatch.setattr(ers_generate, "_enqueue_ers_image_product", _fake_enqueue)
     monkeypatch.setattr(
         "app.spatial_map.service.get_document",
-        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid),
+        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid, backgroundAssetId="atlas-ref-1"),
     )
     monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", lambda *a, **k: None)
     monkeypatch.setattr("app.environment_reference_sheet.store.save_sheet", lambda current: None)
 
-    ers_generate.handle(
-        db=None,
-        project_id=project_id,
-        execution_id=execution_id,
-        spatial_map_id=spatial_map_id,
-        scene_id="scene-1",
-        hosted_model_id="nano-banana-kie",
-        source="api",
-    )
-    assert len(captured) == 1
-    body = captured[0]
-    assert body["purpose"] == "environment_reference_sheet"
-    assert body.get("hostedModelId") == "nano-banana-kie"
-    assert body.get("modelFamilyPreference") != "zimage"
-    assert (body.get("creativeContext") or {}).get("workflowKey") != "zimage.txt2img"
-    assert "zimage.txt2img" not in str(body)
-    assert (body.get("creativeContext") or {}).get("resolvedProvider") == "kie"
+    with pytest.raises(RuntimeError, match="GPT Image 2"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id=execution_id,
+            spatial_map_id=spatial_map_id,
+            scene_id="scene-1",
+            hosted_model_id="nano-banana-kie",
+            source="api",
+        )
+    assert not captured
 
 
 def test_ers_persist_composite_sets_has_reference(monkeypatch) -> None:
@@ -511,13 +508,14 @@ def test_ers_handle_stamps_one_job_id_for_async_persist(monkeypatch) -> None:
     monkeypatch.setattr(ers_generate, "_enqueue_ers_image_product", _fake_enqueue)
     monkeypatch.setattr(
         "app.spatial_map.service.get_document",
-        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid),
+        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid, backgroundAssetId="atlas-ref-1"),
     )
     monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", lambda *a, **k: None)
     monkeypatch.setattr(
         "app.environment_reference_sheet.store.save_sheet",
         lambda current: stamped.append(current),
     )
+    monkeypatch.setattr(ers_generate, "_public_asset_url", lambda aid: f"https://assets.example/{aid}")
 
     result = ers_generate.handle(
         db=None,

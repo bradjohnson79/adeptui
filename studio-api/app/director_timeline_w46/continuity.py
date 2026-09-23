@@ -215,6 +215,13 @@ def bridge_source_stale(bridge: ContinuityBridge, source: Any, master: Any | Non
         return True
     if bridge.sourceTakeId and source.activeTakeId and bridge.sourceTakeId != source.activeTakeId:
         return True
+    stored_take = str(state.get("sceneTakeId") or "").strip()
+    if master is not None and stored_take:
+        live_take = str(
+            getattr(master, "activeSceneTakeId", "") or getattr(master, "currentSceneTakeId", "") or ""
+        ).strip()
+        if live_take and stored_take != live_take:
+            return True
     return False
 
 
@@ -320,6 +327,9 @@ def prepare_outgoing_bridge(
     scene_id: str,
     master: SceneTimelineMaster,
     source_batch_id: str,
+    *,
+    admitted_preflight: dict | None = None,
+    run_temporal: bool = True,
 ) -> ContinuityBridge | None:
     source = next((b for b in master.batchBlocks if b.id == source_batch_id), None)
     if not source:
@@ -350,7 +360,16 @@ def prepare_outgoing_bridge(
             ready = None
         else:
             nxt.incomingBridgeId = ready.bridgeId
-            _run_temporal_review(db, project_id, scene_id, master, source, nxt.id)
+            if run_temporal:
+                _run_temporal_review(
+                    db,
+                    project_id,
+                    scene_id,
+                    master,
+                    source,
+                    nxt.id,
+                    admitted_preflight=admitted_preflight,
+                )
             return ready
     pending = next((b for b in existing if b.status in ("Waiting", "Analyzing")), None)
     if pending:
@@ -371,7 +390,16 @@ def prepare_outgoing_bridge(
     analyze_bridge(db, project_id, master, bridge)
     master.continuityBridges.append(bridge)
     nxt.incomingBridgeId = bridge.bridgeId
-    _run_temporal_review(db, project_id, scene_id, master, source, nxt.id)
+    if run_temporal:
+        _run_temporal_review(
+            db,
+            project_id,
+            scene_id,
+            master,
+            source,
+            nxt.id,
+            admitted_preflight=admitted_preflight,
+        )
     return bridge
 
 
@@ -382,6 +410,8 @@ def _run_temporal_review(
     master: SceneTimelineMaster,
     source,
     target_batch_id: str,
+    *,
+    admitted_preflight: dict | None = None,
 ) -> None:
     """Sibling of last-frame extract. Failure must not fail the pixel bridge."""
     try:
@@ -400,6 +430,7 @@ def _run_temporal_review(
             master,
             source,
             target_batch_id=target_batch_id,
+            admitted_preflight=admitted_preflight,
         )
     except Exception as exc:
         try:

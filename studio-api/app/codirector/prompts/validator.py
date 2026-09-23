@@ -139,7 +139,7 @@ def validate_front_matter_dict(
         )
 
     may_execute = _coerce_bool(raw.get("may_execute_tools"), "may_execute_tools", path, issues)
-    if may_execute:
+    if may_execute and prompt_type == "specialist":
         issues.append(
             PromptValidationIssue(
                 str(path),

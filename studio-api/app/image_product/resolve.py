@@ -25,6 +25,15 @@ def _intent_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
     ).strip().lower()
     purpose = str(src.get("purpose") or ctx.get("objective") or "").strip()
     operation = str(src.get("operation") or "image.generate").strip()
+    references = bool(
+        src.get("source_asset_id")
+        or src.get("sourceAssetId")
+        or src.get("referenceIds")
+        or src.get("referenceAssetIds")
+        or src.get("refs")
+        or src.get("referenceImage")
+        or src.get("reference_image")
+    )
     if src.get("edit") or src.get("source_asset_id") or src.get("sourceAssetId"):
         operation = "image.edit"
     if purpose == "environment_reference_sheet":
@@ -32,6 +41,8 @@ def _intent_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
         # Stay image.generate so Qwen does not fall into the refused edit path.
         operation = "image.generate"
         layout = "production_ers"
+    elif purpose == "codirector_image_generate" and references:
+        operation = "image.generate"
     model = str(
         src.get("hostedModelId")
         or src.get("kieImageModelId")
@@ -41,13 +52,6 @@ def _intent_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
         or src.get("modelFamilyPreference")
         or ""
     ).strip()
-    references = bool(
-        src.get("source_asset_id")
-        or src.get("sourceAssetId")
-        or src.get("referenceIds")
-        or src.get("referenceAssetIds")
-        or src.get("refs")
-    )
     layout = str(src.get("layout") or ctx.get("layout") or "").strip()
     return {
         "purpose": purpose,
@@ -120,7 +124,11 @@ def _wants_edit(src: dict[str, Any], intent: dict[str, Any]) -> bool:
     if purpose == "environment_reference_sheet":
         return False
     force = str(src.get("forceWorkflowKey") or intent.get("forceWorkflowKey") or "").strip()
-    if force == "qwen2512.ref":
+    if force in {"qwen2512.ref", "flux.img2img", "flux.reference", "flux.ref"}:
+        return False
+    if purpose == "codirector_image_generate" and (
+        src.get("referenceImage") or src.get("referenceAssetIds") or src.get("reference_image")
+    ):
         return False
     if intent.get("operation") == "image.edit":
         return True
@@ -179,6 +187,28 @@ def _kie_supports_i2i(dock: str, official: str) -> bool:
     return bool(kie_image_supports_i2i(dock) or kie_image_supports_i2i(official))
 
 
+
+def _ers_prompt_only_allowed(src: dict, intent: dict) -> bool:
+    """Env Creator Express: ERS may run GPT T2I when a text environment prompt is present."""
+    ctx = src.get("creativeContext") if isinstance(src.get("creativeContext"), dict) else {}
+    if not ctx and isinstance(intent.get("creativeContext"), dict):
+        ctx = intent.get("creativeContext") or {}
+    prompt = str(
+        src.get("environmentPrompt")
+        or src.get("environment_prompt")
+        or ctx.get("environmentPrompt")
+        or src.get("prompt")
+        or intent.get("prompt")
+        or ""
+    ).strip()
+    grounding = ctx.get("referenceGrounding") if isinstance(ctx.get("referenceGrounding"), dict) else {}
+    mode = str(grounding.get("mode") or "").lower()
+    official = str(
+        src.get("kieImageModelId") or src.get("kie_image_model_id") or ctx.get("resolvedOfficialModelId") or ""
+    ).lower()
+    return bool(prompt) or mode == "text" or "text-to-image" in official
+
+
 def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
     """Resolve whether this image intent can execute, and on which adapter.
 
@@ -207,10 +237,14 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
             or src.get("referenceImage")
             or src.get("input_urls")
         )
-        if purpose_local == "environment_reference_sheet" and not has_pixels_local:
+        if (
+            purpose_local == "environment_reference_sheet"
+            and not has_pixels_local
+            and not _ers_prompt_only_allowed(src, intent)
+        ):
             return _refuse(
-                "Environment Reference Sheets require an authoritative source image. "
-                "Text-to-image is not allowed.",
+                "Environment Reference Sheets require an authoritative source image "
+                "or an environment prompt. Text-to-image without a prompt is not allowed.",
                 provider="local",
                 adapter="comfy",
                 officialModelId=family,
@@ -221,21 +255,75 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
             _is_qwen2512_family(family) or _is_qwen2512_family(force)
         ):
             return _refuse_qwen2512_edit(intent, family or force)
-        ers_qwen = (
-            str(intent.get("purpose") or "") == "environment_reference_sheet"
-            and _is_qwen2512_family(family or force)
-            and bool(
-                intent.get("references")
-                or src.get("sourceAssetId")
-                or src.get("source_asset_id")
-                or src.get("referenceImage")
+        purpose_local_n = str(intent.get("purpose") or src.get("purpose") or "").strip().lower()
+        cis_general = purpose_local_n in {
+            "",
+            "general",
+            "concept",
+            "keyframe",
+            "character",
+            "location",
+            "prop",
+            "mood",
+            "storyboard",
+        }
+        has_ref_pixels = bool(
+            intent.get("references")
+            or src.get("sourceAssetId")
+            or src.get("source_asset_id")
+            or src.get("referenceImage")
+            or src.get("referenceAssetIds")
+            or src.get("authorityReferences")
+        )
+        qwen_ref_generate = (
+            _is_qwen2512_family(family or force)
+            and has_ref_pixels
+            and (
+                purpose_local_n
+                in {"environment_reference_sheet", "codirector_image_generate"}
+                or (cis_general and str(force or "").strip() in {"", "qwen2512.ref"})
             )
         )
+        # CIS multi-ref may honestly route to Qwen Edit 2509 (force key).
+        if (
+            cis_general
+            and has_ref_pixels
+            and not force
+            and _is_qwen2512_family(family)
+        ):
+            # Compile should have pinned .ref / 2509; if not, refuse silent T2I.
+            return _refuse(
+                "Qwen Image 2512 cannot silently run txt2img while reference images are "
+                "selected. Use qwen2512.ref (single plate) or Qwen Edit 2509 multi-ref "
+                "(character+environment).",
+                provider="local",
+                adapter="comfy",
+                officialModelId=family or "qwen2512",
+                workflowKey="",
+                intent=intent,
+                family=family,
+            )
+        workflow_key = force or (
+            "qwen2512.ref" if qwen_ref_generate else (f"{family}.txt2img" if family else "")
+        )
+        if (
+            cis_general
+            and has_ref_pixels
+            and str(workflow_key).endswith(".txt2img")
+        ):
+            return _refuse(
+                "Refusing silent txt2img while reference images are selected for Image Generator.",
+                provider="local",
+                adapter="comfy",
+                officialModelId=family,
+                workflowKey="",
+                intent=intent,
+            )
         return _ok(
             provider="local",
             adapter="comfy",
             official=family,
-            workflow_key=force or ("qwen2512.ref" if ers_qwen else (f"{family}.txt2img" if family else "")),
+            workflow_key=workflow_key,
             reason="local comfy adapter facade (not kie)",
             hostedModelId="",
             intent=intent,
@@ -255,10 +343,11 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
         or src.get("image_urls")
         or src.get("referenceImage")
     )
-    if purpose == "environment_reference_sheet" and not has_pixels:
+    ers_prompt_only = _ers_prompt_only_allowed(src, intent)
+    if purpose == "environment_reference_sheet" and not has_pixels and not ers_prompt_only:
         return _refuse(
-            "Environment Reference Sheets require an authoritative source image. "
-            "Text-to-image is not allowed.",
+            "Environment Reference Sheets require an authoritative source image "
+            "or an environment prompt. Text-to-image without a prompt is not allowed.",
             provider=provider or "local",
             adapter=provider or "comfy",
             officialModelId="",
@@ -268,10 +357,11 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
         continuity
         and "gpt-image-2" in model.lower()
         and not has_pixels
+        and not ers_prompt_only
     ):
         return _refuse(
-            "Environment continuity requires an image-conditioned GPT Image 2 path. "
-            "Attach an authoritative environment image; text-to-image is not allowed.",
+            "Environment continuity requires an image-conditioned GPT Image 2 path "
+            "or an environment prompt for text-to-image.",
             provider="kie",
             adapter="kie",
             officialModelId="",

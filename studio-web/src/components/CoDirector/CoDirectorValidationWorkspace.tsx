@@ -192,8 +192,8 @@ export function CoDirectorValidationWorkspace({
     try {
       let itemId = timelineItemId || undefined;
       if (!itemId) {
-        const director = await api.getDirector(projectId, sceneId);
-        const clips = (director?.image_clips || []) as Array<{ id?: string }>;
+        const masterResp = await api.directorTimelineMaster(projectId, sceneId);
+        const clips = (masterResp?.master?.batchBlocks || []).flatMap((b) => b.visualClips || []) as Array<{ id?: string }>;
         if (!clips.length) return undefined;
         // Prefer a clip that already has bindings so closed-loop validation is binding-aware.
         for (const clip of clips) {

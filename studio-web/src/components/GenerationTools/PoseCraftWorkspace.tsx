@@ -79,15 +79,25 @@ import {
   comparePoseIntelligence,
   createCustomPose,
   deleteCustomPose,
+  executeAutoPreviz,
   flushSceneDocument,
-  handoffPoseToSceneCreator,
+  getReconstruction,
   handoffPoseToTimeline,
+  importReconstruction,
   listCustomPoses,
   loadPoseIntelligence,
   loadSceneDocument,
+  proposeAutoPreviz,
   saveSceneDocument,
+  setImageGeneratorHandoff,
+  startReconstruction,
   type PoseIntelligencePacket,
 } from "../../posecraft/posecraftApi";
+import { creatorGroupForPose } from "../../posecraft/posePresentation";
+import { focusCamera, lookFigureAt, sitFigureOnObject } from "../../posecraft/contactActions";
+import { AutoPrevizPanel } from "./posecraft/AutoPrevizPanel";
+import { ReconstructStagePanel } from "./posecraft/ReconstructStagePanel";
+import { StageTreePanel } from "./posecraft/StageTreePanel";
 import type { ArchetypeId, FigureRole, FurnitureKind, PoseCategoryId, PoseCraftDocument, PoseCraftLayoutPrefs, PoseCraftScene, PoseMap, PosePreset } from "../../posecraft/types";
 import type { Project } from "../../types";
 import "../../posecraft/posecraft.css";
@@ -138,6 +148,12 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
     past: [] as PoseCraftScene[], present: initialDocument.currentScene, future: [] as PoseCraftScene[],
   }));
   const [hydrated, setHydrated] = useState(false);
+  const [loadState, setLoadState] = useState<"ok" | "empty" | "corrupt">("ok");
+  const [studioMode, setStudioMode] = useState<"build" | "reconstruct">("build");
+  const [reconstructAssetId, setReconstructAssetId] = useState("");
+  const [reconstructJob, setReconstructJob] = useState<Record<string, unknown> | null>(null);
+  const [autoPrevizPlan, setAutoPrevizPlan] = useState<{ planId: string; shots: Array<{ name: string; focusKind: string }> } | null>(null);
+  const [autoPrevizPrompt, setAutoPrevizPrompt] = useState("Mess Hall establishing, then Korri and Anadriya talking");
   const [customPoses, setCustomPoses] = useState<PosePreset[]>([]);
   const [viewportStatus, setViewportStatus] = useState<{ renderer: "webgl" | "webgpu"; detail: string } | null>(null);
   const [poseCategory, setPoseCategory] = useState<PoseCategoryId | "all">("all");
@@ -188,7 +204,6 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
   const [previewSnapshotId, setPreviewSnapshotId] = useState<string | null>(null);
   const [sendingImageGen, setSendingImageGen] = useState(false);
   const [sendingStoryboard, setSendingStoryboard] = useState(false);
-  const [sendingSceneCreator, setSendingSceneCreator] = useState(false);
   const [sendingTimeline, setSendingTimeline] = useState(false);
   const [poseIntelStatus, setPoseIntelStatus] = useState<"idle" | "analyzing" | "ready" | "warning" | "unavailable" | "degraded">("idle");
   const [poseIntel, setPoseIntel] = useState<PoseIntelligencePacket | null>(null);
@@ -876,27 +891,7 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
           listCustomPoses(project.id).catch(() => []),
         ]);
         if (cancelled) return;
-        try {
-          const listed = await api.spatialMap.listMaps(project.id);
-          const map = (listed as { documents?: Array<Record<string, unknown>> }).documents?.[0] as
-            | { characters?: Array<{ label?: string; tag?: string; x?: number; y?: number; z?: number; positionMeters?: { x: number; y: number; z: number } }> }
-            | undefined;
-          const chars = map?.characters || [];
-          if (chars.length && !doc.currentScene.worldOriginMeters) {
-            const first = chars[0];
-            const origin = first.positionMeters || { x: first.x || 0, y: first.y || 0, z: first.z || 0 };
-            doc.currentScene.worldOriginMeters = origin;
-            doc.currentScene.figures = doc.currentScene.figures.map((fig) => {
-              const match = chars.find((c) => (c.label || c.tag || "").toLowerCase() === fig.name.toLowerCase());
-              const meters = match?.positionMeters || (match ? { x: match.x || 0, y: match.y || 0, z: match.z || 0 } : null);
-              if (!meters) return fig;
-              if (Math.abs(fig.position.x) > 1e-6 || Math.abs(fig.position.z) > 1e-6) return fig;
-              return { ...fig, position: { x: meters.x, z: meters.z } };
-            });
-          }
-        } catch {
-          /* Spatial Map origin is optional */
-        }
+        setLoadState((doc.loadState as "ok" | "empty" | "corrupt") || "ok");
         const prefs = doc.layoutPrefs ?? createDefaultLayoutPrefs();
         setDocumentState((prev) => ({ ...doc, savedVersions: doc.savedVersions ?? prev.savedVersions, layoutPrefs: prefs }));
         // Merge instead of overwrite: if the creator (or automation) added
@@ -973,6 +968,7 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
   // hydration completes so we don't overwrite the server document with defaults.
   useEffect(() => {
     if (!hydrated) return;
+    if (loadState === "corrupt") return;
     const handle = window.setTimeout(() => {
       saveSceneDocument(project.id, currentDocument).catch((error) => {
         console.error(error);
@@ -980,7 +976,7 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
       });
     }, 600);
     return () => window.clearTimeout(handle);
-  }, [currentDocument, project.id, hydrated]);
+  }, [currentDocument, project.id, hydrated, loadState]);
 
   // Gate I — persist layout prefs into the document whenever they change.
   useEffect(() => {
@@ -1206,34 +1202,84 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
     }
     setSendingImageGen(true);
     try {
-      // Project-scoped handoff: stash the frozen Snapshot reference so the
-      // Image Gen tab can show the staging thumbnail on open (existing
-      // sessionStorage handoff pattern).
-      try {
-        window.sessionStorage.setItem(
-          `adept.posecraft.handoff.${project.id}`,
-          JSON.stringify({
-            snapshotId: snap.snapshotId,
-            imageAssetId: snap.imageAssetId,
-            name: snap.name,
-            sceneRevision: snap.sceneRevision,
-            lensMm: snap.camera.lensMm,
-            aspect: snap.camera.aspect,
-            honestyLabel: "PoseCraft Snapshot — Visual Staging Reference",
-            at: Date.now(),
-          }),
-        );
-      } catch {
-        /* sessionStorage may be unavailable; handoff still proceeds via onGo */
-      }
+      await setImageGeneratorHandoff(project.id, snap.snapshotId, snap.imageAssetId);
       onGo?.("imagegen");
       setStatusMessage(`Sent Snapshot "${snap.name}" to Image Generation.`);
+    } catch (error) {
+      console.error(error);
+      setStatusMessage("Could not send this snapshot to Image Generation. The pose is unchanged.");
     } finally {
       setSendingImageGen(false);
     }
   }, [handoffDisabledTip, onGo, project.id, sendingImageGen]);
 
-  // Storyboard handoff: requires a selected Snapshot.
+  const runReconstruct = useCallback(async () => {
+    if (!reconstructAssetId.trim()) {
+      setStatusMessage("Choose a Library picture, then Reconstruct Stage.");
+      return;
+    }
+    try {
+      const started = await startReconstruction(project.id, reconstructAssetId.trim());
+      setReconstructJob(started);
+      setStatusMessage("Reconstruct Stage started. This uses Fire3D on the isolated GPU path.");
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        const job = await getReconstruction(project.id, started.jobId);
+        setReconstructJob(job);
+        if (job.status === "completed" || job.status === "failed") {
+          setStatusMessage(job.status === "completed" ? "Reconstruction finished. Review objects, then import." : String(job.error || "Reconstruction failed."));
+          break;
+        }
+      }
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not start Reconstruct Stage.");
+    }
+  }, [project.id, reconstructAssetId]);
+
+  const importReconstructedStage = useCallback(async () => {
+    const pkg = reconstructJob?.package as Record<string, unknown> | undefined;
+    if (!pkg) {
+      setStatusMessage("No reconstruction package yet. Reconstruct a picture first.");
+      return;
+    }
+    try {
+      const next = await importReconstruction(project.id, { package: pkg, includeEnvironment: true });
+      setDocumentState(next);
+      setHistory((prev) => ({ ...prev, present: next.currentScene }));
+      setStudioMode("build");
+      setStatusMessage("Imported reconstructed stage. Detected people stay as objects until you replace them with a character.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not import the reconstructed stage.");
+    }
+  }, [project.id, reconstructJob]);
+
+  const runAutoPrevizPlan = useCallback(async () => {
+    try {
+      const plan = await proposeAutoPreviz(project.id, autoPrevizPrompt);
+      setAutoPrevizPlan(plan);
+      setStatusMessage("Co-Director drafted an Auto Previz plan. Review it, then approve.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not draft Auto Previz.");
+    }
+  }, [autoPrevizPrompt, project.id]);
+
+  const approveAutoPreviz = useCallback(async () => {
+    if (!autoPrevizPlan) return;
+    try {
+      const next = await executeAutoPreviz(project.id, autoPrevizPlan.planId);
+      setDocumentState(next);
+      setHistory((prev) => ({ ...prev, present: next.currentScene }));
+      setStatusMessage("Approved Auto Previz. Cameras and shots are on the stage.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not build the Auto Previz scene.");
+    }
+  }, [autoPrevizPlan, project.id]);
+
+  // Storyboard handoff: requires a selected Snapshot. Places the frozen
+  // Snapshot PNG onto the Storyboard board through the REAL backend panel
+  // flow (same addImage path Image Generator uses), then navigates there.
+  // The old sessionStorage stub was never read by any surface — no more
+  // phantom "sent" success.
   const sendToStoryboard = useCallback(async () => {
     if (sendingStoryboard) return;
     const snap = getSelectedSnapshot(documentRef.current);
@@ -1241,55 +1287,29 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
       setStatusMessage(handoffDisabledTip);
       return;
     }
+    if (!snap.imageAssetId) {
+      setStatusMessage("This Snapshot has no image to send yet. Capture the Snapshot image and try again.");
+      return;
+    }
     setSendingStoryboard(true);
     try {
-      try {
-        window.sessionStorage.setItem(
-          `adept.posecraft.storyboard.${project.id}`,
-          JSON.stringify({
-            snapshotId: snap.snapshotId,
-            imageAssetId: snap.imageAssetId,
-            name: snap.name,
-            sceneRevision: snap.sceneRevision,
-            honestyLabel: "PoseCraft Snapshot — Visual Staging Reference",
-            at: Date.now(),
-          }),
-        );
-      } catch {
-        /* ignore */
-      }
+      const res = await api.storyboardStudio.addImage(project.id, {
+        assetId: snap.imageAssetId,
+        label: snap.name,
+        prompt: snap.semanticSummary || "",
+        lens: String(snap.camera.lensMm ?? ""),
+      });
+      setStatusMessage(
+        `Sent Snapshot "${snap.name}" to Storyboard · page ${res.slot.pageIndex + 1}, slot ${res.slot.slotIndex + 1}.`,
+      );
       onGo?.("script");
-      setStatusMessage(`Sent Snapshot "${snap.name}" to Storyboard.`);
+    } catch (error) {
+      console.error(error);
+      setStatusMessage("Could not send the Snapshot to Storyboard. Try again.");
     } finally {
       setSendingStoryboard(false);
     }
   }, [handoffDisabledTip, onGo, project.id, sendingStoryboard]);
-
-  const sendToSceneCreator = useCallback(async () => {
-    const snap = getSelectedSnapshot(documentRef.current);
-    if (!snap) {
-      setStatusMessage(handoffDisabledTip);
-      return;
-    }
-    setSendingSceneCreator(true);
-    try {
-      await flushSceneDocument(project.id, { ...documentRef.current, currentScene: sceneRef.current });
-      await handoffPoseToSceneCreator(project.id, snap.snapshotId);
-      try {
-        window.sessionStorage.setItem(
-          `adept.posecraft.scenecreator.${project.id}`,
-          JSON.stringify({ snapshotId: snap.snapshotId, imageAssetId: snap.imageAssetId, name: snap.name, at: Date.now() }),
-        );
-      } catch { /* ignore */ }
-      onGo?.("scenecreator");
-      setStatusMessage(`Sent Snapshot "${snap.name}" and pose notes to Scene Creator.`);
-    } catch (error) {
-      console.error(error);
-      setStatusMessage("Could not send pose notes to Scene Creator. Your pose is unchanged.");
-    } finally {
-      setSendingSceneCreator(false);
-    }
-  }, [handoffDisabledTip, onGo, project.id]);
 
   const sendToTimeline = useCallback(async () => {
     const snap = getSelectedSnapshot(documentRef.current);
@@ -1317,6 +1337,9 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
     }
   }, [handoffDisabledTip, onGo, project.id]);
 
+  // selectedFigure from useMemo above (do not redeclare)
+  const sceneObjects = scene.objects ?? [];
+
   return (
     <div className="page posecraft-workspace" data-testid="posecraft-workspace">
       <header className="posecraft-workspace__header">
@@ -1327,7 +1350,7 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
           </p>
           <h2 className="posecraft-workspace__title">Block your scene in 3D</h2>
           <p className="muted posecraft-workspace__subtitle">
-            Pose characters, set the camera, then send the staging reference to Image Generation.
+            Reconstruct a stage, pose characters, then send a previz snapshot to Image Generation.
           </p>
         </div>
         <div className="posecraft-workspace__actions">
@@ -1340,6 +1363,71 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
         </div>
       </header>
       <p className="scene-meta" data-testid="posecraft-status-message">{statusMessage}</p>
+      {loadState === "corrupt" ? (
+        <p className="scene-meta" data-testid="posecraft-corrupt-banner">
+          This PoseCraft save could not be read. The stored scene was not overwritten.
+        </p>
+      ) : null}
+
+      <div className="posecraft-mode-bar" data-testid="posecraft-mode-bar">
+        <Button variant={studioMode === "build" ? "primary" : "secondary"} onClick={() => setStudioMode("build")} data-testid="posecraft-mode-build">
+          Build Stage
+        </Button>
+        <Button variant={studioMode === "reconstruct" ? "primary" : "secondary"} onClick={() => setStudioMode("reconstruct")} data-testid="posecraft-mode-reconstruct">
+          Reconstruct Stage
+        </Button>
+      </div>
+
+      {studioMode === "reconstruct" ? (
+        <ReconstructStagePanel
+          assetId={reconstructAssetId}
+          onAssetId={setReconstructAssetId}
+          job={reconstructJob}
+          onReconstruct={() => void runReconstruct()}
+          onImport={() => void importReconstructedStage()}
+        />
+      ) : null}
+
+      <StageTreePanel scene={scene} />
+
+      <section className="panel" data-testid="posecraft-contact-bar">
+        <PanelHeading title="Place and look" tip="Sit a character on furniture, turn them toward someone, or move the camera in close." />
+        <div className="row">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const firstSeat = sceneObjects.find((obj) => /chair|bench|seat|stool/i.test(obj.name)) || scene.primitives[0];
+              if (selectedFigure && firstSeat) mutateScene((current) => sitFigureOnObject(current, selectedFigure.id, firstSeat.id));
+            }}
+            data-testid="posecraft-sit-on"
+          >
+            Sit
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const other = scene.figures.find((fig) => fig.id !== selectedFigure?.id);
+              if (selectedFigure && other) mutateScene((current) => lookFigureAt(current, selectedFigure.id, other.id));
+            }}
+            data-testid="posecraft-look-at"
+          >
+            Look at partner
+          </Button>
+          {(["stage", "figure", "torso", "head", "face"] as const).map((kind) => (
+            <Button key={kind} variant="secondary" onClick={() => mutateScene((current) => focusCamera(current, kind, selectedFigure?.id))} data-testid={`posecraft-focus-${kind}`}>
+              {kind === "figure" ? "Body" : kind[0].toUpperCase() + kind.slice(1)}
+            </Button>
+          ))}
+        </div>
+      </section>
+
+      <AutoPrevizPanel
+        prompt={autoPrevizPrompt}
+        onPrompt={setAutoPrevizPrompt}
+        plan={autoPrevizPlan}
+        onDraft={() => void runAutoPrevizPlan()}
+        onApprove={() => void approveAutoPreviz()}
+      />
 
       <section
         className={`posecraft-shell ${fullscreen ? "posecraft-shell--fullscreen" : ""}`}
@@ -1527,6 +1615,7 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
                   <span className="posecraft-pose-thumb" dangerouslySetInnerHTML={{ __html: preset.thumbnail ?? "" }} />
                   <span className="posecraft-pose-meta">
                     <strong>{preset.label}</strong>
+                    <span>{creatorGroupForPose(preset.id, preset.category)}</span>
                     <span>{preset.description}</span>
                   </span>
                   <span
@@ -2099,15 +2188,6 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
                   title={hasSelectedSnapshot ? "Send the selected Snapshot to Storyboard" : handoffDisabledTip}
                 >
                   {sendingStoryboard ? "Sending…" : "Send to Storyboard"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void sendToSceneCreator()}
-                  disabled={sendingSceneCreator || !hasSelectedSnapshot}
-                  data-testid="posecraft-send-scenecreator"
-                  title={hasSelectedSnapshot ? "Send the selected Snapshot and pose notes to Scene Creator" : handoffDisabledTip}
-                >
-                  {sendingSceneCreator ? "Sending…" : "Send to Scene Creator"}
                 </button>
                 <button
                   type="button"

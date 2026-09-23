@@ -4,8 +4,12 @@ import {
   H3_AUTO_MEGAPIXEL_FAST,
   H3_AUTO_MEGAPIXEL_QUALITY,
   H3_MEGAPIXEL_GRID,
+  LTX_DEFAULT_QUALITY,
+  LTX_TIMELINE_QUALITY_TIERS,
+  normalizeLtxTimelineQuality,
   resolveH3MegapixelCanvas,
   resolveH3TimelineCanvas,
+  resolveLtxTimelineCanvas,
 } from "./legalCanvas";
 
 describe("H3_MEGAPIXEL_GRID", () => {
@@ -112,5 +116,42 @@ describe("resolveH3TimelineCanvas", () => {
     expect(() =>
       resolveH3TimelineCanvas({ mode: "manual", megapixels: undefined as unknown as number }, false),
     ).toThrow(/requires a megapixel value/);
+  });
+});
+
+describe("LTX Timeline QUALITY", () => {
+  it("exposes 720p/1080p/2K/4K only (no 480p)", () => {
+    expect([...LTX_TIMELINE_QUALITY_TIERS]).toEqual(["720p", "1080p", "2K", "4K"]);
+    expect(LTX_TIMELINE_QUALITY_TIERS).not.toContain("480p");
+  });
+
+  it("defaults to 720p", () => {
+    expect(LTX_DEFAULT_QUALITY).toBe("720p");
+    expect(normalizeLtxTimelineQuality(null)).toBe("720p");
+    expect(normalizeLtxTimelineQuality(undefined)).toBe("720p");
+  });
+
+  it("resolves legal /32 canvases", () => {
+    expect(resolveLtxTimelineCanvas("720p")).toMatchObject({
+      width: 1280,
+      height: 704,
+      available: true,
+    });
+    expect(resolveLtxTimelineCanvas("1080p")).toMatchObject({
+      width: 1920,
+      height: 1088,
+      available: true,
+    });
+    expect(resolveLtxTimelineCanvas("2K")).toMatchObject({
+      width: 2560,
+      height: 1440,
+      available: true,
+    });
+  });
+
+  it("marks native 4K as UNAVAILABLE", () => {
+    const canvas = resolveLtxTimelineCanvas("4K");
+    expect(canvas.available).toBe(false);
+    expect(canvas.honestyLabel).toMatch(/UNAVAILABLE/i);
   });
 });

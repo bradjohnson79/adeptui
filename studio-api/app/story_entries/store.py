@@ -139,6 +139,32 @@ def reorder_entries(db: Session, project_id: str, entry_ids: list[str]) -> list[
     return rows
 
 
+def ensure_primary_entry(db: Session, project_id: str, title: str = "") -> StoryEntryRow:
+    """Return the project's canonical story document row.
+
+    Reuses an existing ``project_story`` (or first entry). If the project only
+    has a legacy ``story_documents`` row, migrate it. Otherwise create one
+    empty ``project_story`` entry. Never creates a second story store.
+    """
+    rows = list_entries(db, project_id)
+    if rows:
+        stories = [r for r in rows if r.entry_type == "project_story"]
+        pool = stories or rows
+        with_body = [r for r in pool if (r.long_summary or "").strip() or (r.logline or "").strip() or (r.short_summary or "").strip()]
+        chosen = (with_body or pool)
+        chosen.sort(key=lambda r: r.created_at or datetime.utcnow())
+        return chosen[0]
+    if migrate_from_legacy(db, project_id):
+        rows = list_entries(db, project_id)
+        if rows:
+            return rows[0]
+    return create_entry(
+        db,
+        project_id,
+        StoryEntryCreate(title=title or "", entryType="project_story"),
+    )
+
+
 def migrate_from_legacy(db: Session, project_id: str) -> bool:
     existing = (
         db.query(StoryEntryRow)

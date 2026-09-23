@@ -3,8 +3,9 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../api";
+import { StoryDocumentEditor, type StoryDocumentHandle } from "../story/StoryDocumentEditor";
+import { defaultStoryTitle } from "../story/canonicalStory";
 import type { Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
 import { IndentKeys, IndentParagraph } from "./richTextExtensions";
@@ -39,12 +40,12 @@ type NavScene = {
 };
 
 /**
- * Script Writer Standard — the screenplay-writing surface.
+ * Script Writer Standard — screenplay + native Story document.
  *
- * Scope law: this workspace manages screenplay scenes, screenplay text,
- * add/remove/reorder scenes, revisions, and the script title. Story planning
- * (synopsis, treatment, arcs, structure) lives in the Story workspace — the
- * Story button routes there; nothing is duplicated here.
+ * Script owns scenes, screenplay text, add/remove/reorder, revisions, and the
+ * screenplay title. Story is a formatted project document on the same canvas;
+ * it reads and writes the canonical story_entries row shared with Co-Director
+ * Story Express. The Story button never leaves this workspace.
  */
 export function ScriptwriterStudio({
   project,
@@ -59,7 +60,6 @@ export function ScriptwriterStudio({
    * current-scene awareness without manual tagging. */
   onActiveSceneChange?: (sceneHeadingId: string | null) => void;
 }) {
-  const navigate = useNavigate();
   const [doc, setDoc] = useState<ScriptDocument | null>(null);
   const [nav, setNav] = useState<NavScene[]>([]);
   const [stats, setStats] = useState<Record<string, unknown>>({});
@@ -68,6 +68,9 @@ export function ScriptwriterStudio({
   const [bibleProposals, setBibleProposals] = useState<Array<Record<string, unknown>>>([]);
   const [revisions, setRevisions] = useState<Array<Record<string, unknown>>>([]);
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [storySaveState, setStorySaveState] = useState<SaveState>("saved");
+  const [storyTitle, setStoryTitle] = useState("");
+  const storyHandleRef = useRef<StoryDocumentHandle | null>(null);
   const [mode, setMode] = useState<WritingMode>("standard");
   const [view, setView] = useState<StudioView>("script");
   const [message, setMessage] = useState<string | null>(null);
@@ -240,9 +243,11 @@ export function ScriptwriterStudio({
     setDocTracked(d);
   };
 
-  // ── Story workspace (Story owns planning; Script Writer never duplicates) ─
-  const goStory = () => {
-    navigate(`/co-director?projectId=${encodeURIComponent(project.id)}&contentTab=story`);
+  const renameStoryTitle = async (next: string) => {
+    const handle = storyHandleRef.current;
+    if (!handle) throw new Error("save_failed");
+    await handle.rename(next);
+    setStoryTitle(next.trim() || defaultStoryTitle(project.name));
   };
 
   // ── Scene management (canonical script scene model) ────────────────────
@@ -466,38 +471,63 @@ export function ScriptwriterStudio({
   const shellClass = [
     "sw-studio",
     mode === "focus" ? "is-focus" : "",
+    view === "story" ? "is-story" : "",
   ]
     .filter(Boolean)
     .join(" ");
+
+  const toolbarSave = view === "story" ? storySaveState : saveState;
 
   return (
     <div className={shellClass} data-testid="scriptwriter-studio">
       <div className="sw-toolbar" data-testid="scriptwriter-toolbar">
         <span className="sw-toolbar__title">
-          <ScriptTitleEditor title={doc?.title || ""} onRename={renameTitle} testId="scriptwriter-title" />
+          {view === "story" ? (
+            <ScriptTitleEditor
+              title={storyTitle}
+              onRename={renameStoryTitle}
+              testId="scriptwriter-story-title"
+              defaultTitle={defaultStoryTitle(project.name)}
+              ariaLabel="Story title"
+            />
+          ) : (
+            <ScriptTitleEditor title={doc?.title || ""} onRename={renameTitle} testId="scriptwriter-title" />
+          )}
         </span>
         <button type="button" className={view === "script" ? "primary" : "ghost"} data-testid="scriptwriter-view-script" onClick={() => setView("script")}>
           Script
         </button>
-        <button type="button" className="ghost" data-testid="scriptwriter-story" onClick={goStory} title="Open the Story workspace — synopsis, treatment, arcs and structure live there">
-          Story
-        </button>
-        <button type="button" className="ghost" data-testid="scriptwriter-insert-scene" onClick={() => void insertScene()} title="Add a new scene after the selected one">
-          Add Scene
-        </button>
         <button
           type="button"
-          className="ghost"
-          data-testid="scriptwriter-remove-scene"
-          disabled={!activeSceneId}
-          onClick={() => void removeScene()}
-          title="Remove the selected scene (you can undo)"
+          className={view === "story" ? "primary" : "ghost"}
+          data-testid="scriptwriter-story"
+          onClick={() => setView("story")}
+          title="Open the story document — synopsis, treatment, arcs, and world notes"
         >
-          Remove Scene
+          Story
         </button>
-        <button type="button" className={view === "revisions" ? "primary" : "ghost"} data-testid="scriptwriter-revisions" onClick={() => setView("revisions")} title="Snapshot, restore and compare versions of your script">
-          Revisions
-        </button>
+        {view !== "story" ? (
+          <>
+            <button type="button" className="ghost" data-testid="scriptwriter-insert-scene" onClick={() => void insertScene()} title="Add a new scene after the selected one">
+              Add Scene
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              data-testid="scriptwriter-remove-scene"
+              disabled={!activeSceneId}
+              onClick={() => void removeScene()}
+              title="Remove the selected scene (you can undo)"
+            >
+              Remove Scene
+            </button>
+            <button type="button" className={view === "revisions" ? "primary" : "ghost"} data-testid="scriptwriter-revisions" onClick={() => setView("revisions")} title="Snapshot, restore and compare versions of your script">
+              Revisions
+            </button>
+          </>
+        ) : null}
+        {view !== "story" ? (
+          <>
         <button type="button" className="ghost" data-testid="scriptwriter-undo" onClick={() => void undo()} title="Undo the last scene or version change (for typing, use Ctrl+Z while writing)">
           Undo
         </button>
@@ -511,12 +541,14 @@ export function ScriptwriterStudio({
         >
           Redo
         </button>
+          </>
+        ) : null}
         <button type="button" className={mode === "focus" ? "primary" : "ghost"} data-testid="scriptwriter-focus" onClick={() => setMode((m) => (m === "focus" ? "standard" : "focus"))} title="Hide the side panels so you can write">
           Focus
         </button>
         <span className="sw-toolbar__save" data-testid="scriptwriter-save-state">
-          {saveState.replace("_", " ")}
-          {stats.pagesEstimated != null ? ` · ~${String(stats.pagesEstimated)} est. pages` : ""}
+          {toolbarSave.replace("_", " ")}
+          {view !== "story" && stats.pagesEstimated != null ? ` · ~${String(stats.pagesEstimated)} est. pages` : ""}
         </span>
         {shouldOfferRecovery(saveState) ? (
           <button
@@ -531,7 +563,7 @@ export function ScriptwriterStudio({
       </div>
 
       <div className="sw-body">
-        <aside className="sw-nav" data-testid="scriptwriter-navigator" aria-label="Script navigator">
+        <aside className="sw-nav" data-testid="scriptwriter-navigator" aria-label="Script navigator" hidden={view === "story"}>
           <p className="eyebrow">Scenes</p>
           {nav.map((s, i) => (
             <div className="sw-nav__row" key={s.sceneHeadingId}>
@@ -599,6 +631,18 @@ export function ScriptwriterStudio({
               <EditorContent editor={editor} data-testid="scriptwriter-editor" />
             </div>
           ) : null}
+          {view === "story" ? (
+            <StoryDocumentEditor
+              projectId={project.id}
+              projectName={project.name}
+              source="scriptwriter"
+              onSaveState={setStorySaveState}
+              onTitleChange={setStoryTitle}
+              onReady={(handle) => {
+                storyHandleRef.current = handle;
+              }}
+            />
+          ) : null}
           {view === "revisions" ? (
             <div className="sw-page sw-revisions" data-testid="scriptwriter-revisions-view">
               <p className="eyebrow">Revisions</p>
@@ -660,7 +704,7 @@ export function ScriptwriterStudio({
           ) : null}
         </main>
 
-        <aside className="sw-inspector" data-testid="scriptwriter-inspector" aria-label="Script inspector">
+        <aside className="sw-inspector" data-testid="scriptwriter-inspector" aria-label="Script inspector" hidden={view === "story"}>
           <button
             type="button"
             className="ghost sw-inspector__toggle"

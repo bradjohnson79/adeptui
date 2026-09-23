@@ -356,6 +356,62 @@ def compose_labeled_character_sheet(
 
 V2_SHEET_WIDTH = 2560
 V2_SHEET_HEIGHT = 1080
+V3_PAD = 24
+V3_GAP = 16
+V3_TABLE_W = 520
+
+
+def plan_v3_character_sheet(
+    width: int = V2_SHEET_WIDTH,
+    height: int = V2_SHEET_HEIGHT,
+    *,
+    has_closeup: bool = False,
+) -> dict[str, Any]:
+    """Pixel boxes for the Adept V3 21:9 sheet. Same math as compose_v3."""
+    w = int(width or V2_SHEET_WIDTH)
+    h = int(height or V2_SHEET_HEIGHT)
+    sx = w / float(V2_SHEET_WIDTH)
+    sy = h / float(V2_SHEET_HEIGHT)
+    pad = max(1, int(round(V3_PAD * min(sx, sy))))
+    gap = max(1, int(round(V3_GAP * min(sx, sy))))
+    table_w = max(80, int(round(V3_TABLE_W * sx)))
+    label_h = max(16, int(round(_LABEL_BAR_H * sy)))
+    views_w = w - pad * 2 - gap - table_w
+    col_w = max(32, (views_w - gap) // 2)
+    row_h = max(32, (h - pad * 2 - gap) // 2)
+
+    def _tile(col: int, row: int) -> list[int]:
+        x0 = pad + col * (col_w + gap)
+        y0 = pad + row * (row_h + gap)
+        return [x0, y0, x0 + col_w, y0 + row_h]
+
+    front = _tile(0, 0)
+    side = _tile(1, 0)
+    three = _tile(0, 1)
+    back = _tile(1, 1)
+    tx0 = pad + views_w + gap
+    ty0 = pad
+    tx1 = w - pad
+    ty1 = h - pad
+    views = [
+        {"role": "full_body_front", "label": "Front", "bbox": front},
+        {"role": "full_body_side_left", "label": "Side", "bbox": side},
+        {"role": "full_body_three_quarter_front", "label": "3/4", "bbox": three},
+        {"role": "full_body_back", "label": "Back", "bbox": back},
+    ]
+    for cell in views:
+        x0, y0, x1, y1 = cell["bbox"]
+        cell["labelBbox"] = [x0, y1 - label_h, x1, y1]
+        cell["identityBbox"] = [x0, y0, x1, y1 - label_h]
+    return {
+        "layout": "v3_21x9_standard" if has_closeup else "v3_21x9_express",
+        "composer": "adept",
+        "width": w,
+        "height": h,
+        "views": views,
+        "notes": {"bbox": [tx0, ty0, tx1, ty1]},
+        "grid": {"cols": 3, "rows": 2, "tileSize": col_w, "gap": gap, "pad": pad},
+    }
 
 
 def _v2_table_lines(profile: dict[str, Any] | None, extra_facts: dict[str, Any] | None) -> list[tuple[str, str]]:
@@ -464,4 +520,110 @@ def compose_v2_character_sheet(
         "hasCloseup": bool(closeup_path),
         "drawnStrings": drawn,
         "grid": {"cols": 3, "rows": 1, "tileSize": tile_w, "gap": gap, "pad": pad},
+    }
+
+
+def compose_v3_character_sheet(
+    front_path: str,
+    side_path: str,
+    three_quarter_path: str,
+    back_path: str,
+    out_path: str,
+    *,
+    profile: dict[str, Any] | None = None,
+    extra_facts: dict[str, Any] | None = None,
+    closeup_path: str | None = None,
+) -> dict[str, Any]:
+    """Deterministic 21:9 Front | Side | 3/4 | Back | JSON. Optional Standard close-up."""
+    from PIL import Image, ImageDraw, ImageOps
+
+    width, height = V2_SHEET_WIDTH, V2_SHEET_HEIGHT
+    pad, gap = 24, 16
+    table_w = 520
+    views_w = width - pad * 2 - gap - table_w
+    col_w = (views_w - gap) // 2
+    row_h = (height - pad * 2 - gap) // 2
+    has_closeup = bool(closeup_path)
+
+    canvas = Image.new("RGB", (width, height), _BG)
+    draw = ImageDraw.Draw(canvas)
+    resample = getattr(Image, "Resampling", Image).LANCZOS
+    label_font = _font(20)
+    title_font = _font(18)
+    body_font = _font(15)
+
+    def _paste(src: str | None, bbox: tuple[int, int, int, int], label: str) -> None:
+        x0, y0, x1, y1 = bbox
+        tw, th = x1 - x0, y1 - y0
+        tile = Image.new("RGB", (tw, th), _TILE_BG)
+        if src:
+            im = Image.open(src).convert("RGB")
+            contained = ImageOps.contain(im, (tw, th - _LABEL_BAR_H), method=resample)
+            tile.paste(contained, ((tw - contained.width) // 2, (th - _LABEL_BAR_H - contained.height) // 2))
+        canvas.paste(tile, (x0, y0))
+        draw.rectangle([x0, y1 - _LABEL_BAR_H, x1 - 1, y1 - 1], fill=_BAR)
+        lw = int(draw.textlength(label, font=label_font))
+        draw.text((x0 + max(8, (tw - lw) // 2), y1 - _LABEL_BAR_H + 6), label, font=label_font, fill=_TEXT)
+
+    fx0 = pad
+    fy0 = pad
+    _paste(front_path, (fx0, fy0, fx0 + col_w, fy0 + row_h), "Front")
+    _paste(side_path, (fx0 + col_w + gap, fy0, fx0 + col_w + gap + col_w, fy0 + row_h), "Side")
+    _paste(three_quarter_path, (fx0, fy0 + row_h + gap, fx0 + col_w, fy0 + row_h + gap + row_h), "3/4")
+    _paste(back_path, (fx0 + col_w + gap, fy0 + row_h + gap, fx0 + col_w + gap + col_w, fy0 + row_h + gap + row_h), "Back")
+
+    cells: dict[str, dict[str, int] | None] = {
+        "front": {"col": 0, "row": 0},
+        "side": {"col": 1, "row": 0},
+        "three_quarter": {"col": 0, "row": 1},
+        "back": {"col": 1, "row": 1},
+        "json": {"col": 2, "row": 1},
+        "closeup": None,
+    }
+
+    tx0 = pad + views_w + gap
+    ty0 = pad
+    tx1 = width - pad
+    ty1 = height - pad
+    if has_closeup:
+        close_h = row_h
+        _paste(closeup_path, (tx0, ty0, tx1, ty0 + close_h), "Close-up")
+        cells["closeup"] = {"col": 2, "row": 0}
+        ty0 = ty0 + close_h + gap
+
+    draw.rectangle([tx0, ty0, tx1 - 1, ty1 - 1], fill=_PANEL_BG, outline=_PANEL_LINE)
+    draw.text((tx0 + 14, ty0 + 10), "Character", font=title_font, fill=_GOLD)
+    y = ty0 + 38
+    drawn = ["Character"]
+    for label, value in _v2_table_lines(profile, extra_facts):
+        draw.text((tx0 + 14, y), f"{label}", font=title_font, fill=_MUTED)
+        y += 20
+        for line in _wrap(draw, value, body_font, tx1 - tx0 - 28):
+            draw.text((tx0 + 14, y), line, font=body_font, fill=_BODY)
+            drawn.append(f"{label}: {line}")
+            y += 17
+            if y > ty1 - 22:
+                break
+        y += 6
+        if y > ty1 - 22:
+            break
+
+    dest = str(out_path)
+    canvas.save(dest, format="PNG")
+    return {
+        "layout": "v3_21x9_standard" if has_closeup else "v3_21x9_express",
+        "composer": "adept",
+        "width": width,
+        "height": height,
+        "path": dest,
+        "hasCloseup": has_closeup,
+        "drawnStrings": drawn,
+        "grid": {
+            "cols": 3,
+            "rows": 2,
+            "tileSize": col_w,
+            "gap": gap,
+            "pad": pad,
+            "cells": cells,
+        },
     }

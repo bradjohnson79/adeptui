@@ -318,7 +318,7 @@ export function StoryboardStudio({
   };
 
   return (
-    <div className="page storyboard-studio">
+    <div className="page storyboard-studio" data-testid="storyboard-studio">
       <header className="sb-header">
         <div>
           <h1>{t("storyboard:title")}</h1>

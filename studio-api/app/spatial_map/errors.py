@@ -31,6 +31,10 @@ class SpatialMapErrorCode(str, Enum):
     CHARACTER_NOT_FOUND = "CHARACTER_NOT_FOUND"
     PROP_ENTITY_NOT_FOUND = "PROP_ENTITY_NOT_FOUND"
     PROJECT_SCOPE = "PROJECT_SCOPE"
+    MOVEMENT_SEGMENT_NOT_FOUND = "MOVEMENT_SEGMENT_NOT_FOUND"
+    MOVEMENT_LIMIT_REACHED = "MOVEMENT_LIMIT_REACHED"
+    MOVEMENT_CANNOT_DELETE = "MOVEMENT_CANNOT_DELETE"
+    MOVEMENT_DELETE_BLOCKED = "MOVEMENT_DELETE_BLOCKED"
 
 
 ERROR_DETAILS: dict[SpatialMapErrorCode, dict[str, Any]] = {
@@ -129,6 +133,27 @@ ERROR_DETAILS: dict[SpatialMapErrorCode, dict[str, Any]] = {
         "explanation": "The referenced entity belongs to a different project.",
         "recovery": "Use an entity that belongs to this project.",
     },
+    SpatialMapErrorCode.MOVEMENT_SEGMENT_NOT_FOUND: {
+        "status": 404,
+        "explanation": "That movement segment is not on this Spatial Map.",
+        "recovery": "Refresh the map and choose a current movement.",
+    },
+    SpatialMapErrorCode.MOVEMENT_LIMIT_REACHED: {
+        "status": 409,
+        "explanation": "A scene can have at most five movements.",
+        "recovery": "Remove an unused movement (M2-M5) before adding another.",
+    },
+    SpatialMapErrorCode.MOVEMENT_CANNOT_DELETE: {
+        "status": 409,
+        "explanation": "Movement 1 cannot be deleted.",
+        "recovery": "Keep M1 and remove later movements if needed.",
+    },
+    SpatialMapErrorCode.MOVEMENT_DELETE_BLOCKED: {
+        "status": 409,
+        "explanation": "This movement is still used on Timeline or in generated shots.",
+        "recovery": "Clear Timeline and Mini references, then remove the movement.",
+    },
+
 }
 
 

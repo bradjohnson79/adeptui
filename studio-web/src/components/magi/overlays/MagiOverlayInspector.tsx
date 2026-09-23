@@ -1,30 +1,51 @@
 import { MagiAccordion } from "../layout/MagiAccordion";
-import type { MagiOverlayElement, MagiTextElement, MagiVectorElement } from "./types";
+import type { MagiImageElement, MagiOverlayElement, MagiOverlayGroup, MagiTextElement, MagiVectorElement } from "./types";
 
 export function MagiOverlayInspector({
   element,
   accordion,
   setAccordion,
   onChange,
+  onChangeId,
   onDelete,
   onDuplicate,
+  onBringForward,
+  onSendBackward,
+  onBringToFront,
+  onSendToBack,
+  frameRate = 24,
 }: {
   element: MagiOverlayElement | null;
   accordion: Record<string, boolean>;
   setAccordion: (id: string, open: boolean) => void;
   onChange: (patch: Partial<MagiOverlayElement>) => void;
+  onChangeId?: (id: string, patch: Partial<MagiOverlayElement>) => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  onBringForward?: () => void;
+  onSendBackward?: () => void;
+  onBringToFront?: () => void;
+  onSendToBack?: () => void;
+  frameRate?: number;
 }) {
   if (!element) {
-    return <p className="magi-muted">Select a text, shape, or lower-third in the Viewer.</p>;
+    return <p className="magi-muted">Select a title, lower third, shape, or image on the Preview Monitor.</p>;
   }
 
   const isText = element.type === "text";
   const isVec = element.type === "vector";
   const isGroup = element.type === "group";
+  const isImage = element.type === "image";
   const textEl = isText ? (element as MagiTextElement) : null;
   const vecEl = isVec ? (element as MagiVectorElement) : null;
+  const groupEl = isGroup ? (element as MagiOverlayGroup) : null;
+  const imageEl = isImage ? (element as MagiImageElement) : null;
+  const ltTexts = (groupEl?.children || []).filter((c): c is MagiTextElement => c.type === "text");
+  const primary = ltTexts[0];
+  const secondary = ltTexts[1];
+  const fps = Math.max(1, frameRate);
+  const startSec = (element.startFrame ?? 0) / fps;
+  const endSec = (element.endFrame ?? (element.startFrame ?? 0) + fps * 5) / fps;
 
   return (
     <div className="magi-overlay-inspector" data-testid="magi-overlay-inspector">
@@ -51,6 +72,10 @@ export function MagiOverlayInspector({
         >
           {element.visible ? "Hide" : "Show"}
         </button>
+        <button type="button" className="magi-chip" onClick={onBringForward} data-testid="magi-ov-forward">Forward</button>
+        <button type="button" className="magi-chip" onClick={onSendBackward} data-testid="magi-ov-back">Back</button>
+        <button type="button" className="magi-chip" onClick={onBringToFront} data-testid="magi-ov-front">Front</button>
+        <button type="button" className="magi-chip" onClick={onSendToBack} data-testid="magi-ov-behind">Behind</button>
       </div>
 
       {(isText || isGroup) && (
@@ -71,9 +96,24 @@ export function MagiOverlayInspector({
                 />
               </label>
             </>
-          ) : (
-            <p className="magi-muted">Grouped lower-third — edit child text in Viewer (double-click).</p>
-          )}
+          ) : groupEl ? (
+            <>
+              <label>
+                Name
+                <input
+                  value={primary?.text || ""}
+                  onChange={(e) => primary && onChangeId?.(primary.id, { text: e.target.value } as Partial<MagiOverlayElement>)}
+                />
+              </label>
+              <label>
+                Title
+                <input
+                  value={secondary?.text || ""}
+                  onChange={(e) => secondary && onChangeId?.(secondary.id, { text: e.target.value } as Partial<MagiOverlayElement>)}
+                />
+              </label>
+            </>
+          ) : null}
         </MagiAccordion>
       )}
 
@@ -137,6 +177,37 @@ export function MagiOverlayInspector({
                 onChange={(e) =>
                   onChange({
                     textStyle: { ...textEl.textStyle, fontWeight: Number(e.target.value) },
+                  } as Partial<MagiOverlayElement>)
+                }
+              />
+            </label>
+            <label>
+              Align
+              <select
+                value={textEl.textStyle.alignment}
+                onChange={(e) =>
+                  onChange({
+                    textStyle: {
+                      ...textEl.textStyle,
+                      alignment: e.target.value as "left" | "center" | "right",
+                    },
+                  } as Partial<MagiOverlayElement>)
+                }
+              >
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
+            </label>
+            <label>
+              Letter spacing
+              <input
+                type="number"
+                step={0.1}
+                value={textEl.textStyle.letterSpacing}
+                onChange={(e) =>
+                  onChange({
+                    textStyle: { ...textEl.textStyle, letterSpacing: Number(e.target.value) },
                   } as Partial<MagiOverlayElement>)
                 }
               />
@@ -278,8 +349,57 @@ export function MagiOverlayInspector({
               onChange={(e) => onChange({ stroke: e.target.value } as Partial<MagiOverlayElement>)}
             />
           </label>
+          <label>
+            Stroke width
+            <input
+              type="number"
+              min={0}
+              max={40}
+              value={vecEl.strokeWidth}
+              onChange={(e) => onChange({ strokeWidth: Number(e.target.value) } as Partial<MagiOverlayElement>)}
+            />
+          </label>
         </MagiAccordion>
       )}
+
+      {imageEl ? (
+        <MagiAccordion id="overlayImage" title="Image" open onToggle={() => undefined}>
+          <p className="magi-empty">Library image. Transparency is kept.</p>
+          <label>
+            Fit
+            <select
+              value={imageEl.fit}
+              onChange={(e) => onChange({ fit: e.target.value } as Partial<MagiOverlayElement>)}
+            >
+              <option value="contain">Contain</option>
+              <option value="cover">Cover</option>
+            </select>
+          </label>
+        </MagiAccordion>
+      ) : null}
+
+      <MagiAccordion id="overlayTiming" title="Timing" open={accordion.overlayTiming !== false} onToggle={(o) => setAccordion("overlayTiming", o)}>
+        <label>
+          Start (seconds)
+          <input
+            type="number"
+            min={0}
+            step={0.1}
+            value={Number(startSec.toFixed(2))}
+            onChange={(e) => onChange({ startFrame: Math.max(0, Math.round(Number(e.target.value) * fps)) })}
+          />
+        </label>
+        <label>
+          End (seconds)
+          <input
+            type="number"
+            min={0}
+            step={0.1}
+            value={Number(endSec.toFixed(2))}
+            onChange={(e) => onChange({ endFrame: Math.max(1, Math.round(Number(e.target.value) * fps)) })}
+          />
+        </label>
+      </MagiAccordion>
 
       <MagiAccordion
         id="overlayTransform"
@@ -302,16 +422,16 @@ export function MagiOverlayInspector({
 
       <MagiAccordion
         id="overlayAnimation"
-        title="Animation (Draft / Preview only)"
+        title="Animation"
         open={!!accordion.overlayAnimation}
         onToggle={(o) => setAccordion("overlayAnimation", o)}
       >
-        <p className="magi-muted">Motion rendering is not certified. Presets are preview-only.</p>
-        {textEl ? (
+        <p className="magi-empty">Fade is live in Preview and Final Render. Other motions stay Preview-only.</p>
+        {textEl || groupEl ? (
           <label>
             Entrance
             <select
-              value={textEl.animationPreset || "none"}
+              value={(textEl?.animationPreset || groupEl?.animationPreset || "none") as string}
               onChange={(e) =>
                 onChange({
                   animationPreset: e.target.value === "none" ? null : e.target.value,

@@ -1,3 +1,4 @@
+// AVATAR_STUDIO_RETIRED_FRONTEND
 import { api } from "../api";
 import { buildHomeCreateProjectPath } from "../projectEntry";
 import {
@@ -201,52 +202,14 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
         project_id: projectId || undefined,
         scene_id: sceneId || undefined,
       });
-    case "createAvatarSession": {
-      const session = await api.createAvatarSession(projectId, {
-        name: String(inputs.name || "Avatar Session"),
-        character_profile_id: inputs.character_profile_id ? String(inputs.character_profile_id) : undefined,
-        character_name: inputs.character_name ? String(inputs.character_name) : undefined,
-        mode: String(inputs.mode || "talking_portrait"),
-      });
-      ctx.goTab?.("avatar");
-      return session;
-    }
-    case "setAvatarLook": {
-      const sid = String(inputs.sessionId || "");
-      const cur = await api.getAvatarSession(projectId, sid);
-      return api.patchAvatarSession(projectId, sid, { look: { ...cur.look, ...(inputs.look as object) } });
-    }
-    case "attachAvatarAudio": {
-      const sid = String(inputs.sessionId || "");
-      const cur = await api.getAvatarSession(projectId, sid);
-      return api.patchAvatarSession(projectId, sid, {
-        voice: { ...cur.voice, audio_asset_id: inputs.audio_asset_id },
-      });
-    }
-    case "prepareAvatarLipSync": {
-      ctx.goTab?.("timeline");
-      return {
-        checkpoint: true,
-        message: "Place the black rectangle over the character’s mouth, then select Continue.",
-      };
-    }
-    case "approveAvatarTake": {
-      const sid = String(inputs.sessionId || "");
-      return api.addAvatarTake(projectId, sid, {
-        label: String(inputs.label || "Approved take"),
-        status: "final",
-        approved: true,
-        asset_id: inputs.asset_id ? String(inputs.asset_id) : undefined,
-      });
-    }
+    case "createAvatarSession":
+    case "setAvatarLook":
+    case "attachAvatarAudio":
+    case "prepareAvatarLipSync":
+    case "queueAvatarGeneration":
+    case "approveAvatarTake":
     case "sendAvatarToDirector": {
-      const assetId = String(inputs.asset_id || "");
-      if (!assetId) throw new Error("asset_id required");
-      return api.promote(projectId, {
-        asset_id: assetId,
-        target: "scene_new",
-        name: String(inputs.name || "Avatar clip"),
-      });
+      throw new Error("Avatar Studio is not available in this version (temporarily retired from current Adept UI).");
     }
     case "createDirectorSequence": {
       if (!sceneId) throw new Error("sceneId required");

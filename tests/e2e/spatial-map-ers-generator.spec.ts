@@ -1,107 +1,126 @@
 /**
- * Spatial Map ERS generator selector — observe-only.
- * Default is Qwen. Changing to GPT Image 2 must not POST.
- * HOLD: do not click Generate / Retry / Regenerate.
- *
- * Generation is HOLDed BY DESIGN (documented observe-only certification):
- * the selector change is certified without dispatching a live ERS generate,
- * so this spec never POSTs ers.generate (no double-charge / no provider
- * spend). The no-POST guard below enforces that contract.
- *
- * Topology (current Beta, AGENTS.md §15): Studio API :8758 + local Vite dev
- * server (5173). Override PLAYWRIGHT_BASE_URL / STUDIO_API_BASE for hosted
- * or live-Beta runs.
+ * Spatial Map ERS provider contract — GPT Image 2 only.
+ * Named Korri project + Venture Corridor Walk. Never creates a project.
  */
-import { expect, test, type Page } from "@playwright/test";
-import { openCoDirectorFullScreen } from "./codirector/helpers/audit";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { API } from "./helpers/app";
 
-const UI = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
-const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
-const PROJECT_ID = process.env.ADEPT_PROJECT_ID || "2347bf46-3762-4763-86c5-4a6032522278";
+const PROJECT_ID = process.env.ADEPT_PROJECT_ID || "beffd3d8-791d-4adf-9c4d-681ec9d4efb0";
+const MAP_TITLE = /venture corridor walk/i;
 
-function attachHoldGuards(page: Page, clicks: { generate: boolean }) {
-  page.on("request", (req) => {
-    if (req.method() !== "POST") return;
-    const url = req.url();
-    const body = `${req.postData() || ""}`;
-    const ersGenerate =
-      url.includes("/executions") &&
-      !url.includes("/advance") &&
-      (/ers\.generate/i.test(body) || /capability["']?\s*:\s*["']ers\.generate/i.test(body));
-    if (ersGenerate) {
-      clicks.generate = true;
-      throw new Error(`HOLD violated: blocked live Generate POST ${url}`);
-    }
-  });
+test.setTimeout(8 * 60 * 1000);
+
+async function resolveVentureMap(request: APIRequestContext): Promise<string> {
+  const res = await request.get(`${API}/api/spatial-map/projects/${PROJECT_ID}/maps`);
+  expect(res.ok(), "list Spatial Maps").toBeTruthy();
+  const body = await res.json();
+  const maps = (body.documents || body.maps || body.items || []) as Array<{ id?: string; title?: string }>;
+  const venture = maps.find((m) => MAP_TITLE.test(String(m.title || "")));
+  expect(venture?.id, "Venture Corridor Walk must exist").toBeTruthy();
+  return String(venture!.id);
 }
 
-async function dismissOnboarding(page: Page) {
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const region = page.locator('[aria-label="Working relationship"]').first();
-    if (!(await region.isVisible().catch(() => false))) {
-      await page.waitForTimeout(200);
-      continue;
-    }
-    const nameInput = region.getByRole("textbox", { name: /What should I call you/i }).first();
-    if (await nameInput.isVisible().catch(() => false)) {
-      const current = await nameInput.inputValue().catch(() => "");
-      if (!current) await nameInput.fill("Tester");
-    }
-    for (const label of [/Save and continue/i, /Skip for now/i]) {
-      const btn = region.getByRole("button", { name: label }).first();
-      if ((await btn.isVisible().catch(() => false)) && !(await btn.isDisabled().catch(() => false))) {
-        await btn.click({ force: true }).catch(() => undefined);
-        await page.waitForTimeout(400);
-        break;
+async function openStandardSpatial(page: Page, mapId: string) {
+  await page.goto(`/project/${PROJECT_ID}?workspace=spatial`, {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  });
+  await expect(page.getByTestId("spatial-map-panel")).toBeVisible({ timeout: 45_000 });
+  const select = page.locator("#spatial-map-select");
+  if ((await select.count()) && (await select.isVisible().catch(() => false))) {
+    await select.selectOption(mapId);
+  }
+  await expect(page.getByTestId("spatial-map-grid")).toBeVisible({ timeout: 20_000 });
+}
+
+test.describe("Spatial Map ERS generator contract", () => {
+  test("ERS Generator is GPT Image 2 only — no Qwen dropdown or fallback", async ({
+    page,
+    request,
+  }) => {
+    const mapId = await resolveVentureMap(request);
+    await openStandardSpatial(page, mapId);
+
+    const fixed = page.getByTestId("ers-generator-fixed");
+    await expect(fixed).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("ers-generator-select")).toHaveCount(0);
+    await expect(page.getByTestId("ers-generator")).not.toContainText(/Qwen/i);
+
+    const label = (await fixed.innerText()).trim();
+    expect(label === "GPT Image 2 — API" || label === "GPT Image 2 — Requires Setup").toBeTruthy();
+
+    if (label === "GPT Image 2 — Requires Setup") {
+      const reason = page.getByTestId("ers-generator-reason");
+      if (await reason.count()) {
+        await expect(reason).not.toContainText(/I'll use Qwen|choose Qwen/i);
       }
+      const generate = page.getByRole("button", {
+        name: /Generate Environment Reference Sheet|Regenerate Environment Reference Sheet/i,
+      });
+      await expect(generate).toBeDisabled();
     }
-    if (!(await region.isVisible().catch(() => false))) break;
-  }
-}
-
-async function openSpatialMapTab(page: Page) {
-  await dismissOnboarding(page);
-  const tab = page.getByTestId("codirector-content-tab-spatial_map");
-  await expect(tab).toBeVisible({ timeout: 30_000 });
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    await tab.click({ force: true }).catch(() => undefined);
-    const panel = page.getByTestId("spatial-map-panel").or(page.getByTestId("spatial-map-error")).first();
-    if (await panel.isVisible().catch(() => false)) return;
-    await page.waitForTimeout(800);
-  }
-  await expect(page.getByTestId("spatial-map-panel").or(page.getByTestId("spatial-map-error")).first()).toBeVisible({
-    timeout: 45_000,
   });
-}
 
-test.describe("Spatial Map ERS generator selector", () => {
-  test("default is Qwen; changing to GPT Image 2 does not POST", async ({ page }) => {
-    test.setTimeout(120_000);
-    const clicks = { generate: false };
-    attachHoldGuards(page, clicks);
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await openCoDirectorFullScreen(page, PROJECT_ID);
-    await openSpatialMapTab(page);
-    await expect(page.getByTestId("spatial-map-panel")).toBeVisible({ timeout: 30_000 });
+  test("Regenerate Environment Reference Sheet uses GPT Image 2, never Qwen", async ({
+    page,
+    request,
+  }) => {
+    const mapId = await resolveVentureMap(request);
+    await openStandardSpatial(page, mapId);
+    const fixed = page.getByTestId("ers-generator-fixed");
+    await expect(fixed).toBeVisible({ timeout: 20_000 });
+    const label = (await fixed.innerText()).trim();
+    if (label !== "GPT Image 2 — API") {
+      test.info().annotations.push({
+        type: "ers-provider",
+        description: label,
+      });
+      await expect(fixed).toHaveText("GPT Image 2 — Requires Setup");
+      await expect(page.getByTestId("ers-generator")).not.toContainText(/Qwen/i);
+      return;
+    }
 
-    const select = page.getByTestId("ers-generator-select");
-    await expect(select).toBeVisible({ timeout: 30_000 });
-    await expect(select).toHaveValue("qwen2512");
-
-    let posted = false;
+    const generate = page.getByRole("button", {
+      name: /Generate Environment Reference Sheet|Regenerate Environment Reference Sheet/i,
+    });
+    await expect(generate).toBeEnabled();
+    const posted: string[] = [];
     page.on("request", (req) => {
       if (req.method() !== "POST") return;
       const url = req.url();
       const body = `${req.postData() || ""}`;
-      if (url.includes("/executions") && !url.includes("/advance") && /ers\.generate/i.test(body)) {
-        posted = true;
+      if (url.includes("/executions") && /ers\.generate/i.test(body)) {
+        posted.push(body);
       }
     });
+    await generate.click();
+    await expect.poll(() => posted.length, { timeout: 30_000 }).toBeGreaterThan(0);
+    expect(posted.join(" ")).toMatch(/gpt-image-2/i);
+    expect(posted.join(" ")).not.toMatch(/qwen2512/i);
 
-    await select.selectOption("gpt-image-2");
-    await expect(select).toHaveValue("gpt-image-2");
-    await page.waitForTimeout(500);
-    expect(posted, "changing the ERS generator must not POST ers.generate").toBe(false);
-    expect(clicks.generate, "HOLD: Generate was not clicked").toBe(false);
+    const model = page.getByTestId("ers-generation-model");
+    await expect(model).toContainText(/GPT Image 2/i, { timeout: 30_000 });
+    await expect(model).not.toContainText(/Qwen/i);
+
+    await expect(page.getByTestId("ers-generation-monitor")).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(
+        async () => {
+          const stage = (await page.getByTestId("ers-generation-stage").innerText().catch(() => "")).toLowerCase();
+          const err = await page.getByTestId("ers-generation-retry").isVisible().catch(() => false);
+          if (err) return "failed";
+          if (stage.includes("complete") || stage.includes("ready") || stage.includes("saved")) return "complete";
+          return stage || "running";
+        },
+        { timeout: 6 * 60 * 1000 },
+      )
+      .toMatch(/complete|failed/);
+
+    const sheets = await request.get(`${API}/api/environment-reference-sheets/projects/${PROJECT_ID}/sheets`);
+    if (sheets.ok()) {
+      const body = await sheets.json();
+      const text = JSON.stringify(body);
+      expect(text).not.toMatch(/I'll use Qwen/i);
+    }
   });
 });

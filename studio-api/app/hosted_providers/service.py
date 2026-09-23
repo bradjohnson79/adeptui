@@ -12,17 +12,18 @@ from ..secrets_store import (
     set_secret,
     set_secret_verification,
 )
-from .adapters import probe_fal, probe_kie, probe_wavespeed
+from .adapters import probe_fal, probe_kie, probe_wavespeed, probe_elevenlabs
 from .capabilities import capability_matrix, executable_capabilities
 from .models import list_canonical_models
 from .preferences import load_preferences, save_preferences
-from .registry import PRIORITY_ORDER, PROVIDERS, list_providers
+from .registry import CATALOG_ORDER, PRIORITY_ORDER, PROVIDERS, list_providers
 from .resolver import resolve_hosted_provider
 
 _PROBES = {
     "kie": probe_kie,
     "wavespeed": probe_wavespeed,
     "fal": probe_fal,
+    "elevenlabs": probe_elevenlabs,
 }
 
 # In-memory last successful execution stamps (process-local; not fabricated).
@@ -164,7 +165,7 @@ def provider_card(provider_id: str) -> dict[str, Any]:
         "displayName": defn.display_name,
         "role": defn.role,
         "recommended": defn.recommended,
-        "priority": PRIORITY_ORDER.index(pid) + 1,  # type: ignore[arg-type]
+        "priority": (list(CATALOG_ORDER).index(pid) + 1) if pid in CATALOG_ORDER else 99,
         "connectionStatus": status.get("state"),
         "apiKeyStatus": {
             "configured": status.get("configured"),
@@ -193,7 +194,7 @@ def provider_card(provider_id: str) -> dict[str, Any]:
 
 def catalog() -> dict[str, Any]:
     prefs = load_preferences()
-    cards = [provider_card(pid) for pid in PRIORITY_ORDER]
+    cards = [provider_card(pid) for pid in CATALOG_ORDER]
     # Attach balances from last verification detail if present — do not invent
     states = {c["providerId"]: c["connectionStatus"] for c in cards}
     return {
@@ -226,6 +227,11 @@ def resolve(
     capability: str | None = None,
     canonical_model: str | None = None,
 ) -> dict[str, Any]:
+    # ORDER 15 amend: ElevenLabs capability routes via USER fal/kie/wavespeed
+    if (capability or "").strip() in ("elevenlabs.voice", "elevenlabs.sfx"):
+        from .elevenlabs_capability import resolve_capability
+
+        return resolve_capability(capability.strip())  # type: ignore[arg-type]
     states = {pid: secret_status(PROVIDERS[pid].secret_name).get("state") or "missing" for pid in PRIORITY_ORDER}
     return resolve_hosted_provider(
         capability=capability,

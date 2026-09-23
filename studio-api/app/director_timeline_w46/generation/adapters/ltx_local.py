@@ -22,22 +22,27 @@ from ..contracts import (
 GENERATOR_ID = "ltx-local"
 ALIASES = frozenset({
     "ltx-local",
-    "ltx-2.5-full",
-    "ltx-2.5-distilled",
-    "ltx-2.5-comfy",
+    "ltx",
 })
 
 
 def _capabilities() -> VideoGeneratorCapabilities:
     return VideoGeneratorCapabilities(
         id=GENERATOR_ID,
-        label="LTX 2.5 (Local)",
+        label="LTX 2.3 (Local)",
         executionType="local",
-        supportsTextToVideo=True,
+        # HONESTY: LTX is Reference-to-Video only. validate() rejects
+        # text_to_video ("Timeline LTX is Reference-to-Video only.") and the
+        # canonical capability catalog (generator_knowledge/profiles/ltx-local)
+        # already declares supportsTextToVideo=false. The live LTX 2.5 graph
+        # conditions ONE start picture via LTXVImgToVideo (see knowledgebase
+        # video-generators/ltx-2.5.md). Do not advertise T2V here.
+        supportsTextToVideo=False,
         supportsImageToVideo=True,
         supportsStartFrame=True,
         supportsEndFrame=True,
         supportsMultipleImageReferences=False,
+        supportsReferenceToVideo=True,
         supportsVideoReferences=False,
         supportsAudioReferences=False,
         maximumReferenceImages=0,
@@ -60,7 +65,7 @@ def _capabilities() -> VideoGeneratorCapabilities:
             "native": True,
         },
         executable=True,
-        notes="Local Comfy LTX path via studio render_scene jobs. Supports LTX 2.3 and 2.5 variants.",
+        notes="Timeline local Reference-to-Video. LTX 2.3 uses Ingredients IC-LoRA. LTX 2.5 maps one start cond and keeps extra roles in the prompt.",
         draftPathway="local_live",
         supportsQueuedCancel=True,
         supportsRunningCancel=True,
@@ -77,6 +82,12 @@ class LtxLocalAdapter:
 
     def validate(self, request: TimelineGenerationRequest) -> ValidationResult:
         result = validate_against_capabilities(self.capabilities, request)
+        if request.generationMode == "text_to_video":
+            return ValidationResult(
+                ok=False,
+                errors=list(result.errors) + ["Timeline LTX is Reference-to-Video only."],
+                warnings=list(result.warnings),
+            )
         if not result.ok:
             return result
         gen_id = str(
@@ -107,7 +118,7 @@ class LtxLocalAdapter:
             or GENERATOR_ID
         )
         params = {
-            "engine": "ltx",
+            "engine": "ltx-2.5" if str(self.id).startswith("ltx-2.5") else "ltx",
             "generatorId": timeline_model,
             "adapterId": gen_id,
             "prompt": request.prompt,
@@ -118,6 +129,7 @@ class LtxLocalAdapter:
             "seed": request.seed,
             "batchBlockId": request.batchBlockId,
             "executionSnapshotId": request.executionSnapshotId,
+            "sceneTakeId": str(request.providerOptions.get("sceneTakeId") or ""),
             "generationMode": request.generationMode,
             "timelineGeneration": True,
             "fallbackAllowed": bool(request.fallbackAllowed),
@@ -134,13 +146,33 @@ class LtxLocalAdapter:
             "temporalContinuityPacketId": request.temporalContinuityPacketId,
             "temporalContinuation": request.providerOptions.get("temporalContinuation"),
         }
+        from ..r2v import copy_r2v_into_job_params
+
+        copy_r2v_into_job_params(params, request)
+        if request.providerOptions.get("ingredients_ic_lora"):
+            params["ingredients_ic_lora"] = True
+            params["reference_method"] = "ingredients_ic_lora"
+            params["sheet_id"] = request.providerOptions.get("sheet_id")
+            params["source_asset_ids"] = list(request.providerOptions.get("source_asset_ids") or [])
+            params["image_asset_id"] = request.providerOptions.get("image_asset_id")
+            params["reference_prompt"] = request.providerOptions.get("reference_prompt")
+            params["characterIdentity"] = request.providerOptions.get("characterIdentity")
+        elif request.providerOptions.get("characterIdentity"):
+            params["ingredients_ic_lora"] = False
+            params["reference_method"] = request.providerOptions.get("reference_method")
+            params["source_asset_ids"] = list(request.providerOptions.get("source_asset_ids") or [])
+            params["characterIdentity"] = request.providerOptions.get("characterIdentity")
 
         if timeline_model in ("ltx-2.5-full", "ltx-2.5-distilled", "ltx-2.5-comfy"):
             params["fast_mode"] = bool(request.providerOptions.get("fast_generation", True))
+            # Native AV is wired: EmptyAudio+ConcatAV → SamplerCustomAdvanced → SeparateAV.
+            # Default ON to match audio_generation capability / audioAuthority honesty.
             params["generate_audio"] = bool(request.providerOptions.get("audio_generation", True))
             params["variant"] = timeline_model
         elif request.providerOptions.get("fast_generation"):
             params["fast_mode"] = True
+        if request.providerOptions.get("turbo_lora"):
+            params["turbo_lora"] = True
 
         res = str(request.resolution or "")
         if "x" in res:
@@ -233,7 +265,7 @@ class LtxLocalAdapter:
             providerMetadata={
                 "projectId": request.projectId,
                 "sceneId": request.sceneId,
-                "engine": "ltx",
+                "engine": "ltx-2.5" if str(self.id).startswith("ltx-2.5") else "ltx",
                 "generatorId": timeline_model,
                 "requestedModel": timeline_model,
                 "executionSnapshotId": request.executionSnapshotId,

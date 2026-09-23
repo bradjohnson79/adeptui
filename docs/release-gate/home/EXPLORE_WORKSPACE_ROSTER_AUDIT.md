@@ -1,5 +1,7 @@
 # EXPLORE WORKSPACE ROSTER AUDIT: GO
 
+> **SUPERSEDED (2026-09-15).** Historical roster audit. Current Explore Adept UI authority is `docs/release-gate/home/EXPLORE_ADEPT_UI_4X3_GRID_CERTIFICATION.md`.
+
 ## Summary
 
 - Explore Adept UI now shows exactly **10** canonical workspace cards.

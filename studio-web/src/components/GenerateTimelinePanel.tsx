@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { EngineName, Project } from "../types";
 import { api } from "../api";
 import { PanelHeading } from "./HelpTip";
+import { EngineAuthoritySelect } from "./generation/EngineAuthoritySelect";
 
 type ProposalScene = {
   name: string;
@@ -148,25 +149,14 @@ export function GenerateTimelinePanel({
                   </label>
                   <label className="scene-meta">
                     Engine
-                    <select
+                    <EngineAuthoritySelect
                       value={s.engine || "auto"}
-                      onChange={(e) => {
+                      onChange={(engine) => {
                         const next = [...scenes];
-                        next[i] = { ...s, engine: e.target.value as EngineName };
+                        next[i] = { ...s, engine };
                         setScenes(next);
                       }}
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="minimax-h3">MiniMax H3 (Default)</option>
-                      <option value="ltx">LTX 2.5</option>
-                      <option value="hunyuan15">HunyuanVideo 1.5</option>
-                      <option value="hunyuan13b">HunyuanVideo 13B</option>
-                      <option value="wan">WAN (Optional)</option>
-                      <option value="fal_seedance">Seedance</option>
-                      <option value="fal_kling">Kling</option>
-                      <option value="fal_veo">Veo</option>
-                      <option value="fal_runway">Runway</option>
-                    </select>
+                    />
                   </label>
                 </div>
               </li>

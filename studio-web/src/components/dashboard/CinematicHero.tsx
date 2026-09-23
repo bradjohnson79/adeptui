@@ -77,7 +77,7 @@ export function CinematicHero({
           </button>
         </div>
         <div className="hero-chips" aria-label="Pipeline stages">
-          {["Script", "Storyboard", "Spatial Map", "ImageGen", "Director"].map((c) => (
+          {["Script", "Storyboard", "ImageGen", "Director"].map((c) => (
             <span key={c} className="pill">
               {c}
             </span>

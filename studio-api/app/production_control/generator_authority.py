@@ -109,6 +109,12 @@ def apply_authority_to_model(model: dict[str, Any]) -> dict[str, Any] | None:
     if is_production_mock(mid):
         return None
     modality = str(model.get("modality") or "")
+    if modality == "video" and (
+        video_registry.is_retired_local_video(mid)
+        or video_registry.is_retired_local_video(canonical_product_id(mid))
+        or mid == "optional-wan"
+    ):
+        return None
     locality = str(model.get("locality") or "local")
     capability = str(model.get("capabilityLabel") or "Available")
     adapter_id = timeline_adapter_for(mid) if modality == "video" else None
@@ -287,6 +293,7 @@ def _capability_from_row(row: dict[str, Any], adapter_caps: Any | None) -> Any:
             else []
         ),
         supportsAudio=bool(getattr(adapter_caps, "audio_generation", False) if adapter_caps else False),
+        qualityControl=getattr(adapter_caps, "qualityControl", None) if adapter_caps else None,
         executable=bool(row.get("executable")),
         notes=notes,
         # list_models() stamps timelineAdapterId but drops this bool.
@@ -297,12 +304,17 @@ def _capability_from_row(row: dict[str, Any], adapter_caps: Any | None) -> Any:
         supportsImageToVideo=bool(
             adapter_caps.supportsImageToVideo if adapter_caps is not None else True
         ),
-        # Surface truth, not the Timeline adapter flag: a Timeline R2V adapter
-        # declaring supportsTextToVideo=False must not hide a genuine T2V
-        # workflow on the Text to Video surface.
+        supportsReferenceToVideo=bool(
+            getattr(adapter_caps, "supportsReferenceToVideo", False)
+            if adapter_caps is not None
+            else False
+        ),
+        # Timeline supportsTextToVideo is adapter/Timeline truth ONLY.
+        # CREATE route_a.t2va / workflowCapabilities.t2v must NOT leak onto this
+        # flag (that mislabels MiniMax H3 R2V as Text-to-Video on Timeline).
+        # CREATE surfaces read workflowCapabilities separately.
         supportsTextToVideo=bool(
-            (row.get("workflowCapabilities") or {}).get("t2v", {}).get("supported")
-            or (adapter_caps.supportsTextToVideo if adapter_caps is not None else False)
+            adapter_caps.supportsTextToVideo if adapter_caps is not None else False
         ),
         requiresLastFrame=bool(
             getattr(adapter_caps, "requiresLastFrame", False) if adapter_caps is not None else False
@@ -417,19 +429,20 @@ def timeline_generator_snapshot() -> list[Any]:
     for cap in adapter_caps.values():
         if cap.id in seen or canonical_product_id(cap.id) in seen:
             continue
-        if cap.id in _ADAPTER_ONLY_IDS:
+        if cap.id in _ADAPTER_ONLY_IDS and not (cap.id == "cert-stub-local" and stub_enabled()):
             continue
         if cap.id == "cert-stub-local" and not stub_enabled():
             continue
+        stub_ready = cap.id == "cert-stub-local" and stub_enabled()
         annotated = apply_authority_to_model(
             {
                 "id": cap.id,
                 "modality": "video",
                 "label": cap.label,
                 "locality": "hosted" if cap.executionType == "api" else "local",
-                "providerId": None,
-                "capabilityLabel": "Testing" if cap.id.startswith("minimax-h3") else "Available",
-                "executable": False,
+                "providerId": "cert-stub" if stub_ready else None,
+                "capabilityLabel": "Available" if stub_ready else ("Testing" if cap.id.startswith("minimax-h3") else "Available"),
+                "executable": True if stub_ready else False,
             }
         )
         if annotated is None:
@@ -450,16 +463,16 @@ def timeline_generator_snapshot() -> list[Any]:
                 label="Cert Stub (wiring certification only)",
                 locality="local",
                 providerId="cert-stub",
-                capabilityLabel="Testing",
+                capabilityLabel="Available",
                 maxDurationSec=10.0,
                 supportsStartEndFrame=True,
                 supportsContinuation=True,
                 inPaintStrategies=["range_replacement", "keyframe_repair", "complete_batch_retake"],
-                executable=False,
+                executable=True,
                 supportsTimelineGeneration=True,
                 notes="Certification stub — env-gated. Never executes GPU code.",
-                readiness="Testing",
-                disabledReason="Testing — certification stub",
+                readiness="Ready",
+                disabledReason="",
             )
         )
     return gens

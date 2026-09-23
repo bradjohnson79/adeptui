@@ -102,6 +102,10 @@ class DirectionalViewRecord(BaseModel):
     continuityNotes: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     provenance: ERSProvenanceRecord = Field(default_factory=ERSProvenanceRecord)
+    # Version lineage (edit → vN). parent/root empty means this sheet is a lineage root.
+    parentSheetId: str | None = None
+    rootSheetId: str | None = None
+    versionNumber: int = 1
 
 
 class OptionalThreeDRecord(BaseModel):
@@ -185,10 +189,12 @@ class EnvironmentReferenceSheet(BaseModel):
     projectId: str
     sceneId: str | None = None
     name: str
+    canonicalTag: str = ""
     description: str
     status: ERSStatus = "draft"
     createdAt: str = Field(default_factory=utc_now)
     updatedAt: str = Field(default_factory=utc_now)
+    isGlobal: bool = False
     profile: EnvironmentProfile
     spatialMap: SpatialMapReference | None = None
     directionalViews: list[DirectionalViewRecord] = Field(default_factory=list)
@@ -201,3 +207,7 @@ class EnvironmentReferenceSheet(BaseModel):
     exports: list[ERSExportRecord] = Field(default_factory=list)
     revisionLaw: ERSRevisionLaw = Field(default_factory=ERSRevisionLaw)
     provenance: ERSProvenanceRecord = Field(default_factory=ERSProvenanceRecord)
+    # Version lineage (edit → vN). parent/root empty means this sheet is a lineage root.
+    parentSheetId: str | None = None
+    rootSheetId: str | None = None
+    versionNumber: int = 1

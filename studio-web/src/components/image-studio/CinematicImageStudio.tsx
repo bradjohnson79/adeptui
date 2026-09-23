@@ -10,15 +10,26 @@ import { languageProjectContext, useLanguagePrefs } from "../../i18n";
 import type { Job, Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
 import { ASPECT_PRESETS } from "../../workspacePrefs";
-import { ImageEditWorkspace } from "../imageEdit/ImageEditWorkspace";
+import {
+  AuthorityReferencePanel,
+  authorityRefAssetIds,
+  mergeAssetIdsIntoAuthority,
+  type CisAuthorityRef,
+} from "./AuthorityReferencePanel";
+import { IgShotDescriptionField, mergeResolvedIntoSelected } from "./IgPromptNativeField";
+import type { IgCatalogOption } from "./igPromptTokens";
+import {
+  loadImageGeneratorDraft,
+  publishImageGeneratorPlanning,
+  saveImageGeneratorDraft,
+} from "./imageGeneratorPlanning";
 import { PromptIntelligencePanel } from "../CoDirector/PromptIntelligencePanel";
 import { SpatialReferenceFieldset } from "../spatial-map/SpatialReferenceFieldset";
 import { HelpTip } from "../HelpTip";
 import type { LibraryAsset } from "../CoDirector/library/assetModel";
-import { getAssetName } from "../CoDirector/library/assetModel";
 import { CisAccordion } from "./CisAccordion";
 import { LoRASelector, type LoraSelection } from "../lora/LoRASelector";
-import { isReferenceImage, ReferenceBrowser, referenceRole } from "./ReferenceBrowser";
+import { isReferenceImage } from "./ReferenceBrowser";
 import { ImageProviderBrowser } from "./ImageProviderBrowser";
 import { providerSubLabel } from "./providerDisplay";
 import { ProductionPipelinePanel } from "./ProductionPipelinePanel";
@@ -32,13 +43,17 @@ import type {
 } from "../../contracts/cinematicImageStudio";
 import { CREATOR_IMAGE_CATEGORIES, DEFAULT_IMAGE_CATEGORY } from "../../contracts/cinematicImageStudio";
 import { DEFAULT_COLOR_GRADE, resolveColorGradeId } from "../../contracts/colorGrades";
+import {
+  LIGHTING_PRESET_IDS,
+  LIGHTING_PRESET_LABELS,
+  hydrateLightingPreset,
+  lightingPresetLabel,
+} from "../../cinematography";
 import type { ImagePipelineDeploymentPreference } from "../../contracts/imagePipeline";
 import type { VisualContinuitySession } from "../../contracts/visualContinuity";
 import { CIS_QUEUED_NO_HYDRATE_MS, staleCisQueuedNoHydrate } from "./cisFailClose";
-import { consumePoseCraftHandoff } from "./posecraftHandoff";
 import "./cinematic-image-studio.css";
 
-type StudioMode = "generate" | "edit";
 
 type ResultCard = {
   jobId: string;
@@ -96,14 +111,6 @@ const LENS_OPTIONS: { value: string; tip: string }[] = [
   },
 ];
 
-const LIGHTING_OPTIONS = [
-  "Natural soft daylight",
-  "Motivated practicals",
-  "Hard key / noir",
-  "Overcast ambient",
-  "Neon night",
-  "Golden hour rim",
-];
 
 function projectDefaults(project: Project): Record<string, unknown> {
   try {
@@ -197,7 +204,6 @@ export function CinematicImageStudio({
   const { t } = useTranslation(["imageGenerator", "common"]);
   const { prefs } = useLanguagePrefs();
   const d = projectDefaults(project);
-  const [studioMode, setStudioMode] = useState<StudioMode>("generate");
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState(project.negative_prompt || "");
   const [controls, setControls] = useState<CinematicControls>({
@@ -205,9 +211,10 @@ export function CinematicImageStudio({
     shotIntent: "medium",
     category: DEFAULT_IMAGE_CATEGORY,
     lens: "35mm",
-    lighting: "Natural soft daylight",
+    lighting: "auto",
     colorTreatment: "Neutral cinematic",
     colorGradePreset: DEFAULT_COLOR_GRADE,
+    visualStyle: "live_action",
     customShotIntent: "",
   });
   const [resolution, setResolution] = useState<ResolutionLabel>("1K");
@@ -225,10 +232,11 @@ export function CinematicImageStudio({
   const [seed, setSeed] = useState(project.seed ?? -1);
   const [guidance, setGuidance] = useState<number | "">("");
   const [steps, setSteps] = useState<number | "">("");
-  const [refIds, setRefIds] = useState<string[]>([]);
-  const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const [authorityRefs, setAuthorityRefs] = useState<CisAuthorityRef[]>([]);
+  const refIds = useMemo(() => authorityRefAssetIds(authorityRefs), [authorityRefs]);
+  const [igCatalogs, setIgCatalogs] = useState<IgCatalogOption[]>([]);
+  const [unresolvedTags, setUnresolvedTags] = useState<Array<{ raw: string; suggestions: string[] }>>([]);
   const [libraryItems, setLibraryItems] = useState<LibraryAsset[]>([]);
-  const [highlightId, setHighlightId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [piStatus, setPiStatus] = useState("Co-Director");
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -260,6 +268,49 @@ export function CinematicImageStudio({
   useEffect(() => {
     void loadLibrary();
   }, [loadLibrary, project.assets]);
+
+  // Persist + publish IG planning (Env Creator module-store pattern).
+  useEffect(() => {
+    const providerId = chosenProviderId || bestMatch?.id || "";
+    const state = {
+      prompt,
+      negativePrompt: negative,
+      authorityRefs,
+      referenceAssetIds: refIds,
+      unresolvedTags: unresolvedTags.map((u) => u.raw),
+      provenance: "cinematic_image_studio",
+      updatedAt: new Date().toISOString(),
+      generationMode: mode,
+      category: controls.category,
+      batchSize,
+      modelId: providerId || undefined,
+      generatorId: providerId || undefined,
+      aspectRatio: controls.aspectRatio,
+      resolution,
+    };
+    saveImageGeneratorDraft(project.id, state);
+    publishImageGeneratorPlanning(project.id, state);
+  }, [
+    project.id,
+    prompt,
+    negative,
+    authorityRefs,
+    refIds,
+    unresolvedTags,
+    mode,
+    controls.category,
+    controls.aspectRatio,
+    batchSize,
+    chosenProviderId,
+    bestMatch?.id,
+    resolution,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      publishImageGeneratorPlanning(project.id, null);
+    };
+  }, [project.id]);
 
   const scenes = useMemo(
     () => [...(project.scenes || [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)),
@@ -310,6 +361,19 @@ export function CinematicImageStudio({
   }, [mode, prompt, controls.category, chosenProviderId]);
 
   useEffect(() => {
+    // Project-scoped Journey 1 refs — reset when project changes, then apply seed/handoff.
+    setAuthorityRefs([]);
+    setUnresolvedTags([]);
+    setIgCatalogs([]);
+    poseHandoffRef.current = false;
+    const draft = loadImageGeneratorDraft(project.id);
+    if (draft) {
+      if (typeof draft.prompt === "string" && draft.prompt.trim()) setPrompt(draft.prompt);
+      if (typeof draft.negativePrompt === "string") setNegative(draft.negativePrompt);
+      if (Array.isArray(draft.authorityRefs) && draft.authorityRefs.length) {
+        setAuthorityRefs(draft.authorityRefs as CisAuthorityRef[]);
+      }
+    }
     try {
       const raw = sessionStorage.getItem("adept_cis_seed");
       if (raw) {
@@ -328,7 +392,9 @@ export function CinematicImageStudio({
               const r = res.reopen;
               if (r.prompt) setPrompt(r.prompt);
               if (r.negativePrompt != null) setNegative(r.negativePrompt);
-              if (r.referenceAssetIds?.length) setRefIds(r.referenceAssetIds);
+              if (r.referenceAssetIds?.length) {
+        setAuthorityRefs((prev) => mergeAssetIdsIntoAuthority(prev, r.referenceAssetIds!, "other"));
+      }
               if (r.sceneId) setSceneId(String(r.sceneId));
               setSpatialMapId(r.spatialMapId ? String(r.spatialMapId) : undefined);
               setSpatialMapVersion(r.spatialMapVersion ? String(r.spatialMapVersion) : undefined);
@@ -343,6 +409,10 @@ export function CinematicImageStudio({
                   colorGradePreset: resolveColorGradeId(
                     String(r.controls.colorGradePreset || r.controls.colorTreatment || c.colorGradePreset || "")
                   ),
+                  lighting: hydrateLightingPreset(
+                    String(r.controls.lighting || c.lighting || "auto")
+                  ),
+                  visualStyle: String(r.controls.visualStyle || c.visualStyle || "live_action"),
                 }));
               }
             })
@@ -362,15 +432,35 @@ export function CinematicImageStudio({
     } catch {
       /* ignore */
     }
-    const pose = consumePoseCraftHandoff(project.id);
-    if (pose?.imageAssetId) {
-      poseHandoffRef.current = true;
-      setRefIds((prev) => Array.from(new Set([pose.imageAssetId!, ...prev])));
-      setMsg(
-        pose.honestyLabel ||
-          "PoseCraft snapshot attached as a picture reference. Generate uses image-to-image when this generator supports it.",
-      );
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const handoffAssetId = String(params.get("assetId") || "").trim();
+      const handoffKind = params.get("characterId")
+        ? "character"
+        : params.get("propId")
+          ? "prop"
+          : "other";
+      if (handoffAssetId) {
+        setAuthorityRefs((prev) => mergeAssetIdsIntoAuthority(prev, [handoffAssetId], handoffKind));
+      }
+    } catch {
+      /* ignore */
     }
+    const applyPose = (pose: { imageAssetId?: string; honestyLabel?: string } | null) => {
+      if (!pose?.imageAssetId) return;
+      poseHandoffRef.current = true;
+      setAuthorityRefs((prev) =>
+        mergeAssetIdsIntoAuthority(prev, [pose.imageAssetId!], "posecraft"),
+      );
+      setMsg(
+        "Picture reference attached. Generate uses image-to-image when this generator supports it.",
+      );
+    };
+    void import("./posecraftHandoff").then(async ({ consumeBackendPoseCraftHandoff, consumePoseCraftHandoff }) => {
+      const backend = await consumeBackendPoseCraftHandoff(project.id);
+      applyPose(backend);
+      if (!backend) applyPose(consumePoseCraftHandoff(project.id));
+    });
   }, [project.id]);
 
   useEffect(() => {
@@ -452,13 +542,18 @@ export function CinematicImageStudio({
       setContinuitySession(res.session);
       setContinuityOn(true);
       if (res.session.referenceAssetIds?.length) {
-        setRefIds((prev) => Array.from(new Set([...prev, ...res.session.referenceAssetIds])));
+        setAuthorityRefs((prev) =>
+          mergeAssetIdsIntoAuthority(prev, res.session.referenceAssetIds, "other"),
+        );
       }
       if (res.session.lensLanguage) {
         setControls((c) => ({ ...c, lens: res.session.lensLanguage || c.lens }));
       }
       if (res.session.lightingDirection) {
-        setControls((c) => ({ ...c, lighting: res.session.lightingDirection || c.lighting }));
+        setControls((c) => ({
+          ...c,
+          lighting: hydrateLightingPreset(res.session.lightingDirection || c.lighting),
+        }));
       }
       if (res.session.colorTreatment) {
         const grade = resolveColorGradeId(res.session.colorTreatment);
@@ -516,6 +611,24 @@ export function CinematicImageStudio({
       const queued: Job[] = [];
       const cards: ResultCard[] = [];
       const failures: string[] = [];
+      // Prompt-native resolve: mentioned tags must activate into referenceAssetIds.
+      const resolved = mergeResolvedIntoSelected(authorityRefs, igCatalogs, prompt);
+      if (resolved.refs !== authorityRefs) setAuthorityRefs(resolved.refs);
+      setUnresolvedTags(resolved.unresolved);
+      if (resolved.unresolved.length) {
+        setMsg(
+          `Unresolved prompt tags: ${resolved.unresolved
+            .map((u) =>
+              u.suggestions.length
+                ? `${u.raw} (Did you mean ${u.suggestions.join(", ")}?)`
+                : u.raw,
+            )
+            .join(" · ")}`,
+        );
+      } else if (resolved.warnings.length) {
+        setMsg(resolved.warnings.join(" · "));
+      }
+      const resolvedRefIds = authorityRefAssetIds(resolved.refs);
       const promptForGen = effectivePrompt(prompt, controls);
 
       for (const target of targets) {
@@ -531,7 +644,14 @@ export function CinematicImageStudio({
             batchSize: mode === "all_models" ? 1 : batchSize,
             resolution,
             controls,
-            referenceAssetIds: refIds,
+            referenceAssetIds: resolvedRefIds,
+            authorityReferences: resolved.refs.map((r) => ({
+              key: r.key,
+              kind: r.kind,
+              assetId: r.assetId,
+              name: r.name,
+              chip: r.chip,
+            })),
             sceneId: sceneId || undefined,
             continuitySessionId: continuityOn ? continuitySession?.id : undefined,
             inheritContinuityFromScene: continuityOn && !continuitySession?.id && !!sceneId,
@@ -555,8 +675,44 @@ export function CinematicImageStudio({
           const body: Record<string, unknown> = {
             ...(preview.imageProductBody || {}),
             lockModelFamily: true,
+            referenceAssetIds: resolvedRefIds,
+            authorityReferences: resolved.refs.map((r) => ({
+              key: r.key,
+              kind: r.kind,
+              assetId: r.assetId,
+              name: r.name,
+              chip: r.chip,
+            })),
           };
-          if (poseHandoffRef.current && refIds.length) {
+          // Locked creator constraints — stamp visualStyle for Co-Director / compile routing.
+          {
+            const vs = String(controls.visualStyle || "").trim();
+            if (vs) {
+              body.visualStyle = vs;
+              const creative = (body.creativeContext as Record<string, unknown> | undefined) || {};
+              body.creativeContext = { ...creative, visualStyle: vs };
+            }
+            const lightId = hydrateLightingPreset(controls.lighting);
+            const creative = (body.creativeContext as Record<string, unknown> | undefined) || {};
+            const lighting = {
+              ...((creative.lighting as Record<string, unknown> | undefined) || {}),
+              setup: lightId,
+              presetId: lightId,
+            };
+            body.creativeContext = { ...creative, lighting };
+            const cine = (body.cinematic as Record<string, unknown> | undefined) || {};
+            body.cinematic = { ...cine, lighting: lightId, visualStyle: vs || cine.visualStyle };
+          }
+          if (resolvedRefIds.length && body.taskType !== "POSE_CONDITIONED_IMAGE") {
+            body.taskType = "IMAGE_I2I";
+            const creative = (body.creativeContext as Record<string, unknown> | undefined) || {};
+            body.creativeContext = {
+              ...creative,
+              taskType: "IMAGE_I2I",
+              authorityReferences: body.authorityReferences,
+            };
+          }
+          if (poseHandoffRef.current && resolvedRefIds.length) {
             body.taskType = "POSE_CONDITIONED_IMAGE";
             const creative = (body.creativeContext as Record<string, unknown> | undefined) || {};
             body.creativeContext = { ...creative, taskType: "POSE_CONDITIONED_IMAGE", referenceKind: "IDENTITY_REFERENCE" };
@@ -634,7 +790,9 @@ export function CinematicImageStudio({
       const r = res.reopen;
       if (r.prompt) setPrompt(r.prompt);
       if (r.negativePrompt != null) setNegative(r.negativePrompt);
-      if (r.referenceAssetIds?.length) setRefIds(r.referenceAssetIds);
+      if (r.referenceAssetIds?.length) {
+        setAuthorityRefs((prev) => mergeAssetIdsIntoAuthority(prev, r.referenceAssetIds!, "other"));
+      }
       if (r.sceneId) setSceneId(String(r.sceneId));
       if (r.panelId) setReplacePanelId(String(r.panelId));
       setSpatialMapId(r.spatialMapId ? String(r.spatialMapId) : undefined);
@@ -650,6 +808,10 @@ export function CinematicImageStudio({
           colorGradePreset: resolveColorGradeId(
             String(r.controls.colorGradePreset || r.controls.colorTreatment || c.colorGradePreset || "")
           ),
+          lighting: hydrateLightingPreset(
+            String(r.controls.lighting || c.lighting || "auto")
+          ),
+          visualStyle: String(r.controls.visualStyle || c.visualStyle || "live_action"),
         }));
       }
       if (r.continuitySessionId) {
@@ -739,8 +901,8 @@ export function CinematicImageStudio({
       const asset = await api.uploadAsset(project.id, file, tagFromFilename(file.name), "image");
       await onChange();
       await loadLibrary();
-      setHighlightId(asset.id);
-      setMsg("Image added to the project Library. Select it, then click Add Reference.");
+      setAuthorityRefs((prev) => mergeAssetIdsIntoAuthority(prev, [asset.id], "other"));
+      setMsg(t("imageGenerator:libraryAddedOther"));
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : "Could not upload that image to the Library.");
     } finally {
@@ -749,12 +911,6 @@ export function CinematicImageStudio({
     }
   };
 
-  const addReferences = () => {
-    if (!pendingIds.length) return;
-    const next = Array.from(new Set([...refIds, ...pendingIds]));
-    setRefIds(next);
-    setPendingIds([]);
-  };
 
   const groupedResults = useMemo(() => {
     const groups = new Map<string, ResultCard[]>();
@@ -771,10 +927,6 @@ export function CinematicImageStudio({
   const paidOk = hostedChoice === "allow_hosted";
   const accordionKey = `adept_cis_accordion_${project.id}`;
   const supportsRefs = providerSupportsReferences(generateTargets[0] || bestMatch);
-  const activeAssets: LibraryAsset[] = refIds.map((id) => {
-    const found = libraryItems.find((item) => item.id === id);
-    return found || { id, tag: id.slice(0, 8), kind: "image" };
-  });
   const showHostedCard =
     mode === "all_models" ||
     paidConfirmIds.length > 0 ||
@@ -786,33 +938,14 @@ export function CinematicImageStudio({
         ? (providers.find((provider) => provider.id === chosenProviderId)?.source === "hosted" ? "api" : "local")
         : "best-match";
 
-  if (studioMode === "edit") {
-    return (
-      <div className="page cinematic-image-studio">
-        <div className="cis-mode-tabs">
-          <button type="button" onClick={() => setStudioMode("generate")}>
-            {t("imageGenerator:generate")}
-          </button>
-          <button type="button" className="primary" onClick={() => setStudioMode("edit")}>
-            {t("imageGenerator:edit")}
-          </button>
-        </div>
-        <ImageEditWorkspace project={project} onChange={onChange} />
-      </div>
-    );
-  }
-
   return (
     <div className="page cinematic-image-studio" data-testid="cinematic-image-studio">
-      <div className="cis-mode-tabs">
-        <button type="button" className="primary" onClick={() => setStudioMode("generate")}>
-          {t("imageGenerator:generate")}
+      <div className="cis-mode-tabs" data-testid="cis-journey1-nav" role="navigation" aria-label="Image Generator triad">
+        <button type="button" className="primary" aria-current="page" data-testid="cis-nav-generate">
+          {t("imageGenerator:navGenerate")}
         </button>
-        <button type="button" onClick={() => setStudioMode("edit")}>
-          {t("imageGenerator:edit")}
-        </button>
-        <button type="button" className="ghost" onClick={() => onGo("script")}>
-          {t("imageGenerator:openStoryboard")}
+        <button type="button" className="ghost" onClick={() => onGo("script")} data-testid="cis-nav-storyboard">
+          {t("imageGenerator:navStoryboardStudio")}
         </button>
       </div>
 
@@ -829,16 +962,15 @@ export function CinematicImageStudio({
         {/* 1. Prompt */}
         <section className="cis-card cis-card--prompt">
           <h2 className="cis-card__title">Prompt</h2>
-          <div className="field">
-            <label htmlFor="cis-prompt">Shot description</label>
-            <textarea
-              id="cis-prompt"
-              rows={5}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe the shot as a filmmaker — subject, action, atmosphere…"
-            />
-          </div>
+          <IgShotDescriptionField
+            prompt={prompt}
+            onPromptChange={setPrompt}
+            catalogs={igCatalogs}
+            selected={authorityRefs}
+            onSelectedChange={setAuthorityRefs}
+            unresolved={unresolvedTags}
+            onUnresolvedChange={setUnresolvedTags}
+          />
           <div className="cis-row" style={{ marginTop: "0.75rem" }}>
             <div className="field">
               <label>Category</label>
@@ -879,6 +1011,41 @@ export function CinematicImageStudio({
               </select>
             </div>
           </div>
+
+          <div className="cis-auth-refs-wrap" data-testid="cis-refs-below-category">
+            <div className="cis-auth-refs-wrap__actions">
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                data-testid="cis-upload-library-input"
+                onChange={(event) => void uploadToLibrary(event.target.files?.[0])}
+              />
+              <button
+                type="button"
+                className="ghost"
+                disabled={uploading}
+                data-testid="cis-upload-library"
+                onClick={() => uploadInputRef.current?.click()}
+              >
+                {uploading ? t("imageGenerator:uploading") : t("imageGenerator:uploadToLibrary")}
+              </button>
+            </div>
+            <AuthorityReferencePanel
+              projectId={project.id}
+              libraryItems={libraryItems}
+              selected={authorityRefs}
+              onChange={setAuthorityRefs}
+              onCatalogsChange={setIgCatalogs}
+            />
+            {supportsRefs === false && authorityRefs.length ? (
+              <p className="muted tiny cis-auth-refs-warn">
+                {t("imageGenerator:refsUnsupportedByProvider")}
+              </p>
+            ) : null}
+          </div>
+
           {mode === "best_match" && bestMatch && (
             <p className="muted tiny" style={{ marginTop: "0.65rem" }}>
               Using <strong>{bestMatch.displayName}</strong> · {bestMatch.costHint || "Local"}
@@ -917,103 +1084,10 @@ export function CinematicImageStudio({
             onColorGradeChange={(id) =>
               setControls((c) => ({ ...c, colorGradePreset: id, colorTreatment: id }))
             }
+            visualStyle={controls.visualStyle || "live_action"}
+            onVisualStyleChange={(id) => setControls((c) => ({ ...c, visualStyle: id }))}
             hideTitle
           />
-        </CisAccordion>
-
-        <CisAccordion
-          id="references"
-          title="References"
-          defaultOpen
-          persistKey={accordionKey}
-          status={refIds.length ? `${refIds.length} active` : undefined}
-          headerAction={
-            <>
-              <input
-                ref={uploadInputRef}
-                type="file"
-                accept="image/*"
-                hidden
-                data-testid="cis-upload-library-input"
-                onChange={(event) => void uploadToLibrary(event.target.files?.[0])}
-              />
-              <button
-                type="button"
-                className="ghost"
-                disabled={uploading}
-                data-testid="cis-upload-library"
-                onClick={() => uploadInputRef.current?.click()}
-              >
-                {uploading ? "Uploading…" : "Upload Image to Library"}
-              </button>
-            </>
-          }
-        >
-          <ReferenceBrowser
-            assets={libraryItems}
-            pendingIds={pendingIds}
-            activeIds={refIds}
-            highlightId={highlightId}
-            onPendingChange={setPendingIds}
-          />
-          <div className="cis-ref-bind">
-            <button
-              type="button"
-              className="primary"
-              disabled={!pendingIds.length}
-              data-testid="cis-add-reference"
-              onClick={addReferences}
-            >
-              {t("imageGenerator:addReference")}
-            </button>
-            {pendingIds.length ? (
-              <span className="muted tiny">{pendingIds.length} selected</span>
-            ) : null}
-          </div>
-          <div className="cis-active-refs" data-testid="cis-active-references">
-            <div className="cis-active-refs__header">
-              <h3>Active References</h3>
-              <span className="muted tiny" data-testid="cis-active-ref-count">
-                {refIds.length} active reference{refIds.length === 1 ? "" : "s"}
-              </span>
-            </div>
-            {!activeAssets.length ? (
-              <p className="muted tiny">{t("imageGenerator:addReferenceHint")}</p>
-            ) : (
-              <ul className="cis-active-ref-list">
-                {activeAssets.map((asset) => {
-                  const role = referenceRole(asset);
-                  const supported = supportsRefs;
-                  return (
-                    <li key={asset.id} className="cis-active-ref-chip" data-testid={`cis-active-ref-${asset.id}`}>
-                      <img src={api.assetUrl(asset.id)} alt="" />
-                      <span className="cis-active-ref-chip__meta">
-                        <strong>{getAssetName(asset)}</strong>
-                        <span>
-                          {role}
-                          {supported === true ? " ✓" : supported === false ? " ⚠" : ""}
-                        </span>
-                        {supported === false ? (
-                          <span className="cis-active-ref-chip__warn">
-                            Selected generator cannot directly use this reference.
-                          </span>
-                        ) : null}
-                      </span>
-                      <button
-                        type="button"
-                        className="ghost"
-                        aria-label={`Remove ${getAssetName(asset)}`}
-                        data-testid={`cis-remove-ref-${asset.id}`}
-                        onClick={() => setRefIds((prev) => prev.filter((id) => id !== asset.id))}
-                      >
-                        ×
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
         </CisAccordion>
 
         <CisAccordion
@@ -1102,18 +1176,19 @@ export function CinematicImageStudio({
           id="lighting"
           title={t("imageGenerator:lighting")}
           persistKey={accordionKey}
-          status={controls.lighting || undefined}
+          status={lightingPresetLabel(controls.lighting) || undefined}
         >
           <div className="cis-row">
             <div className="field">
-              <label>Lighting</label>
+              <label>{t("imageGenerator:lighting")}</label>
               <select
-                value={controls.lighting || ""}
+                data-testid="cis-lighting"
+                value={hydrateLightingPreset(controls.lighting)}
                 onChange={(e) => setControls((c) => ({ ...c, lighting: e.target.value }))}
               >
-                {LIGHTING_OPTIONS.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
+                {LIGHTING_PRESET_IDS.map((id) => (
+                  <option key={id} value={id}>
+                    {LIGHTING_PRESET_LABELS[id]}
                   </option>
                 ))}
               </select>
@@ -1383,14 +1458,13 @@ export function CinematicImageStudio({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setRefIds((prev) => Array.from(new Set([card.assetId!, ...prev])));
+                                  setAuthorityRefs((prev) =>
+                                    mergeAssetIdsIntoAuthority(prev, [card.assetId!], "other"),
+                                  );
                                   setMsg("Set as variation reference.");
                                 }}
                               >
                                 Variation
-                              </button>
-                              <button type="button" onClick={() => setStudioMode("edit")}>
-                                Edit
                               </button>
                               <button type="button" onClick={() => void reopenFromAsset(card.assetId!)}>
                                 More…

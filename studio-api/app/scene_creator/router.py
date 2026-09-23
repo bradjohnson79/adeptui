@@ -122,6 +122,11 @@ class CreateShotBody(BaseModel):
     intent: str = ""
     character_ids: list[str] | None = None
     prop_entity_ids: list[str] | None = None
+    prs_ids: list[str] | None = None
+    ers_view: str = "auto"
+    posecraft_asset_id: str = ""
+    story_theme: str = ""
+    style: str = ""
     camera: dict[str, Any] | None = None
     generator: dict[str, Any] | None = None
 
@@ -140,6 +145,11 @@ class GenerateShotBody(BaseModel):
     candidate_count: int = 4
     # Shared LoRA registry selection ({loraId, name, strength}); None = baseline.
     lora: dict[str, Any] | None = None
+    ers_view: str | None = None
+    prs_ids: list[str] | None = None
+    posecraft_asset_id: str | None = None
+    story_theme: str | None = None
+    style: str | None = None
 
 
 class RetakeShotBody(BaseModel):
@@ -740,6 +750,11 @@ def api_upsert_shot(
             intent=body.intent,
             character_ids=body.character_ids,
             prop_entity_ids=body.prop_entity_ids,
+            prs_ids=body.prs_ids,
+            ers_view=body.ers_view,
+            posecraft_asset_id=body.posecraft_asset_id,
+            story_theme=body.story_theme,
+            style=body.style,
             camera=body.camera,
             generator=body.generator,
         )
@@ -783,6 +798,11 @@ def api_generate_shot(
             api_model=body.api_model,
             candidate_count=body.candidate_count,
             lora=body.lora,
+            ers_view=body.ers_view,
+            prs_ids=body.prs_ids,
+            posecraft_asset_id=body.posecraft_asset_id,
+            story_theme=body.story_theme,
+            style=body.style,
         )
     except Exception as exc:
         raise _service_error(exc) from exc

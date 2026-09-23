@@ -15,24 +15,59 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 TrackKind = Literal[
-    "video", "image", "audio", "text", "fx", "mask", "adjustment"
+    "video",
+    "image",
+    "audio",
+    "music",
+    "sfx",
+    "text",
+    "fx",
+    "mask",
+    "adjustment",
+    "graphics",
+    "objects",
 ]
 
 _TRACK_KINDS: frozenset[str] = frozenset(
-    {"video", "image", "audio", "text", "fx", "mask", "adjustment"}
+    {
+        "video",
+        "image",
+        "audio",
+        "music",
+        "sfx",
+        "text",
+        "fx",
+        "mask",
+        "adjustment",
+        "graphics",
+        "objects",
+    }
 )
 
 _ORDER_RE = re.compile(r"^(seq_|trk_|clip_|mk_)")
 
 _DEFAULT_TRACK_KINDS = (
-    "video", "video", "video",
-    "image", "image",
-    "audio", "audio", "audio",
-    "text",
-    "fx",
-    "mask",
-    "adjustment",
+    "objects",
+    "video",
+    "audio",
+    "music",
+    "sfx",
 )
+
+
+def strip_projected_graphics_clips(clips: list[Any]) -> list[Any]:
+    """Remove gfx_* / graphic-role projection clips before sequence persistence."""
+    out: list[Any] = []
+    for clip in clips:
+        if not isinstance(clip, dict):
+            continue
+        clip_id = str(clip.get("id") or "")
+        if clip_id.startswith("gfx_"):
+            continue
+        if clip.get("ingestRole") == "graphic":
+            continue
+        out.append(clip)
+    return out
 
 
 class MagiMarkerModel(BaseModel):
@@ -50,6 +85,16 @@ class MagiTrackModel(BaseModel):
     locked: Optional[bool] = None
     muted: Optional[bool] = None
     solo: Optional[bool] = None
+    objectsSlot: Optional[int] = None
+
+    @field_validator("objectsSlot")
+    @classmethod
+    def _objects_slot(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return value
+        if value not in (1, 2):
+            raise ValueError("objectsSlot must be 1 or 2")
+        return value
 
     @field_validator("kind")
     @classmethod
@@ -79,6 +124,7 @@ class MagiClipModel(BaseModel):
     takeId: Optional[str] = None
     sourceClipId: Optional[str] = None
     sceneId: Optional[str] = None
+    ingestRole: Optional[str] = None
 
     @model_validator(mode="after")
     def _outpoint_not_less_than_inpoint(self) -> "MagiClipModel":
@@ -122,6 +168,9 @@ class MagiSequenceModel(BaseModel):
                 raise ValueError(
                     f"clip '{clip.id}' references unknown trackId '{clip.trackId}'"
                 )
+        objects_n = sum(1 for track in self.tracks if track.kind in {"objects", "graphics"})
+        if objects_n > 2:
+            raise ValueError("MAGI allows at most two Objects tracks")
         return self
 
 
@@ -140,7 +189,7 @@ def parse_sequence(raw: Any) -> MagiSequenceModel:
 def ensure_asset_lineage_fields(clip: dict[str, Any]) -> dict[str, Any]:
     """Carry optional lineage fields from a client clip dict through saving."""
     out = dict(clip)
-    for key in ("batchBlockId", "generationId", "takeId", "sourceClipId", "sceneId"):
+    for key in ("batchBlockId", "generationId", "takeId", "sourceClipId", "sceneId", "ingestRole"):
         if clip.get(key) is not None:
             out[key] = clip[key]
     return out
@@ -161,6 +210,7 @@ def validate_asset_ownership(
 
     Values are the offending asset ids (or clip ids for ``INVALID_CLIP_ASSET``).
     Clips that reference no asset are only reported as ``INVALID_CLIP_ASSET``.
+    Graphics-track clips are not required to reference an existing asset.
     """
     result: dict[str, list[str]] = {
         "ASSET_NOT_FOUND": [],
@@ -170,8 +220,14 @@ def validate_asset_ownership(
     if not sequence.clips:
         return result
 
+    track_kinds = {t.id: t.kind for t in sequence.tracks}
+
     asset_ids: set[str] = set()
     for clip in sequence.clips:
+        if track_kinds.get(clip.trackId) in {"graphics", "objects"}:
+            continue
+        if str(clip.id).startswith("gfx_") or clip.ingestRole == "graphic":
+            continue
         if not clip.assetId:
             result["INVALID_CLIP_ASSET"].append(clip.id)
             continue

@@ -19,6 +19,7 @@ import {
   type MagiWorkspaceLayoutV1,
   type MagiWorkspacePreset,
 } from "./MagiLayoutPersistence";
+import { resetMagiCenterSplit } from "../../../timelineMaster/workspaceLayout";
 
 type MagiLayoutContextValue = {
   layout: MagiWorkspaceLayoutV1;
@@ -159,8 +160,10 @@ export function MagiWorkspaceLayoutProvider({ children }: { children: ReactNode 
           };
         }),
       applyWorkspacePreset: (preset) => update((p) => applyPreset(preset, p)),
-      resetWorkspace: () =>
-        update(() => ({ ...DEFAULT_LAYOUT, accordionState: { ...DEFAULT_LAYOUT.accordionState } })),
+      resetWorkspace: () => {
+        resetMagiCenterSplit();
+        update(() => ({ ...DEFAULT_LAYOUT, accordionState: { ...DEFAULT_LAYOUT.accordionState } }));
+      },
       setRenderQueueOpen: (open) => update((p) => ({ ...p, renderQueueOpen: open })),
     }),
     [layout, update, upperWidth, viewportH]

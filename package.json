@@ -15,7 +15,7 @@
     "dev:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 start",
     "beta:start": "studio-api\\.venv\\Scripts\\python.exe scripts\\run_runtime_supervisor.py start",
     "beta:stop": "studio-api\\.venv\\Scripts\\python.exe scripts\\run_runtime_supervisor.py stop",
-    "beta:restart": "studio-api\\.venv\\Scripts\\python.exe scripts\\run_runtime_supervisor.py restart",
+    "beta:restart": "studio-api\\.venv\\Scripts\\python.exe scripts\\restart_studio_api_only.py",
     "beta:health": "studio-api\\.venv\\Scripts\\python.exe scripts\\run_runtime_supervisor.py status",
     "beta:certify": "studio-api\\.venv\\Scripts\\python.exe scripts\\beta_runtime\\certify.py",
     "install:all": "cd studio-api && python -m venv .venv && .venv\\Scripts\\python.exe -m pip install -r requirements.txt && cd ..\\studio-web && npm install && cd .. && npm install",

@@ -50,7 +50,7 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     await expect(page.getByText("NEW PRODUCTION", { exact: false })).toHaveCount(0);
   });
 
-  test("GENSTUDIO-UI-03 Co-Director composer is visible above templates", async ({
+  test("GENSTUDIO-UI-03 Co-Director feature card is visible above templates", async ({
     page,
     request,
   }) => {
@@ -59,24 +59,25 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     const card = page.getByTestId("codirector-launch-card");
     const templates = page.getByTestId("browse-templates-card");
     await expect(card).toBeVisible();
-    await expect(page.getByTestId("codirector-launch-composer")).toBeVisible();
+    await expect(page.getByTestId("codirector-launch-image")).toBeVisible();
+    await expect(page.getByTestId("enter-codirector")).toBeVisible();
+    await expect(page.getByTestId("codirector-launch-composer")).toHaveCount(0);
     const cardBox = await card.boundingBox();
     const templatesBox = await templates.boundingBox();
     expect(cardBox && templatesBox).toBeTruthy();
     expect(cardBox!.y).toBeLessThan(templatesBox!.y);
   });
 
-  test("GENSTUDIO-UI-04 Empty prompt does not submit", async ({ page, request }) => {
+  test("GENSTUDIO-UI-04 Home composer and prompt starters are absent", async ({ page, request }) => {
     await waitForAppReady(request);
     await gotoHome(page);
-    const submit = page.getByTestId("codirector-launch-submit");
-    await expect(submit).toBeDisabled();
-    await page.getByTestId("codirector-launch-composer").fill("   ");
-    await expect(submit).toBeDisabled();
+    await expect(page.getByTestId("codirector-launch-composer")).toHaveCount(0);
+    await expect(page.getByTestId("codirector-launch-submit")).toHaveCount(0);
+    await expect(page.getByTestId("codirector-starter-start-a-storyboard")).toHaveCount(0);
     await expect(page).toHaveURL(/\/$/);
   });
 
-  test("GENSTUDIO-UI-05 Submitted homepage prompt opens fullscreen Co-Director", async ({
+  test("GENSTUDIO-UI-05 Enter Co-Director opens fullscreen Co-Director", async ({
     page,
     request,
   }) => {
@@ -84,43 +85,36 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     observer.attach();
     await waitForAppReady(request);
     await gotoHome(page);
-    const prompt = `M32d aurora prompt ${Date.now()}`;
-    await page.getByTestId("codirector-launch-composer").fill(prompt);
-    await page.getByTestId("codirector-launch-submit").click();
+    await page.getByTestId("enter-codirector").click();
     await expect(page).toHaveURL(/\/co-director/, { timeout: 15_000 });
-    await expect(page.getByTestId("codirector-shell")).toHaveAttribute("data-mode", "fullscreen", {
+    await expect(page.getByTestId("codirector-fullscreen-shell")).toHaveAttribute("data-mode", "fullscreen", {
       timeout: 15_000,
     });
     await page.screenshot({ path: path.join(SHOT_DIR, "05-fullscreen-codirector.png") });
     observer.flush();
   });
 
-  test("GENSTUDIO-UI-06 Submitted prompt appears once in the conversation", async ({
+  test("GENSTUDIO-UI-06 Home entry opens a single fullscreen Co-Director session", async ({
     page,
     request,
   }) => {
     await waitForAppReady(request);
     await gotoHome(page);
-    const prompt = `Unique aurora seed ${Date.now()}`;
-    await page.getByTestId("codirector-launch-composer").fill(prompt);
-    await page.getByTestId("codirector-launch-submit").click();
-    await expect(page.getByTestId("codirector-shell")).toBeVisible({ timeout: 15_000 });
-    const matches = page.getByText(prompt);
-    await expect(matches.first()).toBeVisible({ timeout: 20_000 });
-    expect(await matches.count()).toBe(1);
+    await page.getByTestId("enter-codirector").click();
+    await expect(page.getByTestId("codirector-fullscreen-shell")).toBeVisible({ timeout: 15_000 });
+    expect(await page.getByTestId("codirector-fullscreen-shell").count()).toBe(1);
+    expect(await page.getByTestId("codirector-fullscreen").count()).toBe(1);
   });
 
-  test("GENSTUDIO-UI-07 Prompt starter uses canonical composer/send path", async ({
+  test("GENSTUDIO-UI-07 Co-Director card keeps project context", async ({
     page,
     request,
   }) => {
     await waitForAppReady(request);
     await gotoHome(page);
-    await page.getByTestId("codirector-starter-start-a-storyboard").click();
-    await expect(page.getByTestId("codirector-launch-composer")).toHaveValue("Start a storyboard");
-    await page.getByTestId("codirector-launch-submit").click();
-    await expect(page).toHaveURL(/\/co-director/, { timeout: 15_000 });
-    await expect(page.getByText("Start a storyboard").first()).toBeVisible({ timeout: 20_000 });
+    const context = page.getByTestId("codirector-project-context");
+    await expect(context).toBeVisible();
+    await expect(context).toHaveText(/Active project:|Open Co-Director to choose or continue a project\./);
   });
 
   test("GENSTUDIO-UI-08 Project Templates use real inventory", async ({ page, request }) => {
@@ -254,7 +248,6 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     await gotoHome(page);
     await expect(page.getByTestId("create-project-open")).toHaveClass(/ui-btn/);
     await expect(page.getByTestId("enter-codirector")).toHaveClass(/ui-btn/);
-    await expect(page.getByTestId("codirector-launch-submit")).toHaveClass(/ui-btn/);
     await expect(page.getByTestId("carousel-next")).toHaveClass(/ui-btn/);
   });
 
@@ -279,7 +272,8 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     await page.evaluate(() => {
       document.body.style.zoom = "2";
     });
-    await expect(page.getByTestId("codirector-launch-composer")).toBeVisible();
+    await expect(page.getByTestId("codirector-launch-card")).toBeVisible();
+    await expect(page.getByTestId("enter-codirector")).toBeVisible();
     await expect(page.getByTestId("create-project-open")).toBeVisible();
     await page.screenshot({ path: path.join(SHOT_DIR, "17-zoom-200.png") });
     await page.evaluate(() => {
@@ -292,7 +286,7 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     observer.attach();
     await waitForAppReady(request);
     await gotoHome(page);
-    await page.getByTestId("codirector-launch-composer").fill("console check");
+    await expect(page.getByTestId("enter-codirector")).toBeVisible();
     await page.waitForTimeout(500);
     observer.assertHealthyBrowser();
     observer.flush();

@@ -18,7 +18,9 @@ type Props = {
   onUseInSceneCreator?: () => void;
   onOpenFullSize?: (url: string) => void;
   onUseAnyway?: () => void;
-  /** Save Gate: disable "Use in Scene Creator" until the map is saved & clean. */
+  /** Environment Creator ERS Edit/Inpaint entry (optional — Spatial Map omits). */
+  onEditInpaint?: () => void;
+  /** Save Gate: disable "Use in Image Generator" until the map is saved & clean. */
   useInSceneCreatorDisabled?: boolean;
   saveStatus?: SpatialMapSaveStatus;
   saveIsDirty?: boolean;
@@ -40,6 +42,7 @@ export function ERSGenerationMonitor({
   onUseInSceneCreator,
   onOpenFullSize,
   onUseAnyway,
+  onEditInpaint,
   useInSceneCreatorDisabled = false,
   saveStatus = "idle",
   saveIsDirty = false,
@@ -185,6 +188,17 @@ export function ERSGenerationMonitor({
 
       {complete ? (
         <div className="spatial-map__ers-live-actions">
+          {onEditInpaint ? (
+            <button
+              type="button"
+              className="ui-btn ui-btn--primary"
+              onClick={onEditInpaint}
+              data-testid="ers-edit-inpaint"
+              aria-label="Edit or Inpaint Environment Reference Sheet"
+            >
+              Edit / Inpaint
+            </button>
+          ) : null}
           <button
             type="button"
             className="ui-btn ui-btn--secondary"
@@ -217,9 +231,9 @@ export function ERSGenerationMonitor({
             onClick={onUseInSceneCreator}
             disabled={useInSceneCreatorDisabled}
             data-testid="use-in-scene-creator"
-            title={useInSceneCreatorDisabled ? "Save Spatial Map first" : undefined}
+            title={useInSceneCreatorDisabled ? "Save Spatial Map first" : "Opens the Image Generator"}
           >
-            Use in Scene Creator
+            Use in Image Generator
           </button>
         </div>
       ) : null}

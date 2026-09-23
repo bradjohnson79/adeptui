@@ -19,8 +19,10 @@ export const ERS_GPT_OFFICIAL_ID = "gpt-image-2-image-to-image";
 /** Legacy T2I Market id — forbidden for ERS; kept only to recognize old jobs. */
 export const ERS_GPT_T2I_ID = "gpt-image-2-text-to-image";
 
-export const ERS_GENERATOR_DEFAULT: ErsGeneratorId = "qwen2512";
+/** Environment Reference Sheets use GPT Image 2 API only. */
+export const ERS_GENERATOR_DEFAULT: ErsGeneratorId = "gpt-image-2";
 
+/** Scene Creator Mini / Atlas engine catalogs may still list Qwen. ERS UI does not. */
 export const ERS_GENERATOR_OPTIONS: ReadonlyArray<{ id: ErsGeneratorId; label: string }> = [
   { id: "qwen2512", label: "Qwen Image — Local" },
   { id: "gpt-image-2", label: "GPT Image 2 — API" },
@@ -33,9 +35,14 @@ export function ersGeneratorOptionDisabled(
   id: ErsGeneratorId,
   qwenI2IReady?: boolean | null,
   gptI2IReady?: boolean | null,
+  gptReady?: boolean | null,
 ): boolean {
   if (id === "qwen2512" && qwenI2IReady === false) return true;
-  if (id === "gpt-image-2" && gptI2IReady === false) return true;
+  // GPT: disable only when neither I2I nor general readiness is available.
+  if (id === "gpt-image-2") {
+    if (gptI2IReady === false && gptReady === false) return true;
+    if (gptI2IReady === false && gptReady == null) return true;
+  }
   return false;
 }
 
@@ -46,10 +53,10 @@ export const QWEN_I2I_NOT_READY_MESSAGE =
   "Qwen Image image-to-image is not available for ERS. Environment Reference Sheets require a generator that consumes the source environment image (I2I). Choose GPT Image 2 or repair the local I2I workflow.";
 
 export const GPT_NOT_READY_MESSAGE =
-  "GPT Image 2 is not ready. Check the Kie API key, or choose Qwen Image.";
+  "GPT Image 2 — Requires Setup. Add a Kie API key in Settings. Environment Reference Sheets cannot use Qwen.";
 
 export const GPT_I2I_NOT_READY_MESSAGE =
-  "GPT Image 2 image-to-image is not available for ERS. Environment Reference Sheets cannot use text-to-image. Choose Qwen Image or repair the hosted I2I operation.";
+  "GPT Image 2 — Requires Setup. Environment Reference Sheets use GPT Image 2 image-to-image only and cannot fall back to Qwen.";
 
 export const ERS_NO_SOURCE_MESSAGE =
   "ERS requires an authoritative environment image. Attach an Atlas Shot to this Spatial Map first.";
@@ -164,6 +171,16 @@ export function buildErsStartContext(id: ErsGeneratorId): Record<string, unknown
       source: "api",
       providerKind: "api",
       provider_kind: "api",
+      // Env Creator regenerate defaults: one-pass full sheet (not component repair).
+      forceFull: true,
+      force_full: true,
+      ers_force_full: true,
+      ers_pipeline: "full_sheet",
+      generationMode: "full_sheet_api",
+      panel_task: "whole_sheet",
+      panelTask: "whole_sheet",
+      templateId: "ers.original.v1",
+      collageTemplate: "ers.original.v1",
     };
   }
   return {
@@ -224,6 +241,19 @@ export function provenanceModelFromSelection(id: ErsGeneratorId): {
   return { model: ERS_QWEN_WORKFLOW_KEY, sourceKind: "Local" };
 }
 
+export const ERS_PROMPT_OR_SOURCE_MESSAGE =
+  "Describe the environment in the prompt, or attach a source/reference image.";
+
+export const GPT_T2I_NOT_READY_MESSAGE =
+  "GPT Image 2 — Requires Setup. Add a Kie API key in Settings to generate from a text prompt (text-to-image).";
+
+/**
+ * Block reason for ERS start.
+ * - With source: GPT needs I2I readiness (gptI2IReady).
+ * - Prompt-only (no source): GPT needs provider readiness (gptReady) for T2I.
+ * - hasSource === false and hasPrompt !== true: ask for prompt or source.
+ * - hasSource === null: do not enforce source (caller decides); still check provider.
+ */
 export function generatorBlockReason(
   id: ErsGeneratorId,
   qwenReady: boolean | null,
@@ -231,15 +261,31 @@ export function generatorBlockReason(
   qwenI2IReady?: boolean | null,
   gptI2IReady?: boolean | null,
   hasSource?: boolean | null,
+  hasPrompt?: boolean | null,
 ): string | null {
-  if (hasSource === false) return ERS_NO_SOURCE_MESSAGE;
+  const promptOk = hasPrompt === true;
+  if (hasSource === false && !promptOk) return ERS_PROMPT_OR_SOURCE_MESSAGE;
   if (id === "qwen2512") {
+    // Qwen ERS path remains I2I-only (local ref workflow).
+    if (hasSource === false && promptOk) {
+      return "Qwen Image cannot generate an ERS from text alone. Attach a source image or choose GPT Image 2.";
+    }
     if (qwenI2IReady === false) return QWEN_I2I_NOT_READY_MESSAGE;
     if (qwenReady === false) return QWEN_NOT_READY_MESSAGE;
   }
   if (id === "gpt-image-2") {
-    if (gptI2IReady === false) return GPT_I2I_NOT_READY_MESSAGE;
-    if (gptReady === false) return GPT_NOT_READY_MESSAGE;
+    if (hasSource === true) {
+      // Source attached → I2I readiness.
+      if (gptI2IReady === false) return GPT_I2I_NOT_READY_MESSAGE;
+      if (gptReady === false) return GPT_NOT_READY_MESSAGE;
+    } else if (hasSource === false && promptOk) {
+      // Explicit prompt-only → T2I via gptReady.
+      if (gptReady === false) return GPT_T2I_NOT_READY_MESSAGE;
+    } else {
+      // hasSource null/undefined (legacy Spatial Map): keep I2I gate.
+      if (gptI2IReady === false) return GPT_I2I_NOT_READY_MESSAGE;
+      if (gptReady === false) return GPT_NOT_READY_MESSAGE;
+    }
   }
   return null;
 }

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """Aspect ratio + FPS helpers for per-scene render planning."""
 
@@ -18,12 +18,13 @@ ASPECT_PRESETS = (
 )
 
 # Shared production contract for Scene Creator + Timeline Generator.
-PRODUCTION_ASPECTS = ("1:1", "4:3", "16:9", "21:9")
+PRODUCTION_ASPECTS = ("1:1", "4:3", "16:9", "9:16", "21:9")
 DEFAULT_PRODUCTION_ASPECT = "16:9"
 PRODUCTION_PIXELS: dict[str, dict[str, tuple[int, int]]] = {
     "1:1": {"draft": (512, 512), "final": (1024, 1024)},
     "4:3": {"draft": (512, 384), "final": (1024, 768)},
     "16:9": {"draft": (512, 288), "final": (1280, 720)},
+    "9:16": {"draft": (288, 512), "final": (720, 1280)},
     "21:9": {"draft": (672, 288), "final": (1344, 576)},
 }
 
@@ -31,8 +32,11 @@ FPS_CHOICES = (12, 16, 18, 24, 25, 30, 48, 50, 60)
 
 # Engine → allowed aspect labels (approximate; UI warns when mismatched)
 ENGINE_ASPECT_HINTS: dict[str, set[str]] = {
-    "ltx": set(ASPECT_PRESETS) - {"custom"},
-    "wan": set(ASPECT_PRESETS) - {"custom"},
+    "minimax-h3": set(ASPECT_PRESETS) - {"custom"},
+    "ltx-2.5": set(ASPECT_PRESETS) - {"custom"},
+    "ltx-2.5-distilled": set(ASPECT_PRESETS) - {"custom"},
+    "ltx-2.5-full": set(ASPECT_PRESETS) - {"custom"},
+    "ltx-2.5-comfy": set(ASPECT_PRESETS) - {"custom"},
     "fal_seedance": {"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"},
     "fal_kling": {"16:9", "9:16", "1:1"},
     "fal_veo": {"16:9", "9:16"},
@@ -63,25 +67,25 @@ def aspect_to_size(aspect: str, base_long: int = 1280) -> tuple[int, int]:
 
 
 def resolve_scene_dims(project: Any, scene: Any) -> tuple[int, int]:
-    aspect = (getattr(scene, "aspect_ratio", None) or "16:9").strip() or "16:9"
-    if aspect == "custom":
-        w = int(getattr(scene, "width", 0) or getattr(project, "width", 1280) or 1280)
-        h = int(getattr(scene, "height", 0) or getattr(project, "height", 720) or 720)
-        return max(64, w), max(64, h)
-    base = max(int(getattr(project, "width", 1280) or 1280), int(getattr(project, "height", 720) or 720))
-    return aspect_to_size(aspect, base)
+    """Return the stored creator canvas. Never rebuild 16:9 via /8 image math.
+
+    Video /32 families cannot use aspect_to_size(16:9, 1280) → 1280Ã—720.
+    That silently replaces a legal 720p class (1280Ã—704) with an illegal one.
+    """
+    sw = int(getattr(scene, "width", 0) or 0)
+    sh = int(getattr(scene, "height", 0) or 0)
+    if sw > 0 and sh > 0:
+        return sw, sh
+    pw = int(getattr(project, "width", 0) or 0)
+    ph = int(getattr(project, "height", 0) or 0)
+    if pw > 0 and ph > 0:
+        return pw, ph
+    return 1280, 704
 
 
 def resolve_scene_fps(project: Any, scene: Any) -> int:
     mode = (getattr(scene, "fps_mode", None) or "auto").strip().lower()
     if mode == "auto" or mode == "":
-        # VRAM-aware defaults
-        vram = int(getattr(project, "vram_gb", 32) or 32)
-        duration = float(getattr(scene, "duration_sec", 5) or 5)
-        if vram <= 8:
-            return 16
-        if vram <= 16:
-            return 20 if duration <= 5 else 16
         return int(getattr(project, "fps", 24) or 24)
     try:
         fps = int(float(mode))
@@ -100,7 +104,7 @@ def resolve_scene_fps(project: Any, scene: Any) -> int:
 
 def validate_engine_aspect(engine: str, aspect: str) -> list[str]:
     warnings: list[str] = []
-    eng = (engine or "ltx").lower()
+    eng = (engine or "minimax-h3").lower()
     if eng == "auto":
         return warnings
     allowed = ENGINE_ASPECT_HINTS.get(eng)

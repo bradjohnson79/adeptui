@@ -6,7 +6,8 @@ import { CoDirectorConversation } from "./CoDirectorConversation";
 import { CoDirectorComposer } from "./CoDirectorComposer";
 import { CoDirectorOverflowMenu } from "./CoDirectorOverflowMenu";
 import { CoDirectorAssetPicker } from "./CoDirectorAssetPicker";
-import { CoDirectorNavDrawer, type ContentTab } from "./CoDirectorNavDrawer";
+import { isSpatialMapEnabled } from "../../core/featureFlags";
+import { OPEN_CONTENT_TAB_EVENT, type ContentTab } from "./navEntries";
 import { CoDirectorProjectContent } from "./CoDirectorProjectContent";
 import { CoDirectorStageStrip } from "./CoDirectorStageStrip";
 import { CoDirectorSpecialistStrip } from "./CoDirectorSpecialistStrip";
@@ -25,6 +26,7 @@ import {
   useWorkspaceFullscreen,
 } from "../../workspace/fullscreen";
 import type { CoDirectorDisplayMode } from "./types";
+import { OPEN_VOICE_CREATOR_EVENT, VOICE_CREATOR_OPENED_EVENT } from "./VoiceCreator/openVoiceCreator";
 import "./codirector-cinematic.css";
 
 const CONTENT_TAB_STORAGE_KEY = "adept_codirector_content_tab";
@@ -48,10 +50,13 @@ function normalizeContentTab(value: string | null | undefined): ContentTab {
     value === "story" ||
     value === "script" ||
     value === "characters" ||
+    value === "voice_creator" ||
     value === "prop_creator" ||
     value === "spatial_map" ||
-    value === "scene_creator"
+    value === "scene_creator" ||
+    value === "timeline"
   ) {
+    if (value === "spatial_map" && !isSpatialMapEnabled()) return "scene_creator";
     return value as ContentTab;
   }
   return "wiki";
@@ -96,9 +101,9 @@ export function CoDirectorShell({
     showReconnectAction,
     reconnect,
     uiContext,
+    sessionContext,
     setActiveContentTab,
   } = useCoDirectorSession();
-  const [navOpen, setNavOpen] = useState(false);
   const [contentTabState, setContentTabState] = useState<ContentTab>(() => loadContentTab());
   const [searchParams] = useSearchParams();
   // Deep-link: /co-director?projectId=…&contentTab=story opens a specific
@@ -109,7 +114,6 @@ export function CoDirectorShell({
   const [primarySizeRequest, setPrimarySizeRequest] = useState<{ size: number; token: number } | null>(
     null,
   );
-  const menuBtnRef = useRef<HTMLButtonElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const sizeRequestToken = useRef(0);
   const initializedContentTabRef = useRef(false);
@@ -171,6 +175,26 @@ export function CoDirectorShell({
     setActiveContentTab(contentTab);
   }, [contentTab, setActiveContentTab]);
 
+  useEffect(() => {
+    const onOpen = () => {
+      setContentTab("voice_creator");
+      setContextPanelOpen(true);
+      window.dispatchEvent(new CustomEvent(VOICE_CREATOR_OPENED_EVENT));
+    };
+    window.addEventListener(OPEN_VOICE_CREATOR_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_VOICE_CREATOR_EVENT, onOpen);
+  }, [setContentTab, setContextPanelOpen]);
+
+  useEffect(() => {
+    const onOpenTab = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      const tab = typeof detail === "string" ? detail : (detail as { tab?: string } | null)?.tab;
+      if (typeof tab === "string") setContentTab(normalizeContentTab(tab));
+    };
+    window.addEventListener(OPEN_CONTENT_TAB_EVENT, onOpenTab);
+    return () => window.removeEventListener(OPEN_CONTENT_TAB_EVENT, onOpenTab);
+  }, [setContentTab]);
+
   const applyLayoutPreset = useCallback(
     (preset: CoDirectorLayoutPreset) => {
       const apply = () => {
@@ -222,13 +246,15 @@ export function CoDirectorShell({
       data-mode={mode}
       data-runtime-state={runtimeState}
       data-layout-preset={mode === "fullscreen" ? layoutPreset : undefined}
+      data-project-id={uiContext.projectId || "no_project"}
+      data-scene-id={uiContext.sceneId || ""}
+      data-session-status={uiContext.projectId ? sessionContext.sessionStatus || "bound" : "no_project"}
+      data-workspace={uiContext.workspaceId || ""}
     >
       <WorkspaceFullscreenBanner visible={workspaceFs.showBanner} />
       <CoDirectorHeader
-        ref={menuBtnRef}
         mode={mode}
         onClose={onClose}
-        onOpenNav={() => setNavOpen(true)}
         ready={ready}
         runtimeChip={runtimeChip}
         runtimeState={runtimeState}
@@ -265,17 +291,6 @@ export function CoDirectorShell({
         </div>
       )}
       <CoDirectorOverflowMenu />
-      <CoDirectorNavDrawer
-        open={navOpen}
-        onClose={() => setNavOpen(false)}
-        returnFocusRef={menuBtnRef}
-        mode={mode}
-        expandToFullScreen={expandToFullScreen}
-        onSelectContent={(tab) => {
-          setContentTab(tab);
-          setContextPanelOpen(true);
-        }}
-      />
 
       {mode === "popup" ? (
         <div className="codirector-body">

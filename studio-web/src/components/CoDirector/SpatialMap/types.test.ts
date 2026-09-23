@@ -282,6 +282,8 @@ describe("Camera shot size (Scene Creator Mini)", () => {
     expect(normalizeShotSize("close-up")).toBe("close_up");
     expect(normalizeShotSize("medium_close")).toBe("medium_close");
     expect(normalizeShotSize("extreme_close")).toBe("extreme_close");
+    expect(normalizeShotSize("pov")).toBe("pov");
+    expect(normalizeShotSize("POV")).toBe("pov");
     expect(normalizeShotSize(null)).toBe("auto");
     expect(normalizeShotSize("bogus")).toBe("auto");
   });
@@ -294,6 +296,7 @@ describe("Camera shot size (Scene Creator Mini)", () => {
     expect(shotSizeLabel("medium_close")).toBe("Medium Close");
     expect(shotSizeLabel("close_up")).toBe("Close Up");
     expect(shotSizeLabel("extreme_close")).toBe("Extreme Close");
+    expect(shotSizeLabel("pov")).toBe("POV");
     expect(shotSizeLabel(undefined)).toBe("Auto");
   });
 });

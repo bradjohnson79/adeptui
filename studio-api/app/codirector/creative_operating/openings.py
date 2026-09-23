@@ -15,6 +15,11 @@ def detect_creative_openings(
     has_episode_gap: bool = False,
     format_label: str = "UNKNOWN",
 ) -> list[CreativeOpening]:
+    from app.codirector.conversation.foundation.visual_generation import is_executable_image_turn
+
+    if is_executable_image_turn(user_message):
+        return []
+
     text = user_message or ""
     lower = text.lower()
     openings: list[CreativeOpening] = []

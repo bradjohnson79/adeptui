@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api";
-import { CapabilityStatusBadge } from "../CapabilityPanel";
+import { CapabilityStatusBadge, capabilityById, useCapabilities } from "../CapabilityPanel";
 import { StatusBadge } from "../ui";
 import {
   apiHealthLabel,
@@ -9,8 +9,8 @@ import {
   mapApiOk,
   mapComfyHealth,
   mapGpuOk,
-  mapProviderReachable,
-  providerHealthLabel,
+  mapProviderStatus,
+  providerStatusLabel,
 } from "../../status";
 import { useStudioHealth } from "../../hooks/useStudioHealth";
 import { BetaRuntimeStatus } from "../BetaRuntimeStatus";
@@ -41,6 +41,7 @@ export function SystemStatusStrip({
   const [gpu, setGpu] = useState<GpuSummary | null>(null);
   const [queued, setQueued] = useState<number | null>(queuedJobs ?? null);
   const { health, error: healthError, reload } = useStudioHealth();
+  const { snapshot } = useCapabilities({ projectId, pollMs: 30000 });
 
   useEffect(() => {
     if (queuedJobs != null) setQueued(queuedJobs);
@@ -106,10 +107,15 @@ export function SystemStatusStrip({
       0,
       (health?.comfy?.missingModelComponentIds?.length ?? health?.missing_model_component_ids?.length ?? health?.missing_models?.length ?? 0) - missingRequiredCount,
     );
+  const comfyProbed = health?.comfy_probed !== false && Boolean(health);
   const comfyReachable = Boolean(health?.comfy_reachable);
   const comfyNodeCatalogOk = Boolean(health?.node_catalog_available);
   const op = health?.operator;
   const provider = op?.provider;
+  const providerCap = capabilityById(snapshot, "codirector.provider");
+  const providerReady = providerCap
+    ? providerCap.status === "locally_verified" || providerCap.status === "production_ready"
+    : null;
 
   const goSetupOrSourceManager = () => {
     navigate(
@@ -169,31 +175,43 @@ export function SystemStatusStrip({
         onClick={refreshApi}
       />
       <StatusBadge
-        kind={!health ? "Checking" : mapComfyHealth(comfyReachable, Boolean(missingRequiredCount) || !comfyNodeCatalogOk)}
+        kind={
+          !health || !comfyProbed
+            ? "Checking"
+            : !comfyReachable
+              ? "Offline"
+              : healthError
+                ? "NeedsAttention"
+                : mapComfyHealth(comfyReachable, Boolean(missingRequiredCount))
+        }
         label={
-          !health
+          !health || !comfyProbed
             ? "ComfyUI Checking…"
             : !comfyReachable
               ? "ComfyUI Offline"
-              : !comfyNodeCatalogOk
-                ? "ComfyUI Starting…"
-                : missingRequiredCount
-                  ? `ComfyUI · ${missingRequiredCount} required missing`
-                  : "ComfyUI Healthy"
+              : healthError
+                ? "ComfyUI Error"
+                : !comfyNodeCatalogOk
+                  ? "ComfyUI Ready · Loading Nodes"
+                  : missingRequiredCount
+                    ? `ComfyUI · ${missingRequiredCount} required missing`
+                    : "ComfyUI Ready"
         }
         data-testid="status-comfy"
         title={
-          !health
+          !health || !comfyProbed
             ? "ComfyUI health probe in progress"
             : !comfyReachable
               ? health?.message || "ComfyUI is unreachable. Start ComfyUI, then refresh."
-              : !comfyNodeCatalogOk
-                ? "ComfyUI is reachable but its node catalogue is still loading."
-                : missingRequiredCount
-                  ? `${missingRequiredCount} required model component(s) missing. Runtime cannot generate until installed.`
-                  : health?.comfy_version
-                    ? `ComfyUI ${health.comfy_version} · node catalogue OK`
-                    : "ComfyUI reachable, node catalogue OK"
+              : healthError
+                ? String(healthError)
+                : !comfyNodeCatalogOk
+                  ? "Runtime is up. Node list is still loading."
+                  : missingRequiredCount
+                    ? `${missingRequiredCount} required model component(s) missing. Runtime cannot generate until installed.`
+                    : health?.comfy_version
+                      ? `ComfyUI ${health.comfy_version} · node catalogue OK`
+                      : "ComfyUI reachable, node catalogue OK"
         }
         onClick={goSetupOrSourceManager}
       />
@@ -203,34 +221,39 @@ export function SystemStatusStrip({
             ? "Checking"
             : !comfyReachable
               ? "Checking"
-              : missingOptionalCount > 0
+              : missingRequiredCount > 0
                 ? "NeedsAttention"
                 : "Ready"
         }
         label={
           !health
             ? "Models…"
-            : missingOptionalCount > 0
-              ? `Models · ${missingOptionalCount} incomplete`
+            : missingRequiredCount > 0
+              ? `Models · ${missingRequiredCount} required missing`
               : "Models Ready"
         }
         data-testid="status-models"
         title={
           !health
             ? "Model readiness probe in progress"
-            : missingOptionalCount > 0
-              ? `${missingOptionalCount} optional/generator-specific component(s) incomplete. Affected generators are blocked; others remain usable. Open Model Readiness for details.`
-              : "All configured model components are present."
+            : missingRequiredCount > 0
+              ? `${missingRequiredCount} required model component(s) missing.`
+              : missingOptionalCount > 0
+                ? `Required models present. ${missingOptionalCount} optional component(s) not installed — not a production blocker.`
+                : "All configured required model components are present."
         }
         onClick={goSetupOrSourceManager}
       />
       <StatusBadge
-        kind={!health ? "Checking" : mapProviderReachable(Boolean(provider?.reachable))}
-        label={
-          !health ? "Provider Checking…" : providerHealthLabel(Boolean(provider?.reachable))
-        }
+        kind={!health ? "Checking" : mapProviderStatus(provider, providerReady)}
+        label={!health ? "Providers…" : providerStatusLabel(provider, providerReady)}
         data-testid="status-provider"
-        title={provider?.selectedModel || provider?.status || "Open Co-Director provider health"}
+        title={
+          providerCap?.message
+          || provider?.selectedModel
+          || provider?.status
+          || "Co-Director local provider health"
+        }
         onClick={goProvider}
       />
       <StatusBadge

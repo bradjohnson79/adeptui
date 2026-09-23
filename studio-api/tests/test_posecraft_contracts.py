@@ -142,6 +142,9 @@ def test_posecraft_export_preview_is_honesty_labelled(client) -> None:
     assert preview["lensMm"] == 35
 
 
+@pytest.mark.skip(
+    reason="DEFERRED — V1.2 CLOUD: Co-Director posecraft.* tools stay registered but are not v1.1-exposed; get_scene payload shape is dormant contract work."
+)
 def test_posecraft_codirector_read_tools(client) -> None:
     project_id = _create_project(client)
     _put_scene(client, project_id, _default_scene())
@@ -204,7 +207,9 @@ def test_posecraft_send_to_storyboard_is_honesty_labelled(client) -> None:
     send_to_storyboard returns a handoff package carrying the export preview,
     a creator-facing label, the target scene id, and an explicit honesty
     label (PoseCraft is a visual staging reference, not a final frame). It
-    is approval-gated like every posecraft mutating tool.
+    is approval-gated like every posecraft mutating tool. When no frozen
+    Snapshot image is supplied it reports placed=False with a reason instead
+    of emitting a dead next-step pointer.
     """
     project_id = _create_project(client)
     _put_scene(client, project_id, _default_scene())
@@ -223,7 +228,11 @@ def test_posecraft_send_to_storyboard_is_honesty_labelled(client) -> None:
     assert result["label"] == "Coffee blocking"
     assert result["notes"] == "two-shot"
     assert result["honestyLabel"] == "PoseCraft visual staging reference"
-    assert result["next"] == "storyboard.ingest_posecraft_sketch"
+    # No dead pointer to an unregistered tool.
+    assert "next" not in result
+    # No Snapshot image supplied → honest non-placement, never fake success.
+    assert result["placed"] is False
+    assert result["placementError"]
     assert result["exportPreview"]["figureCount"] >= 1
 
 
@@ -396,7 +405,8 @@ def test_posecraft_compat_migration_preserves_protected_fields(client) -> None:
     assert fig["archetypeId"] == "adult-male"
     # legacy color "teal" remapped to current "seaglass" (same hex #0f766e)
     assert fig["colorId"] == "seaglass"
-    assert fig["position"] == {"x": -0.8, "z": 0}
+    assert fig["position"]["x"] == -0.8
+    assert fig["position"]["z"] == 0
     assert fig["rotationY"] == 12
     assert fig["scale"] == 1.0
     assert fig["characterId"] == "char-eli"

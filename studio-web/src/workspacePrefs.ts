@@ -1,15 +1,17 @@
-/** Workspace persistence helpers for Adept UI Studio */
+﻿/** Workspace persistence helpers for Adept UI Studio */
 import {
   resolveWorkspace,
   type EditorTab,
 } from "./core/workspaces";
+import { pruneSelectedScenes } from "./sceneSelection";
+import { legalCanvasSize } from "./video/legalCanvas";
 
 export { ALL_TABS, resolveWorkspace, type EditorTab } from "./core/workspaces";
 
 const KEY = "adept_ui_last_workspace";
 const RECENT_KEY = "adept_ui_recent_projects";
 
-/** Ops/setup chrome and the project landing page — never resume destinations. */
+/** Ops/setup chrome and the project landing page â€” never resume destinations. */
 const NON_RESUME_WORKSPACES = new Set<EditorTab>(["setup", "home"]);
 
 function asResumeWorkspace(tab: EditorTab | null | undefined): EditorTab | null {
@@ -20,7 +22,7 @@ function asResumeWorkspace(tab: EditorTab | null | undefined): EditorTab | null 
 
 /**
  * Workspace memory is PER PROJECT (lastWorkspaceByProject). A plain Open
- * Project never resumes silently — this store only feeds the intentional
+ * Project never resumes silently â€” this store only feeds the intentional
  * "Continue" affordance on the project landing page. One project's memory
  * must never contaminate another's.
  */
@@ -30,7 +32,7 @@ function readMap(): Record<string, string> {
     if (!raw) return {};
     const data = JSON.parse(raw);
     if (data && typeof data === "object") {
-      // Legacy single-record shape: { projectId, tab } → migrate into the map.
+      // Legacy single-record shape: { projectId, tab } â†’ migrate into the map.
       if (typeof data.projectId === "string" && typeof data.tab === "string") {
         return { [data.projectId]: data.tab };
       }
@@ -49,7 +51,7 @@ export function loadLastWorkspace(projectId: string): EditorTab | null {
 
 export function saveLastWorkspace(projectId: string, tab: EditorTab) {
   try {
-    // Wave 4C: always persist canonical workspace id (director → timeline).
+    // Wave 4C: always persist canonical workspace id (director â†’ timeline).
     const canonical = resolveWorkspace(tab) || tab;
     // Setup Wizard / project landing must not hijack the resume destination.
     if (NON_RESUME_WORKSPACES.has(canonical)) return;
@@ -129,6 +131,7 @@ export function pruneDeletedProjects(validIds: Set<string>): number {
   } catch {
     /* ignore */
   }
+  removed += pruneSelectedScenes(validIds);
   return removed;
 }
 
@@ -148,13 +151,14 @@ export const ASPECT_PRESETS = [
 export type AspectPreset = (typeof ASPECT_PRESETS)[number];
 
 /** Scene Creator + Timeline Generator production contract. Project Settings may keep the wider list. */
-export const PRODUCTION_ASPECTS = ["1:1", "4:3", "16:9", "21:9"] as const;
+export const PRODUCTION_ASPECTS = ["1:1", "4:3", "16:9", "9:16", "21:9"] as const;
 export type ProductionAspectRatio = (typeof PRODUCTION_ASPECTS)[number];
 export const DEFAULT_PRODUCTION_ASPECT: ProductionAspectRatio = "16:9";
 export const PRODUCTION_PIXELS: Record<ProductionAspectRatio, { draft: [number, number]; final: [number, number] }> = {
   "1:1": { draft: [512, 512], final: [1024, 1024] },
   "4:3": { draft: [512, 384], final: [1024, 768] },
   "16:9": { draft: [512, 288], final: [1280, 720] },
+  "9:16": { draft: [288, 512], final: [720, 1280] },
   "21:9": { draft: [672, 288], final: [1344, 576] },
 };
 
@@ -222,7 +226,7 @@ export function sizeFromAspect(
 }
 
 export function resolutionToSize(label: string, aspect = "16:9"): { width: number; height: number } {
-  const long =
-    label === "4K" ? 3840 : label === "1440p" ? 2560 : label === "1080p" ? 1920 : label === "720p" ? 1280 : 1280;
-  return sizeFromAspect(aspect, long);
+  const canvas = legalCanvasSize("ltx-2.5", label, aspect);
+  if (canvas.available) return { width: canvas.width, height: canvas.height };
+  return sizeFromAspect(aspect, 1280);
 }

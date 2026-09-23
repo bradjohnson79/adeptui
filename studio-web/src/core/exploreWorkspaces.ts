@@ -3,23 +3,21 @@ import { dashboardImages } from "../dashboardImages";
 import { WORKSPACES, type EditorTab } from "./workspaces";
 
 /**
- * Canonical Home "Explore Adept UI" roster.
+ * Canonical Home "Explore Adept UI" roster — 4 columns × 3 rows = 12 cards.
+ * Timeline and MAGI stay on Home feature cards / nav / Production, not here.
  * Ordered list of workspace ids from the WORKSPACES registry — do not hardcode
  * parallel route maps in Home or Production menu.
  */
 export const EXPLORE_WORKSPACE_IDS = [
-  "timeline",
-  "magi",
-  "brandstudio",
-  "spatial",
-  "posecraft",
   "imagegen",
   "txt2vid",
   "one",
   "three",
   "characters",
+  "propcreator",
+  "environmentcreator",
+  "script",
   "scriptwriter",
-  "avatar",
   "voicestudio",
   "audiostudio",
   "library",
@@ -40,43 +38,13 @@ export type ExploreWorkspaceCard = {
 
 /**
  * Creator-facing Explore card labels/copy.
- * Prefer short Home labels (e.g. Timeline) while WORKSPACES keeps product/menu names
- * (e.g. Timeline Generator) for chrome and Production menu.
+ * Prefer short Home labels (e.g. Storyboard) while WORKSPACES keeps product/menu names
+ * (e.g. Storyboard Studio) for chrome and Production menu.
  */
 const EXPLORE_CARD_COPY: Record<
   ExploreWorkspaceId,
   { label: string; description: string; category: ExploreWorkspaceCard["category"]; image: DashboardImage }
 > = {
-  timeline: {
-    label: "Timeline",
-    description: "Build and organize production timelines, scenes, shots, and sequences.",
-    category: "production",
-    image: dashboardImages.timeline,
-  },
-  magi: {
-    label: "MAGI Editor",
-    description: "Cut. Change. Create. — AI-native editing for all types and takes.",
-    category: "production",
-    image: dashboardImages.magi,
-  },
-  brandstudio: {
-    label: "Brand Studio",
-    description: "Create brand identities, visual systems, campaign assets, and reusable production styling.",
-    category: "studio",
-    image: dashboardImages.brand,
-  },
-  spatial: {
-    label: "Spatial Map",
-    description: "Block cameras, characters, and continuity.",
-    category: "production",
-    image: dashboardImages.spatial,
-  },
-  posecraft: {
-    label: "PoseCraft",
-    description: "Pose characters on a 3D stage with cameras, lenses, and guides to stage shots before generation.",
-    category: "production",
-    image: dashboardImages.posecraft,
-  },
   imagegen: {
     label: "Image Generation",
     description: "Create stills, keyframes, and references.",
@@ -103,9 +71,27 @@ const EXPLORE_CARD_COPY: Record<
   },
   characters: {
     label: "Character Creator",
-    description: "Design character identity, appearance, wardrobe, voice, and continuity.",
+    description: "Design character identity, appearance, wardrobe, and voice.",
     category: "studio",
     image: dashboardImages.characterCreator,
+  },
+  propcreator: {
+    label: "Prop Creator",
+    description: "Design reusable props, objects, and production assets.",
+    category: "studio",
+    image: dashboardImages.propCreator,
+  },
+  environmentcreator: {
+    label: "Environment Creator",
+    description: "Build locations, sets, and reusable scene environments.",
+    category: "studio",
+    image: dashboardImages.environmentCreator,
+  },
+  script: {
+    label: "Storyboard",
+    description: "Plan shots, beats, and visual sequences before production.",
+    category: "production",
+    image: dashboardImages.storyboard,
   },
   scriptwriter: {
     label: "Scriptwriter",
@@ -113,21 +99,15 @@ const EXPLORE_CARD_COPY: Record<
     category: "production",
     image: dashboardImages.scriptwriter,
   },
-  avatar: {
-    label: "Avatar Studio",
-    description: "Talking characters, presenters, and guided lip sync from Character Profiles.",
-    category: "studio",
-    image: dashboardImages.avatar,
-  },
   voicestudio: {
     label: "Voice Studio",
-    description: "Design character voices, direct performances, and prepare dialogue for production.",
+    description: "Design character voices, direct performances, and prepare dialogue.",
     category: "studio",
     image: dashboardImages.voice,
   },
   audiostudio: {
     label: "Audio Studio",
-    description: "Create music, ambience, Foley, sound effects, and production-ready audio layers.",
+    description: "Create music, ambience, Foley, and production-ready audio.",
     category: "studio",
     image: dashboardImages.audio,
   },

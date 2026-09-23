@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 import uuid
 from pathlib import Path
@@ -12,6 +13,14 @@ import httpx
 from .config import settings
 
 CancelCheck = Callable[[], bool]
+
+# Wave 3B stall watchdog reconciliation:
+# Do not mark Timeline/Comfy jobs failed while Comfy still has the prompt in
+# queue_running/pending. Cap "running without history" at the job wall clock
+# (default 3600s) rather than an early 900s abort. Fail early only when the
+# prompt has vanished from queue+history (gone) or Comfy reports failure/cancel.
+RUNNING_WITHOUT_HISTORY_STALL_SEC = 3600.0
+PROMPT_GONE_GRACE_SEC = 45.0
 
 
 class JobCancelledError(RuntimeError):
@@ -39,7 +48,13 @@ class ComfyClient:
             data = r.json()
             return data if isinstance(data, dict) else {}
 
-    async def get_object_info(self, *, force: bool = False, ttl_sec: float = 60.0) -> dict[str, Any]:
+    async def get_object_info(
+        self,
+        *,
+        force: bool = False,
+        ttl_sec: float = 60.0,
+        timeout_sec: float = 60.0,
+    ) -> dict[str, Any]:
         """Fetch /object_info with a short in-memory cache."""
         import time
 
@@ -50,7 +65,7 @@ class ComfyClient:
             and (now - self._object_info_cached_at) < ttl_sec
         ):
             return self._object_info_cache
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=float(timeout_sec)) as client:
             r = await client.get(f"{self.base_url}/object_info")
             r.raise_for_status()
             data = r.json()
@@ -58,7 +73,7 @@ class ComfyClient:
         self._object_info_cached_at = now
         return data
 
-    async def _known_node_types(self) -> set[str] | None:
+    async def _known_node_types(self, *, timeout_sec: float = 60.0) -> set[str] | None:
         """Live node type names, or None when the catalogue cannot be read.
 
         Retry once. Unknown is not treated as ready when a workflow_key is bound
@@ -67,7 +82,7 @@ class ComfyClient:
         last_error: Exception | None = None
         for _attempt in range(2):
             try:
-                catalogue = await self.get_object_info()
+                catalogue = await self.get_object_info(timeout_sec=timeout_sec)
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 continue
@@ -82,15 +97,18 @@ class ComfyClient:
         *,
         validate: bool = True,
         workflow_key: str | None = None,
+        timeout_sec: float = 60.0,
     ) -> str:
         """Submit a graph. Refuses graphs whose required node types are provably absent.
 
         When ``workflow_key`` is provided, also runs ``ensure_queueable`` (models + registry).
+        ``timeout_sec`` covers catalogue fetch and POST /prompt. Heavy H3 graphs
+        can exceed the 60s default after a Qwen Omni pre-review (VRAM settle).
         """
         if validate:
             from .workflows.readiness import assert_graph_runnable
 
-            known = await self._known_node_types()
+            known = await self._known_node_types(timeout_sec=max(60.0, float(timeout_sec)))
             if workflow_key:
                 if known is None:
                     from .capabilities.errors import CapabilityError
@@ -110,7 +128,7 @@ class ComfyClient:
                 ensure_local_queueable(workflow_key, node_types=known)
             assert_graph_runnable(workflow, known)
         payload = {"prompt": workflow, "client_id": self.client_id}
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=float(timeout_sec)) as client:
             r = await client.post(f"{self.base_url}/prompt", json=payload)
             if r.status_code >= 400:
                 detail = r.text
@@ -316,125 +334,361 @@ class ComfyClient:
         timeout_sec: float | None = None,
         on_progress: Optional[Any] = None,
         cancel_check: Optional[CancelCheck] = None,
+        on_preview_frame: Optional[Any] = None,
     ) -> dict[str, Any]:
-        """Poll history/queue until complete. Observes cancel_check every poll cycle."""
+        """Poll history/queue until complete. Observes cancel_check every poll cycle.
+        When on_preview_frame is provided, a WebSocket latent-preview tap publishes
+        low-res frames during sampling. Preview failure never fails the render."""
         from .video_runtime.progress import ProgressNormalizer
 
         timeout = timeout_sec or settings.job_timeout_sec
         elapsed = 0.0
         normalizer = ProgressNormalizer()
         running_without_history_sec = 0.0
-        stall_limit_sec = min(180.0, float(timeout))
-        while elapsed < timeout:
-            if cancel_check and cancel_check():
-                # Interrupt promptly; full confirm/transition is owned by JobQueue.cancel_and_halt.
+        prompt_gone_sec = 0.0
+        # Wave 3B: long-running Comfy (H3 etc.) may stay queue_running without
+        # history for >15m. Do not early-abort at 900s while Comfy still owns
+        # the prompt — align stall cap with overall timeout / 3600s wall.
+        stall_limit_sec = min(RUNNING_WITHOUT_HISTORY_STALL_SEC, float(timeout))
+
+        # Optional live preview tap (Comfy WebSocket → low-res latent previews).
+        preview_task: asyncio.Task | None = None
+        if on_preview_frame is not None:
+            try:
+                from .video_runtime.live_preview import tap_comfy_previews
+
+                preview_task = asyncio.create_task(
+                    tap_comfy_previews(
+                        self.base_url,
+                        self.client_id,
+                        prompt_id,
+                        on_preview_frame,
+                    )
+                )
+            except Exception:
+                logging.getLogger(__name__).debug("Preview tap unavailable", exc_info=True)
+
+        try:
+            return await self._wait_for_prompt_poll(
+                prompt_id,
+                timeout=timeout,
+                elapsed=elapsed,
+                normalizer=normalizer,
+                running_without_history_sec=running_without_history_sec,
+                stall_limit_sec=stall_limit_sec,
+                prompt_gone_sec=prompt_gone_sec,
+                on_progress=on_progress,
+                cancel_check=cancel_check,
+            )
+        finally:
+            # CRITICAL: never block finalize on preview WS teardown.
+            # A hung websockets close after Comfy success previously stranded
+            # MiniMax H3 at writing_output/message=done/progress=0.96 with the
+            # MP4 on disk but no studio ingest (job 98db381c).
+            if preview_task is not None:
+                if not preview_task.done():
+                    preview_task.cancel()
                 try:
-                    await self.interrupt()
-                    await self.delete_queue_prompt(prompt_id)
-                except Exception:  # noqa: BLE001
+                    await asyncio.wait_for(preview_task, timeout=2.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
                     pass
-                raise JobCancelledError(
-                    f"Cancel observed — waiting for confirmed ComfyUI stop of prompt {prompt_id}"
-                )
-            history = await self.get_history(prompt_id)
-            if prompt_id in history:
-                entry = history[prompt_id]
-                status = entry.get("status", {})
-                if status.get("status_str") == "error" or (
-                    status.get("completed") is False and status.get("messages")
-                ):
-                    msgs = status.get("messages") or []
-                    # Treat interrupt as cancellation when cancel was requested
-                    joined = json.dumps(msgs).lower()
-                    if cancel_check and cancel_check():
-                        raise JobCancelledError(
-                            f"Cancelled by user — ComfyUI prompt {prompt_id} halted"
-                        )
-                    # Honest cancel signal: execution_interrupted — not the word
-                    # "interrupt" appearing inside stack frames (allow_interrupt=True).
-                    interrupted = any(
-                        isinstance(m, (list, tuple))
-                        and len(m) >= 1
-                        and str(m[0]).lower()
-                        in {"execution_interrupted", "execution_cached_interrupted"}
-                        for m in msgs
-                    ) or (
-                        "execution_interrupted" in joined
-                        or '"interrupted": true' in joined
-                        or "prompt interrupted" in joined
+                except Exception:
+                    logging.getLogger(__name__).debug(
+                        "Preview tap cleanup ended", exc_info=True
                     )
-                    if interrupted:
-                        raise JobCancelledError(
-                            f"ComfyUI interrupted for prompt {prompt_id}"
-                        )
-                    # Surface the real exception_message when present
-                    err_msg = None
-                    for m in msgs:
-                        if (
-                            isinstance(m, (list, tuple))
-                            and len(m) >= 2
-                            and str(m[0]) == "execution_error"
-                            and isinstance(m[1], dict)
-                        ):
-                            err_msg = m[1].get("exception_message") or m[1].get(
-                                "exception_type"
+
+    async def _listen_comfy_progress(
+        self,
+        prompt_id: str,
+        live: dict[str, Any],
+        stop: asyncio.Event,
+    ) -> None:
+        """Primary live progress authority: Comfy WS progress / progress_state / executing."""
+        try:
+            import websockets
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "websockets missing — poll-only progress", exc_info=True
+            )
+            return
+
+        from .video_runtime.progress import (
+            extract_progress_state_fraction,
+            live_fraction_from_comfy,
+        )
+
+        ws_url = self.base_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = f"{ws_url}/ws?clientId={self.client_id}"
+        wanted = (prompt_id or "").strip()
+        try:
+            async with websockets.connect(
+                ws_url, max_size=32 * 1024 * 1024, open_timeout=10
+            ) as ws:
+                while not stop.is_set():
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception:
+                        break
+                    if isinstance(raw, (bytes, bytearray)):
+                        continue
+                    try:
+                        msg = json.loads(raw)
+                    except Exception:
+                        continue
+                    if not isinstance(msg, dict):
+                        continue
+                    mtype = str(msg.get("type") or "")
+                    data = msg.get("data") if isinstance(msg.get("data"), dict) else {}
+                    pid = str(data.get("prompt_id") or "").strip()
+                    if wanted and pid and pid != wanted:
+                        continue
+                    now = asyncio.get_running_loop().time()
+                    if mtype == "progress":
+                        value = float(data.get("value") or 0)
+                        mx = float(data.get("max") or 0) or 1.0
+                        frac = live_fraction_from_comfy(value, mx)
+                        # Multi-step sampler ticks own the bar. Single-tick node
+                        # completions (max<=1) are phase-only — never a fake %.
+                        live["node"] = data.get("node")
+                        live["live"] = True
+                        live["updated_at"] = now
+                        live["comfy_value"] = value
+                        live["comfy_max"] = mx
+                        if mx > 1:
+                            live["fraction"] = frac
+                            live["message"] = f"Sampling step {int(value)}/{int(mx)}"
+                            live["grounded"] = True
+                        else:
+                            live["message"] = f"Node progress {int(value)}/{int(mx)}"
+                            live["grounded"] = bool(live.get("grounded"))
+                    elif mtype == "progress_state":
+                        extracted = extract_progress_state_fraction(data)
+                        if extracted:
+                            frac, label = extracted
+                            mx_guess = 1.0
+                            try:
+                                if "/" in label:
+                                    mx_guess = float(label.rsplit("/", 1)[-1].split()[0])
+                            except Exception:
+                                mx_guess = 1.0
+                            live["message"] = label
+                            live["live"] = True
+                            live["updated_at"] = now
+                            if mx_guess > 1:
+                                live["fraction"] = frac
+                                live["grounded"] = True
+                            else:
+                                live["grounded"] = bool(live.get("grounded"))
+                    elif mtype == "executing":
+                        node = data.get("node")
+                        if node is None:
+                            live["message"] = live.get("message") or "finalizing ComfyUI"
+                            live["updated_at"] = now
+                            return
+                        live["node"] = node
+                        live["message"] = f"Executing node {node}"
+                        live["live"] = True
+                        live["updated_at"] = now
+                        # Node change is a real runtime event, not a percent.
+                    elif mtype == "execution_error":
+                        return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).debug("Comfy progress WS ended", exc_info=True)
+
+    async def _wait_for_prompt_poll(
+        self,
+        prompt_id: str,
+        *,
+        timeout: float,
+        elapsed: float,
+        normalizer: Any,
+        running_without_history_sec: float,
+        stall_limit_sec: float,
+        prompt_gone_sec: float = 0.0,
+        on_progress: Optional[Any],
+        cancel_check: Optional[CancelCheck],
+    ) -> dict[str, Any]:
+        live: dict[str, Any] = {
+            "fraction": None,
+            "message": None,
+            "node": None,
+            "live": False,
+            "grounded": False,
+            "updated_at": 0.0,
+        }
+        stop = asyncio.Event()
+        ws_task = asyncio.create_task(self._listen_comfy_progress(prompt_id, live, stop))
+        last_mapped = 0.0
+        last_force_elapsed = -999.0
+        try:
+            while elapsed < timeout:
+                if cancel_check and cancel_check():
+                    try:
+                        await self.interrupt()
+                        await self.delete_queue_prompt(prompt_id)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    raise JobCancelledError(
+                        f"Cancel observed — waiting for confirmed ComfyUI stop of prompt {prompt_id}"
+                    )
+                history = await self.get_history(prompt_id)
+                if prompt_id in history:
+                    entry = history[prompt_id]
+                    status = entry.get("status", {})
+                    if status.get("status_str") == "error" or (
+                        status.get("completed") is False and status.get("messages")
+                    ):
+                        msgs = status.get("messages") or []
+                        joined = json.dumps(msgs).lower()
+                        if cancel_check and cancel_check():
+                            raise JobCancelledError(
+                                f"Cancelled by user — ComfyUI prompt {prompt_id} halted"
                             )
-                            break
-                    raise RuntimeError(
-                        f"ComfyUI job failed: {err_msg or msgs}"
-                    )
-                if status.get("completed") is True or status.get("status_str") == "success":
-                    if cancel_check and cancel_check():
-                        # Late completion after cancel — do not treat as success
-                        raise JobCancelledError(
-                            f"Cancelled by user — ignoring late ComfyUI completion for {prompt_id}"
+                        interrupted = any(
+                            isinstance(m, (list, tuple))
+                            and len(m) >= 1
+                            and str(m[0]).lower()
+                            in {"execution_interrupted", "execution_cached_interrupted"}
+                            for m in msgs
+                        ) or (
+                            "execution_interrupted" in joined
+                            or '"interrupted": true' in joined
+                            or "prompt interrupted" in joined
                         )
-                    if on_progress:
-                        stage, p = normalizer.map_comfy_message("done", 1.0)
-                        await normalizer.emit(
-                            self._adapt_progress(on_progress),
-                            progress=p,
-                            message="done",
-                            stage=stage,
-                            force=True,
+                        if interrupted:
+                            raise JobCancelledError(
+                                f"ComfyUI interrupted for prompt {prompt_id}"
+                            )
+                        err_msg = None
+                        for m in msgs:
+                            if (
+                                isinstance(m, (list, tuple))
+                                and len(m) >= 2
+                                and str(m[0]) == "execution_error"
+                                and isinstance(m[1], dict)
+                            ):
+                                err_msg = m[1].get("exception_message") or m[1].get(
+                                    "exception_type"
+                                )
+                                break
+                        raise RuntimeError(
+                            f"ComfyUI job failed: {err_msg or msgs}"
                         )
-                    return entry
-            queue = await self.get_queue()
-            running = queue.get("queue_running") or []
-            pending = queue.get("queue_pending") or []
-            in_running = any(item[1] == prompt_id for item in running if len(item) > 1)
-            in_pending = any(item[1] == prompt_id for item in pending if len(item) > 1)
-            if in_running and prompt_id not in history:
-                running_without_history_sec += settings.poll_interval_sec
-                if running_without_history_sec >= stall_limit_sec:
-                    raise TimeoutError(
-                        f"ComfyUI stall: prompt {prompt_id} has been queue_running "
-                        f"for {int(running_without_history_sec)}s with no history. "
-                        "Failing closed instead of polling for up to an hour."
-                    )
-            else:
-                running_without_history_sec = 0.0
-            if on_progress:
-                if in_running:
-                    msg = "running in ComfyUI"
-                    prog = 0.55
-                elif in_pending:
-                    msg = "queued in ComfyUI"
-                    prog = 0.2
+                    if status.get("completed") is True or status.get("status_str") == "success":
+                        if cancel_check and cancel_check():
+                            raise JobCancelledError(
+                                f"Cancelled by user — ignoring late ComfyUI completion for {prompt_id}"
+                            )
+                        if on_progress:
+                            stage, p = normalizer.map_comfy_message("done", 1.0, live=True)
+                            await normalizer.emit(
+                                self._adapt_progress(on_progress),
+                                progress=p,
+                                message="done",
+                                stage=stage,
+                                force=True,
+                            )
+                        return entry
+                queue = await self.get_queue()
+                running = queue.get("queue_running") or []
+                pending = queue.get("queue_pending") or []
+                in_running = any(item[1] == prompt_id for item in running if len(item) > 1)
+                in_pending = any(item[1] == prompt_id for item in pending if len(item) > 1)
+                if in_running or in_pending:
+                    # Comfy still owns the job — keep Timeline in rendering.
+                    prompt_gone_sec = 0.0
+                    if in_running and prompt_id not in history:
+                        running_without_history_sec += settings.poll_interval_sec
+                        # Only trip if wall-aligned stall_limit elapses while still
+                        # running without history (typically == overall timeout).
+                        if running_without_history_sec >= stall_limit_sec:
+                            raise TimeoutError(
+                                f"ComfyUI stall: prompt {prompt_id} has been queue_running "
+                                f"for {int(running_without_history_sec)}s with no history "
+                                f"(stall_limit={int(stall_limit_sec)}s)."
+                            )
+                    else:
+                        running_without_history_sec = 0.0
+                elif prompt_id not in history:
+                    # Proven gone: not running, not pending, no history yet.
+                    running_without_history_sec = 0.0
+                    prompt_gone_sec += settings.poll_interval_sec
+                    if prompt_gone_sec >= PROMPT_GONE_GRACE_SEC:
+                        raise TimeoutError(
+                            f"ComfyUI prompt gone: {prompt_id} missing from queue and "
+                            f"history for {int(prompt_gone_sec)}s (unrecoverable)."
+                        )
                 else:
-                    msg = "waiting for ComfyUI"
-                    prog = 0.3
-                stage, mapped = normalizer.map_comfy_message(msg, prog)
-                await normalizer.emit(
-                    self._adapt_progress(on_progress),
-                    progress=mapped,
-                    message=msg,
-                    stage=stage,
+                    running_without_history_sec = 0.0
+                    prompt_gone_sec = 0.0
+                if on_progress:
+                    live_frac = live.get("fraction")
+                    live_msg = live.get("message")
+                    is_live = bool(live.get("live"))
+                    is_grounded = bool(live.get("grounded")) and live_frac is not None
+                    node = live.get("node")
+                    if is_grounded:
+                        msg = str(live_msg or "running in ComfyUI")
+                        prog = float(live_frac)
+                        stage, mapped = normalizer.map_comfy_message(msg, prog, live=True)
+                    elif in_running:
+                        msg = str(live_msg or "running in ComfyUI")
+                        prog = last_mapped
+                        stage, mapped = normalizer.map_comfy_message(msg, prog, live=False)
+                    elif in_pending:
+                        msg = "queued in ComfyUI"
+                        prog = last_mapped
+                        stage, mapped = normalizer.map_comfy_message(msg, prog, live=False)
+                    else:
+                        msg = str(live_msg or "waiting for ComfyUI")
+                        prog = last_mapped
+                        stage, mapped = normalizer.map_comfy_message(msg, prog, live=False)
+                    # Heartbeat every ~3s while Comfy owns the prompt — message/updated_at
+                    # only. Never invent a percent from elapsed time.
+                    force = False
+                    if in_running and (elapsed - last_force_elapsed) >= 3.0 and not is_grounded:
+                        force = True
+                        if live_msg:
+                            msg = f"{live_msg} · still running ({int(elapsed)}s)"
+                        else:
+                            msg = f"running in ComfyUI · still running ({int(elapsed)}s)"
+                        last_force_elapsed = elapsed
+                    stage_token = getattr(stage, "value", stage)
+                    if node is not None:
+                        from .video_runtime.progress_telemetry import infer_creator_phase
+
+                        phase = infer_creator_phase(message=msg, stage=str(stage_token), node=node)
+                        stage_name = phase or stage_token
+                    else:
+                        stage_name = stage_token
+                    emitted = await normalizer.emit(
+                        self._adapt_progress(on_progress),
+                        progress=mapped,
+                        message=msg,
+                        stage=stage_name,
+                        force=force,
+                    )
+                    if emitted and is_grounded:
+                        last_mapped = mapped
+                await asyncio.sleep(settings.poll_interval_sec)
+                elapsed += settings.poll_interval_sec
+            raise TimeoutError(f"Timed out waiting for ComfyUI prompt {prompt_id}")
+        finally:
+            stop.set()
+            if not ws_task.done():
+                ws_task.cancel()
+            try:
+                await asyncio.wait_for(ws_task, timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            except Exception:
+                logging.getLogger(__name__).debug(
+                    "Comfy progress WS cleanup ended", exc_info=True
                 )
-            # Best-effort WebSocket progress enrichment (non-blocking short attempt)
-            await asyncio.sleep(settings.poll_interval_sec)
-            elapsed += settings.poll_interval_sec
-        raise TimeoutError(f"Timed out waiting for ComfyUI prompt {prompt_id}")
 
     @staticmethod
     def _adapt_progress(on_progress: Any) -> Any:

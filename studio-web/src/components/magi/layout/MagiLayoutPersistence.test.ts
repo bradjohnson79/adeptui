@@ -46,6 +46,41 @@ describe("MagiLayoutPersistence", () => {
     expect(layout.accordionState.transform).toBe(true);
   });
 
+  it("mask-editing preset and persisted state collapse to default finishing layout", () => {
+    const layout = applyPreset("mask-editing", { ...DEFAULT_LAYOUT, accordionState: { ...DEFAULT_LAYOUT.accordionState } });
+    expect(layout.activePreset).toBe("default");
+    expect(layout.leftDockCollapsed).toBe(false);
+    expect(layout.rightDockCollapsed).toBe(false);
+    const persisted = validateMagiLayout({
+      schemaVersion: 1,
+      leftPaneOrder: ["project", "media"],
+      rightPaneOrder: ["inspector"],
+      leftDockWidth: 280,
+      rightDockWidth: 300,
+      timelineHeight: 280,
+      activePreset: "mask-editing",
+    });
+    expect(persisted?.activePreset).toBe("default");
+  });
+
+  it("defaults the left drawer to Project / Library / Recipes", () => {
+    expect(DEFAULT_LAYOUT.leftPaneOrder).toEqual(["project", "library", "recipes"]);
+    expect(DEFAULT_LAYOUT.accordionState.library).toBe(true);
+  });
+
+  it("migrates MEDIA/ASSETS panes to Library without rejecting", () => {
+    const layout = validateMagiLayout({
+      schemaVersion: 1,
+      leftPaneOrder: ["project", "media", "assets"],
+      rightPaneOrder: ["inspector"],
+      leftDockWidth: 280,
+      rightDockWidth: 300,
+      timelineHeight: 280,
+    });
+    expect(layout).not.toBeNull();
+    expect(layout!.leftPaneOrder).toEqual(["project", "library"]);
+  });
+
   it("compare-review preset keeps Clip Properties expanded", () => {
     const layout = applyPreset("compare-review", { ...DEFAULT_LAYOUT, accordionState: { ...DEFAULT_LAYOUT.accordionState } });
     expect(layout.accordionState.compare).toBe(true);

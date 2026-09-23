@@ -21,6 +21,7 @@ from .schemas import (
     PoseCraftScene,
     PoseCraftSnapshot,
 )
+from .vec3 import as_vec3
 
 
 class PoseCraftError(Exception):
@@ -85,11 +86,30 @@ def _migrate_figure(figure: dict) -> dict:
     return out
 
 
-def migrate_scene_to_current(data: dict) -> dict:
-    """Migrate a raw PoseCraft scene dict to the current schemaVersion (2).
+def _primitive_to_object(primitive: dict) -> dict:
+    position = as_vec3(primitive.get("position"))
+    yaw = float(primitive.get("rotationY") or 0.0)
+    uniform = float(primitive.get("scale") or 1.0)
+    return {
+        "id": primitive.get("id"),
+        "name": primitive.get("name") or primitive.get("kind") or "Object",
+        "source": "procedural",
+        "primitiveKind": primitive.get("kind") or "apple-box",
+        "position": position,
+        "rotation": {"x": 0.0, "y": yaw, "z": 0.0},
+        "scale": {"x": uniform, "y": uniform, "z": uniform},
+        "size": primitive.get("size") or {"x": 0.6, "y": 0.5, "z": 0.4},
+        "color": primitive.get("color") or "#94a3b8",
+        "visible": bool(primitive.get("visible", True)),
+        "locked": bool(primitive.get("locked", False)),
+        "nameConfirmed": True,
+    }
 
-    Idempotent. Preserves all protected fields; never corrupts an existing
-    project merely because the figure mesh / joint system improved.
+
+def migrate_scene_to_current(data: dict) -> dict:
+    """Migrate a raw PoseCraft scene dict to schemaVersion 3.
+
+    Idempotent. Preserves protected fields. Maps primitives → objects.
     """
     scene = dict(data)
     migrated_from = int(scene.get("schemaVersion") or 1)
@@ -97,14 +117,58 @@ def migrate_scene_to_current(data: dict) -> dict:
     scene["schemaVersion"] = POSECRAFT_SCHEMA_VERSION
     figures = scene.get("figures")
     if isinstance(figures, list):
-        scene["figures"] = [_migrate_figure(f) for f in figures if isinstance(f, dict)]
+        migrated_figures = []
+        for figure in figures:
+            if not isinstance(figure, dict):
+                continue
+            next_figure = _migrate_figure(figure)
+            next_figure["position"] = as_vec3(next_figure.get("position"))
+            rotation = next_figure.get("rotation")
+            if not isinstance(rotation, dict):
+                next_figure["rotation"] = {"x": 0.0, "y": float(next_figure.get("rotationY") or 0.0), "z": 0.0}
+            migrated_figures.append(next_figure)
+        scene["figures"] = migrated_figures
+
+    primitives = scene.get("primitives") if isinstance(scene.get("primitives"), list) else []
+    objects = scene.get("objects") if isinstance(scene.get("objects"), list) else []
+    if not objects and primitives:
+        scene["objects"] = [_primitive_to_object(p) for p in primitives if isinstance(p, dict)]
+    elif objects:
+        normalized = []
+        for obj in objects:
+            if not isinstance(obj, dict):
+                continue
+            obj = dict(obj)
+            obj["position"] = as_vec3(obj.get("position"))
+            if not isinstance(obj.get("rotation"), dict):
+                obj["rotation"] = {"x": 0.0, "y": float(obj.get("rotationY") or 0.0), "z": 0.0}
+            if not isinstance(obj.get("scale"), dict):
+                uniform = float(obj.get("scale") or 1.0)
+                obj["scale"] = {"x": uniform, "y": uniform, "z": uniform}
+            normalized.append(obj)
+        scene["objects"] = normalized
+    else:
+        scene["objects"] = []
+
+    if not isinstance(scene.get("environment"), dict):
+        scene["environment"] = {"id": "environment", "name": scene.get("name") or "Stage", "source": "none"}
+    if not isinstance(scene.get("cameras"), list) or not scene["cameras"]:
+        scene["cameras"] = [{"id": "camera-01", "name": "Camera 01", "state": scene.get("camera") or {}}]
+    if not isinstance(scene.get("shots"), list):
+        scene["shots"] = []
+    if "selectedObjectId" not in scene:
+        scene["selectedObjectId"] = scene.get("selectedPrimitiveId")
+
     if needs_migration:
-        notes = (
-            "Migrated from schemaVersion 1 (block-figure) to 2 (humanoid rig). "
-            "Unsupported legacy joints retained in figure.legacyJointData."
-            if migrated_from < 2
-            else "Schema normalized to current version."
-        )
+        if migrated_from < 2:
+            notes = (
+                "Migrated from schemaVersion 1 (block-figure) to 3 (canonical stage). "
+                "Unsupported legacy joints retained in figure.legacyJointData."
+            )
+        elif migrated_from < 3:
+            notes = "Migrated from schemaVersion 2 to 3 (environment/objects/cameras/shots)."
+        else:
+            notes = "Schema normalized to current version."
         scene["provenance"] = {
             "migratedFrom": migrated_from,
             "migratedAt": _now_iso(),
@@ -127,48 +191,55 @@ def _coerce_iso(value: Any) -> str:
     return text + "Z"
 
 
-def _empty_document() -> PoseCraftDocument:
-    return PoseCraftDocument()
+def _empty_document(*, load_state: str = "empty") -> PoseCraftDocument:
+    doc = PoseCraftDocument()
+    doc.loadState = load_state  # type: ignore[assignment]
+    return doc
+
+
+def _is_empty_scene(scene: PoseCraftScene) -> bool:
+    return (
+        not scene.figures
+        and not scene.objects
+        and not scene.primitives
+        and not scene.shots
+        and (scene.revision or 1) <= 1
+        and not (scene.name and scene.name not in ("PoseCraft Blocking Study", "Stage"))
+    )
 
 
 def load_scene(project_id: str, db: Session) -> PoseCraftDocument:
-    """Load the live PoseCraft document for a project. Empty doc if unset.
+    """Load the live PoseCraft document for a project.
 
-    Runs the backward-compat migration gate so GREEN-baseline saved scenes
-    remain loadable after the rig/joint upgrade: protected fields preserved,
-    unsupported legacy joints retained in figure.legacyJointData.
+    Distinguishes new-empty from corrupt so the client must not PUT a default
+    document over stored bytes.
     """
     project = db.get(Project, project_id)
     if not project:
         raise PoseCraftError("Project not found", 404)
     raw = (project.posecraft_document_json or "").strip()
     if not raw:
-        return _empty_document()
+        return _empty_document(load_state="empty")
     try:
         data = json.loads(raw)
     except Exception:  # noqa: BLE001
-        # Corrupt document — fall back to empty rather than crash the UI.
-        return _empty_document()
+        return _empty_document(load_state="corrupt")
     try:
-        # Migrate the current scene to the current schema (idempotent).
         if isinstance(data, dict) and isinstance(data.get("currentScene"), dict):
             data["currentScene"] = migrate_scene_to_current(data["currentScene"])
         if isinstance(data, dict) and isinstance(data.get("savedVersions"), list):
             for v in data["savedVersions"]:
                 if isinstance(v, dict) and isinstance(v.get("scene"), dict):
                     v["scene"] = migrate_scene_to_current(v["scene"])
-        # Snapshot contract migration: missing snapshots → [], missing
-        # selectedSnapshotId → None. Snapshots are frozen at capture time;
-        # we do not mutate their frozen camera/figures/primitives here.
         if isinstance(data, dict):
             if not isinstance(data.get("snapshots"), list):
                 data["snapshots"] = []
             if data.get("selectedSnapshotId") is not None and not isinstance(data.get("selectedSnapshotId"), str):
                 data["selectedSnapshotId"] = None
+            data["loadState"] = "ok"
         return PoseCraftDocument.model_validate(data)
-    except Exception as exc:  # noqa: BLE001
-        # Schema mismatch that migration could not fix — fall back to empty.
-        return _empty_document()
+    except Exception:  # noqa: BLE001
+        return _empty_document(load_state="corrupt")
 
 
 def save_scene(project_id: str, document: PoseCraftDocument, db: Session, *, saved_by: str = "creator") -> PoseCraftDocument:
@@ -184,6 +255,12 @@ def save_scene(project_id: str, document: PoseCraftDocument, db: Session, *, sav
     project = db.get(Project, project_id)
     if not project:
         raise PoseCraftError("Project not found", 404)
+    existing_raw = (project.posecraft_document_json or "").strip()
+    if existing_raw and _is_empty_scene(document.currentScene) and document.loadState in ("corrupt", "empty"):
+        raise PoseCraftError(
+            "Refusing to overwrite a stored PoseCraft document with an empty hydrate-failure scene",
+            409,
+        )
     # Bump schema/revision metadata defensively.
     document.schemaVersion = POSECRAFT_SCHEMA_VERSION
     # Migrate the incoming currentScene to the current schema (idempotent):
@@ -201,6 +278,7 @@ def save_scene(project_id: str, document: PoseCraftDocument, db: Session, *, sav
     if document.currentScene.updatedAt == "":
         document.currentScene.updatedAt = _now_iso()
     document.currentScene.creatorModified = True
+    document.loadState = "ok"
     project.posecraft_document_json = document.model_dump_json()
     project.updated_at = datetime.utcnow()
     db.commit()
@@ -335,7 +413,23 @@ def _semantic_summary(scene: PoseCraftScene) -> str:
         lines.append(f"{f.name}{role_s} — {f.archetypeId} — {pose}")
     for p in scene.primitives:
         lines.append(f"{p.name} — {p.kind}")
+    for obj in getattr(scene, "objects", []) or []:
+        lines.append(f"{obj.name} — {obj.source}")
     return "\n".join(lines)
+
+
+def _semantic_object(obj) -> dict:
+    return {
+        "id": obj.id,
+        "label": obj.name,
+        "name": obj.name,
+        "type": obj.source,
+        "source": obj.source,
+        "detectedLabel": getattr(obj, "detectedLabel", None),
+        "position": obj.position,
+        "visible": obj.visible,
+        "locked": obj.locked,
+    }
 
 
 def build_export_preview(project_id: str, db: Session, *, snapshot_id: str | None = None) -> PoseCraftExportPreview:
@@ -361,7 +455,7 @@ def build_export_preview(project_id: str, db: Session, *, snapshot_id: str | Non
             honestyLabel="PoseCraft Snapshot — Visual Staging Reference",
             notes=snapshot.semanticSummary,
             figures=[_semantic_figure(f) for f in snapshot.figures],
-            objects=[_semantic_primitive(p) for p in snapshot.primitives],
+            objects=[_semantic_object(o) for o in (snapshot.objects or [])] or [_semantic_primitive(p) for p in snapshot.primitives],
             semanticSummary=snapshot.semanticSummary,
             camera=snapshot.camera,
         )
@@ -370,12 +464,12 @@ def build_export_preview(project_id: str, db: Session, *, snapshot_id: str | Non
         sceneName=scene.name,
         revision=int(scene.revision),
         figureCount=len(scene.figures),
-        primitiveCount=len(scene.primitives),
+        primitiveCount=len(scene.objects) or len(scene.primitives),
         lensMm=float(scene.camera.lensMm),
         aspect=scene.camera.aspect,
         notes=scene.notes,
         figures=[_semantic_figure(f) for f in scene.figures],
-        objects=[_semantic_primitive(p) for p in scene.primitives],
+        objects=[_semantic_object(o) for o in scene.objects] or [_semantic_primitive(p) for p in scene.primitives],
         semanticSummary=_semantic_summary(scene),
         camera=scene.camera,
     )

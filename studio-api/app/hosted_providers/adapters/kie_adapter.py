@@ -532,11 +532,61 @@ async def poll_kie_task(api_key: str, task_id: str, *, timeout_sec: float = 15.0
 # Restored Market enqueue + Gemini chat so adapters.__init__ imports stay valid.
 _KIE_CHAT_ENDPOINTS: dict[str, str] = {
     "gemini-3-pro": "https://api.kie.ai/gemini-3-pro/v1/chat/completions",
-    "gemini-3.1-pro": "https://api.kie.ai/gemini-3-pro/v1/chat/completions",
+    "gemini-3.1-pro": "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions",
     "gemini-2.5-pro": "https://api.kie.ai/gemini-2.5-pro/v1/chat/completions",
     "gemini-2.5-flash": "https://api.kie.ai/gemini-2.5-flash/v1/chat/completions",
     "gemini-3-flash": "https://api.kie.ai/gemini-3-flash/v1/chat/completions",
 }
+
+
+def _openai_chat_content(data: Any) -> str:
+    if not isinstance(data, dict):
+        return ""
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+    if not isinstance(msg, dict):
+        return ""
+    return str(msg.get("content") or "").strip()
+
+
+def kie_chat_failure_from_payload(data: Any, http_status: int) -> str | None:
+    """Return the real Kie chat failure, or None when content is present.
+
+    Kie often answers HTTP 200 with ``{"code": 401, "msg": "...", "data": null}``
+    instead of OpenAI ``choices``. Callers must not collapse that to a generic
+    ``vlm_error`` — the envelope ``msg`` is the authority.
+    """
+    msg = None
+    code_int: int | None = None
+    if isinstance(data, dict):
+        raw_msg = data.get("msg") or data.get("message")
+        raw_err = data.get("error")
+        if isinstance(raw_err, dict):
+            raw_msg = raw_msg or raw_err.get("message") or raw_err.get("msg")
+        elif raw_err and not raw_msg:
+            raw_msg = raw_err
+        if raw_msg is not None:
+            text = str(raw_msg).strip()
+            msg = text or None
+        try:
+            if data.get("code") is not None and str(data.get("code")).strip() != "":
+                code_int = int(data["code"])
+        except (TypeError, ValueError):
+            code_int = None
+
+        if code_int is not None and code_int >= 400:
+            return msg or f"Kie returned code {code_int}."
+        if _openai_chat_content(data):
+            return None
+        if http_status >= 400:
+            return msg or f"Kie HTTP {http_status}."
+        return msg or "Kie returned no vision text."
+
+    if http_status >= 400:
+        return f"Kie HTTP {http_status}."
+    return "Kie returned no vision text."
 
 
 async def enqueue_kie(
@@ -618,26 +668,39 @@ async def chat_kie(
                 json={"model": mid, "messages": messages, "temperature": temperature, "stream": False},
             )
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": "NETWORK", "message": str(exc), "mock": False}
+        detail = str(exc).strip() or "Could not reach the vision service."
+        return {
+            "ok": False,
+            "providerId": "kie",
+            "modelId": mid,
+            "error": detail,
+            "message": detail,
+            "httpStatus": None,
+            "providerCode": None,
+            "output": "",
+            "raw": None,
+            "mock": False,
+        }
     data: Any = None
     try:
         data = response.json()
     except Exception:
         data = {"raw": response.text[:800]}
-    output = ""
-    if isinstance(data, dict):
-        choices = data.get("choices")
-        if isinstance(choices, list) and choices:
-            msg = choices[0].get("message") if isinstance(choices[0], dict) else None
-            if isinstance(msg, dict):
-                output = str(msg.get("content") or "")
-    ok = response.status_code < 400 and bool(output)
+    output = _openai_chat_content(data)
+    failure = kie_chat_failure_from_payload(data, response.status_code)
+    ok = failure is None and bool(output)
+    provider_code = None
+    if isinstance(data, dict) and data.get("code") is not None:
+        provider_code = data.get("code")
     return {
         "ok": ok,
         "providerId": "kie",
         "modelId": mid,
         "httpStatus": response.status_code,
+        "providerCode": provider_code,
         "output": output,
+        "error": None if ok else failure,
+        "message": None if ok else failure,
         "raw": data,
         "mock": False,
     }

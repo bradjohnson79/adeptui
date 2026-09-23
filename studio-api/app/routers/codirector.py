@@ -33,6 +33,7 @@ from ..codirector.language_intelligence.api import router as language_intelligen
 from ..codirector.prompt_intelligence.api import router as prompt_intelligence_router
 from ..codirector.prompt_intelligence.benchmark_api import router as prompt_intelligence_v2_router
 from ..codirector.world_intelligence.router import router as world_intelligence_router
+from ..codirector.video_intelligence.media_router import router as media_intelligence_router
 from ..codirector.status.router import router as status_router
 from ..codirector.bible.schemas import (
     ApprovalDecisionRequest,
@@ -63,6 +64,7 @@ router.include_router(language_intelligence_router)
 router.include_router(prompt_intelligence_router)
 router.include_router(prompt_intelligence_v2_router)
 router.include_router(world_intelligence_router)
+router.include_router(media_intelligence_router)
 router.include_router(status_router)
 
 
@@ -71,14 +73,19 @@ def _http_error(err: CoDirectorError) -> HTTPException:
 
 
 class ChatMessageIn(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
     role: str
     content: str
+    attachment_ids: list[str] = Field(default_factory=list, alias="attachmentIds")
 
 
 class CoDirectorChatBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     messages: list[ChatMessageIn]
-    project_id: Optional[str] = None
-    scene_id: Optional[str] = None
+    project_id: Optional[str] = Field(default=None, alias="projectId")
+    scene_id: Optional[str] = Field(default=None, alias="sceneId")
     model: Optional[str] = None
     provider_id: Optional[str] = None
     mode: Literal["chat", "prompt", "guide", "setup"] = "chat"
@@ -90,14 +97,27 @@ class CoDirectorChatBody(BaseModel):
     attachmentIds: list[str] = Field(default_factory=list)
     active_content_tab: Optional[str] = None
     activeContentTab: Optional[str] = None
+    workspace_tab: Optional[str] = None
+    workspaceTab: Optional[str] = None
     # Script Writer current-scene awareness: the canonical script document and
     # the selected scene (sceneHeadingId) the creator is editing right now.
     active_document_id: Optional[str] = Field(default=None, alias="activeDocumentId")
     scriptwriter_scene_id: Optional[str] = Field(default=None, alias="scriptwriterSceneId")
+    environment_creator_planning: Optional[dict] = Field(default=None, alias="environmentCreatorPlanning")
+    image_generator_planning: Optional[dict] = Field(default=None, alias="imageGeneratorPlanning")
 
 
 class CoDirectorCancelBody(BaseModel):
     request_id: str
+
+
+class TurnGroundingBody(BaseModel):
+    text: str = ""
+    scene_id: Optional[str] = None
+    sceneId: Optional[str] = None
+    workspace: Optional[str] = None
+    workspace_tab: Optional[str] = None
+    workspaceTab: Optional[str] = None
 
 
 class ConversationMessageIn(BaseModel):
@@ -205,20 +225,46 @@ async def get_config() -> dict[str, Any]:
 @router.get("/session-context")
 async def session_context(
     project_id: Optional[str] = None,
+    projectId: Optional[str] = None,
     scene_id: Optional[str] = None,
+    sceneId: Optional[str] = None,
     workspace: Optional[str] = None,
     content_tab: Optional[str] = None,
+    contentTab: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Canonical session-context contract (composed from existing stores)."""
     from ..codirector.session_context import build_session_context
 
+    # BOT2_SESSION_BIND: accept snake + camel so UI-selected Scene 2 binds activeSceneId.
+    resolved_project_id = project_id or projectId
+    resolved_scene_id = scene_id or sceneId
+    resolved_content_tab = content_tab or contentTab
+
     return build_session_context(
         db,
-        project_id=project_id,
-        active_scene_id=scene_id,
+        project_id=resolved_project_id,
+        active_scene_id=resolved_scene_id,
         active_workspace=workspace,
-        active_content_tab=content_tab,
+        active_content_tab=resolved_content_tab,
+    )
+
+
+@router.post("/projects/{project_id}/turn-grounding")
+async def turn_grounding(
+    project_id: str,
+    body: TurnGroundingBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Read-only project snapshot + @entity resolution. Never starts generation."""
+    from ..codirector.project_grounding import inspect_turn_grounding
+
+    return inspect_turn_grounding(
+        db,
+        project_id,
+        body.scene_id or body.sceneId,
+        body.text,
+        workspace=body.workspace or body.workspace_tab or body.workspaceTab,
     )
 
 
@@ -299,9 +345,12 @@ async def chat(body: CoDirectorChatBody, db: Session = Depends(get_db)) -> dict[
             request_id=body.request_id,
             conversation_locale=body.conversation_locale or body.conversationLocale,
             attachment_ids=body.attachment_ids or body.attachmentIds,
-            active_content_tab=body.active_content_tab,
+            active_content_tab=body.active_content_tab or body.activeContentTab,
+            active_workspace=body.workspace_tab or body.workspaceTab or body.active_content_tab or body.activeContentTab,
             active_document_id=body.active_document_id,
             scriptwriter_scene_id=body.scriptwriter_scene_id,
+            environment_creator_planning=body.environment_creator_planning,
+            image_generator_planning=body.image_generator_planning,
         )
     except CoDirectorError as err:
         raise _http_error(err) from err
@@ -346,9 +395,12 @@ async def chat_stream(body: CoDirectorChatBody) -> StreamingResponse:
                 conversation_locale=body.conversation_locale or body.conversationLocale,
                 origin_session_id=body.origin_session_id,
                 attachment_ids=body.attachment_ids or body.attachmentIds,
-                active_content_tab=body.active_content_tab,
+                active_content_tab=body.active_content_tab or body.activeContentTab,
+                active_workspace=body.workspace_tab or body.workspaceTab or body.active_content_tab or body.activeContentTab,
                 active_document_id=body.active_document_id,
                 scriptwriter_scene_id=body.scriptwriter_scene_id,
+                environment_creator_planning=body.environment_creator_planning,
+                image_generator_planning=body.image_generator_planning,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
                 if codirector_service.is_cancelled(request_id):

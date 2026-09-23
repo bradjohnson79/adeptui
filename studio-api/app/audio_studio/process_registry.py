@@ -205,8 +205,12 @@ def terminate_batch(batch_id: str) -> dict[str, Any]:
     }
 
 
-def terminate_orphan_audio_workers() -> dict[str, Any]:
-    """Kill any ace_step_worker / mmaudio_worker processes not necessarily tracked (GPU safety)."""
+def terminate_orphan_audio_workers(*, include_serve: bool = False) -> dict[str, Any]:
+    """Kill one-shot ace_step_worker / mmaudio_worker processes.
+
+    Warm `--serve` MMAudio residents are left alone unless include_serve=True.
+    Cancel of a live take uses interrupt_in_flight instead of blindly killing serve.
+    """
     killed: list[dict[str, Any]] = []
     patterns = ("ace_step_worker.py", "mmaudio_worker.py")
     if os.name == "nt":
@@ -235,10 +239,13 @@ def terminate_orphan_audio_workers() -> dict[str, Any]:
                 rows = data if isinstance(data, list) else [data]
             for row in rows:
                 pid = int(row.get("Pid") or 0)
+                cmd = str(row.get("Cmd") or "")
                 if not pid:
                     continue
+                if (not include_serve) and "mmaudio_worker" in cmd and "--serve" in cmd:
+                    continue
                 notes = _kill_windows_tree(pid)
-                killed.append({"pid": pid, "cmd": str(row.get("Cmd") or "")[:240], "notes": notes})
+                killed.append({"pid": pid, "cmd": cmd[:240], "notes": notes})
         except Exception as exc:
             return {"ok": False, "error": str(exc), "killed": killed, "sourceCancel": True}
     else:
@@ -246,6 +253,8 @@ def terminate_orphan_audio_workers() -> dict[str, Any]:
             ps = subprocess.run(["ps", "ax", "-o", "pid=,command="], capture_output=True, text=True, check=False)
             for line in (ps.stdout or "").splitlines():
                 if not any(p in line for p in patterns):
+                    continue
+                if (not include_serve) and "mmaudio_worker" in line and "--serve" in line:
                     continue
                 parts = line.strip().split(None, 1)
                 if not parts:

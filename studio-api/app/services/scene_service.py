@@ -237,6 +237,10 @@ class SceneService:
         """
         scene = cls.get(db, project_id, scene_id)
         data = dict(values)
+        # SINGLE-STORE: clients must never replace scenes.director_json. A stale
+        # browser copy can overwrite newer timelineMaster. Isolated metadata
+        # goes through store.patch_scene_metadata.
+        data.pop("director_json", None)
         unknown = sorted(set(data) - WRITABLE_FIELDS)
         if unknown:
             raise CapabilityError(

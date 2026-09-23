@@ -43,8 +43,22 @@ class ChildJobStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class PlanStepLifecycle(str, Enum):
+    """Planner multi-step lifecycle (additive; does not replace ChildJobStatus)."""
+
+    PLANNED = "PLANNED"
+    READY = "READY"
+    WAITING_FOR_CONFIRMATION = "WAITING_FOR_CONFIRMATION"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    BLOCKED = "BLOCKED"
+    SKIPPED = "SKIPPED"
+
+
 class ExecutionStep(BaseModel):
-    """One step in a multi-step execution plan (spec §14)."""
+    """One step in a multi-step execution plan (spec)."""
 
     step_index: int
     label: str = ""
@@ -55,6 +69,17 @@ class ExecutionStep(BaseModel):
     error: Optional[str] = None
     # Shot/frame metadata for storyboard steps.
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    # --- Production Planner multi-step extensions (additive) ---
+    step_id: str = ""
+    depends_on: list[str] = Field(default_factory=list)  # step_id deps (asset-ID slots via metadata)
+    lifecycle_status: PlanStepLifecycle = PlanStepLifecycle.PLANNED
+    result_asset_ids: list[str] = Field(default_factory=list)
+    failure_reason: Optional[str] = None
+    failure_reason_codes: list[str] = Field(default_factory=list)
+    parent_execution_id: Optional[str] = None
+    parent_step_id: Optional[str] = None
+    plan_id: str = ""
 
 
 class ChildJobView(BaseModel):
@@ -133,6 +158,12 @@ class ExecutionPlan(BaseModel):
     intent: str = ""
     classifier_source: str = ""
 
+    # --- Production Planner lineage (additive) ---
+    parent_execution_id: Optional[str] = None
+    parent_step_id: Optional[str] = None
+    plan_id: str = ""
+    failure_reason_codes: list[str] = Field(default_factory=list)
+
     created_at: str = ""
     updated_at: str = ""
 
@@ -161,12 +192,16 @@ class ExecutionPlan(BaseModel):
         self.progress = done / total if total > 0 else 0.0
 
         # Parent status reflects children (spec §46 — one failure doesn't destroy siblings).
-        if all(c.status == ChildJobStatus.COMPLETED for c in self.child_jobs):
-            self.status = ExecutionStatus.COMPLETED
-        elif all(c.status in (ChildJobStatus.COMPLETED, ChildJobStatus.FAILED) for c in self.child_jobs):
-            # All children resolved; if any failed, pack is FAILED (but siblings kept).
+        terminal = (
+            ChildJobStatus.COMPLETED,
+            ChildJobStatus.FAILED,
+            ChildJobStatus.CANCELLED,
+        )
+        if all(c.status in terminal for c in self.child_jobs):
             if self.failed_children > 0:
                 self.status = ExecutionStatus.FAILED
+            elif any(c.status == ChildJobStatus.CANCELLED for c in self.child_jobs):
+                self.status = ExecutionStatus.CANCELLED
             else:
                 self.status = ExecutionStatus.COMPLETED
         elif any(c.status == ChildJobStatus.RUNNING for c in self.child_jobs):

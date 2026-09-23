@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { rotateOrientation } from "./gridGeometry";
 import { normalizeShotSize, SHOT_SIZES, shotSizeLabel, type SpatialCamera } from "./types";
+import type { PrimarySubjectOption } from "./primarySubjectOptions";
 
 function normalizeFovPreset(value: string | null | undefined): "narrow" | "medium" | "wide" {
   const v = String(value || "medium").trim().toLowerCase();
@@ -12,6 +13,8 @@ function normalizeFovPreset(value: string | null | undefined): "narrow" | "mediu
 
 type Props = {
   camera: SpatialCamera;
+  subjectOptions: PrimarySubjectOption[];
+  subjectValue: string;
   onRotate: (orientation: string) => void;
   onFovChange: (fovPreset: string) => void;
   onShotSizeChange: (shotSize: string) => void;
@@ -20,7 +23,7 @@ type Props = {
   onRemove: () => void;
 };
 
-export function CameraInspector({ camera, onRotate, onFovChange, onShotSizeChange, onPrimarySubjectChange, onMove, onRemove }: Props) {
+export function CameraInspector({ camera, subjectOptions, subjectValue, onRotate, onFovChange, onShotSizeChange, onPrimarySubjectChange, onMove, onRemove }: Props) {
   const orientation = camera.orientation || "N";
   const savedFov = normalizeFovPreset(camera.fovPreset);
   const [pendingFov, setPendingFov] = useState<"narrow" | "medium" | "wide" | null>(null);
@@ -97,17 +100,25 @@ export function CameraInspector({ camera, onRotate, onFovChange, onShotSizeChang
           ))}
         </select>
       </div>
+      {normalizeShotSize(camera.shotSize) === "pov" ? (
+        <p className="spatial-map__camera-inspector-hint" data-testid="camera-pov-hint">
+          POV attaches this camera to the Primary Subject. Other shot sizes keep C1 free to place.
+        </p>
+      ) : null}
       <div className="spatial-map__camera-inspector-row">
         <span className="spatial-map__camera-inspector-label">Primary Subject</span>
         <select
           className="spatial-map__camera-inspector-select"
-          value={camera.primarySubject || "auto"}
+          value={subjectValue}
           onChange={(e) => onPrimarySubjectChange(e.target.value)}
           data-testid="camera-primary-subject"
           aria-label={`Set ${label} primary subject`}
         >
-          <option value="auto">Auto</option>
-          <option value="environment">Environment</option>
+          {subjectOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
         </select>
       </div>
       <div className="spatial-map__camera-inspector-row">

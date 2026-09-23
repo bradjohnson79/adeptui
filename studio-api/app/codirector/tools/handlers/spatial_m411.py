@@ -1088,3 +1088,175 @@ def preview_prepare_video_generation(ctx: ToolContext, args: dict[str, Any]) -> 
 def apply_prepare_video_generation(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     packet = _generation_packet(ctx, args, target="video")
     return {**packet, "approvedPreparation": True, "persisted": False}
+
+
+async def get_spin_camera(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....spatial_map import spin_camera
+
+    document_id = _required_string(args, "documentId")
+    result = spin_camera.get_placement(ctx.db, ctx.project_id, document_id)
+    return {
+        "ok": True,
+        "documentId": document_id,
+        **result,
+        "mock": False,
+        "_evidence": {"source": "spatial_map.spin_camera.get_placement"},
+    }
+
+
+def preview_place_spin_camera(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    document_id = _required_string(args, "documentId")
+    x = _number(args, "x", 0.0)
+    z = _number(args, "z", 0.0)
+    scene_id = _string(args, "sceneId")
+    return ToolPreview(
+        summary="Place the Spin Camera origin on a Spatial Map.",
+        lines=[
+            f"documentId: {document_id}",
+            f"origin: ({x:.2f}, {z:.2f})",
+            f"sceneId: {scene_id or '(current map scene)'}",
+            "This is the dedicated ERS spin origin, separate from scene cameras.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_place_spin_camera(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....spatial_map import spin_camera
+
+    document_id = _required_string(args, "documentId")
+    x = _number(args, "x", 0.0)
+    z = _number(args, "z", 0.0)
+    scene_id = _string(args, "sceneId") or None
+    result = spin_camera.set_placement(ctx.db, ctx.project_id, document_id, x, z, scene_id=scene_id)
+    return {
+        "ok": True,
+        "documentId": document_id,
+        **result,
+        "persisted": True,
+        "mock": False,
+        "_evidence": {"source": "spatial_map.spin_camera.set_placement"},
+    }
+
+
+def _spin_document(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    return spatial_service.get_document(ctx.db, ctx.project_id, _required_string(args, "documentId"))
+
+
+def preview_generate_package(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    document = _spin_document(ctx, args)
+    provider = _required_string(args, "provider")
+    placement = getattr(document, "spinCamera", None)
+    warnings: list[str] = []
+    if placement is None:
+        warnings.append("No Spin Camera is placed on this map yet.")
+    if not document.backgroundAssetId:
+        warnings.append("The Spatial Map has no background atlas asset.")
+    return ToolPreview(
+        summary=f"Generate Spin Camera directional package using {provider}.",
+        lines=[
+            f"documentId: {document.id}",
+            f"provider: {provider}",
+            "Creates 5 queued image edits (center/north/east/south/west) from the map atlas.",
+            "Uses paid cloud credits.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+        warnings=warnings,
+    )
+
+
+def apply_generate_package(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....spatial_map import spin_camera
+
+    document = _spin_document(ctx, args)
+    provider = _required_string(args, "provider")
+    confirm_paid = _bool(args, "confirmPaidCloud", False)
+    manifest = spin_camera.create_package(
+        ctx.db,
+        ctx.project_id,
+        document,
+        provider,
+        confirm_paid=confirm_paid,
+    )
+    return {
+        "ok": True,
+        "documentId": document.id,
+        "manifest": manifest,
+        "persisted": True,
+        "mock": False,
+        "_evidence": {"source": "spatial_map.spin_camera.create_package"},
+    }
+
+
+def preview_regenerate_direction(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    document_id = _required_string(args, "documentId")
+    package_id = _required_string(args, "packageId")
+    direction = _required_string(args, "direction")
+    return ToolPreview(
+        summary=f"Regenerate Spin Camera direction: {direction}.",
+        lines=[
+            f"documentId: {document_id}",
+            f"packageId: {package_id}",
+            f"direction: {direction}",
+            "Re-enqueues one paid image edit. Other four views are preserved.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+        warnings=["Uses paid cloud credits."],
+    )
+
+
+def apply_regenerate_direction(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....spatial_map import spin_camera
+
+    package_id = _required_string(args, "packageId")
+    direction = _required_string(args, "direction")
+    confirm_paid = _bool(args, "confirmPaidCloud", False)
+    manifest = spin_camera.regenerate_direction(
+        ctx.db,
+        ctx.project_id,
+        package_id,
+        direction,
+        confirm_paid=confirm_paid,
+    )
+    return {
+        "ok": True,
+        "packageId": package_id,
+        "direction": direction,
+        "manifest": manifest,
+        "persisted": True,
+        "mock": False,
+        "_evidence": {"source": "spatial_map.spin_camera.regenerate_direction"},
+    }
+
+
+def preview_build_ers(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    document_id = _required_string(args, "documentId")
+    package_id = _required_string(args, "packageId")
+    return ToolPreview(
+        summary="Assemble an Environment Reference Sheet from a completed Spin package.",
+        lines=[
+            f"documentId: {document_id}",
+            f"packageId: {package_id}",
+            "Composes the 2K ERS from center/north/east/south/west views.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_build_ers(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....spatial_map import spin_camera
+
+    package_id = _required_string(args, "packageId")
+    result = spin_camera.build_ers(ctx.db, ctx.project_id, package_id)
+    return {
+        "ok": True,
+        "packageId": package_id,
+        "ers": result,
+        "persisted": True,
+        "mock": False,
+        "_evidence": {"source": "spatial_map.spin_camera.build_ers"},
+    }

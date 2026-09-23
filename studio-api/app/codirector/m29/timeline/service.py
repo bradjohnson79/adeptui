@@ -1,6 +1,6 @@
 """M2.9 Director Timeline Generation propose/apply (approval-aware).
 
-Apply persists to scene.director_json. Bible mutations route through ProposalService
+Apply persists clips to SceneTimelineMaster. Bible mutations route through ProposalService
 and are never silently applied.
 """
 
@@ -131,7 +131,7 @@ class TimelineService:
 
     @staticmethod
     def apply(db: Session, proposal_id: str, *, actor: str = "user") -> dict[str, Any]:
-        """Apply only after human approval — persist director_json; Bible via proposal bus."""
+        """Apply only after human approval — persist Master clips; Bible via proposal bus."""
         prop = TimelineService.get(db, proposal_id)
         if not prop:
             raise KeyError(proposal_id)
@@ -168,18 +168,21 @@ class TimelineService:
         applied_scene = None
         if scene_id:
             from ....db import Scene
-            from ....director_timeline import (
-                TimelineClip,
-                dumps_director_timeline_preserving_embedded,
-                parse_director_timeline,
-            )
+            from ....director_timeline_w46 import store as timeline_store
+            from ....director_timeline_w46.contracts import BatchClip
+            from ....director_timeline_w46.master_clip_mutate import append_clip, ensure_windows, snapshot
+            from ....director_timeline_w46.service import load_timeline_bundle
 
             scene = db.get(Scene, scene_id)
             if scene and scene.project_id == project_id:
-                tl = parse_director_timeline(
-                    scene.director_json,
-                    fallback_duration=float(scene.duration_sec or 5),
-                    fallback_prompt=scene.prompt or "",
+                bundle = load_timeline_bundle(db, project_id, scene_id)
+                if not bundle.get("ok"):
+                    raise KeyError(scene_id)
+                master = bundle["master"]
+                ensure_windows(
+                    master,
+                    scene_id=scene_id,
+                    duration_sec=float(scene.duration_sec or 5),
                 )
                 # Version branch metadata
                 try:
@@ -192,7 +195,7 @@ class TimelineService:
                     {
                         "branch": branch,
                         "proposalId": proposal_id,
-                        "snapshot": scene.director_json or "",
+                        "snapshot": snapshot(master),
                         "at": _now(),
                     }
                 )
@@ -201,32 +204,29 @@ class TimelineService:
 
                 for c in clips:
                     track = (c.get("track") or "video").lower()
-                    clip = TimelineClip(
-                        id=str(c.get("clipId") or uuid.uuid4().hex[:10]),
-                        asset_id=c.get("assetId"),
-                        start=float(c.get("start") or 0),
-                        length=float(c.get("length") or 4),
-                        label=str(c.get("label") or ""),
+                    start = float(c.get("start") or 0)
+                    clip_id = str(c.get("clipId") or "").strip()
+                    fields: dict[str, Any] = {
+                        "kind": (
+                            "audio"
+                            if track in {"dialogue", "music", "audio"}
+                            else ("sfx" if track == "sfx" else ("image" if track == "image" else "video"))
+                        ),
+                        "assetId": c.get("assetId"),
+                        "start": start,
+                        "length": float(c.get("length") or 4),
+                        "label": str(c.get("label") or ""),
+                    }
+                    if clip_id:
+                        fields["id"] = clip_id
+                    clip = BatchClip.model_validate(fields)
+                    attr = (
+                        "audioClips"
+                        if track in {"dialogue", "music", "audio"}
+                        else ("sfxClips" if track == "sfx" else "visualClips")
                     )
-                    if track in {"dialogue", "music", "audio"}:
-                        tl.audio_clips.append(clip)
-                    elif track == "sfx":
-                        tl.sfx_clips.append(clip)
-                    elif track == "image":
-                        from ....director_timeline import ImageClip
-
-                        tl.image_clips.append(
-                            ImageClip(
-                                id=clip.id,
-                                asset_id=clip.asset_id,
-                                start=clip.start,
-                                length=clip.length,
-                                label=clip.label,
-                            )
-                        )
-                    else:
-                        tl.video_clips.append(clip)
-                scene.director_json = dumps_director_timeline_preserving_embedded(tl, scene.director_json)
+                    append_clip(master, clip, start, attr)
+                timeline_store.save_master(db, project_id, scene_id, master, bump_revision=True)
                 scene.continuity_json = json.dumps(cont)
                 db.commit()
                 applied_scene = scene_id

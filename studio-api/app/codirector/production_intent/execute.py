@@ -139,10 +139,151 @@ def preflight_intent(intent: ProductionIntent) -> dict[str, Any]:
     return result
 
 
+def _is_h3_engine(engine: str) -> bool:
+    token = (engine or "").strip().lower().replace("_", "-")
+    return token in {"h3", "minimax", "minimax-h3"} or token.startswith("minimax-h3")
+
+
+def _enqueue_standalone_video(db: Session, intent: ProductionIntent) -> dict[str, Any]:
+    """Standalone Co-Director video — never Timeline render_scene / Scene-table lookup."""
+    store = get_intent_store()
+    store.save(intent)
+    meta = dict(intent.metadata or {})
+    if meta.get("forceEnqueueFailure"):
+        raise IntentExecutionError(
+            "Could not start the video generation job. Please retry.",
+            code="force_enqueue_failure",
+        )
+    engine = str(intent.enginePreference or meta.get("engine") or "")
+    if _is_h3_engine(engine):
+        return _enqueue_h3_standalone(db, intent)
+
+    params = to_studio_job_params(intent, {})
+    params["standalone"] = True
+    params["workspaceSceneId"] = intent.sceneId or meta.get("sceneId") or ""
+    params["videoMode"] = meta.get("videoMode") or "t2v"
+    params["creativeContext"] = {
+        **(params.get("creativeContext") or {}),
+        "executionId": meta.get("executionId") or "",
+    }
+    # TEXT-ONLY CONTRACT: standalone txt2vid is text-to-video. It must NOT
+    # inherit a start frame / source image from Co-Director sourceAssets —
+    # that is Image-to-Video (1 Frame / 3 Frame / render_scene), not T2V.
+    # to_studio_job_params may have copied source asset ids; strip them so the
+    # T2V compile path stays text-only.
+    for _ref_key in ("start_asset_id", "source_asset_id", "reference_asset_ids", "referenceAssetIds"):
+        params.pop(_ref_key, None)
+    job = Job(
+        id=str(uuid.uuid4()),
+        project_id=intent.projectId,
+        scene_id=None,
+        kind="txt2vid",
+        status="queued",
+        progress=0.0,
+        message="Standalone Co-Director video queued",
+        params_json=json.dumps(params),
+    )
+    db.add(job)
+    db.commit()
+    try:
+        from ..executive.imagegen_adapter import schedule_job_queue_enqueue
+
+        schedule_job_queue_enqueue(job.id)
+    except Exception:
+        pass
+    store.update_state(
+        intent.projectId,
+        intent.intentId,
+        execution_state="queued",
+        approval_policy="approved",
+        job_id=job.id,
+        workflow_key="standalone.txt2vid",
+    )
+    return {
+        "ok": True,
+        "intentId": intent.intentId,
+        "jobId": job.id,
+        "jobKind": job.kind,
+        "status": "queued",
+        "workflowKey": "standalone.txt2vid",
+        "completed": False,
+        "note": "Standalone video queued. Success only after the runtime finishes and the asset is registered.",
+    }
+
+
+def _enqueue_h3_standalone(db: Session, intent: ProductionIntent) -> dict[str, Any]:
+    """Reconnect standalone H3 to the existing Route A service — not Timeline Scene render."""
+    store = get_intent_store()
+    meta = dict(intent.metadata or {})
+    try:
+        from ...minimax_h3.contracts import AdeptMiniMaxH3Request, H3ReferenceAssignment, H3TimelineContext
+        from ...minimax_h3.service import create_job_or_block, prepare_plan, readiness
+    except Exception as exc:
+        raise IntentExecutionError(
+            "MiniMax H3 is not available for standalone video.",
+            code="h3_unavailable",
+        ) from exc
+
+    snap = readiness()
+    if not snap.get("ready") and not snap.get("onDemand"):
+        raise IntentExecutionError(
+            str(snap.get("creatorStatus") or "MiniMax H3 is not ready. I will not switch to another generator."),
+            code="h3_not_ready",
+        )
+
+    source = intent.sourceAssets[0] if intent.sourceAssets else ""
+    mode = "one-frame" if source else "text-to-video"
+    assignments = []
+    if source:
+        assignments.append(H3ReferenceAssignment(role="start", assetId=str(source), displayName="Start"))
+    request = AdeptMiniMaxH3Request(
+        projectId=intent.projectId,
+        prompt=intent.prompt or "",
+        sourceSurface="codirector",
+        mode=mode,
+        deployment="local_weights",
+        durationSec=float(intent.duration or 5),
+        referenceAssignments=assignments,
+        timelineContext=H3TimelineContext(sceneId=intent.sceneId or meta.get("sceneId") or None),
+        creatorNotes="standalone Co-Director video",
+    )
+    plan = prepare_plan(request)
+    result = create_job_or_block(intent.projectId, plan.planId)
+    if not result.get("ok") or not result.get("jobId"):
+        raise IntentExecutionError(
+            str(result.get("message") or "MiniMax H3 could not start. I will not switch to another generator."),
+            code=str(result.get("status") or "h3_blocked"),
+        )
+    job_id = str(result["jobId"])
+    store.update_state(
+        intent.projectId,
+        intent.intentId,
+        execution_state="queued",
+        approval_policy="approved",
+        job_id=job_id,
+        workflow_key="minimax-h3-route-a",
+    )
+    return {
+        "ok": True,
+        "intentId": intent.intentId,
+        "jobId": job_id,
+        "jobKind": "minimax-h3",
+        "status": str(result.get("status") or "queued"),
+        "workflowKey": "minimax-h3-route-a",
+        "completed": False,
+        "note": str(result.get("message") or "MiniMax H3 generation started."),
+    }
+
+
 def enqueue_intent(db: Session, intent: ProductionIntent) -> dict[str, Any]:
     """Enqueue studio job from approved intent. Returns job binding — does not fake success."""
     store = get_intent_store()
     store.save(intent)
+    if (intent.metadata or {}).get("standalone") and intent.operation in {
+        "video.generate",
+        "video.three_frame",
+    }:
+        return _enqueue_standalone_video(db, intent)
     kind = studio_job_kind_for(intent.operation)
     if kind is None and intent.operation.startswith("video."):
         raise IntentExecutionError(
@@ -351,45 +492,200 @@ def _enqueue_non_video(db: Session, intent: ProductionIntent) -> dict[str, Any]:
 
 
 def _place_asset(db: Session, intent: ProductionIntent) -> dict[str, Any]:
+    """Place a durable asset on the Director Timeline.
+
+    ORDER19: Visual assets (image/video) land on image_clips / video_clips.
+    Audio kinds keep m29 AudioService.place_cue (music/ambience HOLD).
+    """
     asset_id = intent.sourceAssets[0] if intent.sourceAssets else None
     if not asset_id:
         raise IntentExecutionError("editor.place requires sourceAssets[0]", code="missing_asset")
     placement = intent.targetPlacement or {}
-    try:
-        from ..m29.audio.service import AudioService
+    scene_id = intent.sceneId or placement.get("sceneId")
+    start_sec = float(placement.get("startSec") or 0)
+    duration_sec = float(placement.get("durationSec") or intent.duration or 2.0)
+    track = str(placement.get("track") or placement.get("kind") or "").strip().lower()
 
-        out = AudioService.place_cue(
-            db,
-            project_id=intent.projectId,
-            kind=str(placement.get("track") or placement.get("kind") or "dialogue"),
-            asset_id=asset_id,
-            scene_id=intent.sceneId or placement.get("sceneId"),
-            start_sec=float(placement.get("startSec") or 0),
-            duration_sec=float(placement.get("durationSec") or intent.duration or 2.0),
+    asset_kind = ""
+    try:
+        from ...db import Asset
+
+        row = db.get(Asset, str(asset_id))
+        if row is not None:
+            asset_kind = str(getattr(row, "kind", "") or "").strip().lower()
+    except Exception:
+        asset_kind = ""
+
+    audio_kinds = {"audio", "music", "sfx", "voice", "ambience", "dialogue", "sound"}
+    audio_tracks = {"dialogue", "music", "sfx", "ambience"}
+    if not track:
+        if asset_kind in audio_kinds:
+            track = "dialogue" if asset_kind in {"audio", "voice", "dialogue"} else asset_kind
+        else:
+            track = "video"
+
+    want_audio = track in audio_tracks or asset_kind in audio_kinds
+    if want_audio and track != "video":
+        try:
+            from ..m29.audio.service import AudioService
+
+            out = AudioService.place_cue(
+                db,
+                project_id=intent.projectId,
+                kind=str(track or "dialogue"),
+                asset_id=asset_id,
+                scene_id=scene_id,
+                start_sec=start_sec,
+                duration_sec=duration_sec,
+            )
+            return {"ok": True, "assetId": asset_id, "placement": out, "destination": "audio_cue"}
+        except Exception as exc:
+            return {
+                "ok": False,
+                "assetId": asset_id,
+                "error": str(exc),
+                "note": "Placement adapter unavailable — no silent success.",
+            }
+
+    if not scene_id:
+        raise IntentExecutionError(
+            "editor.place visual requires sceneId (targetPlacement.sceneId or intent.sceneId)",
+            code="missing_scene",
         )
-        return {"ok": True, "assetId": asset_id, "placement": out}
+    try:
+        from ...db import Scene
+        from ...director_timeline_w46.contracts import BatchClip
+        from ...director_timeline_w46.service import load_timeline_bundle
+        from ...director_timeline_w46 import store as timeline_store
+
+        scene = db.get(Scene, str(scene_id))
+        if scene is None or str(scene.project_id) != str(intent.projectId):
+            raise IntentExecutionError(
+                f"Scene not found for editor.place: {scene_id}",
+                code="scene_not_found",
+            )
+        bundle = load_timeline_bundle(db, str(intent.projectId), str(scene_id))
+        if not bundle.get("ok"):
+            raise IntentExecutionError(
+                f"Scene timeline not found for editor.place: {scene_id}",
+                code="scene_not_found",
+            )
+        master = bundle["master"]
+        duration = float(getattr(scene, "duration_sec", None) or 5.0)
+        existing = []
+        for batch in getattr(master, "batchBlocks", None) or []:
+            existing.extend(getattr(batch, "visualClips", None) or [])
+        length = max(0.1, min(float(duration_sec), duration))
+        start = max(0.0, float(start_sec))
+        is_video = asset_kind == "video"
+        if start_sec == 0 and existing:
+            start = max(
+                (float(getattr(c, "start", 0) or 0) + float(getattr(c, "length", 0) or 0) for c in existing),
+                default=0.0,
+            )
+        clip = BatchClip(
+            kind="video" if is_video else "image",
+            assetId=str(asset_id),
+            start=start,
+            length=min(2.0, length) if (not is_video and duration_sec == 2.0) else length,
+            label=str(placement.get("label") or ("Video" if is_video else f"Image {len(existing) + 1}")),
+            role=None if is_video else "guide",
+        )
+        blocks = sorted(
+            list(getattr(master, "batchBlocks", None) or []),
+            key=lambda b: int(getattr(b, "order", 0) or 0),
+        )
+        if not blocks:
+            raise IntentExecutionError(
+                "Timeline Master has no execution windows yet. Rematerialize windows before placing a clip.",
+                code="no_windows",
+            )
+        cursor = 0.0
+        target = blocks[0]
+        for batch in blocks:
+            dur = getattr(batch, "duration", None)
+            planned = max(0.1, float(getattr(dur, "plannedDuration", None) or 0.0))
+            end = cursor + planned
+            if start + 1e-6 >= cursor and start < end - 1e-9:
+                target = batch
+                break
+            cursor = end
+            target = batch
+        target.visualClips = list(getattr(target, "visualClips", None) or []) + [clip]
+        timeline_store.save_master(db, str(intent.projectId), str(scene_id), master, bump_revision=True)
+        dest = "visualClips"
+        return {
+            "ok": True,
+            "assetId": asset_id,
+            "sceneId": scene_id,
+            "destination": dest,
+            "clipId": clip.id,
+            "start": clip.start,
+            "length": clip.length,
+            "placement": {"track": track or "video", "destination": dest, "clipId": clip.id},
+        }
+    except IntentExecutionError:
+        raise
     except Exception as exc:
         return {
             "ok": False,
             "assetId": asset_id,
             "error": str(exc),
-            "note": "Placement adapter unavailable — no silent success.",
+            "note": "Visual placement adapter unavailable — no silent success.",
         }
 
 
-def _voice_generate(db: Session, intent: ProductionIntent) -> dict[str, Any]:
-    try:
-        from ..m210b.adapters.kokoro import generate_voice
 
-        return generate_voice(
+def _voice_generate(db: Session, intent: ProductionIntent) -> dict[str, Any]:
+    from ...character_identity.models import CharacterProfileRow, VoiceProfileRow
+    from ...character_identity.schemas import DialogueGenerateRequest
+    from ...character_identity.voice_runtime import qwen_speech_compatible, run_generate_dialogue
+
+    text = (intent.prompt or "").strip()
+    if not text:
+        raise IntentExecutionError("voice.generate needs spoken text.", code="missing_prompt")
+    meta = intent.metadata or {}
+    character_id = str(meta.get("characterId") or meta.get("character_id") or "").strip()
+    if not character_id:
+        raise IntentExecutionError(
+            "voice.generate needs a character so it can use that character's approved voice. It did not invent a generic speaker.",
+            code="voice_identity_required",
+        )
+    profile = db.get(CharacterProfileRow, character_id)
+    if not profile or str(profile.project_id) != str(intent.projectId):
+        raise IntentExecutionError("Character not found in this project.", code="character_not_found")
+    voice_id = str(profile.active_voice_profile_id or meta.get("voiceProfileId") or meta.get("voice_profile_id") or "").strip()
+    if not voice_id:
+        raise IntentExecutionError("This character has no approved voice yet.", code="voice_identity_required")
+    voice = db.get(VoiceProfileRow, voice_id)
+    if not voice or str(voice.project_id) != str(intent.projectId) or str(voice.character_profile_id) != character_id:
+        raise IntentExecutionError("This character has no approved voice yet.", code="voice_identity_required")
+    if (voice.approval_status or "").lower() != "approved":
+        raise IntentExecutionError("This character has no approved voice yet.", code="voice_identity_required")
+    if not qwen_speech_compatible(voice):
+        raise IntentExecutionError(
+            "This character's approved voice is not on the shared local Qwen worker, so Co-Director did not switch to another speaker.",
+            code="engine_incompatible",
+        )
+    try:
+        out = run_generate_dialogue(
             db,
-            project_id=intent.projectId,
-            text=intent.prompt,
-            character_id=(intent.metadata or {}).get("characterId"),
+            intent.projectId,
+            character_id,
+            voice.id,
+            DialogueGenerateRequest(text=text, language="en", allow_kokoro_fallback=False),
         )
     except Exception as exc:
         recovery = classify_failure(exc)
         raise IntentExecutionError(str(exc), code=recovery.diagnosticCode, recovery=recovery) from exc
+    return {
+        "ok": True,
+        "assetId": out.get("assetId"),
+        "engine": out.get("engine") or "qwen3-tts",
+        "warmWorker": bool(out.get("warmWorker")),
+        "voiceProfileId": out.get("voiceProfileId") or voice.id,
+        "path": out.get("path"),
+    }
 
 
 def _subtitle_generate(db: Session, intent: ProductionIntent) -> dict[str, Any]:

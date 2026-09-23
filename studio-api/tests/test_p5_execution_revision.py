@@ -111,6 +111,7 @@ def test_cd_handoff_flags_match_mint_contract():
         currentSceneTakeId=old.id,
     )
     minted = begin_execution_revision(master, reason=str(handoff["reason"]))
+    assert minted is not None
     assert minted.id != old.id
     assert master.currentSceneTakeId == minted.id
     assert master.activeSceneTakeId is None
@@ -118,3 +119,28 @@ def test_cd_handoff_flags_match_mint_contract():
         project_id="p1", scene_id="sc1", master=master, batch=master.batchBlocks[0]
     )
     assert keys["take_id"] == minted.id
+
+
+def test_pregeneration_topology_change_does_not_mint_takes():
+    """Duration/window changes before any finished generation must not create Take A/B."""
+    from app.director_timeline_w46.scene_takes import ensure_scene_takes
+
+    master = SceneTimelineMaster(
+        sceneGeneratorId="minimax-h3",
+        batchBlocks=[_batch("b0", 0), _batch("b1", 1), _batch("b2", 2)],
+        sceneTakes=[
+            SceneTake(id="stk_a", label="A", letterIndex=1, status="incomplete"),
+            SceneTake(id="stk_b", label="B", letterIndex=2, status="incomplete"),
+        ],
+        currentSceneTakeId="stk_b",
+    )
+    prev = master.model_copy(deep=True)
+    prev.batchBlocks = [_batch("b0", 0)]
+    minted = enforce_execution_boundary_if_topology_changed(
+        prev, master, reason="window_topology_change"
+    )
+    assert minted is None
+    assert master.sceneTakes == []
+    assert master.currentSceneTakeId is None
+    assert ensure_scene_takes(master) is False
+    assert master.sceneTakes == []

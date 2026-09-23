@@ -25,7 +25,7 @@ function doc(version: string, savedVersion?: string | null): SpatialMapDocument 
 }
 
 describe("Spatial Map Save Gate — dirty/saved derivation (Tests A, B, C, D)", () => {
-  it("A: never-saved map (no savedVersion) is dirty => Use in Scene Creator must be disabled", () => {
+  it("A: never-saved map (no savedVersion) is dirty => Use in Image Generator must be disabled", () => {
     const d = doc("3");
     expect(spatialMapIsDirty(d)).toBe(true);
     expect(spatialMapIsSaved(d)).toBe(false);

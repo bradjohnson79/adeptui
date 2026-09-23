@@ -88,6 +88,21 @@
   color: var(--muted);
 }
 
+.ds-menu-root--compact {
+  flex: 0 0 auto;
+}
+
+.ds-menu-trigger--overflow {
+  min-width: 1.85rem;
+  min-height: 1.85rem;
+  padding: 0.1rem 0.35rem;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
 .ds-menu-panel {
   position: absolute;
   top: calc(100% + 4px);
@@ -103,6 +118,16 @@
   box-shadow: var(--shadow-lift), var(--glow-cyan);
   z-index: var(--z-dropdown);
   animation: ds-menu-in var(--motion-base) var(--ease-standard);
+}
+
+.ds-menu-panel--end {
+  left: auto;
+  right: 0;
+}
+
+.ds-menu-root--compact .ds-menu-panel {
+  min-width: 188px;
+  max-width: min(260px, 70vw);
 }
 
 @keyframes ds-menu-in {
@@ -162,6 +187,17 @@
 .ds-menu-item[aria-disabled="true"] {
   color: var(--disabled);
   cursor: default;
+}
+
+.ds-menu-item--danger {
+  color: var(--danger, #f87171);
+}
+
+.ds-menu-item--danger:hover,
+.ds-menu-item--danger:focus-visible {
+  background: var(--btn-danger-bg, rgba(248, 113, 113, 0.16));
+  border-color: rgba(248, 113, 113, 0.35);
+  color: var(--btn-danger-fg, #fecaca);
 }
 
 .ds-menu-item__shortcut {

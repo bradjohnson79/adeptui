@@ -33,10 +33,12 @@ from .m031_character_visual_description_style import MIGRATION as M031
 from .m032_project_traits import MIGRATION as M032
 from .m033_reference_aliases import MIGRATION as M033
 from .m034_production_events import MIGRATION as M034
+from .m036_creator_asset_scope import MIGRATION as M036
+from .m037_scope_local_reference_alias import MIGRATION as M037
 from .registry import Migration, MigrationRegistry
 from .runner import ChecksumMismatchError, MigrationRun, MigrationRunner
 
-DEFAULT_REGISTRY = MigrationRegistry((M001, M002, M003, M004, M005, M006, M007, M008, M010, M011, M012, M013, M014, M015, M016, M017, M018, M019, M020, M021, M022, M023, M024, M025, M026, M027, M028, M029, M030, M031, M032, M033, M034))
+DEFAULT_REGISTRY = MigrationRegistry((M001, M002, M003, M004, M005, M006, M007, M008, M010, M011, M012, M013, M014, M015, M016, M017, M018, M019, M020, M021, M022, M023, M024, M025, M026, M027, M028, M029, M030, M031, M032, M033, M034, M036, M037))
 
 __all__ = [
     "ChecksumMismatchError",
@@ -73,6 +75,9 @@ __all__ = [
     "M031",
     "M032",
     "M033",
+    "M034",
+    "M036",
+    "M037",
     "Migration",
     "MigrationRegistry",
     "MigrationRun",

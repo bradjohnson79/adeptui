@@ -77,7 +77,7 @@ def _serialize_plan_summary(plan: Any) -> dict[str, Any]:
                 "job_id": getattr(c, "job_id", None),
                 "child_index": getattr(c, "child_index", None),
                 "label": getattr(c, "label", "") or "",
-                "status": str(getattr(c, "status", "") or "").lower(),
+                "status": str(getattr(getattr(c, "status", ""), "value", getattr(c, "status", "")) or "").lower(),
                 "asset_id": getattr(c, "asset_id", None),
                 "error": getattr(c, "error", None),
                 "progress": getattr(c, "progress", 0.0),
@@ -87,8 +87,10 @@ def _serialize_plan_summary(plan: Any) -> dict[str, Any]:
 
     completed = getattr(plan, "completed_children", 0) or 0
     total = getattr(plan, "total_children", 0) or 0
-    status = str(getattr(plan, "status", "") or "").lower()
+    raw_status = getattr(plan, "status", "") or ""
+    status = str(getattr(raw_status, "value", raw_status) or "").lower()
     progress = float(getattr(plan, "progress", 0.0) or 0.0)
+    error = str(getattr(plan, "error", "") or "").strip()
 
     plan_data_val = getattr(plan, "plan_data", None) or {}
 
@@ -103,6 +105,7 @@ def _serialize_plan_summary(plan: Any) -> dict[str, Any]:
         "result_asset_ids": list(getattr(plan, "result_asset_ids", []) or []),
         "child_jobs": child_jobs,
         "plan_data": plan_data_val if plan_data_val else None,
+        "error": error or None,
     }
 
 
@@ -128,12 +131,39 @@ def _build_execution_status_text(plan_summary: dict[str, Any]) -> str:
             return f"{label} — {completed}/{total} complete. Done."
         return f"{label} — Done."
     if status == "failed":
-        return f"{label} — failed. You can retry or adjust and try again."
+        error = str(plan_summary.get("error") or "").strip()
+        return error or f"{label} — failed. You can retry or adjust and try again."
     if status == "cancelled":
         return f"{label} — stopped."
-    # Non-terminal: report real progress, never claim success.
-    if total:
+    plan_data = plan_summary.get("plan_data") or {}
+    if status == "preview" and (
+        plan_data.get("sceneProduction") or plan_data.get("preparationReady")
+    ):
+        return str(plan_data.get("creatorAck") or "Timeline shot ready.")
+    if status == "preview" and plan_data.get("timelineHandoff"):
+        return str(plan_data.get("handoffMessage") or plan_data.get("creatorAck") or "Timeline is ready. Generation has not started.")
+    if status in {"preview", "preparing"}:
+        return "Preparing Timeline scene..."
+    if status in {"queued", "preparing"} and not (plan_summary.get("child_jobs") or []):
+        return "Prepared. Waiting to generate."
+    running_like = any(
+        str((child or {}).get("status") or "").lower() in {"queued", "running", "working"}
+        for child in (plan_summary.get("child_jobs") or [])
+        if isinstance(child, dict)
+    )
+    if status == "queued" and running_like:
+        return f"Queued — {completed}/{total} complete." if total else "Queued."
+    if status == "running" or (
+        running_like and status not in {"preview", "preparing"} and str(capability).endswith("generate_shot")
+    ):
+        if total:
+            return f"Generating — {completed}/{total} complete."
+        return "Generating…"
+    # Non-terminal: report real progress, never claim Generating without a live job.
+    if total and status in {"running"}:
         return f"{label} — {completed}/{total} complete."
+    if total and status == "queued":
+        return f"Queued — {completed}/{total} complete."
     return f"{label} — working…"
 
 
@@ -198,16 +228,23 @@ def append_execution_status_message(
     request_id: str,
     execution_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Append an execution_status assistant message with real job state.
+    """Append the execution status as a DURABLE NON-CONVERSATIONAL event.
+
+    Co-Director Intelligence Law (owner mission 2026-09-19): execution status
+    is machine/workflow state. It must never be persisted as (or replayed into
+    the LLM as) the assistant's conversational memory. The event is stored with
+    ``role="system"`` / ``event_type="execution_status"`` + the execution
+    payload, so the UI can still reload cards while
+    ``conversation_events.fold_events_for_llm`` excludes it from the model's
+    history. This never raises.
 
     Returns the message id used, or None when no execution could be resolved
-    (the pack store is absent or no execution is active). This never raises.
+    (the pack store is absent or no execution is active).
     """
     if not project_id:
         return None
     try:
-        # Local import to avoid a hard dependency on service.py at module load.
-        from ...service import append_assistant_completion
+        from ..conversation_events import EventInput, append_events
 
         event = build_execution_status_event(
             db,
@@ -220,23 +257,26 @@ def append_execution_status_message(
 
         status_str = str((event.get("execution") or {}).get("status") or "")
         message_kind = event.get("messageType") or "execution_status"
-        # Stash the execution payload on the message via the tool_result channel
-        # is not appropriate; instead we append a normal assistant message with
-        # messageType carrying the kind. The frontend hydrates the execution
-        # payload from the companion SSE event (build_execution_status_event) and
-        # from the result_context block on the next turn.
-        # The DB row stores the honest text; the execution payload travels via SSE.
-        return append_assistant_completion(
+        execution = event.get("execution") if isinstance(event.get("execution"), dict) else None
+        message_id = f"exec-{request_id}-{(execution_id or 'active')[:12]}"
+        append_events(
             db,
             project_id,
-            request_id=request_id,
-            reply=event.get("content") or "",
-            model=None,
-            provider_id=None,
-            message_id=f"asst-exec-{request_id}-{(execution_id or 'active')[:12]}",
-            message_type=message_kind,
-            status=status_str or None,
+            [
+                EventInput(
+                    role="system",
+                    content=event.get("content") or "",
+                    event_type="execution_status",
+                    message_id=message_id,
+                    message_type=message_kind,
+                    status=status_str or None,
+                    attachments=[{"kind": "execution", "execution": execution}] if execution else None,
+                    request_id=request_id,
+                    actor="system",
+                )
+            ],
         )
+        return message_id
     except Exception:  # noqa: BLE001
         logger.exception(
             "append_execution_status_message failed project=%s request=%s execution=%s",

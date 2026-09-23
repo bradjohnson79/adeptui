@@ -8,8 +8,11 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { useOpenCoDirector } from "../CoDirector";
 import { Dialog } from "../ui/Dialog";
+import { CreatorProfileDeleteModal } from "../creators/CreatorProfileDeleteModal";
+import type { CreatorDeletePreview } from "../creators/creatorProfileDelete";
 import { LibraryQuickPreviewModal, type LibraryQuickPreviewAsset } from "../library/LibraryQuickPreviewModal";
 import { CharacterActions } from "./CharacterActions";
+import { promptCanonicalCharacterTag } from "../../creatorScope/identityTags";
 import { CharacterActiveCrsCard } from "./CharacterActiveCrsCard";
 import { CharacterProfileForm } from "./CharacterProfileForm";
 import { CharacterReferenceControl } from "./CharacterReferenceControl";
@@ -23,6 +26,8 @@ import {
 import { candidateAssetId, resolveActiveCrsCard } from "./activeCrsCard";
 import { approvedHistoricalRevisions, type CharacterCandidate, type GeneratorOption } from "./types";
 import { getHeroIdentity, getReferenceImage, useCharacterProfile } from "./useCharacterProfile";
+import { characterOwnedByProject } from "../../creatorScope";
+import type { GoTab } from "./characterSheetDestinations";
 import "./characterCore.css";
 
 type Props = {
@@ -31,13 +36,16 @@ type Props = {
   /** Optional advanced-workspace buttons rendered when the character is saved. */
   renderAdvanced?: (ctx: { characterId: string; saved: boolean }) => React.ReactNode;
   onDeleted?: () => void;
+  /** Bind the parent saved-character selector after a local create. */
+  onCreated?: (characterId: string) => void;
   /** When true, auto-focus the name field (new character). */
   autoFocusName?: boolean;
   /** Express (Co-Director) hides Close-up and generator internals. */
   mode?: "express" | "standard";
+  onGoTab?: GoTab;
 };
 
-export function CharacterCore({ projectId, characterId, renderAdvanced, onDeleted, autoFocusName, mode = "standard" }: Props) {
+export function CharacterCore({ projectId, characterId, renderAdvanced, onDeleted, onCreated, autoFocusName, mode = "standard", onGoTab }: Props) {
   const { t } = useTranslation("characterCreator");
   const openCoDirector = useOpenCoDirector();
   const cp = useCharacterProfile(projectId, characterId);
@@ -55,6 +63,9 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const [previewAsset, setPreviewAsset] = useState<LibraryQuickPreviewAsset | null>(null);
   const [approveTarget, setApproveTarget] = useState<CharacterCandidate | null>(null);
   const [rejectTarget, setRejectTarget] = useState<CharacterCandidate | null>(null);
+  const [deletePreview, setDeletePreview] = useState<CreatorDeletePreview | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [crsActionBusy, setCrsActionBusy] = useState(false);
   const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
   const prefsHydratedRef = useRef(false);
@@ -69,7 +80,8 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const productionReady = (profile?.approval_status || "").toLowerCase() === "approved";
 
   const saved = !!profile?.id;
-  const canSave = !!profile?.name?.trim();
+  const owned = characterOwnedByProject(profile, projectId);
+  const canSave = owned && !!profile?.name?.trim();
 
   const applyHydration = useCallback(
     (
@@ -293,7 +305,26 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     [projectId, characterId, cp],
   );
 
+  const handleCreateLocal = useCallback(async () => {
+    const createdId = await cp.create(profile?.name?.trim() || "New Character", {
+      gender_presentation: profile?.gender_presentation,
+      visual_style: profile?.visual_style,
+      description: profile?.description,
+      is_global: Boolean(profile?.isGlobal || profile?.is_global),
+      isGlobal: Boolean(profile?.isGlobal || profile?.is_global),
+    });
+    if (createdId) {
+      setProfileDirty(false);
+      setNotice("Character profile saved");
+      onCreated?.(createdId);
+    }
+  }, [cp, onCreated, profile]);
+
   const handleSave = useCallback(async () => {
+    if (!owned) {
+      setNotice("Global characters can only be edited from the project that created them.");
+      return;
+    }
     // save() returns the canonical saved profile and dispatches
     // adept:character-profile-saved, so every mounted saved-character
     // dropdown (Express + Standard) upserts the profile instantly.
@@ -302,6 +333,8 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       gender_presentation: profile?.gender_presentation,
       visual_style: profile?.visual_style,
       description: profile?.description,
+      is_global: Boolean(profile?.isGlobal || profile?.is_global),
+      isGlobal: Boolean(profile?.isGlobal || profile?.is_global),
     });
     if (savedProfile) {
       setProfileDirty(false);
@@ -309,7 +342,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     } else {
       setNotice("");
     }
-  }, [cp, profile]);
+  }, [cp, owned, profile]);
 
   const handleReset = useCallback(() => {
     if (!profileDirty) return;
@@ -319,13 +352,41 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   }, [cp, profileDirty]);
 
   const handleDelete = useCallback(async () => {
-    const confirmed = window.confirm(
-      `Delete ${profile?.name || "this character"}? This cannot be undone.`,
-    );
-    if (!confirmed) return;
-    const ok = await cp.remove();
-    if (ok) onDeleted?.();
-  }, [cp, profile, onDeleted]);
+    if (!profile?.id || !owned || profileDirty) return;
+    setNotice("");
+    try {
+      const preview = await api.getCharacterDeletePreview(projectId, characterId);
+      setDeletePreview(preview);
+      setDeleteModalOpen(true);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Failed to load delete preview.");
+    }
+  }, [projectId, characterId, profile?.id, owned, profileDirty]);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deletePreview) return;
+    setDeleting(true);
+    setNotice("");
+    try {
+      const ok = await cp.remove({
+        confirmCrossProject: deletePreview.isGlobal && deletePreview.usageCount > 0,
+      });
+      if (ok) {
+        setDeleteModalOpen(false);
+        setDeletePreview(null);
+        setProfileDirty(false);
+        setNotice("Character deleted");
+        onDeleted?.();
+      } else {
+        const updated = await api.getCharacterDeletePreview(projectId, characterId);
+        setDeletePreview(updated);
+      }
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Failed to delete character.");
+    } finally {
+      setDeleting(false);
+    }
+  }, [cp, deletePreview, projectId, characterId, onDeleted]);
 
   const approvedAssetId = crsApprovedAssetId || hero?.asset_id || "";
   const approvedHistory = useMemo(
@@ -391,7 +452,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     return <p className="character-core__hint">Loading character…</p>;
   }
 
-  const atName = profile?.name?.trim() ? `@${profile.name.trim()}` : null;
+  const atName = promptCanonicalCharacterTag(profile?.name);
 
   return (
     <div className="character-core" data-testid="character-core">
@@ -400,11 +461,28 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         <CharacterProfileForm
           profile={profile}
           autoFocusName={autoFocusName}
+          disabled={!owned}
           onChange={(fields) => {
             setProfileDirty(true);
             cp.setLocal(fields);
           }}
         />
+        {!owned && profile?.id ? (
+          <div className="character-core__ownership" data-testid="character-core-ownership">
+            <p className="character-core__hint">
+              Global characters can only be edited from the project that created them.
+            </p>
+            <button
+              type="button"
+              className="character-core__button primary"
+              data-testid="character-create-local"
+              disabled={cp.saving}
+              onClick={() => void handleCreateLocal()}
+            >
+              Create a character in this project
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="character-core__section">
@@ -427,7 +505,9 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           characterId={characterId}
           mode={mode}
           saved={saved}
+          editable={owned}
           frontEpoch={frontEpoch}
+          onGoTab={onGoTab}
         />
         {resolvedCrs.showBoth && resolvedCrs.canon ? (
           <CharacterActiveCrsCard
@@ -452,6 +532,8 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
             onPreview={openPreview}
             disabled={crsActionBusy}
             onApprove={requestApprove}
+            onGoTab={onGoTab}
+            characterId={characterId}
           />
         ) : null}
         <CharacterActiveCrsCard
@@ -473,6 +555,8 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           disabled={crsActionBusy}
           onApprove={requestApprove}
           onReject={requestReject}
+          onGoTab={onGoTab}
+          characterId={characterId}
         />
         {productionReady && atName ? (
           <p className="character-core__hint" data-testid="character-approved-banner">
@@ -516,10 +600,11 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       ) : null}
 
       <CharacterActions
-        isSaved={saved}
+        isSaved={saved && owned}
         canSave={canSave}
         saving={cp.saving}
-        dirty={profileDirty}
+        dirty={profileDirty && owned}
+        deleteDisabled={!saved || !owned || profileDirty || deleting}
         onSave={() => void handleSave()}
         onReset={handleReset}
         onDelete={() => void handleDelete()}
@@ -570,6 +655,19 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       >
         This deletes only that draft candidate. The approved Character Reference Sheet is not touched. Cancel or dismiss keeps the draft.
       </Dialog>
+      <CreatorProfileDeleteModal
+        open={deleteModalOpen}
+        entityType="character"
+        preview={deletePreview}
+        deleting={deleting}
+        onClose={() => {
+          if (!deleting) {
+            setDeleteModalOpen(false);
+            setDeletePreview(null);
+          }
+        }}
+        onConfirm={() => void handleConfirmDelete()}
+      />
     </div>
   );
 }

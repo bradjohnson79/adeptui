@@ -129,8 +129,16 @@ def _delete_where(db: Session, table_name: str, where_sql: str, project_id: str)
 
 
 def delete_project_residue(db: Session, project_id: str) -> None:
-    inspector = inspect(db.bind)
+    # Read the schema on this session's connection before any DELETE.
+    # inspect(engine) opens a second SQLite connection, and journal_mode=DELETE
+    # then locks that PRAGMA against the uncommitted write on this session.
+    connection = db.connection()
+    inspector = inspect(connection)
     table_names = set(inspector.get_table_names())
+    columns_by_table = {
+        name: {column["name"] for column in inspector.get_columns(name)}
+        for name in table_names
+    }
 
     delete_bible_for_project(db, project_id)
 
@@ -141,7 +149,7 @@ def delete_project_residue(db: Session, project_id: str) -> None:
     for table_name in table_names:
         if table_name == "projects":
             continue
-        columns = {column["name"] for column in inspector.get_columns(table_name)}
+        columns = columns_by_table.get(table_name, set())
         for column_name in _PROJECT_COLUMN_NAMES:
             if column_name in columns:
                 quoted = f'"{column_name}"' if column_name != "project_id" else column_name

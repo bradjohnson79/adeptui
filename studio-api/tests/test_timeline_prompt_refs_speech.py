@@ -13,7 +13,13 @@ from app.director_timeline import (
     hydrate_prompt_refs,
     parse_director_timeline,
 )
-from app.director_timeline_w46.contracts import BatchBlock, DurationState, ExecutionSnapshot
+from app.director_timeline_w46.contracts import (
+    BatchBlock,
+    DurationState,
+    ExecutionSnapshot,
+    SceneTimelineMaster,
+    TimelinePromptSegment,
+)
 from app.director_timeline_w46.generation.adapter import validate_against_capabilities
 from app.director_timeline_w46.generation.reference_compile import apply_compiled_references
 from app.director_timeline_w46.generation.registry import get_registry
@@ -22,6 +28,7 @@ from app.director_timeline_w46.generation.speech_compile import (
     LIPSYNC_SPEAKER_REQUIRED,
     compile_speech_windows,
     extract_dialogue_cues,
+    extract_dialogue_cues_from_text,
     lipsync_speaker_errors,
 )
 from app.lipsync_tracks import LipSyncClip, LipSyncTrack, LipSyncTracks
@@ -125,10 +132,10 @@ def test_minimax_caps_are_real_not_invented():
     registry = get_registry()
     t2v = registry.capabilities("minimax-h3-t2v-local")
     i2v = registry.capabilities("minimax-h3-i2v-local")
-    assert t2v.maximumReferenceImages == 0
-    assert i2v.maximumReferenceImages == 1
-    assert t2v.maximumReferenceImages != 9
-    assert i2v.maximumReferenceImages != 9
+    assert t2v.supportsReferenceToVideo is True
+    assert i2v.supportsReferenceToVideo is True
+    assert t2v.maximumReferenceImages == 9
+    assert i2v.maximumReferenceImages == 9
 
 
 def test_request_builder_does_not_silent_drop_refs():
@@ -136,6 +143,7 @@ def test_request_builder_does_not_silent_drop_refs():
         sceneId="scene-1",
         generatorId="minimax-h3-t2v-local",
         duration=DurationState(plannedDuration=5),
+        promptSegments=[TimelinePromptSegment(text="Korri stands in frame.", start=0, length=5)],
         references=[{"kind": "image", "role": "image_reference", "assetId": "img-1", "consumed": True}],
     )
     snap = ExecutionSnapshot(batchBlockId=batch.id, selectedGenerator="minimax-h3-t2v-local")
@@ -147,10 +155,12 @@ def test_request_builder_does_not_silent_drop_refs():
         fallback_allowed=False,
     )
     assert req.referenceAssetIds == ["img-1"]
+    assert req.generationMode == "reference"
+    slots = (req.providerOptions.get("r2v") or {}).get("slots") or []
+    assert any(slot.get("assetId") == "img-1" for slot in slots)
     registry = get_registry()
     result = validate_against_capabilities(registry.capabilities("minimax-h3-t2v-local"), req)
-    assert result.ok is False
-    assert any("image reference" in err.lower() or "does not accept" in err.lower() for err in result.errors)
+    assert result.ok is True
 
 
 def test_over_limit_keeps_ids_and_refuses(db=None):
@@ -198,7 +208,12 @@ def test_over_limit_keeps_ids_and_refuses(db=None):
     warnings = apply_compiled_references(batch, timeline, db=session, project_id="proj-ref")
     stored = [r["bindingId"] for r in batch.references if r.get("bindingId")]
     assert b1["id"] in stored and b2["id"] in stored
-    assert any(w["code"] == "IMAGE_REFERENCE_OVER_LIMIT" for w in warnings)
+    assert not any(w["code"] == "IMAGE_REFERENCE_OVER_LIMIT" for w in warnings)
+    # Phase A: H3 delivery uses Timed Prompt; ensure batch carries creator text.
+    if not batch.promptSegments:
+        batch.promptSegments = [
+            TimelinePromptSegment(text="Korri holds the cup at the bar.", start=0, length=5)
+        ]
     snap = ExecutionSnapshot(batchBlockId=batch.id, selectedGenerator="minimax-h3-i2v-local")
     req = build_timeline_generation_request(
         project_id="proj-ref",
@@ -209,8 +224,9 @@ def test_over_limit_keeps_ids_and_refuses(db=None):
     )
     assert "img-1" in req.referenceAssetIds
     assert "img-2" in req.referenceAssetIds
+    assert req.prompt
     result = validate_against_capabilities(get_registry().capabilities("minimax-h3-i2v-local"), req)
-    assert result.ok is False
+    assert result.ok is True
     session.close()
 
 
@@ -285,7 +301,25 @@ def test_one_prompt_spanning_sequential_lipsync():
             ]
         ),
     )
-    windows, errors = compile_speech_windows(timeline)
+    master = SceneTimelineMaster(
+        sceneId="scene-1",
+        batchBlocks=[
+            BatchBlock(
+                sceneId="scene-1",
+                order=0,
+                duration=DurationState(plannedDuration=5),
+                promptSegments=[
+                    TimelinePromptSegment(
+                        start=0,
+                        length=5,
+                        text="@Korri and @Anadriya work the bar.",
+                        referenceBindingIds=["bind-korri", "bind-ana"],
+                    )
+                ],
+            )
+        ],
+    )
+    windows, errors = compile_speech_windows(timeline, master=master)
     assert errors == []
     assert len(windows) == 2
     first, second = windows
@@ -339,3 +373,189 @@ def test_lipsync_audio_beats_prompt_dialogue():
     assert windows[0]["speechKind"] == "lipsync_audio"
     assert windows[0]["speakers"][0]["audioAssetId"] == "aud-k"
     assert "hello from prompt tts" not in json.dumps(windows[0]["speakers"])
+
+
+SCENE_12B_BATCH2 = """
+[SHOT 6: Full Close Up on Anadriya]
+
+Anadriya looks toward Korri with an annoyed expression and says:
+"He asked me a question and you won't even let me talk!"
+
+[SHOT 7: Medium Close Up on Korri]
+
+Korri speaks fast and is very to the point as she says:
+"Cuz what I say is what they're here for. Spit out a roast while there's still a decade, then you'll get some schnickin' air time, sis."
+
+[SHOT 8: Over the Shoulder on Anadriya]
+
+Anadriya grows more irritated and gives a stern like to Korri saying:
+"Korri... language! And don't talk about Renkoka like the way you have."
+
+[SHOT 9: Close Up on Korri]
+
+Korri just smiles and remains confident as she says:
+"Sorry sis, but Renkoka had you beat. She's my hero... with an ass that won't quit!"
+
+[SHOT 10: Medium 2 Shot]
+
+Anadriya tells her:
+"Do I have to be the 'good' sister?"
+
+[SHOT 11: Full Close Up on Korri]
+
+Korri's eyes bulge and she hisses like a cat at Anadriya. Korri says nearly intimidated out of her mind:
+"Put that away you soap psycho!"
+"""
+
+
+def _12b_bindings():
+    return [
+        {"bindingId": "bind-ana", "promptName": "Anadriya"},
+        {"bindingId": "bind-korri", "promptName": "Korri"},
+    ]
+
+
+def test_cue_12b_let_me_talk_binds_anadriya_not_korri():
+    """SLICE C: object name (toward Korri) must not steal Anadriya's line."""
+    cues = extract_dialogue_cues_from_text(
+        SCENE_12B_BATCH2,
+        reference_name_bindings=_12b_bindings(),
+    )
+    let_me = [c for c in cues if "let me talk" in (c.get("text") or "")]
+    assert let_me, "Anadriya let-me-talk line must be extracted"
+    assert let_me[0]["speakerName"] == "Anadriya"
+    assert let_me[0]["speakerBindingId"] == "bind-ana"
+    assert let_me[0]["exactText"] == let_me[0]["text"]
+    assert all(c["speakerName"] != "Korri" for c in let_me)
+
+
+def test_cue_12b_batch2_speaker_exact_text_pairs():
+    """SLICE C: each 12B batch-2 quoted line binds the speaking subject."""
+    cues = extract_dialogue_cues_from_text(
+        SCENE_12B_BATCH2,
+        reference_name_bindings=_12b_bindings(),
+    )
+    by_text = {c["text"]: c["speakerName"] for c in cues}
+    assert by_text["He asked me a question and you won't even let me talk!"] == "Anadriya"
+    assert by_text["Put that away you soap psycho!"] == "Korri"
+    assert "Cuz what I say is what they're here for. Spit out a roast while there's still a decade, then you'll get some schnickin' air time, sis." in by_text
+    assert by_text["Cuz what I say is what they're here for. Spit out a roast while there's still a decade, then you'll get some schnickin' air time, sis."] == "Korri"
+    assert by_text.get("Do I have to be the 'good' sister?") == "Anadriya"
+    # Korri mentioned as object of "to Korri saying" is not the speaker.
+    lang = [c for c in cues if "language" in (c.get("text") or "").lower()]
+    assert lang and lang[0]["speakerName"] == "Anadriya"
+
+
+def test_cue_whispers_to_korri_stays_anadriya():
+    """SLICE C: 'whispers to Korri saying' subject is Anadriya."""
+    text = (
+        'Anadriya is embarrassed and whispers to Korri saying\n'
+        '"You\'re so rude."'
+    )
+    cues = extract_dialogue_cues_from_text(
+        text,
+        reference_name_bindings=_12b_bindings(),
+    )
+    assert len(cues) == 1
+    assert cues[0]["speakerName"] == "Anadriya"
+    assert cues[0]["text"] == "You're so rude."
+
+
+def test_cue_canonical_at_token_still_binds():
+    cues = extract_dialogue_cues_from_text(
+        '@Korri says "Renkoka obviously!"',
+        reference_name_bindings=_12b_bindings(),
+    )
+    assert len(cues) == 1
+    assert cues[0]["speakerName"] == "Korri"
+    assert cues[0]["text"] == "Renkoka obviously!"
+
+
+def test_scene_level_timed_prompt_defers_speech_to_extension_window():
+    """30s Timed Prompt: Batch 1 (0-15) is setup; Batch 2 (15-30) owns the spoken line."""
+    timeline = DirectorTimeline(
+        duration_sec=30,
+        prompt_segments=[
+            PromptSegment(
+                id="ps-scene",
+                start=0,
+                length=30,
+                text='Cade O\'Connor says in a deep voice: "Where is the Adept?"',
+                reference_name_bindings=[
+                    {"bindingId": "bind-cade", "promptName": "Cade O'Connor"},
+                    {"bindingId": "bind-cade", "promptName": "Cade"},
+                ],
+            )
+        ],
+    )
+    master = SceneTimelineMaster(
+        sceneId="scene-1",
+        batchBlocks=[
+            BatchBlock(
+                sceneId="scene-1",
+                order=0,
+                duration=DurationState(plannedDuration=30),
+                promptSegments=[
+                    TimelinePromptSegment(
+                        start=0,
+                        length=30,
+                        text='Cade O\'Connor says in a deep voice: "Where is the Adept?"',
+                        referenceNameBindings=[
+                            {"bindingId": "bind-cade", "promptName": "Cade O'Connor"},
+                            {"bindingId": "bind-cade", "promptName": "Cade"},
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    first, err1 = compile_speech_windows(timeline, window_start=0.0, window_end=15.0, master=master)
+    second, err2 = compile_speech_windows(timeline, window_start=15.0, window_end=30.0, master=master)
+    assert err1 == [] and err2 == []
+    assert first
+    assert all(w["speechKind"] != "prompt_dialogue" for w in first)
+    assert any(w["speechKind"] == "prompt_dialogue" for w in second)
+    spoken = [s.get("text") or "" for w in second for s in (w.get("speakers") or [])]
+    assert any("Adept" in line for line in spoken)
+
+
+
+
+
+def test_cue_screenplay_korri_name_then_line():
+    """Screenplay NAME + spoken line (no quotes) must bind dialogue."""
+    text = (
+        "Morning light in Schnick Coffee.\n"
+        "KORRI\n"
+        "Hello, welcome to Schnick Coffee.\n"
+        "She smiles at the camera.\n"
+    )
+    cues = extract_dialogue_cues_from_text(
+        text,
+        reference_name_bindings=[{"bindingId": "bind-korri", "promptName": "Korri"}],
+    )
+    assert cues, "screenplay KORRI cue must extract spoken line"
+    assert cues[0]["speakerName"].lower() == "korri"
+    assert "welcome to Schnick Coffee" in cues[0]["text"]
+    assert cues[0].get("exactText") == cues[0]["text"] or cues[0].get("exactText") == cues[0].get("text")
+
+
+def test_cue_screenplay_two_speakers():
+    text = (
+        "KORRI\n"
+        "What can I get you?\n"
+        "\n"
+        "ANADRIYA\n"
+        "(dry)\n"
+        "Anything but schnickin' silence.\n"
+    )
+    cues = extract_dialogue_cues_from_text(
+        text,
+        reference_name_bindings=[
+            {"bindingId": "bind-korri", "promptName": "Korri"},
+            {"bindingId": "bind-ana", "promptName": "Anadriya"},
+        ],
+    )
+    by = {c["speakerName"].lower(): c["text"] for c in cues}
+    assert "korri" in by and "What can I get you?" in by["korri"]
+    assert "anadriya" in by and "silence" in by["anadriya"].lower()

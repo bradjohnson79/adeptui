@@ -582,13 +582,14 @@ def run_omni_equipment_qc(
     asset_id: str,
     force: bool = True,
     timeout_sec: float = 180.0,
+    observed_packet: Any = None,
 ) -> dict[str, Any]:
     """Invoke Adept Omni visual analyze and evaluate vs unauthorized-equipment AUTHORITY."""
     observed: dict[str, Any]
     try:
         from app.codirector.video_intelligence.media_analyze import analyze_asset
 
-        packet = analyze_asset(
+        packet = observed_packet if observed_packet is not None else analyze_asset(
             db,
             project_id,
             asset_id,

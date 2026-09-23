@@ -101,10 +101,11 @@ def test_ers_generate_plan_path_uses_intent_prompt_not_plan_prompt(monkeypatch) 
     monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _fake_enqueue)
     monkeypatch.setattr(
         "app.spatial_map.service.get_document",
-        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid),
+        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid, backgroundAssetId="atlas-ref-1"),
     )
     monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", lambda *a, **k: None)
     monkeypatch.setattr("app.environment_reference_sheet.store.save_sheet", lambda current: None)
+    monkeypatch.setattr(ers_generate, "_public_asset_url", lambda aid: f"https://assets.example/{aid}")
 
     result = ers_generate.handle(
         db=None,
@@ -112,7 +113,8 @@ def test_ers_generate_plan_path_uses_intent_prompt_not_plan_prompt(monkeypatch) 
         execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
         spatial_map_id=spatial_map_id,
         scene_id="scene-1",
-        hosted_model_id="nano-banana-kie",
+        hosted_model_id="gpt-image-2-kie",
+        kie_image_model_id="gpt-image-2-image-to-image",
         source="api",
     )
 
@@ -123,7 +125,7 @@ def test_ers_generate_plan_path_uses_intent_prompt_not_plan_prompt(monkeypatch) 
     for body in captured:
         assert body["purpose"] == "environment_reference_sheet"
         assert "REQUEST_SHOULD_NOT_WIN" not in body["prompt"]
-        assert body.get("hostedModelId") == "nano-banana-kie"
+        assert body.get("hostedModelId") == "gpt-image-2-kie"
         assert body.get("modelFamilyPreference") != "zimage"
         assert "zimage.txt2img" not in str(body)
         assert body["creativeContext"]["resolvedProvider"] == "kie"

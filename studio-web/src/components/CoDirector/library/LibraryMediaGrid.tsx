@@ -6,7 +6,7 @@
  * preview modal. Fetches api.library directly and renders friendly labels
  * (no UUIDs, no JSON, no evidence bullets).
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
@@ -30,6 +30,7 @@ import {
   type LibraryAsset,
 } from "./assetModel";
 import type { LibraryFolderMapEntry, LibraryFolderNode } from "./assetModel";
+import { inferLibraryUploadKind, libraryUploadTag } from "../../library/libraryUpload";
 import "./libraryMediaGrid.css";
 
 type Props = {
@@ -429,6 +430,9 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [deleting, setDeleting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const addMediaRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -571,9 +575,45 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
 
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
 
+  const uploadFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      for (const file of Array.from(files)) {
+        await api.uploadAsset(projectId, file, libraryUploadTag(file), inferLibraryUploadKind(file));
+      }
+      await refresh();
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : t("library:addMediaFailed"));
+    } finally {
+      setUploading(false);
+      if (addMediaRef.current) addMediaRef.current.value = "";
+    }
+  };
+
   return (
     <div className="library-media-grid" data-testid="library-media-grid">
       <div className="library-media-grid__toolbar">
+        <input
+          ref={addMediaRef}
+          type="file"
+          hidden
+          multiple
+          accept="image/*,video/*,audio/*,.pdf,.txt,.doc,.docx"
+          data-testid="library-add-media-input"
+          onChange={(event) => void uploadFiles(event.target.files)}
+        />
+        <button
+          type="button"
+          className="library-media-grid__add-media"
+          data-testid="library-add-media"
+          disabled={uploading}
+          title={t("library:addMediaTip")}
+          onClick={() => addMediaRef.current?.click()}
+        >
+          {uploading ? t("library:addingMedia") : t("library:addMedia")}
+        </button>
         <div className="library-media-grid__search">
           <input
             type="search"
@@ -656,6 +696,11 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
           )}
         </div>
       </div>
+      {uploadError ? (
+        <p className="library-media-grid__upload-error" data-testid="library-add-media-error" role="alert">
+          {uploadError}
+        </p>
+      ) : null}
 
       {allFolders.length > 0 ? (
         <div className="library-media-grid__folder-nav" data-testid="library-folder-nav">
@@ -741,6 +786,15 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
         <div className="library-media-grid__state" data-testid="library-empty">
           <strong>No project assets yet.</strong>
           <p>Generated and uploaded images, videos, audio and documents will appear here.</p>
+          <button
+            type="button"
+            className="library-media-grid__add-media"
+            data-testid="library-add-media-empty"
+            disabled={uploading}
+            onClick={() => addMediaRef.current?.click()}
+          >
+            {uploading ? t("library:addingMedia") : t("library:addMedia")}
+          </button>
         </div>
       ) : filtered.length === 0 ? (
         <div className="library-media-grid__state" data-testid="library-empty-filter">

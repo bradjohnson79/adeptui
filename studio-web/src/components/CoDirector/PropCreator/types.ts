@@ -17,6 +17,12 @@ export type PropCandidate = {
   error?: string;
   /** Live Job.progress (0-1) copied by GET hydration. Absent when no job reported one. */
   progress?: number | null;
+  /** Honest Job.stage from queue worker. */
+  job_stage?: string | null;
+  /** Honest Job.message from queue worker. */
+  job_message?: string | null;
+  /** generated | uploaded — distinct from source local|api. */
+  origin?: string | null;
 };
 
 export type PropGeneratorPersist = {
@@ -37,10 +43,43 @@ export type PropGeneratorPersist = {
   stage2Family?: string;
 };
 
+
+export type PropCreatorMode = "standard" | "advanced";
+export type PropAdvancedType = "spacecraft" | "vehicle" | "aircraft" | "mech" | "other";
+export type PropPrimaryPhase = "draft" | "generating" | "review" | "approved";
+export type PropAngleKey = "front" | "back" | "left" | "right" | "top" | "bottom" | "hero";
+
+export const PROP_ADVANCED_ANGLE_KEYS: PropAngleKey[] = [
+  "front",
+  "back",
+  "left",
+  "right",
+  "top",
+  "bottom",
+  "hero",
+];
+
+export type PropAngleSlot = {
+  key: string;
+  status: "idle" | "queued" | "generating" | "complete" | "failed" | "approved";
+  asset_id?: string | null;
+  approved: boolean;
+  job_id?: string | null;
+  seed?: number | null;
+  error?: string;
+  source_primary_asset_id?: string | null;
+  engine?: string;
+  workflow_key?: string;
+  progress?: number | null;
+  source?: string | null;
+};
+
 export type PropEntity = {
   id: string;
   project_id: string;
   tag: string;
+  canonical_tag?: string;
+  canonicalTag?: string;
   display_label: string;
   library_asset_id: string;
   notes: string;
@@ -48,11 +87,40 @@ export type PropEntity = {
   description: string;
   reference_asset_id?: string | null;
   approved_asset_id?: string | null;
+  /** Basic PRS asset — never replaces approved still. */
+  prs_asset_id?: string | null;
+  prsAssetId?: string | null;
+  /** Advanced mode fields — Standard path leaves defaults / ignores. */
+  mode?: PropCreatorMode;
+  advanced_type?: PropAdvancedType | null;
+  primary_prompt?: string;
+  primary_phase?: PropPrimaryPhase;
+  primary_approved_asset_id?: string | null;
+  angles?: Partial<Record<PropAngleKey, PropAngleSlot>> | Record<string, PropAngleSlot>;
+  hero_optional?: boolean;
+  advanced_sheet_asset_id?: string | null;
+  advanced_sheet_status?: string;
+  advanced_sheet_progress?: number | null;
+  advanced_sheet_error?: string;
   candidates: PropCandidate[];
   generator?: PropGeneratorPersist;
   created_at?: string;
   updated_at?: string;
+  is_global?: boolean;
+  isGlobal?: boolean;
 };
+
+export function promptCanonicalPropTag(prop?: PropEntity | null, name?: string): string {
+  const stored = String(prop?.canonical_tag || prop?.canonicalTag || "").trim();
+  if (stored) return stored.startsWith("%") ? stored : `%${stored}`;
+  const label = String(name || prop?.display_label || "").trim();
+  if (!label) return "";
+  const withS = label.replace(/['’]s\b/gi, "S");
+  const token = (withS.match(/[A-Za-z0-9]+/g) || [])
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+  return token ? `%${token}` : "";
+}
 
 export type PropCreatorWorkspace = {
   props: PropEntity[];

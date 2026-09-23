@@ -10,6 +10,7 @@ No fake I2V. H3: adapters have supportsNegativePrompt=False / supportsCameraCont
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -234,6 +235,44 @@ def observation_matches_unauthorized_equipment(text: str | None, *, context: str
     )
 
 
+def _batch_scoped_to_window_story(batch: Any, full_text: str) -> Any:
+    """Re-Take reads one window. A 45s segment on a 15s window is not that window.
+
+    The master Timed Prompt stays intact. Only the beat clock used to compile
+    the repair is narrowed to this window's slice.
+    """
+    from types import SimpleNamespace
+
+    from .window_script import is_structured_scene_prompt, slice_story_for_window
+
+    text = (full_text or "").strip()
+    if not text or is_structured_scene_prompt(text):
+        return batch
+    segs = list(getattr(batch, "promptSegments", None) or [])
+    if not segs:
+        return batch
+    try:
+        seg_len = float(getattr(segs[0], "length", 0.0) or 0.0)
+        planned = float(getattr(getattr(batch, "duration", None), "plannedDuration", 0.0) or 0.0)
+        order = int(getattr(batch, "order", 0) or 0)
+    except (TypeError, ValueError):
+        return batch
+    if planned <= 0 or seg_len <= planned + 0.5:
+        return batch
+    # Same rule as execution windows: 60s → 4, 75s → 5. The last window may be short.
+    count = max(2, int(math.ceil(seg_len / planned - 1e-9)))
+    if order < 0 or order >= count:
+        return batch
+    sliced = slice_story_for_window(text, order, count)
+    if not sliced or sliced == text:
+        return batch
+    return SimpleNamespace(
+        promptSegments=[SimpleNamespace(text=sliced, start=0.0, length=planned)],
+        duration=getattr(batch, "duration", None),
+        order=order,
+    )
+
+
 def established_scene_text(batch: Any) -> str:
     """Master Timed Prompt from batch promptSegments (full text for inheritance)."""
     parts: list[str] = []
@@ -279,7 +318,11 @@ def established_setup_only(established: str) -> str:
         return ""
     m = _SHOT_HEADER_RE.search(text)
     if not m:
-        setup = text
+        # Unstructured prose has no shot list. The opening paragraph is the
+        # setup. The rest of a full-scene script must not ride along, or a
+        # short Re-Take plays the ending inside the marked range.
+        parts = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+        setup = parts[0] if parts else text
     else:
         setup = text[: m.start()].strip()
     if not setup:
@@ -865,8 +908,6 @@ def compile_retake_prompt(
     """Labeled ESTABLISHED SETUP + PREV/TARGET/NEXT + USER DELTA + HARD CONSTRAINTS."""
     end = float(range_start or 0.0) + float(range_length or 0.0)
     setup = established_setup_only(established_full or established)
-    if established and not _SHOT_HEADER_RE.search(established):
-        setup = _neutralize_crew_present_prose(established.strip())
     excl = list(exclusions or _DEFAULT_H3_EXCLUSIONS)
     hard = _hard_constraints_block(
         local_beat=local_beat,
@@ -943,6 +984,7 @@ def build_retake_context_package(
         user_correction = dict(continuity["userCorrection"])
 
     established_full = established_scene_text(batch)
+    story_batch = _batch_scoped_to_window_story(batch, established_full)
     range_start = float(range_rep.get("start") or user_correction.get("start") or 0.0)
     range_length = float(range_rep.get("length") or user_correction.get("length") or 0.0)
     user_delta = str(
@@ -966,8 +1008,8 @@ def build_retake_context_package(
         user_correction = merged
 
     beat = extract_local_beat(
-        established=established_full,
-        batch=batch,
+        established=established_scene_text(story_batch) or established_full,
+        batch=story_batch,
         range_start=range_start,
         range_length=range_length,
         user_delta=user_delta,

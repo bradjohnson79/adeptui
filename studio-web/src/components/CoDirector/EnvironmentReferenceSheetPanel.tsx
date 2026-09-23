@@ -164,9 +164,18 @@ export function EnvironmentReferenceSheetPanel({ projectId }: { projectId: strin
         <>
           {tab === "overview" ? (
             <div className="assistant-setup-list">
+              {(sheet.ers_composite_asset_id || selectedSummary?.ers_composite_asset_id) ? (
+                <div style={{ marginBottom: "0.75rem" }}>
+                  <img
+                    src={api.assetUrl(String(sheet.ers_composite_asset_id || selectedSummary?.ers_composite_asset_id))}
+                    alt="Environment Reference Sheet"
+                    data-testid="codirector-ers-composite"
+                    style={{ maxWidth: "100%", borderRadius: "0.4rem", display: "block" }}
+                  />
+                </div>
+              ) : null}
               <p>{sheet.description}</p>
               <li>North lock: {sheet.spatialMap?.northLockDirection || "missing"}</li>
-              <li>Spatial Map: {sheet.spatialMap?.mapId || "Not attached yet"}</li>
               <li>Location link: {sheet.registration.locationDisplayName || "Not registered yet"}</li>
               <li>
                 Creator highlights:{" "}

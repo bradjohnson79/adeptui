@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useTranslation } from "react-i18next";
 import { api, bindAssetUrlProject } from "../../api";
 import type { Asset, Project } from "../../types";
-import type { BatchBlock, SceneTimelineMaster, TimelinePromptSegment } from "../../timelineMaster/contracts";
+import type { SceneTimelineMaster, TimelinePromptSegment } from "../../timelineMaster/contracts";
 import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
 import type { DirectorSelectionKind } from "../../directorSelection";
 import {
@@ -41,24 +41,34 @@ import {
 } from "../../timelineMaster/timelineHotkeys";
 import {
   DirectorTracks,
-  lipSyncTrackHasContent,
+  masterPromptSegmentToView,
   normalizeLipSyncTracks,
   overlayLiveTimeline,
   promptIdsOf,
   syncPromptTombstones,
-  type DirectorTimeline,
+  type TimelineBoardView,
 } from "../DirectorTracks";
-import { playableVisualClipsFromMaster } from "../../timelineMaster/playableVisualTakes";
+import {
+  displayedVisualVideoClips,
+  playableVisualClipsFromMaster,
+  removePlacedVisualClip,
+  resolveSceneTake,
+} from "../../timelineMaster/playableVisualTakes";
+import { planLibraryImageClick } from "./libraryImageToVisual";
 import { bindShellTimelineMutate, bindShellTimelineSnapshot, dropPromptIdsFromMaster } from "./timelineMutateBridge";
 import { TimelinePreviewComposer } from "./TimelinePreviewComposer";
 import { Timeline } from "../Timeline";
 import { AssetTray } from "../AssetTray";
 import { AddFromProjectLibraryModal } from "./AddFromProjectLibraryModal";
-import { VideoGeneratorDock } from "./VideoGeneratorDock";
 import { ReferencesPane } from "../sceneReferences/ReferencesPane";
+import {
+  inferSemanticReferenceType,
+  mediaKindForReferenceType,
+  sanitizeAlias,
+} from "../../sceneReferences/referenceTokens";
+import { timelineLibraryIdentity } from "../library/timelineLibraryIdentity";
 import { formatDurationSeconds } from "../../lib/formatDuration";
 import { creatorGeneratorLine, timelineBoardDurationSec } from "../../timelineMaster/generatorDuration";
-import { buildBatchTimeWindows } from "../../timelineMaster/batchWindows";
 import { resolveTimelineTransportBounds } from "../../timelineMaster/timelineTransport";
 import { useTimelineClock } from "../../timelineMaster/useTimelineClock";
 import { useTimelineAudioPlayback } from "./useTimelineAudioPlayback";
@@ -69,36 +79,47 @@ import { stepTimelineZoom } from "../../timelineMaster/timelineZoom";
 import { useOpenCoDirector } from "../CoDirector";
 import { TimelineWorkspaceStack } from "./TimelineWorkspaceStack";
 import { TimelineToolbar } from "./TimelineToolbar";
+import { AudioSfxClipModal } from "./AudioSfxClipModal";
+import {
+  applySelectedAudioFile,
+  audioClipMetadata,
+  blankAudioClipDraft,
+  readAudioFileDuration,
+  roundTimelineSec,
+  type AudioClipDraft,
+  type AudioClipModalKind,
+} from "../../timelineMaster/audioClipModal";
+import { readSceneAudioClip } from "../../timelineMaster/batchOwnedAudioClips";
+import { findSameTrackIntersection } from "../../timelineMaster/sameTrackNoOverlap";
 import { SceneStatusStrip } from "./SceneStatusStrip";
+import { formatPreviewTakeStatusLabel } from "../../timelineMaster/previewTakeStatus";
 import { TimelineInspector } from "./TimelineInspector";
 import { TimelineHotKeysPane } from "./TimelineHotKeysPane";
 import { ActionWithHelp } from "../HelpTip";
 import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
 import { completedApprovedBatches } from "../../timelineMaster/sceneStitch";
-import { addTimelineBatch } from "../../timelineMaster/addTimelineBatch";
+import { isSceneRenderActive, shouldShowSceneRenderStatus } from "../../timelineMaster/sceneRenderProgress";
+import {
+  hasGeneratedTakeForRetake,
+  retakeEmptyCopy,
+} from "../../timelineMaster/retakeEligibility";
+import { batchWindowAtTime, buildBatchTimeWindows } from "../../timelineMaster/batchWindows";
+import { rematerializeThenGenerateScene } from "../../timelineMaster/rematerializeThenGenerate";
+import { flattenMasterPrompts } from "../../timelineMaster/masterTimelineMutate";
 import { CompactRenderQueue } from "./CompactRenderQueue";
 import { TimelineGpuPane } from "./TimelineGpuPane";
 import { timelineActionError, timelineGenerateEmpty } from "../../timelineMaster/timelineErrors";
 import { TimelineGeneratorBanner } from "./TimelineGeneratorBanner";
 import { useVideoRetake } from "./useVideoRetake";
+import { boundRetakeToBatch, resolveRetakeMarks } from "../../timelineMaster/videoRetake";
 import "../../styles/timeline-master/timeline-editor-shell.css";
 import "../../styles/timeline-master/timeline-v2-shell.css";
 import "../../styles/timeline-master/timeline-v2-canvas.css";
 
 
-function batchHasContent(batch: BatchBlock) {
-  if (batch.approvedClip) return true;
-  if (batch.generationJobs?.length) return true;
-  if (batch.candidateVersions?.length) return true;
-  if (batch.repairRanges?.length) return true;
-  if (batch.sourceAnchors?.some((a) => a.assetId)) return true;
-  if (batch.promptSegments?.some((s) => (s.text || "").trim())) return true;
-  if (batch.status && batch.status !== "Draft") return true;
-  return false;
-}
 
 type TimelineHistoryEntry = {
-  timeline: DirectorTimeline;
+  timeline: TimelineBoardView;
   batchPrompts: { batchId: string; promptSegments: TimelinePromptSegment[] }[];
 };
 
@@ -130,14 +151,19 @@ export function TimelineEditorShell({
   const [playheadSec, setPlayheadSec] = useState(0);
   const [libraryPreviewId, setLibraryPreviewId] = useState<string | null>(null);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [audioDraft, setAudioDraft] = useState<AudioClipDraft | null>(null);
+  const [audioModalError, setAudioModalError] = useState<string | null>(null);
+  const [audioModalBusy, setAudioModalBusy] = useState(false);
+  const pendingAudioFileRef = useRef<File | null>(null);
   const generatorOptions = useTimelineVideoGenerators();
   const [master, setMaster] = useState<SceneTimelineMaster | null>(null);
-  const [directorTimeline, setDirectorTimeline] = useState<DirectorTimeline | null>(null);
+  const [previewTakeId, setPreviewTakeId] = useState<string | null>(null);
+  const [directorTimeline, setDirectorTimeline] = useState<TimelineBoardView | null>(null);
   const [appliedSceneId, setAppliedSceneId] = useState<string | null>(null);
   const masterRef = useRef<SceneTimelineMaster | null>(null);
-  const directorTimelineRef = useRef<DirectorTimeline | null>(null);
+  const directorTimelineRef = useRef<TimelineBoardView | null>(null);
   const masterCacheRef = useRef<Map<string, SceneTimelineMaster>>(new Map());
-  const directorCacheRef = useRef<Map<string, DirectorTimeline>>(new Map());
+  const directorCacheRef = useRef<Map<string, TimelineBoardView>>(new Map());
   const liveMaster = appliedSceneId === selected.id ? master : masterCacheRef.current.get(selected.id) ?? null;
   const selectedGenerator = useMemo(
     () =>
@@ -210,6 +236,19 @@ export function TimelineEditorShell({
   const goToSceneEnd = useCallback(() => {
     seek(resolveTransport().sceneEnd);
   }, [resolveTransport, seek]);
+
+  // ATOMIC_BATCH_AV_SWITCH: selecting a Batch Block seeks playhead into that
+  // batch window so TimelinePreviewComposer (video src / clip-local time) and
+  // useTimelineAudioPlayback (audio layers) resolve the same batch together.
+  useEffect(() => {
+    if (!selectedBatchId) return;
+    const win = batchWindows.find((entry) => entry.id === selectedBatchId);
+    if (!win) return;
+    const t = playheadLiveRef.current;
+    if (t < win.start - 1e-3 || t >= win.end - 1e-3) {
+      seek(win.start);
+    }
+  }, [selectedBatchId, batchWindows, seek]);
   const [reloadKey, setReloadKey] = useState(0);
   // Always-on Preflight: event-driven (signature over exactly what the backend
   // run_preflight reads), single-flight, 400ms debounce. One shared state feeds
@@ -218,7 +257,7 @@ export function TimelineEditorShell({
     projectId: project.id,
     sceneId: selected?.id ?? null,
     master: liveMaster,
-    director: liveDirector,
+    lipsyncTracksJson: selected?.lipsync_tracks_json || "",
   });
   const preflightSummary = timelinePreflight.summary;
   const preflightBlockingCount = timelinePreflight.blockingCount;
@@ -226,12 +265,13 @@ export function TimelineEditorShell({
   const [rightTab, setRightTab] = useState<"inspector" | "codirector" | "hotkeys" | "gpu">("inspector");
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [generateBusy, setGenerateBusy] = useState(false);
+  const [generationStandby, setGenerationStandby] = useState(false);
+  const retakeBusyPrev = useRef(false);
   const [extendBusy, setExtendBusy] = useState(false);
   const [undoStack, setUndoStack] = useState<TimelineHistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<TimelineHistoryEntry[]>([]);
   const [focusFinding, setFocusFinding] = useState<string | null>(null);
   const [hideOverlay, setHideOverlay] = useState(false);
-  const [pauseUpdates, setPauseUpdates] = useState(false);
   const [viewportMode, setViewportMode] = useState<WorkspaceViewportMode>("STANDARD");
   const workspaceFs = useWorkspaceFullscreen({
     workspaceId: "timeline",
@@ -379,15 +419,31 @@ export function TimelineEditorShell({
     masterCacheRef.current.set(sceneId, nextMaster);
     setMaster(nextMaster);
     setAppliedSceneId(sceneId);
-    // TIMELINE_DRIVEN_PREVIEW: fetch the real DirectorTimeline (image_clips,
-    // prompt_segments, etc.) so the Preview Composer can resolve the active
-    // clip at the playhead. Previously the shell passed `master` (the batch
-    // container) cast as the timeline, so the composer never saw clips.
+    // Preview view is projected from Master clip arrays — GET /director is
+    // not the Timeline authoring store.
     try {
-      const tl = (await api.getDirector(project.id, sceneId)) as DirectorTimeline;
+      const { flattenMasterPrompts, projectMasterPreviewClips } = await import(
+        "../../timelineMaster/masterTimelineMutate"
+      );
       if (token !== masterLoadTokenRef.current) return;
+      const clips = projectMasterPreviewClips(nextMaster);
+      const projected = {
+        media_mode: clips.videoClips.length ? "video" : "image",
+        duration_sec: selected.duration_sec || 5,
+        ...clips,
+        // SINGLE-STORE: the view's promptSegments are a Master projection so
+        // view-bridge mutators diff against real data (never an empty array).
+        promptSegments: flattenMasterPrompts(nextMaster).map(masterPromptSegmentToView),
+        library_asset_ids: Array.isArray(data.libraryAssetIds) ? data.libraryAssetIds : undefined,
+        video_reference_clips: [],
+        image_reference_clips: [],
+        cameraClips: [],
+        lipsync: { tracks: [] },
+        playhead: directorTimelineRef.current?.playhead || 0,
+        guidance_priority: "visual_first",
+      } as TimelineBoardView;
       const priorForScene = directorCacheRef.current.get(sceneId) ?? null;
-      const merged = overlayLiveTimeline(tl, priorForScene);
+      const merged = overlayLiveTimeline(projected, priorForScene);
       directorCacheRef.current.set(sceneId, merged);
       directorTimelineRef.current = merged;
       setDirectorTimeline(merged);
@@ -427,6 +483,8 @@ export function TimelineEditorShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSceneId]);
 
+
+
   useEffect(() => {
     const onFocus = (event: Event) => {
       const detail = (event as CustomEvent<TimelineFocusRequest>).detail;
@@ -453,14 +511,7 @@ export function TimelineEditorShell({
       }
       if (typeof detail.playheadSec === "number") {
         seek(detail.playheadSec);
-        if (selected) {
-          void api.getDirector(project.id, selected.id).then((timeline) => {
-            void api.putDirector(project.id, selected.id, {
-              ...(timeline as DirectorTimeline),
-              playhead: detail.playheadSec,
-            });
-          });
-        }
+        // SINGLE-STORE: playhead is local UI state; PUT /director is retired.
       }
       if (typeof detail.zoom === "number") {
         setZoom(detail.zoom);
@@ -470,6 +521,9 @@ export function TimelineEditorShell({
       if (detail.findingCode) setFocusFinding(detail.findingCode);
       if (detail.openInpaint === true || detail.openRetake === true) {
         openRetakeRef.current();
+      }
+      if (typeof detail.takeId === "string" && detail.takeId.trim()) {
+        setPreviewTakeId(detail.takeId.trim());
       }
       window.setTimeout(() => {
         if (detail.target === "scenePrompt" || detail.fieldId === "scenePrompt") {
@@ -501,10 +555,7 @@ export function TimelineEditorShell({
     setReloadKey((value) => value + 1);
   }, [refresh, refreshMaster]);
 
-  const anyGenerating = useMemo(
-    () => (liveMaster?.batchBlocks || []).some((batch) => batch.status === "Generating"),
-    [liveMaster?.batchBlocks],
-  );
+  const anyGenerating = useMemo(() => isSceneRenderActive(liveMaster), [liveMaster]);
   const takeSignature = useMemo(
     () =>
       (liveMaster?.batchBlocks || [])
@@ -529,10 +580,14 @@ export function TimelineEditorShell({
 
   useEffect(() => {
     if (wasGeneratingRef.current && !anyGenerating) {
+      // Progress / Dialogue QC stay in Preview Monitor — no upper-left notice.
       void afterMutation();
     }
     wasGeneratingRef.current = anyGenerating;
-  }, [anyGenerating, afterMutation]);
+  }, [anyGenerating, afterMutation, liveMaster]);
+
+  // Multi-batch progress primary surface is Preview Monitor (LivePreviewMonitor).
+  // Do not mirror sceneRenderStatus into actionNotice / upper-left chrome.
 
   useEffect(() => {
     if (takeSignatureRef.current === takeSignature) return;
@@ -541,18 +596,18 @@ export function TimelineEditorShell({
     setReloadKey((value) => value + 1);
   }, [takeSignature]);
 
-  const timelineCancelSupported = useMemo(() => {
-    const generating = (liveMaster?.batchBlocks || []).some((b) => b.status === "Generating");
-    if (!generating) return false;
-    return Boolean(selectedGenerator?.supportsQueuedCancel || selectedGenerator?.supportsRunningCancel);
-  }, [liveMaster?.batchBlocks, selectedGenerator?.supportsQueuedCancel, selectedGenerator?.supportsRunningCancel]);
+  const timelineCancelSupported = true;
 
   const handleTimelineCancelRender = useCallback(() => {
-    if (!timelineCancelSupported) return;
+    setGenerationStandby(false);
+    if (!selected?.id) return;
     void api
       .directorTimelineCancel(project.id, selected.id, { action: "cancel_active_local_job" })
-      .then(afterMutation);
-  }, [afterMutation, project.id, selected.id, timelineCancelSupported]);
+      .then(afterMutation)
+      .catch((error: unknown) => {
+        setActionNotice(error instanceof Error && error.message ? error.message : "Cancel failed.");
+      });
+  }, [afterMutation, project.id, selected?.id]);
 
   const runGenerateScene = useCallback(async () => {
     if (!selected || generateBusy) return;
@@ -569,21 +624,31 @@ export function TimelineEditorShell({
       return;
     }
     setGenerateBusy(true);
+    setGenerationStandby(true);
     setActionNotice(null);
     try {
-      const result = await api.directorTimelineGenerateScene(project.id, selected.id, { scope: "full" });
+      const durationSeconds = Number(selected.duration_sec || 0) || undefined;
+      const result = await rematerializeThenGenerateScene({
+        projectId: project.id,
+        sceneId: selected.id,
+        generatorId: selectedGenerator?.id || liveMaster?.sceneGeneratorId || selected.engine,
+        durationSeconds,
+      });
       const err = timelineActionError(result);
       if (err) {
+        setGenerationStandby(false);
         setActionNotice(err);
         return;
       }
       if (timelineGenerateEmpty(result)) {
+        setGenerationStandby(false);
         setActionNotice(t("timeline:generateSceneNothingQueued"));
         return;
       }
       setActionNotice(t("timeline:generateSceneSubmitted"));
       await afterMutation();
     } catch (error) {
+      setGenerationStandby(false);
       setActionNotice(error instanceof Error && error.message ? error.message : t("timeline:generateSceneNotReady", { reason: "the request failed" }));
     } finally {
       setGenerateBusy(false);
@@ -639,21 +704,42 @@ export function TimelineEditorShell({
     sceneId: selected?.id,
     playheadSec,
     batchWindows,
+    videoClips: liveDirector?.videoClips,
     pausePlayback: pause,
     afterMutation,
   });
   openRetakeRef.current = videoRetake.open;
   retakeOpenRef.current = videoRetake.session.open;
 
-  const handleOpenRetake = useCallback(() => {
-    videoRetake.toggle();
-  }, [videoRetake]);
+  useEffect(() => {
+    const busy = videoRetake.session.busy;
+    if (busy && !retakeBusyPrev.current) setGenerationStandby(true);
+    if (!busy && retakeBusyPrev.current && !shouldShowSceneRenderStatus(liveMaster)) {
+      setGenerationStandby(false);
+    }
+    retakeBusyPrev.current = busy;
+  }, [videoRetake.session.busy, liveMaster]);
 
-  const handleAddBatch = useCallback(async () => {
-    if (!selected) return;
-    await addTimelineBatch(project.id, selected.id, master);
-    await afterMutation();
-  }, [afterMutation, master, project.id, selected]);
+  useEffect(() => {
+    if (generationStandby && shouldShowSceneRenderStatus(liveMaster)) {
+      setGenerationStandby(false);
+    }
+  }, [generationStandby, liveMaster]);
+
+  const handleOpenRetake = useCallback(() => {
+    if (videoRetake.session.open) {
+      videoRetake.toggle();
+      return;
+    }
+    const win = batchWindowAtTime(batchWindows, playheadSec);
+    const batch = (liveMaster?.batchBlocks || []).find((entry) => entry.id === win?.id);
+    const hasTake = batch ? hasGeneratedTakeForRetake(batch) : false;
+    if (!hasTake) {
+      videoRetake.openWithEmpty(retakeEmptyCopy(false, true));
+      return;
+    }
+    videoRetake.open();
+  }, [batchWindows, liveMaster?.batchBlocks, playheadSec, videoRetake]);
 
   const completedBatches = useMemo(() => completedApprovedBatches(liveMaster), [liveMaster]);
   const canStitch = Boolean(selected?.id) && completedBatches.length >= 2 && !stitchBusy;
@@ -685,23 +771,42 @@ export function TimelineEditorShell({
   // so the creator sees approved changes without a manual reload.
   useEffect(() => {
     const onProjectMutated = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectId?: string; toolId?: string }>).detail;
+      const detail = (event as CustomEvent<{ projectId?: string; toolId?: string; sceneId?: string }>).detail;
       if (!detail || detail.projectId !== project.id) return;
+      // BOT2_HYDRATE: switch to mutated scene when CD wrote a different active target, then refresh.
+      const mutatedSceneId = String(detail.sceneId || "").trim();
+      if (mutatedSceneId) {
+        directorCacheRef.current.delete(mutatedSceneId);
+        masterCacheRef.current.delete(mutatedSceneId);
+      }
+      if (mutatedSceneId && selected && mutatedSceneId !== selected.id) {
+        setSelectedScene(mutatedSceneId);
+      }
       void afterMutation();
     };
     window.addEventListener("adept:codirector-project-mutated", onProjectMutated);
     return () => window.removeEventListener("adept:codirector-project-mutated", onProjectMutated);
-  }, [project.id, afterMutation]);
+  }, [project.id, afterMutation, selected, setSelectedScene]);
 
   const persistBatchPrompts = useCallback(
     async (entries: TimelineHistoryEntry["batchPrompts"]) => {
       if (!selected) return;
       const currentMaster = masterRef.current;
+      const segKey = (segs: TimelinePromptSegment[] | undefined) =>
+        JSON.stringify(
+          (segs || []).map((seg) => ({
+            id: seg.id,
+            start: seg.start,
+            length: seg.length,
+            text: seg.text || "",
+            referenceBindingIds: seg.referenceBindingIds || [],
+            referenceNameBindings: (seg as { referenceNameBindings?: unknown }).referenceNameBindings || [],
+            legacyPromptSegmentId: (seg as { legacyPromptSegmentId?: string }).legacyPromptSegmentId || "",
+          })),
+        );
       for (const entry of entries) {
         const existing = currentMaster?.batchBlocks.find((batch) => batch.id === entry.batchId);
-        const beforeIds = (existing?.promptSegments || []).map((seg) => seg.id).join(",");
-        const afterIds = (entry.promptSegments || []).map((seg) => seg.id).join(",");
-        if (beforeIds === afterIds) continue;
+        if (segKey(existing?.promptSegments) === segKey(entry.promptSegments)) continue;
         await api.directorTimelinePatchBatch(project.id, selected.id, entry.batchId, {
           promptSegments: entry.promptSegments,
         });
@@ -724,11 +829,27 @@ export function TimelineEditorShell({
 
   const mutateTimeline = useCallback(
     async (
-      mutator: (timeline: DirectorTimeline) => DirectorTimeline,
+      mutator: (timeline: TimelineBoardView) => TimelineBoardView,
       opts?: { refresh?: boolean },
     ) => {
       if (!selected) return;
-      const current = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
+      const current =
+        directorTimelineRef.current ||
+        ({
+          media_mode: "image",
+          duration_sec: selected.duration_sec || 5,
+          imageClips: [],
+          videoClips: [],
+          video_reference_clips: [],
+          image_reference_clips: [],
+          cameraClips: [],
+          audioClips: [],
+          sfxClips: [],
+          promptSegments: [],
+          lipsync: { tracks: [] },
+          playhead: 0,
+          guidance_priority: "visual_first",
+        } as TimelineBoardView);
       const next = mutator(current);
       setUndoStack((stack) => [
         ...stack.slice(-19),
@@ -738,13 +859,143 @@ export function TimelineEditorShell({
       directorTimelineRef.current = next;
       directorCacheRef.current.set(selected.id, next);
       setDirectorTimeline(next);
-      await api.putDirector(project.id, selected.id, next);
+      // SINGLE-STORE: Timed Prompt SoT is SceneTimelineMaster. PUT /director is
+      // retired (410 Gone). Prompt edits persist via Master patchBatch only.
       const removed = [...promptIdsOf(current)].filter((id) => !promptIdsOf(next).has(id));
       if (removed.length && masterRef.current) {
         const patched = dropPromptIdsFromMaster(masterRef.current, removed);
         await persistBatchPrompts(
           patched.batchBlocks.map((batch) => ({ batchId: batch.id, promptSegments: batch.promptSegments || [] })),
         );
+      }
+      // Soft text/binding/geometry/add → Master batch.promptSegments (start-containment).
+      try {
+      if (masterRef.current) {
+        const { patchMasterPrompt, removableVisualClipIds, syncMasterClips } = await import(
+          "../../timelineMaster/masterTimelineMutate"
+        );
+        if (!removed.length) {
+          const masterSegs = flattenMasterPrompts(masterRef.current);
+          const viewSegs =
+            (next as { promptSegments?: Array<{ id: string; text?: string; start?: number; length?: number; reference_binding_ids?: string[] }> })
+              .promptSegments || [];
+          for (const view of viewSegs) {
+            const seg = masterSegs.find((s) => s.id === view.id || s.legacyPromptSegmentId === view.id);
+            const textChanged = !seg || view.text !== seg.text;
+            const geomChanged =
+              !seg ||
+              Number(view.start) !== Number(seg.start) ||
+              Number(view.length) !== Number(seg.length);
+            const bindChanged =
+              !seg ||
+              JSON.stringify(view.reference_binding_ids || []) !== JSON.stringify(seg.referenceBindingIds || []);
+            if (seg && !textChanged && !geomChanged && !bindChanged) continue;
+            await patchMasterPrompt(project.id, selected.id, masterRef.current, {
+              id: seg?.id || view.id,
+              start: Number(view.start) || 0,
+              length: Number(view.length) || 0,
+              text: view.text || "",
+              referenceBindingIds: view.reference_binding_ids || seg?.referenceBindingIds || [],
+            });
+          }
+        }
+        // SINGLE-STORE clip sync: view clip arrays are Master projections, so
+        // ids present before but absent now are creator removals — delete them
+        // from Master (managed takes / composition pieces are guarded), then
+        // upsert the survivors. Removals + upserts compose atomically per batch.
+        const removedVisual = removableVisualClipIds(masterRef.current, [
+          ...(current.imageClips || [])
+            .filter((c) => !(next.imageClips || []).some((n) => n.id === c.id))
+            .map((c) => c.id),
+          ...(current.videoClips || [])
+            .filter((c) => !(next.videoClips || []).some((n) => n.id === c.id))
+            .map((c) => c.id),
+        ]);
+        const removedAudio = new Set(
+          (current.audioClips || [])
+            .filter((c) => !(next.audioClips || []).some((n) => n.id === c.id))
+            .map((c) => c.id),
+        );
+        const removedSfx = new Set(
+          (current.sfxClips || [])
+            .filter((c) => !(next.sfxClips || []).some((n) => n.id === c.id))
+            .map((c) => c.id),
+        );
+        const clipAdds: Array<{
+          id?: string;
+          kind: "image" | "video";
+          start: number;
+          length: number;
+          label: string;
+          assetId: string | null;
+          role?: string | null;
+        }> = [];
+        for (const c of next.imageClips || []) {
+          clipAdds.push({
+            id: c.id,
+            kind: "image",
+            start: Number(c.start) || 0,
+            length: Number(c.length) || 0,
+            label: c.label || "Image",
+            assetId: c.asset_id ?? null,
+            role: c.role,
+          });
+        }
+        for (const c of next.videoClips || []) {
+          clipAdds.push({
+            id: c.id,
+            kind: "video",
+            start: Number(c.start) || 0,
+            length: Number(c.length) || 0,
+            label: c.label || "Video",
+            assetId: c.asset_id ?? null,
+          });
+        }
+        if (clipAdds.length || removedVisual.size) {
+          await syncMasterClips(project.id, selected.id, masterRef.current, {
+            attr: "visualClips",
+            removeIds: removedVisual,
+            upserts: clipAdds,
+          });
+        }
+        if ((next.audioClips || []).length || removedAudio.size) {
+          await syncMasterClips(project.id, selected.id, masterRef.current, {
+            attr: "audioClips",
+            removeIds: removedAudio,
+            upserts: (next.audioClips || []).map((c) => ({
+              id: c.id,
+              kind: "audio" as const,
+              start: Number(c.start) || 0,
+              length: Number(c.length) || 0,
+              label: c.label || "Audio",
+              assetId: c.asset_id ?? null,
+              volume: Number(c.volume ?? 1),
+              metadata: audioClipMetadata(c),
+            })),
+          });
+        }
+        if ((next.sfxClips || []).length || removedSfx.size) {
+          await syncMasterClips(project.id, selected.id, masterRef.current, {
+            attr: "sfxClips",
+            removeIds: removedSfx,
+            upserts: (next.sfxClips || []).map((c) => ({
+              id: c.id,
+              kind: "sfx" as const,
+              start: Number(c.start) || 0,
+              length: Number(c.length) || 0,
+              label: c.label || "SFX",
+              assetId: c.asset_id ?? null,
+              volume: Number(c.volume ?? 1),
+              metadata: audioClipMetadata(c),
+            })),
+          });
+        }
+      }
+      } catch (err) {
+        directorTimelineRef.current = current;
+        directorCacheRef.current.set(selected.id, current);
+        setDirectorTimeline(current);
+        throw err;
       }
       syncPromptTombstones(current, next);
       // Soft text edits must not remount the Inspector (preserves focus/cursor).
@@ -759,6 +1010,84 @@ export function TimelineEditorShell({
     return () => bindShellTimelineMutate(null);
   }, [mutateTimeline]);
 
+  const openAudioClipModal = useCallback(
+    (request: { kind: AudioClipModalKind; clipId: string | null; start: number }) => {
+      pendingAudioFileRef.current = null;
+      setAudioModalError(null);
+      const existing = request.clipId
+        ? readSceneAudioClip(masterRef.current, request.kind, request.clipId)
+        : null;
+      setAudioDraft(existing ?? blankAudioClipDraft(request.kind, request.start));
+    },
+    [],
+  );
+
+  const chooseAudioFile = useCallback(async (file: File) => {
+    pendingAudioFileRef.current = file;
+    const duration = await readAudioFileDuration(file);
+    setAudioDraft((current) => (current ? applySelectedAudioFile(current, file.name, duration) : current));
+    setAudioModalError(
+      duration == null ? "Adept could not read this sound's length. Type the length, then press OK." : null,
+    );
+  }, []);
+
+  const commitAudioClip = useCallback(async () => {
+    if (!audioDraft || !selected) return;
+    const kind = audioDraft.kind;
+    const length = roundTimelineSec(audioDraft.length);
+    if (!(length > 0)) {
+      setAudioModalError("Choose a sound file so Adept can set the length.");
+      return;
+    }
+    const start = roundTimelineSec(Math.max(0, audioDraft.start));
+    const lane = kind === "audio" ? directorTimelineRef.current?.audioClips || [] : directorTimelineRef.current?.sfxClips || [];
+    const id = audioDraft.id || Math.random().toString(36).slice(2, 10);
+    if (findSameTrackIntersection(lane, { id, start, length })) {
+      setAudioModalError("That spot on the track is already filled.");
+      return;
+    }
+    setAudioModalBusy(true);
+    setAudioModalError(null);
+    try {
+      let assetId = audioDraft.assetId;
+      const file = pendingAudioFileRef.current;
+      if (file) {
+        const uploaded = await api.uploadAsset(project.id, file, audioDraft.title || audioDraft.label || "Audio", "audio");
+        assetId = uploaded.id;
+      }
+      if (!assetId) {
+        setAudioModalError("Choose a sound file.");
+        return;
+      }
+      const row = {
+        id,
+        start,
+        length,
+        label: audioDraft.label || audioDraft.title || (kind === "sfx" ? "SFX" : "Audio"),
+        title: audioDraft.title,
+        description: audioDraft.description,
+        asset_id: assetId,
+        volume: Math.max(0, Math.min(2, Number(audioDraft.volume) || 0)),
+        metadata: audioClipMetadata(audioDraft),
+      };
+      await mutateTimeline((timeline) => {
+        const key = kind === "audio" ? "audioClips" : "sfxClips";
+        const clips = timeline[key] || [];
+        const nextClips = clips.some((clip) => clip.id === id)
+          ? clips.map((clip) => (clip.id === id ? { ...clip, ...row } : clip))
+          : [...clips, row];
+        return { ...timeline, [key]: nextClips };
+      });
+      pendingAudioFileRef.current = null;
+      setAudioDraft(null);
+      setSelection({ kind, id });
+    } catch (err) {
+      setAudioModalError(err instanceof Error ? err.message : "Could not place that sound.");
+    } finally {
+      setAudioModalBusy(false);
+    }
+  }, [audioDraft, mutateTimeline, project.id, selected, setSelection]);
+
   useEffect(() => {
     bindShellTimelineSnapshot(liveDirector);
     return () => bindShellTimelineSnapshot(null);
@@ -769,7 +1098,23 @@ export function TimelineEditorShell({
       if (!selected) return;
       if (direction === "undo" && undoStack.length === 0) return;
       if (direction === "redo" && redoStack.length === 0) return;
-      const currentTimeline = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
+      const currentTimeline =
+        directorTimelineRef.current ||
+        ({
+          media_mode: "image",
+          duration_sec: selected.duration_sec || 5,
+          imageClips: [],
+          videoClips: [],
+          video_reference_clips: [],
+          image_reference_clips: [],
+          cameraClips: [],
+          audioClips: [],
+          sfxClips: [],
+          promptSegments: [],
+          lipsync: { tracks: [] },
+          playhead: 0,
+          guidance_priority: "visual_first",
+        } as TimelineBoardView);
       const currentEntry: TimelineHistoryEntry = {
         timeline: currentTimeline,
         batchPrompts: snapshotBatchPrompts(masterRef.current),
@@ -787,7 +1132,7 @@ export function TimelineEditorShell({
       directorTimelineRef.current = next.timeline;
       directorCacheRef.current.set(selected.id, next.timeline);
       setDirectorTimeline(next.timeline);
-      await api.putDirector(project.id, selected.id, next.timeline);
+      // SINGLE-STORE: undo/redo restores Master batch prompts only. PUT /director retired.
       await persistBatchPrompts(next.batchPrompts);
       syncPromptTombstones(currentTimeline, next.timeline);
       await afterMutation();
@@ -797,16 +1142,18 @@ export function TimelineEditorShell({
       // for legitimate state changes; no stale Inspector after undo/redo).
       const s = selection;
       const restored = next.timeline;
-      if (s && s.kind !== "scene" && s.kind !== null && s.id) {
+      if (s && s.kind === "camera") {
+        /* Phase 0: never restore camera as active creator selection */
+        setSelection({ kind: "scene", id: selected.id });
+      } else if (s && s.kind !== "scene" && s.kind !== null && s.id) {
         const exists =
-          (restored.prompt_segments || []).some((c) => c.id === s.id) ||
-          (restored.image_clips || []).some((c) => c.id === s.id) ||
-          (restored.video_clips || []).some((c) => c.id === s.id) ||
+          (restored.promptSegments || []).some((c) => c.id === s.id) ||
+          (restored.imageClips || []).some((c) => c.id === s.id) ||
+          (restored.videoClips || []).some((c) => c.id === s.id) ||
           (restored.video_reference_clips || []).some((c) => c.id === s.id) ||
           (restored.image_reference_clips || []).some((c) => c.id === s.id) ||
-          (restored.audio_clips || []).some((c) => c.id === s.id) ||
-          (restored.sfx_clips || []).some((c) => c.id === s.id) ||
-          (restored.camera_clips || []).some((c) => c.id === s.id) ||
+          (restored.audioClips || []).some((c) => c.id === s.id) ||
+          (restored.sfxClips || []).some((c) => c.id === s.id) ||
           normalizeLipSyncTracks(restored.lipsync?.tracks).some((t) =>
             t.id === s.id || (t.clips || []).some((c) => c.id === s.id),
           );
@@ -818,45 +1165,27 @@ export function TimelineEditorShell({
 
   const deleteSelection = useCallback(async () => {
     if (!selected || !selection.kind || !selection.id) return;
+    const selectionId: string = selection.id;
     if (selection.kind === "scene") return;
 
     if (selection.kind === "batch") {
-      const batch = master?.batchBlocks.find((b) => b.id === selection.id);
-      if (!batch) return;
-      if (batchHasContent(batch)) {
-        const ok = window.confirm(t("timeline:removeBatch", { name: batch.label }));
-        if (!ok) return;
-      }
-      await api.directorTimelineDeleteBatch(project.id, selected.id, batch.id);
-      setSelection({ kind: "scene", id: selected.id });
-      await afterMutation();
-      return;
-    }
-
-    if (selection.kind === "lipsyncTrack") {
-      const timeline = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
-      const tracks = normalizeLipSyncTracks(timeline.lipsync?.tracks);
-      const targetIndex = tracks.findIndex((track) => track.id === selection.id);
-      if (targetIndex < 1) return;
-      const target = tracks[targetIndex];
-      if (lipSyncTrackHasContent(target)) {
-        const ok = window.confirm(
-          `Remove “${target.label || `Lip Sync ${targetIndex + 1}`}”?\n\nIts clips and track settings will be removed from the Timeline.`,
-        );
-        if (!ok) return;
-      }
-      await mutateTimeline((current) => ({
-        ...current,
-        lipsync: {
-          ...current.lipsync,
-          tracks: normalizeLipSyncTracks(current.lipsync?.tracks).filter((track) => track.id !== selection.id),
-        },
-      }));
+      // P3: creator Batch track removed — execution windows are CD+Gen owned (not deletable here).
       setSelection({ kind: "scene", id: selected.id });
       return;
     }
 
-    const kindMap: Record<string, "image" | "video" | "videoReference" | "imageReference" | "audio" | "sfx" | "prompt" | "camera" | "lipsyncClip"> = {
+    // Lip Sync track UI removed — ignore legacy lipsyncTrack selection deletes.
+    if (selection.kind === "lipsyncTrack" || selection.kind === "lipsync" || selection.kind === "lipsyncClip") {
+      return;
+    }
+
+    // Phase 0: CAMERA lane unmounted — do not delete retained cameraClips via shell chrome.
+    if (selection.kind === "camera") {
+      setSelection({ kind: "scene", id: selected.id });
+      return;
+    }
+
+    const kindMap: Record<string, "image" | "video" | "videoReference" | "imageReference" | "audio" | "sfx" | "prompt"> = {
       imageClip: "image",
       videoClip: "video",
       videoReferenceClip: "videoReference",
@@ -864,25 +1193,30 @@ export function TimelineEditorShell({
       audio: "audio",
       sfx: "sfx",
       promptSeg: "prompt",
-      camera: "camera",
-      lipsyncClip: "lipsyncClip",
     };
     const clipKind = kindMap[selection.kind];
     if (!clipKind) return;
 
-    const timeline = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
+    const timeline = directorTimelineRef.current;
+    if (!timeline) return;
     let confirmed = true;
     if (clipKind === "image") {
-      const clip = (timeline.image_clips || []).find((c) => c.id === selection.id);
+      const clip = (timeline.imageClips || []).find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
         confirmed = window.confirm(t("timeline:removeImage"));
       }
     } else if (clipKind === "video") {
-      const playableTakes = playableVisualClipsFromMaster(masterRef.current);
+      const playableTakes = playableVisualClipsFromMaster(masterRef.current, { takeId: previewTakeId });
+      const displayed = displayedVisualVideoClips(
+        timeline.videoClips,
+        playableTakes,
+        timeline.media_mode,
+        resolveSceneTake(masterRef.current, previewTakeId),
+      );
       const clip =
-        (timeline.video_clips || []).find((c) => c.id === selection.id) ||
-        playableTakes.find((c) => c.id === selection.id);
+        displayed.find((c) => c.id === selection.id) ||
+        (timeline.videoClips || []).find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
         confirmed = window.confirm(t("timeline:removeVideo"));
@@ -894,69 +1228,50 @@ export function TimelineEditorShell({
         confirmed = window.confirm(t("timeline:removeVideoReference"));
       }
     } else if (clipKind === "audio") {
-      const clip = (timeline.audio_clips || []).find((c) => c.id === selection.id);
+      const clip = (timeline.audioClips || []).find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
         confirmed = window.confirm(t("timeline:removeAudio"));
       }
     } else if (clipKind === "sfx") {
-      const clip = (timeline.sfx_clips || []).find((c) => c.id === selection.id);
+      const clip = (timeline.sfxClips || []).find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
         confirmed = window.confirm(t("timeline:removeSfx"));
       }
     } else if (clipKind === "prompt") {
-      const seg = (timeline.prompt_segments || []).find((c) => c.id === selection.id);
+      const seg = (timeline.promptSegments || []).find((c) => c.id === selection.id);
       if (!seg) return;
       if ((seg.text || "").trim()) {
         confirmed = window.confirm(t("timeline:removeInstruction"));
       }
-    } else if (clipKind === "camera") {
-      confirmed = window.confirm(t("timeline:removeCamera"));
-    } else if (clipKind === "lipsyncClip") {
-      const track = normalizeLipSyncTracks(timeline.lipsync?.tracks).find(
-        (item) => item.id === selection.trackId || (item.clips || []).some((clip) => clip.id === selection.id),
-      );
-      const clip = track?.clips?.find((item) => item.id === selection.id);
-      if (!track || !clip) return;
-      confirmed = window.confirm(t("timeline:removeLipSync"));
     }
+
     if (!confirmed) return;
 
     await mutateTimeline((current) => {
       const next = { ...current };
-      if (clipKind === "image") next.image_clips = (current.image_clips || []).filter((c) => c.id !== selection.id);
+      if (clipKind === "image") next.imageClips = (current.imageClips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "video") {
-        const playableTakes = playableVisualClipsFromMaster(masterRef.current);
-        const source =
-          (current.video_clips || []).length > 0 ? current.video_clips : playableTakes;
-        next.video_clips = source.filter((c) => c.id !== selection.id);
-        next.media_mode = "video";
+        const playableTakes = playableVisualClipsFromMaster(masterRef.current, { takeId: previewTakeId });
+        const detached = removePlacedVisualClip({
+          clipId: selectionId,
+          displayedClips: displayedVisualVideoClips(
+            current.videoClips,
+            playableTakes,
+            current.media_mode,
+            resolveSceneTake(masterRef.current, previewTakeId),
+          ),
+        });
+        next.videoClips = detached.video_clips as TimelineBoardView["videoClips"];
+        next.media_mode = detached.media_mode;
       }
       if (clipKind === "videoReference") next.video_reference_clips = (current.video_reference_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "imageReference") next.image_reference_clips = (current.image_reference_clips || []).filter((c) => c.id !== selection.id);
-      if (clipKind === "audio") next.audio_clips = (current.audio_clips || []).filter((c) => c.id !== selection.id);
-      if (clipKind === "sfx") next.sfx_clips = (current.sfx_clips || []).filter((c) => c.id !== selection.id);
-      if (clipKind === "prompt") next.prompt_segments = (current.prompt_segments || []).filter((c) => c.id !== selection.id);
-      if (clipKind === "camera") next.camera_clips = (current.camera_clips || []).filter((c) => c.id !== selection.id);
-      if (clipKind === "lipsyncClip") {
-        next.lipsync = {
-          ...current.lipsync,
-          tracks: normalizeLipSyncTracks(current.lipsync?.tracks).map((track) => {
-            const clips = (track.clips || []).filter((clip) => clip.id !== selection.id);
-            const firstAudio = clips.find((clip) => clip.audio_asset_id);
-            const firstCharacterId = clips.find((clip) => clip.character_id);
-            const firstCharacterName = clips.find((clip) => clip.character_name);
-            return {
-              ...track,
-              clips,
-              audio_asset_id: firstAudio?.audio_asset_id || track.audio_asset_id || null,
-              character_id: firstCharacterId?.character_id || track.character_id || null,
-              character_name: firstCharacterName?.character_name || track.character_name || null,
-            };
-          }),
-        };
-      }
+      if (clipKind === "audio") next.audioClips = (current.audioClips || []).filter((c) => c.id !== selection.id);
+      if (clipKind === "sfx") next.sfxClips = (current.sfxClips || []).filter((c) => c.id !== selection.id);
+      if (clipKind === "prompt") next.promptSegments = (current.promptSegments || []).filter((c) => c.id !== selection.id);
+      /* Phase 0: camera delete path removed — early-return above */
       return next;
     });
     setSelection({ kind: "scene", id: selected.id });
@@ -970,14 +1285,14 @@ export function TimelineEditorShell({
         if (!item) return items;
         return [...items, { ...item, id: Math.random().toString(36).slice(2, 10), start: item.start + 0.25 }];
       };
-      if (selection.kind === "imageClip") return { ...current, image_clips: dup(current.image_clips || []) };
-      if (selection.kind === "videoClip") return { ...current, video_clips: dup(current.video_clips || []) };
+      if (selection.kind === "imageClip") return { ...current, imageClips: dup(current.imageClips || []) };
+      if (selection.kind === "videoClip") return { ...current, videoClips: dup(current.videoClips || []) };
       if (selection.kind === "videoReferenceClip") return { ...current, video_reference_clips: dup(current.video_reference_clips || []) };
       if (selection.kind === "imageReferenceClip") return { ...current, image_reference_clips: dup(current.image_reference_clips || []) };
-      if (selection.kind === "promptSeg") return { ...current, prompt_segments: dup(current.prompt_segments || []) };
-      if (selection.kind === "audio") return { ...current, audio_clips: dup(current.audio_clips || []) };
-      if (selection.kind === "sfx") return { ...current, sfx_clips: dup(current.sfx_clips || []) };
-      if (selection.kind === "camera") return { ...current, camera_clips: dup(current.camera_clips || []) };
+      if (selection.kind === "promptSeg") return { ...current, promptSegments: dup(current.promptSegments || []) };
+      if (selection.kind === "audio") return { ...current, audioClips: dup(current.audioClips || []) };
+      if (selection.kind === "sfx") return { ...current, sfxClips: dup(current.sfxClips || []) };
+      if (selection.kind === "camera") return current; /* Phase 0: no camera duplicate */
       return current;
     });
   }, [mutateTimeline, selected, selection.id, selection.kind]);
@@ -1073,30 +1388,103 @@ export function TimelineEditorShell({
   const handleAddAssetToTimeline = useCallback(
     async (asset: Asset) => {
       if (!selected) return;
-      const timeline = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
+      const timeline = directorTimelineRef.current || ({
+        media_mode: "image",
+        duration_sec: selected.duration_sec || 5,
+        imageClips: [],
+        videoClips: [],
+        video_reference_clips: [],
+        image_reference_clips: [],
+        cameraClips: [],
+        audioClips: [],
+        sfxClips: [],
+        promptSegments: [],
+        lipsync: { tracks: [] },
+        playhead: 0,
+        guidance_priority: "visual_first",
+      } as TimelineBoardView);
       const duration = timeline.duration_sec || selected.duration_sec || 5;
       const id = Math.random().toString(36).slice(2, 10);
       let next = { ...timeline };
       if (asset.kind === "image") {
-        // Omni Wave 3A Law 2: Library image → References only (mediaType=image).
-        // Do NOT write Visual image_clips guide takes. No silent generation.
-        await api.sceneReferences.attach(project.id, {
-          asset_id: asset.id,
-          scope_type: "project",
-          scope_id: project.id,
-          reference_type: "image",
-          media_kind: "image",
-          alias: (asset.tag || asset.filename || "Image").replace(/\s+/g, ""),
-          usage_modes: ["appearance"],
-          reference_roles: ["image"],
+        // Image-Frame: Mark In/Out set → place A|imgclip_|B on Visual via Generation API.
+        const marks = resolveRetakeMarks(
+          videoRetake.session.rangeStart,
+          videoRetake.session.rangeEnd,
+        );
+        if (marks.ok && selected?.id) {
+          const bounded = boundRetakeToBatch(batchWindows, marks.start, marks.end);
+          const placementId =
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID().replace(/-/g, "").slice(0, 12)
+              : Math.random().toString(36).slice(2, 14);
+          const placed = await api.placeVisualImageRange(project.id, selected.id, {
+            markIn: marks.start,
+            markOut: marks.end,
+            imageAssetId: asset.id,
+            placementId,
+            batchId: bounded.ok ? bounded.batchId : undefined,
+            label: asset.tag || asset.filename || "Image frame",
+          });
+          if (placed && placed.ok === false) {
+            window.alert(String(placed.message || placed.error || "Could not place image on Visual."));
+            return;
+          }
+          await afterMutation();
+          return;
+        }
+        const playableTakes = playableVisualClipsFromMaster(masterRef.current, { takeId: previewTakeId });
+        const plan = planLibraryImageClick({
+          marksOk: false,
+          videoClips: [...(timeline.videoClips || []), ...(timeline.imageClips || [])],
+          playableTakes,
+          durationSec: duration,
+          asset,
         });
-        await afterMutation();
+        if (plan.action === "occupied-safe") {
+          // Non-empty Visual: do not auto-add. Keep references-only + clear UX.
+          {
+            const identity = timelineLibraryIdentity(asset, { relatedAssets: project.assets });
+            const referenceType = inferSemanticReferenceType({
+              tag: asset.tag,
+              filename: asset.filename,
+              alias: identity.title,
+              mediaKind: "image",
+            });
+            const mediaKind = mediaKindForReferenceType(referenceType, asset.kind);
+            const alias =
+              sanitizeAlias(identity.title) ||
+              sanitizeAlias(asset.tag || asset.filename || referenceType) ||
+              "Image";
+            await api.sceneReferences.attach(project.id, {
+              asset_id: asset.id,
+              scope_type: "project",
+              scope_id: project.id,
+              reference_type: referenceType,
+              media_kind: mediaKind,
+              alias,
+              usage_modes: mediaKind === "video" ? ["motion"] : ["appearance"],
+              reference_roles: [referenceType],
+            });
+          }
+          setActionNotice(plan.notice);
+          await afterMutation();
+          return;
+        }
+        if (plan.action === "add-full-span") {
+          await mutateTimeline((current) => {
+            const images = current.imageClips || [];
+            const nextImages = images.length === 0 ? [plan.clip] : [...images, plan.clip];
+            return { ...current, imageClips: nextImages };
+          });
+          return;
+        }
         return;
       } else if (asset.kind === "video") {
         next = {
           ...next,
           media_mode: "video",
-          video_clips: [
+          videoClips: [
             {
               id,
               start: 0,
@@ -1112,61 +1500,110 @@ export function TimelineEditorShell({
       } else if (asset.kind === "audio") {
         next = {
           ...next,
-          audio_clips: [...(timeline.audio_clips || []), { id, start: 0, length: duration, label: asset.tag || "Audio", asset_id: asset.id, volume: 1 }],
+          audioClips: [...(timeline.audioClips || []), { id, start: 0, length: duration, label: asset.tag || "Audio", asset_id: asset.id, volume: 1 }],
         };
       }
-      await api.putDirector(project.id, selected.id, next);
+      if (masterRef.current) {
+        const { patchMasterClips } = await import("../../timelineMaster/masterTimelineMutate");
+        if (next.videoClips !== timeline.videoClips) {
+          await patchMasterClips(
+            project.id,
+            selected.id,
+            masterRef.current,
+            (next.videoClips || []).map((c) => ({
+              id: c.id,
+              kind: "video" as const,
+              assetId: (c as { asset_id?: string }).asset_id ?? null,
+              start: Number(c.start) || 0,
+              length: Number(c.length) || 0,
+              label: c.label || "Video clip",
+            })),
+            "visualClips",
+          );
+        }
+        if (next.audioClips !== timeline.audioClips) {
+          await patchMasterClips(
+            project.id,
+            selected.id,
+            masterRef.current,
+            (next.audioClips || []).map((c) => ({
+              id: c.id,
+              kind: "audio" as const,
+              assetId: (c as { asset_id?: string }).asset_id ?? null,
+              start: Number(c.start) || 0,
+              length: Number(c.length) || 0,
+              label: c.label || "Audio clip",
+            })),
+            "audioClips",
+          );
+        }
+      }
       await afterMutation();
     },
-    [afterMutation, project.id, selected],
+    [afterMutation, batchWindows, mutateTimeline, project.id, selected, videoRetake.session.rangeEnd, videoRetake.session.rangeStart],
   );
 
   const handleAddAssetAsReference = useCallback(
     async (asset: Asset) => {
       if (!selected) return;
       if (asset.kind === "audio") return;
-      const mediaKind = asset.kind === "video" ? "video" : asset.kind === "image" ? "image" : null;
-      if (!mediaKind) return;
+      const assetMediaKind = asset.kind === "video" ? "video" : asset.kind === "image" ? "image" : null;
+      if (!assetMediaKind) return;
+      const identity = timelineLibraryIdentity(asset, { relatedAssets: project.assets });
+      const referenceType = inferSemanticReferenceType({
+        tag: asset.tag,
+        filename: asset.filename,
+        alias: identity.title,
+        mediaKind: assetMediaKind,
+      });
+      const mediaKind = mediaKindForReferenceType(referenceType, asset.kind);
+      const alias =
+        sanitizeAlias(identity.title) ||
+        sanitizeAlias(asset.tag || asset.filename || referenceType) ||
+        mediaKind;
       await api.sceneReferences.attach(project.id, {
         asset_id: asset.id,
         scope_type: "project",
         scope_id: project.id,
-        reference_type: mediaKind,
+        reference_type: referenceType,
         media_kind: mediaKind,
-        alias: (asset.tag || asset.filename || mediaKind).replace(/\s+/g, ""),
+        alias,
         usage_modes: mediaKind === "video" ? ["motion"] : ["appearance"],
-        reference_roles: [mediaKind],
+        reference_roles: [referenceType],
       });
       await afterMutation();
     },
-    [afterMutation, project.id, selected],
+    [afterMutation, project.assets, project.id, selected],
   );
 
   const handleAddFromProjectLibrary = useCallback(
     (assetIds: string[]) => {
-      if (!assetIds.length) return;
-      void mutateTimeline((current) => {
-        const already = new Set(current.library_asset_ids || []);
-        const nextIds = [...(current.library_asset_ids || [])];
+      if (!assetIds.length || !selected) return;
+      void (async () => {
+        const already = new Set(directorTimelineRef.current?.library_asset_ids || []);
+        const nextIds = [...(directorTimelineRef.current?.library_asset_ids || [])];
         for (const id of assetIds) {
           if (!already.has(id)) nextIds.push(id);
         }
-        return { ...current, library_asset_ids: nextIds };
-      });
+        await api.directorTimelineSetLibraryAssets(project.id, selected.id, nextIds);
+        await mutateTimeline((current) => ({ ...current, library_asset_ids: nextIds }));
+      })();
     },
-    [mutateTimeline],
+    [mutateTimeline, project.id, selected],
   );
 
   const handleRemoveFromLibrary = useCallback(
     (asset: { id: string }) => {
+      if (!selected) return;
       setLibraryPreviewId((current) => (current === asset.id ? null : current));
-      void mutateTimeline((current) => {
-        const nextIds = (current.library_asset_ids || []).filter((id) => id !== asset.id);
-        if (nextIds.length === (current.library_asset_ids || []).length) return current;
-        return { ...current, library_asset_ids: nextIds };
-      });
+      void (async () => {
+        const nextIds = (directorTimelineRef.current?.library_asset_ids || []).filter((id) => id !== asset.id);
+        if (nextIds.length === (directorTimelineRef.current?.library_asset_ids || []).length) return;
+        await api.directorTimelineSetLibraryAssets(project.id, selected.id, nextIds);
+        await mutateTimeline((current) => ({ ...current, library_asset_ids: nextIds }));
+      })();
     },
-    [mutateTimeline],
+    [mutateTimeline, project.id, selected],
   );
 
   if (!selected) {
@@ -1225,6 +1662,20 @@ export function TimelineEditorShell({
     requestTimelineFocus({ target: "viewer", layoutReset: true });
   };
 
+  const bannerSceneMeta = [
+    creatorGeneratorLine(
+      resolveGeneratorOption(
+        generatorOptions,
+        liveMaster?.sceneGeneratorId,
+        liveMaster?.batchBlocks[0]?.generatorId,
+        selected.engine,
+      ) || { label: selected.engine || "Engine", executionType: "local" },
+    ),
+    t("timeline:durationSec", { seconds: formatDurationSeconds(sceneEndSec).replace(/s$/, "") }),
+    master?.mode === "video_finishing" ? t("timeline:videoFinishing") : t("timeline:imagePlanning"),
+  ].join(" · ");
+  const previewTakeStatusLabel = formatPreviewTakeStatusLabel(liveMaster, previewTakeId);
+
   return (
     <div
       ref={workspaceFs.containerRef}
@@ -1241,23 +1692,8 @@ export function TimelineEditorShell({
     >
       <div ref={audioHostRef} data-testid="timeline-audio-playback" hidden />
       <WorkspaceFullscreenBanner visible={workspaceFs.showBanner} />
-      <TimelineGeneratorBanner />
+      <TimelineGeneratorBanner sceneTitle={selected.name} sceneMeta={bannerSceneMeta} />
       <header className="timeline-v2__header" data-testid="timeline-scene-header">
-        <div className="timeline-v2__header-identity">
-          <h2 className="timeline-v2__header-title" data-testid="timeline-scene-header-title">{selected.name}</h2>
-          <p className="timeline-v2__header-meta" data-testid="timeline-scene-header-meta">
-            {creatorGeneratorLine(
-              resolveGeneratorOption(
-                generatorOptions,
-                liveMaster?.sceneGeneratorId,
-                liveMaster?.batchBlocks[0]?.generatorId,
-                selected.engine,
-              ) || { label: selected.engine || "Engine", executionType: "local" },
-            )}{" "}
-            · {t("timeline:durationSec", { seconds: formatDurationSeconds(sceneEndSec).replace(/s$/, "") })} ·{" "}
-            {master?.mode === "video_finishing" ? t("timeline:videoFinishing") : t("timeline:imagePlanning")}
-          </p>
-        </div>
         <div className="timeline-v2__header-actions">
           <div className="timeline-v2__header-viewer" data-testid="timeline-scene-header-viewer">
             <button
@@ -1316,17 +1752,6 @@ export function TimelineEditorShell({
               onClick={() => setHideOverlay((v) => !v)}
             >
               {t("timeline:guides")}
-            </button>
-            <button
-              type="button"
-              className={`timeline-v2__header-btn ${pauseUpdates ? "primary" : "ghost"}`}
-              data-testid="timeline-viewer-pause"
-              title={pauseUpdates ? t("timeline:resumeViewerTitle") : t("timeline:pauseViewerTitle")}
-              aria-label={pauseUpdates ? t("timeline:resumeViewerTitle") : t("timeline:pauseViewerTitle")}
-              aria-pressed={pauseUpdates}
-              onClick={() => setPauseUpdates((v) => !v)}
-            >
-              {pauseUpdates ? t("timeline:resumeViewer") : t("timeline:pauseViewer")}
             </button>
             <button
               type="button"
@@ -1398,11 +1823,11 @@ export function TimelineEditorShell({
             title={t("timeline:preflightTitle")}
             aria-label={t("timeline:preflightTitle")}
             data-testid="timeline-header-preflight"
-            onClick={() => timelinePreflight.recheckNow()}
+            onClick={() => void timelinePreflight.recheckNow()}
           >
             {timelinePreflight.status === "checking"
               ? t("timeline:preflightChecking")
-              : t("timeline:preflightRecheck")}
+              : t("timeline:preflight")}
           </button>
           <button
             type="button"
@@ -1449,12 +1874,32 @@ export function TimelineEditorShell({
             data-testid="timeline-header-resume"
             title={t("timeline:resumeTitle")}
             aria-label={t("timeline:resumeTitle")}
-            onClick={() => void api.directorTimelineCancel(project.id, selected.id, { action: "resume_incomplete_only" }).then(afterMutation)}
+            onClick={() => {
+              const incomplete = (liveMaster?.sceneTakes || []).find(
+                (take) => take.status === "incomplete" || take.status === "cancelled",
+              );
+              if (incomplete) {
+                void api.directorTimelineResumeSceneTake(project.id, selected.id, incomplete.id).then(afterMutation);
+                return;
+              }
+              void api
+                .directorTimelineCancel(project.id, selected.id, { action: "resume_incomplete_only" })
+                .then(afterMutation);
+            }}
           >
             {t("timeline:resume")}
           </button>
         </div>
-        {actionNotice ? (
+        {actionNotice &&
+        !(
+          actionNotice.startsWith("Render Batch") ||
+          actionNotice.startsWith("Scene Render Complete") ||
+          actionNotice.includes("batches complete") ||
+          actionNotice.includes("Dialogue QC") ||
+          actionNotice.includes("Scene Finished") ||
+          actionNotice.includes("Scene Not Finished") ||
+          actionNotice.includes("Repairing Batch")
+        ) ? (
           <p className="timeline-v2__action-notice" data-testid="timeline-action-notice" role="status">
             {actionNotice}
           </p>
@@ -1476,51 +1921,61 @@ export function TimelineEditorShell({
                   scene={selected}
                   timeline={liveDirector}
                   master={liveMaster}
+                  previewTakeId={previewTakeId}
                   selection={selection}
                   playheadSec={playheadSec}
                   onPlayheadChange={seek}
                   timelinePlaying={playing}
+                  onTogglePlay={toggle}
                   sceneEndSec={sceneEndSec}
                   libraryAsset={selectedAsset}
                   onClearLibraryAsset={() => setLibraryPreviewId(null)}
                   hideOverlay={hideOverlay}
                   onHideOverlayChange={setHideOverlay}
-                  pauseUpdates={pauseUpdates}
-                  onPauseUpdatesChange={setPauseUpdates}
                   inlineActions={false}
                   cancelRenderSupported={timelineCancelSupported}
                   onCancelRender={handleTimelineCancelRender}
-                  onAddBatch={() => void handleAddBatch()}
                   onOpenRetake={handleOpenRetake}
                   retakeActive={videoRetake.session.open}
                   retakeSession={videoRetake.session}
-                  retakeMediaRef={videoRetake.mediaRef}
                   onRetakeMarkIn={videoRetake.markIn}
                   onRetakeMarkOut={videoRetake.markOut}
-                  onRetakeTool={videoRetake.setTool}
-                  onRetakeBrushSize={videoRetake.setBrushSize}
                   onRetakePrompt={videoRetake.setPrompt}
-                  onRetakeClearMask={videoRetake.clearMask}
                   onRetakeRemoveBackground={() => void videoRetake.removeBackground()}
                   onRetakeCancel={videoRetake.close}
                   onRetakeSubmit={() => void videoRetake.submit()}
-                  onRetakeMaskChange={videoRetake.setHasMask}
-                  onDismissFailure={(jobId) =>
-                    void api.directorTimelineDismissFailure(project.id, selected.id, jobId).then(afterMutation)
-                  }
+                  onDismissFailure={(jobId) => {
+                    const current = masterRef.current;
+                    if (current && !(current.dismissedFailureJobIds || []).includes(jobId)) {
+                      const next = {
+                        ...current,
+                        dismissedFailureJobIds: [...(current.dismissedFailureJobIds || []), jobId],
+                      };
+                      masterCacheRef.current.set(selected.id, next);
+                      setMaster(next);
+                      setAppliedSceneId(selected.id);
+                    }
+                    void api
+                      .directorTimelineDismissFailure(project.id, selected.id, jobId)
+                      .then(afterMutation)
+                      .catch(() => undefined);
+                  }}
                   onApproved={afterMutation}
+                  onMasterMutated={afterMutation}
+                  generationStandby={generationStandby}
                 />
               </div>
             }
             timeline={
               <div className="timeline-v2__tracks">
-                <SceneStatusStrip projectId={project.id} />
+                <SceneStatusStrip previewStatusLabel={previewTakeStatusLabel} />
                 <TimelineToolbar
                   projectId={project.id}
                   scene={selected}
                   master={liveMaster}
                   onRefresh={afterMutation}
                   onActionError={(message) => setActionNotice(message)}
+                  onGenerationStandby={setGenerationStandby}
                   onPreflightRecheck={timelinePreflight.recheckNow}
                   mutateTimeline={mutateTimeline}
                   canUndo={undoStack.length > 0}
@@ -1541,6 +1996,7 @@ export function TimelineEditorShell({
                   onGoToSceneEnd={goToSceneEnd}
                   transportBounds={transportBounds}
                   transportSceneId={selected.id}
+                  onOpenAudioClip={openAudioClipModal}
                 />
                 <DirectorTracks
                   project={project}
@@ -1551,10 +2007,12 @@ export function TimelineEditorShell({
                   onPlayheadChange={seek}
                   reloadKey={reloadKey}
                   master={liveMaster}
+                  previewSceneTakeId={previewTakeId}
                   shellMode
                   mutateTimeline={mutateTimeline}
                   retakeMode={videoRetake.session.open}
                   retakeRange={videoRetake.highlight}
+                  onOpenAudioClip={openAudioClipModal}
                 />
               </div>
             }
@@ -1584,14 +2042,6 @@ export function TimelineEditorShell({
           className={`timeline-v2__drawer timeline-v2__drawer--left${workspaceLayout.leftDrawerOpen ? " timeline-v2__drawer--open" : " timeline-v2__drawer--closed"}`}
         >
           <div className="timeline-v2__drawer-body">
-            <VideoGeneratorDock
-              projectId={project.id}
-              scene={selected}
-              master={liveMaster}
-              timeline={liveDirector}
-              onRefresh={afterMutation}
-              mutateTimeline={mutateTimeline}
-            />
             <div className="timeline-v2__dock timeline-v2__dock--scenes">
               <Timeline
                 project={project}
@@ -1601,6 +2051,8 @@ export function TimelineEditorShell({
                   setSelection({ kind: "scene", id });
                 }}
                 onChange={() => void refresh()}
+                previewTakeId={previewTakeId}
+                selectedMaster={liveMaster}
               />
             </div>
             <div className="timeline-v2__dock timeline-v2__dock--library">
@@ -1732,11 +2184,17 @@ export function TimelineEditorShell({
                 project={project}
                 scene={selected}
                 master={liveMaster}
+                previewTakeId={previewTakeId}
+                onPreviewTake={setPreviewTakeId}
                 reloadKey={reloadKey}
                 preflightSummary={preflightSummary}
+                preflightStatus={timelinePreflight.status}
+                preflightFindings={timelinePreflight.findings}
+                onPreflightRecheck={timelinePreflight.recheckNow}
                 focusFinding={focusFinding}
                 onRefresh={afterMutation}
                 onActionError={(message) => setActionNotice(message)}
+                onGenerationStandby={setGenerationStandby}
                 mutateTimeline={mutateTimeline}
               />
             </div>
@@ -1798,6 +2256,22 @@ export function TimelineEditorShell({
           {workspaceLayout.rightDrawerOpen ? "›" : "‹"}
         </button>
       </div>
+      {audioDraft ? (
+        <AudioSfxClipModal
+          draft={audioDraft}
+          busy={audioModalBusy}
+          error={audioModalError}
+          onChange={setAudioDraft}
+          onFile={(file) => void chooseAudioFile(file)}
+          onCancel={() => {
+            if (audioModalBusy) return;
+            pendingAudioFileRef.current = null;
+            setAudioDraft(null);
+            setAudioModalError(null);
+          }}
+          onOk={() => void commitAudioClip()}
+        />
+      ) : null}
       {libraryPickerOpen ? (
         <AddFromProjectLibraryModal
           project={project}

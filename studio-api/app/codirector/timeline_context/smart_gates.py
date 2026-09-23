@@ -3,12 +3,11 @@ Service (SMART_PRODUCTION_GATES).
 
 Levels:
   EXPLORATION        — always allowed (storyboarding, drafts, exploration)
-  PRODUCTION_WARNING — final generation allowed but warned (partial readiness)
-  PRODUCTION_LOCK    — final generation blocked until readiness satisfied
+  PRODUCTION_WARNING — generation allowed; advisory quality gaps only
+  PRODUCTION_LOCK    — genuine technical impossibility only
 
-The gate level is derived from scene readiness + the action scope. Wiring
-into generate_scene blocks final generation on PRODUCTION_LOCK while keeping
-editing available (provider outage resilience).
+Location / References / Cast / Voice gaps are advisories (PARTIAL →
+PRODUCTION_WARNING / ALLOW_WITH_WARNING). They must not BLOCK generate.
 """
 
 from __future__ import annotations
@@ -76,7 +75,7 @@ def evaluate_smart_gate(
             "ok": True,
             "level": "PRODUCTION_LOCK",
             "decision": "BLOCK",
-            "reason": readiness.get("blockerSummary") or "Scene is not ready for final generation.",
+            "reason": readiness.get("blockerSummary") or "Generation is blocked by a technical failure.",
             "readiness": readiness,
             "package": pkg,
         }
@@ -86,7 +85,7 @@ def evaluate_smart_gate(
             "ok": True,
             "level": "PRODUCTION_WARNING",
             "decision": "ALLOW_WITH_WARNING",
-            "reason": readiness.get("blockerSummary") or "Scene is partially ready — proceed with caution.",
+            "reason": readiness.get("blockerSummary") or "Ready with advisories — generation remains available.",
             "readiness": readiness,
             "package": pkg,
         }

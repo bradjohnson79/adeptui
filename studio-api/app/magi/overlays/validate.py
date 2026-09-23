@@ -9,6 +9,7 @@ from .fonts import font_ids, resolve_font
 
 MAX_TEXT = 100
 MAX_VECTOR = 200
+MAX_IMAGE = 50
 MAX_TEXT_LEN = 5000
 MAX_GROUP_DEPTH = 8
 SHAPES = {
@@ -49,11 +50,11 @@ def validate_composition(comp: dict[str, Any], *, project_id: str) -> dict[str, 
         errors.append("overlays must be a list")
         return {"ok": False, "errors": errors}
     ids: set[str] = set()
-    text_n = vec_n = 0
+    text_n = vec_n = img_n = 0
     known = font_ids()
 
     def walk(els: list[Any], depth: int) -> None:
-        nonlocal text_n, vec_n
+        nonlocal text_n, vec_n, img_n
         if depth > MAX_GROUP_DEPTH:
             errors.append("Maximum nested group depth exceeded")
             return
@@ -96,6 +97,11 @@ def validate_composition(comp: dict[str, Any], *, project_id: str) -> dict[str, 
                     errors.append(f"Unsupported shape on {eid}")
                 if el.get("rawSvg") or el.get("svg"):
                     errors.append(f"Raw SVG forbidden on {eid}")
+            elif t == "image":
+                img_n += 1
+                asset_id = el.get("assetId")
+                if not asset_id or not isinstance(asset_id, str):
+                    errors.append(f"Image overlay missing assetId on {eid}")
             elif t == "group":
                 children = el.get("children") or []
                 if not isinstance(children, list):
@@ -104,6 +110,9 @@ def validate_composition(comp: dict[str, Any], *, project_id: str) -> dict[str, 
                     walk(children, depth + 1)
             else:
                 errors.append(f"Unknown overlay type on {eid}")
+            objects_track = el.get("objectsTrack")
+            if objects_track is not None and objects_track not in (1, 2):
+                errors.append(f"objectsTrack must be 1 or 2 on {eid}")
             for num_key, lo, hi in (
                 ("opacity", 0, 1),
                 ("rotation", -360, 360),
@@ -131,4 +140,6 @@ def validate_composition(comp: dict[str, Any], *, project_id: str) -> dict[str, 
         errors.append("Too many text elements")
     if vec_n > MAX_VECTOR:
         errors.append("Too many vector elements")
+    if img_n > MAX_IMAGE:
+        errors.append("Too many image elements")
     return {"ok": len(errors) == 0, "errors": errors}

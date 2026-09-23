@@ -3,7 +3,7 @@
  *
  * Per amendment #2, the ERS composite is assembled programmatically in code
  * (not image-generated). This component just displays the resulting asset by ID.
- * Buttons: Open Full Size, Regenerate, Open in Library, Use in Scene Creator.
+ * Buttons: Open Full Size, Regenerate, Open in Library, Use in Image Generator.
  */
 import { api } from "../../../api";
 
@@ -67,9 +67,9 @@ export function ErsResultDisplay({
           type="button"
           className="ui-btn ui-btn--primary"
           onClick={onUseInSceneCreator}
-          aria-label="Use ERS in Scene Creator"
+          aria-label="Use ERS in the Image Generator"
         >
-          Use in Scene Creator
+          Use in Image Generator
         </button>
       </div>
     </div>

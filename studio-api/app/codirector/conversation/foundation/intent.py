@@ -1,4 +1,4 @@
-"""Intent analysis with evidence spans — not labels alone."""
+"""Intent analysis with evidence spans â€” not labels alone."""
 
 from __future__ import annotations
 
@@ -9,21 +9,36 @@ from .schemas import IntentAnalysis, IntentType, InteractionPosture
 # Listening / explain-before-production patterns (semantic coverage, not Dreamweaver-specific).
 _EXPLAIN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bi will tell you\b", re.I), "I will tell you"),
-    (re.compile(r"\bi['’]m going to tell you\b|\bi am going to tell you\b", re.I), "I am going to tell you"),
+    (re.compile(r"\bi['â€™]m going to tell you\b|\bi am going to tell you\b", re.I), "I am going to tell you"),
     (re.compile(r"\bi want to (?:tell|explain|teach)\b", re.I), "I want to tell/explain/teach"),
     (re.compile(r"\blet me (?:give you|explain|tell|begin|walk you)\b", re.I), "Let me explain/tell"),
     (re.compile(r"\bbefore we (?:do anything|start|move|begin|plan|get into)\b", re.I), "before we start/move"),
     (re.compile(r"\bbefore (?:you|we) (?:start )?suggest", re.I), "before suggesting production"),
     (re.compile(r"\bbefore we move into production\b", re.I), "before we move into production"),
-    (re.compile(r"\bjust listen\b|\bplease just listen\b|\bkeep listening\b|\bi['’]?m not finished\b", re.I), "listen / not finished"),
-    (re.compile(r"\bdon['’]?t organize\b|\bdon['’]?t (?:start )?(?:planning|suggesting)\b", re.I), "don't organize/plan yet"),
+    (re.compile(r"\bjust listen\b|\bplease just listen\b|\bkeep listening\b|\bi['â€™]?m not finished\b", re.I), "listen / not finished"),
+    (re.compile(r"\bdon['â€™]?t organize\b|\bdon['â€™]?t (?:start )?(?:planning|suggesting)\b", re.I), "don't organize/plan yet"),
     (re.compile(r"\bwalk you through\b|\bgive you the background\b|\bexplain the story\b", re.I), "walk through / background / story"),
     (re.compile(r"\bfamiliar with (?:the )?story\b|\bunderstand the story\b|\bteach you about\b", re.I), "understand/teach story"),
     (re.compile(r"\bsound good\??\b|\bok(?:ay)?\??\s*$", re.I), "Sound good?"),
 ]
 
 _CORRECTION_RE = re.compile(
-    r"^(?:correction:|actually\b|instead\b|no[,.]?\s+that['’]?s wrong)",
+    r"^(?:correction:|actually\b|instead\b|no[,.]?\s+that['â€™]?s wrong)",
+    re.I,
+)
+# Final-closure mission 2026-09-19 (Blockers 1+2): exact scene-state
+# recall/summary requests. These must consult the conversation's established
+# active facts completely and invent nothing — never the generic
+# "Address the latest user message" plan.
+_RECALL_RE = re.compile(
+    r"\b(?:"
+    r"summarize\s+(?:the\s+)?(?:final\s+|current\s+|whole\s+|exact\s+)?scene"
+    r"|summarize\s+the\s+final\s+scene"
+    r"|exact(?:\s+final)?\s+(?:scene\s+)?state"
+    r"|who(?:'s| is| are)\s+(?:in|on)\s+(?:this|the)\s+(?:scene|shot|frame)\b"
+    r"|what\s+is\s+each\s+(?:person|character)\s+doing\b"
+    r"|recap\s+(?:the\s+)?(?:scene|final\s+scene|where\s+we\s+are)"
+    r")\b",
     re.I,
 )
 _NEXT_STEP_RE = re.compile(
@@ -35,25 +50,40 @@ _FEEDBACK_RE = re.compile(
     re.I,
 )
 _DISSATISFACTION_RE = re.compile(
-    r"\bthat (?:was|is) wrong\b|\byou (?:failed|ignored|didn['’]?t listen)\b|\bnot what i (?:asked|said)\b",
+    r"\bthat (?:was|is) wrong\b|\byou (?:failed|ignored|didn['â€™]?t listen)\b|\bnot what i (?:asked|said)\b",
     re.I,
 )
 _ACTION_RE = re.compile(
     r"\b(?:generate|render|create|run|execute|build)\b.+\b(?:scene|image|video|clip|shot)\b",
     re.I,
 )
+
+# Commitment / acceptance language -- short affirmations that authorize pending action.
+# These do NOT require a target noun because the target is inherited from context.
+# Intelligence mission 2026-09-19 (RC5): fixed the double-backslash alternatives
+# (raw-string `\s` bugs meant "render it/create it/build it" NEVER matched) and
+# added the natural follow-up imperatives creators actually use.
+_COMMITMENT_RE = re.compile(
+    r'\b(?:generate\s+that|do\s+that|do\s+it|make\s+that|make\s+it|go\s+ahead|go\s+with\s+that|'
+    r"that\s+works?|that's?\s+(?:good|great|perfect)|yes,?\s+(?:use|do|go|generate|make)|"
+    r"proceed|render\s+it|create\s+it|build\s+it|i\s+like\s+that|let'?s\s+see\s+it|"
+    r"set\s+(?:that|it|this)\s+up|prepare\s+(?:it|that|this)|use\s+(?:that|it|the\s+same)|"
+    r'use\s+(?:fal|kie|wavespeed|the\s+api))\b',
+    re.I,
+)
+
 # c2/D13: broaden action coverage to common creator imperatives that target a
-# concrete production object (scene/character/asset/voice/bible/canon/batch/…).
+# concrete production object (scene/character/asset/voice/bible/canon/batch/â€¦).
 # This catches "Add an image to Batch 3", "Change Barnes' voice", "Update the
 # Production Bible summary", "Remove the canon record", "Delete the clip", etc.
-# Explain questions ("How does … work?") are checked BEFORE this so they never
+# Explain questions ("How does â€¦ work?") are checked BEFORE this so they never
 # mutate.
 _ACTION_IMPERATIVE_RE = re.compile(
     r"\b(?:add|change|update|remove|delete|make|put|set|move|rename|replace|swap|drop|insert|split|merge|fix|adjust|swap)\b"
     r".+\b(?:scene|image|video|clip|shot|character|asset|plan|bible|canon|continuity|reference|voice|batch|step|summary|entry|record|tag|segment|panel|track|draft)\b",
     re.I,
 )
-# c2/D13: explain questions are informational — they must NOT mutate. Match
+# c2/D13: explain questions are informational â€” they must NOT mutate. Match
 # "How does Timeline Batch generation work?", "What is the Production Bible?",
 # "Explain how the Spatial Map works", "What does canon lock mean?".
 _EXPLAIN_QUESTION_RE = re.compile(
@@ -106,7 +136,7 @@ def analyze_intent(user_message: str) -> IntentAnalysis:
     )
     workflow_hold = bool(
         re.search(
-            r"before (?:we|you).*(?:production|planning|suggest)|don['’]?t organize|just listen|not finished",
+            r"before (?:we|you).*(?:production|planning|suggest)|don['â€™]?t organize|just listen|not finished",
             lowered,
         )
     )
@@ -123,6 +153,28 @@ def analyze_intent(user_message: str) -> IntentAnalysis:
             should_ask_question=False,
             should_use_tools=False,
             should_write_memory=True,
+        )
+
+    # Final-closure mission 2026-09-19 (Blockers 1+2): exact scene-state
+    # recall/summary. Must precede the generic explain/question branches so
+    # "Who is in this scene…?" never collapses to UNKNOWN. (The correction
+    # gate above stays first — frozen behavior.)
+    if _RECALL_RE.search(text):
+        return IntentAnalysis(
+            primary_intent=IntentType.RECALL_SCENE,
+            secondary_intents=[IntentType.INFORM],
+            required_postures=[InteractionPosture.REVIEW, InteractionPosture.ADVISE],
+            forbidden_postures=[InteractionPosture.EXECUTE, InteractionPosture.CREATE],
+            confidence=0.9,
+            user_goal_summary=(
+                "Recall the current scene exactly: enumerate every established "
+                "active fact (characters and actions, positions, props, setting/"
+                "background, audio, camera) and add nothing unstated."
+            ),
+            evidence_spans=evidence or [text[:120]],
+            should_ask_question=False,
+            should_use_tools=False,
+            should_write_memory=False,
         )
 
     if _DISSATISFACTION_RE.search(text):
@@ -199,6 +251,36 @@ def analyze_intent(user_message: str) -> IntentAnalysis:
             should_write_memory=False,
         )
 
+    from .visual_generation import is_executable_image_turn, is_prompt_only_request
+
+    if is_prompt_only_request(text):
+        return IntentAnalysis(
+            primary_intent=IntentType.PROMPT_AUTHORING,
+            secondary_intents=[IntentType.INFORM],
+            required_postures=[InteractionPosture.CREATE, InteractionPosture.ADVISE],
+            forbidden_postures=[InteractionPosture.EXECUTE, InteractionPosture.ASK],
+            confidence=0.88,
+            user_goal_summary="Write the requested prompt text — do not generate.",
+            evidence_spans=evidence or [text[:120]],
+            should_ask_question=False,
+            should_use_tools=False,
+            should_write_memory=False,
+        )
+
+    if is_executable_image_turn(text):
+        span = _span(text, _ACTION_RE, "create/generate image") or text[:120]
+        return IntentAnalysis(
+            primary_intent=IntentType.REQUEST_GENERATION,
+            required_postures=[InteractionPosture.EXECUTE],
+            forbidden_postures=[InteractionPosture.ASK],
+            confidence=0.9,
+            user_goal_summary="Generate the requested still image now.",
+            evidence_spans=evidence + ([span] if span not in evidence else []),
+            should_ask_question=False,
+            should_use_tools=True,
+            should_write_memory=False,
+        )
+
     if _ACTION_RE.search(text) or _ACTION_IMPERATIVE_RE.search(text):
         span = (
             _span(text, _ACTION_RE, "generate/render action")
@@ -270,6 +352,19 @@ def analyze_intent(user_message: str) -> IntentAnalysis:
             should_use_tools=False,
             should_write_memory=True,
         )
+    # --- Commitment / acceptance — authorize the pending action ---
+    if _COMMITMENT_RE.search(text):
+        return IntentAnalysis(
+            primary_intent=IntentType.REQUEST_ACTION,
+            secondary_intents=[IntentType.APPROVE],
+            evidence_spans=[text[:120]],
+            required_postures=[InteractionPosture.EXECUTE],
+            should_ask_question=False,
+            should_use_tools=True,
+            confidence=0.85,
+            user_goal_summary="Authorize pending action from conversation context.",
+        )
+
 
     return IntentAnalysis(
         primary_intent=IntentType.UNKNOWN,

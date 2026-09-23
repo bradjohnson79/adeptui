@@ -25,23 +25,9 @@ from .registry import DEFAULT_WORKFLOW_REGISTRY, WorkflowMetadata
 #: `settings.zimage_*`) have no catalogue entry, so their model requirement is reported as
 #: `unknown` instead of being silently treated as satisfied.
 WORKFLOW_MODEL_COMPONENTS: dict[str, tuple[str, ...]] = {
-    "ltx.scene": ("ltx_checkpoint",),
-    "ltx.simple_i2v": ("ltx_checkpoint",),
-    "ltx.ingredients_ic_lora": ("ltx_checkpoint", "ltx23_ic_lora_ingredients"),
-    # LTX 2.5 needs the distilled transformer, the Gemma 4 text encoder, and
-    # the video VAE together. Audio VAE is only needed when generate_audio=True,
-    # and the spatial upscaler is optional (4K), so they are not in `required`
-    # here — workflow readiness reports them as optional via the capability layer.
     "ltx_25.t2v": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),
     "ltx_25.i2v": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),
-    "ltx_25.flf2v": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),  # noqa: E501 — key preserved for compatibility; builder removed (FLF2V unsupported)
-    "wan.first_last_frame": ("wan_models",),
-    "wan.three_frame": ("wan_models",),
     "lipsync.latentsync": (),
-    "hunyuan15.t2v": ("hunyuan_video_15",),
-    "hunyuan15.i2v": ("hunyuan_video_15",),
-    "hunyuan13b.t2v": ("hunyuan_video_13b",),
-    "hunyuan13b.i2v": ("hunyuan_video_13b",),
     # Still-image production path uses catalogued Z-Image Turbo weights (not FLUX name-only).
     "image.txt2img": ("zimage_models",),
     "image.img2img_edit": ("zimage_models",),
@@ -83,6 +69,8 @@ UNKNOWN = "unknown"
 # hay86/ComfyUI_LatentSync registers D_LatentSyncNode; older packs used LatentSyncNode.
 _NODE_ALTERNATIVE_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"D_LatentSyncNode", "LatentSyncNode"}),
+    # LTX 2.5 audio-on uses SamplerCustomAdvanced (NestedTensor AV); video-only keeps LTXVBaseSampler.
+    frozenset({"LTXVBaseSampler", "SamplerCustomAdvanced"}),
 )
 
 
@@ -142,6 +130,21 @@ def _component_states(component_ids: Iterable[str]) -> list[dict[str, Any]]:
                 }
             )
         except Exception:  # noqa: BLE001
+            if component_id == "qwen_image_edit_2509_models":
+                from ..workflows.qwen_image_edit_2509 import discover_qwen_edit_2509
+
+                disc = discover_qwen_edit_2509()
+                present = bool(disc.get("runtimeReady"))
+                states.append(
+                    {
+                        "componentId": component_id,
+                        "name": "Qwen Image Edit 2509",
+                        "present": present,
+                        "issueCode": None if present else "component_not_verified",
+                        "summary": str(disc.get("reason") or ""),
+                    }
+                )
+                continue
             states.append(
                 {
                     "componentId": component_id,

@@ -6,7 +6,8 @@ import {
 } from "./ersGenerator";
 import { MINI_ASPECTS, miniResultSelectable, miniResultState, type MiniResult } from "./sceneCreatorMiniApi";
 import { useSceneCreatorMini } from "./useSceneCreatorMini";
-import type { SpatialMapDocument } from "./types";
+import { spinViewLabel, SPIN_VIEW_ORDER } from "./spinCameraGeometry";
+import type { SpatialMapDocument, SpinPackageManifest } from "./types";
 
 type Props = {
   projectId: string;
@@ -15,6 +16,8 @@ type Props = {
   qwenI2IReady?: boolean | null;
   gptI2IReady?: boolean | null;
   onOpenSceneCreator?: () => void;
+  /** Latest Spin Package for the SPIN CAMERA REFERENCES section. */
+  spinPackage?: SpinPackageManifest | null;
 };
 
 export function SceneCreatorMini({
@@ -24,6 +27,7 @@ export function SceneCreatorMini({
   qwenI2IReady,
   gptI2IReady,
   onOpenSceneCreator,
+  spinPackage,
 }: Props) {
   const mini = useSceneCreatorMini({
     projectId,
@@ -72,6 +76,58 @@ export function SceneCreatorMini({
       </div>
       {mini.open && mini.enabled ? (
         <div className="spatial-map__mini-body">
+          <div className="spatial-map__mini-spin-section" data-testid="scene-creator-mini-spin-section">
+            <p className="spatial-map__mini-section-title">SPIN CAMERA REFERENCES</p>
+            {spinPackage ? (
+              <div className="spatial-map__mini-spin-grid" data-testid="scene-creator-mini-spin-grid">
+                {SPIN_VIEW_ORDER.map((direction) => {
+                  const view = spinPackage.views?.[direction];
+                  const assetId = view?.assetId;
+                  const status = view?.status || "pending";
+                  const url = assetId ? api.assetUrl(assetId) : "";
+                  return (
+                    <div key={direction} className="spatial-map__mini-spin-card" data-testid={`mini-spin-card-${direction}`}>
+                      {assetId ? (
+                        <img src={url} alt={spinViewLabel(direction)} loading="lazy" />
+                      ) : (
+                        <span>{status === "failed" ? view?.error || "Failed" : status === "generating" ? "Generating…" : "Pending"}</span>
+                      )}
+                      <span className="spatial-map__mini-spin-card-label">{spinViewLabel(direction)}</span>
+                      <div className="spatial-map__mini-spin-card-actions">
+                        {assetId ? (
+                          <>
+                            <button
+                              type="button"
+                              className="spatial-map__slot-action"
+                              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+                              data-testid={`mini-spin-view-${direction}`}
+                            >
+                              View
+                            </button>
+                            <button
+                              type="button"
+                              className="spatial-map__slot-action"
+                              onClick={() => onOpenSceneCreator?.()}
+                              data-testid={`mini-spin-open-${direction}`}
+                            >
+                              Open in Library
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="spatial-map__hint" data-testid="scene-creator-mini-spin-hint">
+                Place a Spin Camera and create a Spin Package to see directional references here.
+              </p>
+            )}
+          </div>
+
+          <p className="spatial-map__mini-section-title">SCENE CAMERAS</p>
+
               <div className="spatial-map__mini-controls">
                 <label>
                   Generator

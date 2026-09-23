@@ -5,11 +5,25 @@ import { api } from "../../api";
 import { PanelHeading } from "../HelpTip";
 import {
   chipLabel,
+  inferSemanticReferenceType,
   mediaKindForAssetKind,
-  referenceTypeForAssetKind,
+  roleLabelForBinding,
   sanitizeAlias,
   type ReferenceBindingView,
 } from "../../sceneReferences/referenceTokens";
+import {
+  buildAddReferenceCandidates,
+  buildCreatorRegistryCandidates,
+  collapseDuplicateIdentityCandidates,
+  identityAliasKey,
+  isAlreadyBound,
+  mergeAddReferenceCandidates,
+  pickCharacterBindAssetId,
+  type AddReferenceCandidate,
+  type CreatorRegistryRow,
+} from "../../sceneReferences/referenceAddCandidates";
+import { timelineLibraryIdentity } from "../library/timelineLibraryIdentity";
+import { ReferencesAddInput } from "./ReferencesAddInput";
 
 type Binding = ReferenceBindingView & {
   scope_type: string;
@@ -69,10 +83,12 @@ export function ReferencesPane({
   const [items, setItems] = useState<Binding[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState("");
   const [preflight, setPreflight] = useState<Record<string, unknown> | null>(null);
   const [attachAssetId, setAttachAssetId] = useState("");
   const [attachType, setAttachType] = useState("character");
+  const [creatorRows, setCreatorRows] = useState<CreatorRegistryRow[]>([]);
+  const [creatorLoading, setCreatorLoading] = useState(false);
+  const [creatorRegistryError, setCreatorRegistryError] = useState<string | null>(null);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -111,17 +127,223 @@ export function ReferencesPane({
     void load();
   }, [load, reloadKey]);
 
-  const filtered = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(
-      (b) =>
-        (b.asset_name || "").toLowerCase().includes(q) ||
-        (b.alias || "").toLowerCase().includes(q) ||
-        b.reference_type.includes(q) ||
-        (b.reference_roles || []).join(" ").toLowerCase().includes(q)
+
+﻿  // Load Character / Prop / Environment Creator registries (local + global).
+  useEffect(() => {
+    let cancelled = false;
+    const loadCreators = async () => {
+      setCreatorLoading(true);
+      setCreatorRegistryError(null);
+      try {
+        const rows: CreatorRegistryRow[] = [];
+        try {
+          const listed = await api.listCharacterProfiles(project.id);
+          const profiles = (listed?.items || []) as Array<Record<string, unknown>>;
+          await Promise.all(
+            profiles.map(async (profile) => {
+              const id = String(profile.id || "");
+              const name = String(profile.name || profile.display_name || "").trim();
+              if (!id || !name) return;
+              const isGlobal = Boolean(profile.is_global || profile.isGlobal);
+              const owningProjectId = String(profile.project_id || profile.projectId || project.id);
+              let assetId = "";
+              try {
+                const refsRes = await api.listCharacterReferences(project.id, id);
+                const refs = (refsRes?.items || refsRes || []) as Array<{ asset_id?: string; reference_role?: string }>;
+                assetId = pickCharacterBindAssetId(Array.isArray(refs) ? refs : []) || "";
+              } catch {
+                /* refs optional */
+              }
+              if (!assetId) {
+                assetId = String(
+                  profile.primary_asset_id ||
+                    profile.primaryAssetId ||
+                    profile.approved_sheet_asset_id ||
+                    profile.approvedSheetAssetId ||
+                    "",
+                );
+              }
+              if (!assetId) return;
+              rows.push({
+                entityId: id,
+                name,
+                semanticType: "character",
+                assetId,
+                isGlobal,
+                owningProjectId,
+                storedTag: null,
+                mediaKind: "image",
+              });
+            }),
+          );
+        } catch (e: any) {
+          const detail = e?.detail || e?.message || e;
+          const msg =
+            typeof detail === "string"
+              ? detail
+              : detail?.message || detail?.code || "Character registry unavailable";
+          // Do not silently empty the @ list — owner sees "No matching reference" otherwise.
+          setCreatorRegistryError(String(msg));
+        }
+        try {
+          const propRes = await api.propCreator.list(project.id, false);
+          const props = (propRes?.props || []) as Array<Record<string, unknown>>;
+          for (const prop of props) {
+            const id = String(prop.id || prop.prop_id || "");
+            const name = String(prop.display_label || prop.name || prop.tag || "").trim();
+            const assetId = String(
+              prop.reference_asset_id ||
+                prop.approved_asset_id ||
+                prop.prs_asset_id ||
+                prop.primary_approved_asset_id ||
+                prop.library_asset_id ||
+                "",
+            );
+            if (!id || !name || !assetId) continue;
+            rows.push({
+              entityId: id,
+              name,
+              semanticType: "prop",
+              assetId,
+              isGlobal: Boolean(prop.is_global || prop.isGlobal),
+              owningProjectId: String(prop.project_id || prop.projectId || project.id),
+              storedTag: String(prop.canonical_tag || prop.tag || "") || null,
+              mediaKind: "image",
+            });
+          }
+        } catch {
+          /* props optional */
+        }
+        try {
+          const ers = await api.environmentReferenceSheet.listSheets(project.id);
+          const sheets = (ers?.sheets || []) as Array<Record<string, unknown>>;
+          for (const sheet of sheets) {
+            const id = String(sheet.sheetId || sheet.sheet_id || sheet.id || "");
+            const name = String(sheet.name || "").trim();
+            const assetId = String(
+              sheet.ers_composite_asset_id ||
+                sheet.composite ||
+                sheet.derivativeAssetId ||
+                sheet.referenceImageAssetId ||
+                "",
+            );
+            if (!id || !name || !assetId) continue;
+            rows.push({
+              entityId: id,
+              name,
+              semanticType: "environment",
+              assetId,
+              isGlobal: Boolean(sheet.is_global || sheet.isGlobal),
+              owningProjectId: String(sheet.projectId || sheet.project_id || project.id),
+              storedTag: null,
+              mediaKind: "image",
+            });
+          }
+        } catch {
+          /* ers optional */
+        }
+        if (!cancelled) setCreatorRows(rows);
+      } finally {
+        if (!cancelled) setCreatorLoading(false);
+      }
+    };
+    void loadCreators();
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id]);
+
+  const addCandidates = useMemo(() => {
+    const characterNames: Record<string, string> = {};
+    for (const row of creatorRows) {
+      if (row.semanticType !== "character" || !row.entityId || !row.name) continue;
+      characterNames[row.entityId] = row.name;
+      characterNames[row.entityId.slice(0, 8)] = row.name;
+    }
+    const fromAssets = buildAddReferenceCandidates({
+      assets: project.assets || [],
+      projectId: project.id,
+      identityOf: (asset) =>
+        timelineLibraryIdentity(asset, { relatedAssets: project.assets, characterNames }),
+      thumbnailUrlOf: (asset) => {
+        const anyAsset = asset as Asset & { thumbnail_url?: string | null };
+        return anyAsset.thumbnail_url || null;
+      },
+    });
+    const fromCreators = buildCreatorRegistryCandidates({ rows: creatorRows, projectId: project.id });
+    return collapseDuplicateIdentityCandidates(
+      mergeAddReferenceCandidates(fromAssets, fromCreators),
     );
-  }, [items, filter]);
+  }, [project.assets, project.id, creatorRows]);
+
+
+  const boundIdentities = useMemo(
+    () =>
+      items.map((b) => ({
+        assetId: b.asset_id,
+        alias: sanitizeAlias(b.alias || b.asset_name || "") || "",
+      })),
+    [items],
+  );
+
+  const addFromCandidate = async (candidate: AddReferenceCandidate): Promise<boolean> => {
+    // Bind by canonical asset identity on the selected candidate — not display text.
+    // Do NOT require the asset to already appear in project.assets (Global / other-project
+    // creator rows are available for reference even when owned elsewhere).
+    if (!candidate?.assetId) {
+      setError("No matching reference");
+      return false;
+    }
+    const localAsset = (project.assets || []).find((item) => item.id === candidate.assetId);
+    if (localAsset?.kind === "audio") {
+      setError("Audio stays on Lip Sync, SFX, or Music. It cannot be a typed reference.");
+      return false;
+    }
+    // Prefer live asset kind when present; otherwise trust candidate.mediaKind from resolver.
+    const assetMediaKind =
+      (localAsset ? mediaKindForAssetKind(localAsset.kind) : null) ||
+      (candidate.mediaKind === "video" || candidate.mediaKind === "image" ? candidate.mediaKind : null) ||
+      "image";
+    if (assetMediaKind !== "image" && assetMediaKind !== "video") {
+      setError("Only images and videos can be named as references.");
+      return false;
+    }
+    // One @/%/# tag per identity. @Cade is the same character as @CadeCRS.
+    const dup = isAlreadyBound(
+      { assetId: candidate.assetId, alias: candidate.alias },
+      items.map((b) => ({
+        assetId: b.asset_id,
+        alias: sanitizeAlias(b.alias || b.asset_name || "") || "",
+      })),
+    );
+    if (dup) {
+      setError(`Already added: ${candidate.displayToken}`);
+      return false;
+    }
+    setError(null);
+    try {
+      // Same Timeline reference-binding entry as Library drag / Add to References.
+      await api.sceneReferences.attach(project.id, {
+        asset_id: candidate.assetId,
+        scope_type: scopeType,
+        scope_id: scopeId,
+        reference_type: candidate.referenceType,
+        media_kind: assetMediaKind,
+        alias: candidate.alias,
+        usage_modes: assetMediaKind === "video" ? ["motion"] : ["appearance"],
+        reference_roles: [candidate.referenceType],
+      });
+      await load();
+      onChange?.();
+      return true;
+    } catch (e: any) {
+      const detail = e?.detail || e?.message || e;
+      const msg = typeof detail === "string" ? detail : detail?.message || "Could not add reference";
+      // Differentiate: lookup miss vs bind fail. Never reuse "No matching reference" for attach failures.
+      setError(msg === "No matching reference" ? "Could not add reference" : (msg || "Could not add reference"));
+      return false;
+    }
+  };
 
   const attach = async () => {
     if (!attachAssetId.trim()) return;
@@ -174,10 +396,36 @@ export function ReferencesPane({
       setError("Audio stays on Lip Sync, SFX, or Music. It cannot be a typed reference.");
       return;
     }
-    const mediaKind = mediaKindForAssetKind(asset.kind);
-    const referenceType = referenceTypeForAssetKind(asset.kind);
-    if (!mediaKind || !referenceType) {
+    const assetMediaKind = mediaKindForAssetKind(asset.kind);
+    if (!assetMediaKind) {
       setError("Only images and videos can be named as references.");
+      return;
+    }
+    const identity = timelineLibraryIdentity(asset, { relatedAssets: project.assets });
+    const referenceType = inferSemanticReferenceType({
+      tag: asset.tag,
+      filename: asset.filename,
+      alias: identity.title,
+      mediaKind: assetMediaKind,
+    });
+    // Keep media_kind as image/video from the asset; semantic type is separate.
+    const mediaKind = assetMediaKind;
+    const alias =
+      sanitizeAlias(identity.title) ||
+      sanitizeAlias(asset.tag || asset.filename || referenceType) ||
+      "Reference";
+    const dup = isAlreadyBound(
+      { assetId: asset.id, alias },
+      items.map((b) => ({
+        assetId: b.asset_id,
+        alias: sanitizeAlias(b.alias || b.asset_name || "") || "",
+      })),
+    );
+    if (dup) {
+      const existing = items.find(
+        (b) => identityAliasKey(b.alias || b.asset_name || "") === identityAliasKey(alias),
+      );
+      setError(existing ? `Already added: ${chipLabel(existing)}` : `Already added: ${alias}`);
       return;
     }
     await api.sceneReferences.attach(project.id, {
@@ -186,7 +434,7 @@ export function ReferencesPane({
       scope_id: scopeId,
       reference_type: referenceType,
       media_kind: mediaKind,
-      alias: sanitizeAlias(asset.tag || asset.filename || referenceType),
+      alias,
       usage_modes: mediaKind === "video" ? ["motion"] : ["appearance"],
       reference_roles: [referenceType],
     });
@@ -221,10 +469,32 @@ export function ReferencesPane({
   const rename = async (b: Binding) => {
     const alias = sanitizeAlias(renameValue);
     if (!alias) return;
-    await api.sceneReferences.update(project.id, b.id, { alias });
-    setRenamingId(null);
-    await load();
-    onChange?.();
+    const duplicate = items.some(
+      (other) =>
+        other.id !== b.id &&
+        sanitizeAlias(other.alias || other.asset_name || "").toLowerCase() === alias.toLowerCase(),
+    );
+    if (duplicate) {
+      setError(`Tag "${alias}" is already used by another active reference. Pick a unique tag.`);
+      return;
+    }
+    setError(null);
+    try {
+      // Rename updates canonical tag (alias) only — asset_id is unchanged.
+      await api.sceneReferences.update(project.id, b.id, { alias });
+      setRenamingId(null);
+      await load();
+      onChange?.();
+    } catch (e: any) {
+      const detail = e?.detail || e?.message || e;
+      const code = typeof detail === "object" ? detail?.code : null;
+      if (code === "ALIAS_TAKEN") {
+        const suggested = detail?.suggested_alias ? ` Try ${detail.suggested_alias}.` : "";
+        setError(`Tag "${alias}" is already used.${suggested}`);
+        return;
+      }
+      setError(typeof detail === "string" ? detail : detail?.message || "Rename failed");
+    }
   };
 
   const supportClass = String(preflight?.supportClass || "");
@@ -252,18 +522,20 @@ export function ReferencesPane({
         </p>
       )}
 
-      <div className="field">
-        <label htmlFor="ref-filter">Filter</label>
-        <input
-          id="ref-filter"
-          data-testid="references-filter"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Search type, role, name"
-        />
-      </div>
+      <ReferencesAddInput
+        candidates={addCandidates}
+        bound={boundIdentities}
+        disabled={loading || creatorLoading}
+        onSelect={(candidate) => { setError(null); return addFromCandidate(candidate); }}
+          onActivity={() => setError(null)}
+      />
 
       {loading && <p data-testid="references-loading">Loading references…</p>}
+      {creatorRegistryError && (
+        <p className="scene-meta" data-testid="references-creator-registry-error" role="status">
+          {creatorRegistryError}
+        </p>
+      )}
       {error && (
         <p className="error" data-testid="references-error">
           {error}{" "}
@@ -273,7 +545,7 @@ export function ReferencesPane({
         </p>
       )}
 
-      {!loading && !error && filtered.length === 0 && (
+      {!loading && !error && items.length === 0 && (
         <div data-testid="references-empty">
           <p>{t("timeline:referencesEmpty")}</p>
           {!compact ? (
@@ -296,8 +568,16 @@ export function ReferencesPane({
 
       {compact ? (
         <ul className="ref-chip-list" data-testid="references-list">
-          {filtered.map((b) => (
-            <li key={b.id} className="ref-chip" data-testid={`reference-binding-${b.id}`}>
+          {items.map((b) => {
+            const approved = b.approval_status === "approved";
+            const roleLabel = roleLabelForBinding(b);
+            return (
+            <li
+              key={b.id}
+              className={`ref-chip${approved ? " ref-chip--approved" : ""}`}
+              data-testid={`reference-binding-${b.id}`}
+              data-approved={approved ? "true" : "false"}
+            >
               {renamingId === b.id ? (
                 <form
                   onSubmit={(e) => {
@@ -331,6 +611,26 @@ export function ReferencesPane({
                   {b.broken ? "Broken Reference" : chipLabel(b)}
                 </button>
               )}
+              <span
+                className="ref-chip__role"
+                data-testid={`reference-role-${b.id}`}
+              >
+                ({roleLabel}){approved ? " ✓" : ""}
+              </span>
+              {renamingId === b.id ? null : (
+                <button
+                  type="button"
+                  className="ghost"
+                  data-testid={`reference-rename-${b.id}`}
+                  title="Rename canonical tag. Asset id stays the same."
+                  onClick={() => {
+                    setRenamingId(b.id);
+                    setRenameValue(b.alias || b.asset_name || "");
+                  }}
+                >
+                  Rename
+                </button>
+              )}
               <button
                 type="button"
                 className="ghost"
@@ -341,18 +641,19 @@ export function ReferencesPane({
                 Remove
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       ) : (
       <ul className="asset-list" data-testid="references-list">
-        {filtered.map((b) => (
+        {items.map((b) => (
           <li key={b.id} data-testid={`reference-binding-${b.id}`} className={!b.enabled ? "muted" : ""}>
             <div className="row-actions" style={{ alignItems: "center", gap: 8 }}>
               {b.thumbnail_url ? (
                 <img src={b.thumbnail_url} alt="" width={40} height={40} style={{ objectFit: "cover" }} />
               ) : null}
               <div>
-                <strong>{b.asset_name || b.asset_id.slice(0, 8)}</strong>
+                <strong dir="auto">{b.broken ? "Broken Reference" : chipLabel(b)}</strong>
                 <div className="scene-meta">
                   {b.reference_type}
                   {(b.reference_roles || []).length ? ` · ${(b.reference_roles || []).join(", ")}` : ""}
@@ -364,11 +665,46 @@ export function ReferencesPane({
               </div>
             </div>
             <div className="row-actions">
+              {renamingId === b.id ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void rename(b);
+                  }}
+                  style={{ display: "inline-flex", gap: 6, alignItems: "center" }}
+                >
+                  <input
+                    data-testid={`reference-alias-input-${b.id}`}
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    aria-label="Reference name"
+                    autoFocus
+                  />
+                  <button type="submit" data-testid={`reference-alias-save-${b.id}`}>
+                    Save
+                  </button>
+                  <button type="button" className="ghost" onClick={() => setRenamingId(null)}>
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  data-testid={`reference-rename-${b.id}`}
+                  title="Rename canonical tag (alias). Asset id stays the same."
+                  onClick={() => {
+                    setRenamingId(b.id);
+                    setRenameValue(b.alias || b.asset_name || "");
+                  }}
+                >
+                  Rename
+                </button>
+              )}
               <button type="button" onClick={() => void toggleEnabled(b)}>
                 {b.enabled ? "Disable" : "Enable"}
               </button>
-              <button type="button" onClick={() => void remove(b)}>
-                Remove binding
+              <button type="button" data-testid={`reference-remove-${b.id}`} onClick={() => void remove(b)}>
+                Remove
               </button>
             </div>
           </li>

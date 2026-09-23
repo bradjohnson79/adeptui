@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api";
 
 /**
@@ -13,10 +13,12 @@ export function useTimelineContextPackage(
   projectId: string,
   sceneId: string | undefined,
   actionScope: "exploration" | "production" = "exploration",
+  revision = 0,
 ) {
   const [pkg, setPkg] = useState<Awaited<ReturnType<typeof api.getTimelineContextPackage>> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     if (!sceneId) return;
@@ -40,7 +42,9 @@ export function useTimelineContextPackage(
     return () => {
       alive = false;
     };
-  }, [projectId, sceneId, actionScope]);
+  }, [projectId, sceneId, actionScope, reloadTick, revision]);
 
-  return { pkg, loading, error };
+  const refresh = useCallback(() => setReloadTick((n) => n + 1), []);
+
+  return { pkg, loading, error, refresh };
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CoDirectorProjectWiki } from "../../../api";
 import { Button } from "../../ui";
+import { sanitizeHtml } from "../../scriptwriter/sanitizeHtml";
 
 type TocNode = {
   key: string;
@@ -28,6 +29,30 @@ function saveExpand(state: Record<string, boolean>) {
     /* ignore */
   }
 }
+
+
+/** READ-only: TipTap/HTML fields via sanitizeHtml + dangerouslySetInnerHTML (never unsanitized). */
+function SafeHtml({
+  html,
+  className,
+  style,
+  "data-testid": testId,
+}: {
+  html: string;
+  className?: string;
+  style?: import("react").CSSProperties;
+  "data-testid"?: string;
+}) {
+  return (
+    <div
+      className={className}
+      style={style}
+      data-testid={testId}
+      dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }}
+    />
+  );
+}
+
 
 export function CompiledWikiReader({
   wiki,
@@ -205,7 +230,12 @@ function LandingView({
       {overview ? (
         <section style={{ marginBottom: "1.5rem" }} data-testid="wiki-section-overview">
           <h2 style={{ marginTop: 0 }}>{overview.title}</h2>
-          <p style={{ lineHeight: 1.55, fontSize: "1.05rem" }}>{overview.summary || overview.sections?.[0]?.body}</p>
+          {(overview.summary || overview.sections?.[0]?.body) ? (
+            <SafeHtml
+              html={overview.summary || overview.sections?.[0]?.body || ""}
+              style={{ lineHeight: 1.55, fontSize: "1.05rem" }}
+            />
+          ) : null}
         </section>
       ) : null}
 
@@ -226,7 +256,7 @@ function LandingView({
         {storySummary?.longSummary ? (
           <>
             <h3 style={{ fontSize: "0.95rem", marginBottom: "0.25rem" }}>Long Summary</h3>
-            <p style={{ lineHeight: 1.5 }}>{storySummary.longSummary}</p>
+            <SafeHtml html={storySummary.longSummary} style={{ lineHeight: 1.5 }} />
           </>
         ) : null}
         {storySummary?.themes?.length ? (
@@ -349,7 +379,7 @@ function PageView({
                   </Button>
                 ) : null}
               </div>
-              {sec.body ? <p style={{ lineHeight: 1.55 }}>{sec.body}</p> : null}
+              {sec.body ? <SafeHtml html={sec.body} style={{ lineHeight: 1.55 }} /> : null}
               {sec.bullets?.length ? (
                 <ul>
                   {sec.bullets.map((b) => (

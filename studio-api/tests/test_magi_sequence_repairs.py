@@ -63,6 +63,15 @@ def _seq_body(project_id: str, asset_id: str | None = None) -> dict:
     return seq
 
 
+def test_empty_sequence_is_five_post_tracks():
+    from app.magi.sequence.store import empty_sequence
+
+    seq = empty_sequence("empty-post-tracks")
+    assert [track["kind"] for track in seq["tracks"]] == ["objects", "video", "audio", "music", "sfx"]
+    assert [track["label"] for track in seq["tracks"]] == ["OBJECTS 1", "VIDEO", "AUDIO", "MUSIC", "SFX"]
+    assert seq["tracks"][0]["objectsSlot"] == 1
+
+
 def test_get_sequence_does_not_persist_on_read():
     """m1 P2 fix: GET on a missing project must not create a file."""
     from pathlib import Path
@@ -273,6 +282,94 @@ def test_put_sequence_expected_revision_match_succeeds(client):
     )
     assert res.status_code == 200, res.text
     assert res.json()["sequence"]["revision"] == rev + 1
+
+
+def test_put_sequence_accepts_graphics_track(client):
+    project_id = _create_project(client)
+    asset_id = _seed_asset(project_id)
+    body = _seq_body(project_id, asset_id)
+    body["tracks"].append({"id": "trk_gfx_000001", "kind": "graphics", "label": "GFX", "order": 2})
+    body["clips"].append(
+        {
+            "id": "clip_gfx_1",
+            "trackId": "trk_gfx_000001",
+            "assetId": asset_id,
+            "name": "Title card",
+            "startFrame": 0,
+            "durationFrames": 24,
+            "inPoint": 0,
+            "outPoint": 24,
+        }
+    )
+    res = client.put(f"/api/magi/projects/{project_id}/sequence", json={"sequence": body})
+    assert res.status_code == 200, res.text
+    assert any(t["kind"] == "graphics" for t in res.json()["sequence"]["tracks"])
+
+
+def test_put_sequence_graphics_clip_no_asset_allowed(client):
+    project_id = _create_project(client)
+    asset_id = _seed_asset(project_id)
+    body = _seq_body(project_id, asset_id)
+    body["tracks"].append({"id": "trk_gfx_000001", "kind": "graphics", "label": "GFX", "order": 2})
+    body["clips"].append(
+        {
+            "id": "clip_gfx_2",
+            "trackId": "trk_gfx_000001",
+            "assetId": "",
+            "name": "Overlay data",
+            "startFrame": 0,
+            "durationFrames": 24,
+            "inPoint": 0,
+            "outPoint": 24,
+        }
+    )
+    res = client.put(f"/api/magi/projects/{project_id}/sequence", json={"sequence": body})
+    assert res.status_code == 200, res.text
+    gfx_clip = next(c for c in res.json()["sequence"]["clips"] if c["id"] == "clip_gfx_2")
+    assert gfx_clip["assetId"] == ""
+
+
+def test_put_sequence_strips_gfx_projection_clips(client):
+    project_id = _create_project(client)
+    asset_id = _seed_asset(project_id)
+    body = _seq_body(project_id, asset_id)
+    body["tracks"].append(
+        {"id": "trk_objects_1", "kind": "objects", "label": "OBJECTS 1", "order": 2, "objectsSlot": 1}
+    )
+    body["clips"].append(
+        {
+            "id": "gfx_should_never_persist",
+            "trackId": "trk_objects_1",
+            "assetId": "overlay:ghost",
+            "name": "Projected title",
+            "startFrame": 0,
+            "durationFrames": 24,
+            "inPoint": 0,
+            "outPoint": 24,
+            "ingestRole": "graphic",
+        }
+    )
+    res = client.put(f"/api/magi/projects/{project_id}/sequence", json={"sequence": body})
+    assert res.status_code == 200, res.text
+    ids = [clip["id"] for clip in res.json()["sequence"]["clips"]]
+    assert "gfx_should_never_persist" not in ids
+    assert all(not clip_id.startswith("gfx_") for clip_id in ids)
+    assert all(clip.get("ingestRole") != "graphic" for clip in res.json()["sequence"]["clips"])
+
+
+def test_put_sequence_rejects_third_objects_track(client):
+    project_id = _create_project(client)
+    asset_id = _seed_asset(project_id)
+    body = _seq_body(project_id, asset_id)
+    body["tracks"].extend(
+        [
+            {"id": "trk_objects_1", "kind": "objects", "label": "OBJECTS 1", "order": 2, "objectsSlot": 1},
+            {"id": "trk_objects_2", "kind": "objects", "label": "OBJECTS 2", "order": 3, "objectsSlot": 2},
+            {"id": "trk_objects_3", "kind": "objects", "label": "OBJECTS 3", "order": 4, "objectsSlot": 1},
+        ]
+    )
+    res = client.put(f"/api/magi/projects/{project_id}/sequence", json={"sequence": body})
+    assert res.status_code in (400, 422)
 
 
 def test_put_sequence_expected_revision_omitted_is_backward_compatible(client):

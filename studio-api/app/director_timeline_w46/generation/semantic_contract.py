@@ -315,6 +315,71 @@ def subject_definition_line(char: CharacterIdentityLayer) -> str:
     return f"<subject {index}> is {name}."
 
 
+def _slot_field(slot: Any, *names: str) -> Any:
+    for name in names:
+        if isinstance(slot, dict):
+            if name in slot:
+                return slot.get(name)
+            continue
+        if hasattr(slot, name):
+            return getattr(slot, name)
+    return None
+
+
+def apply_bound_reference_tokens(prompt: str, slots: Iterable[Any]) -> str:
+    """Prepend missing H3 picture/subject binds. Never overwrite creator action.
+
+    Maps @/%/# tags to the slot that owns that assetId. Does not invent a
+    second person or swap identities.
+    """
+    text = (prompt or "").strip()
+    defs: list[str] = []
+    characters: list[CharacterIdentityLayer] = []
+    for slot in slots or []:
+        idx_raw = _slot_field(slot, "pictureIndex", "picture_index")
+        try:
+            idx = int(idx_raw) if idx_raw is not None else 0
+        except (TypeError, ValueError):
+            idx = 0
+        if idx <= 0:
+            continue
+        role = str(_slot_field(slot, "role") or "").strip().lower()
+        label = str(
+            _slot_field(slot, "label", "promptName", "tag") or ""
+        ).strip()
+        name = label.lstrip("@#%*~").strip() or "this character"
+        asset_id = str(_slot_field(slot, "assetId", "asset_id") or "").strip()
+        identity_id = str(
+            _slot_field(slot, "identityId", "identity_id") or ""
+        ).strip()
+        subject_pat = re.compile(rf"<subject\s+{idx}\s*>", re.IGNORECASE)
+        picture_pat = re.compile(rf"<Picture\s+{idx}\s*>", re.IGNORECASE)
+        if role == "character":
+            layer = CharacterIdentityLayer(
+                tag=label if label.startswith("@") else f"@{name}" if name else "",
+                label=name,
+                picture_index=idx,
+                asset_id=asset_id,
+                identity_id=identity_id,
+                aliases=[label, name] if label else [name],
+            )
+            characters.append(layer)
+            line = subject_definition_line(layer)
+            if not subject_pat.search(text) and line.lower() not in text.lower():
+                defs.append(line)
+        elif role == "place":
+            line = f"<Picture {idx}> is {name} (environment)."
+            if not picture_pat.search(text) and not subject_pat.search(text):
+                defs.append(line)
+        elif role == "prop":
+            line = f"<Picture {idx}> is {name} (prop)."
+            if not picture_pat.search(text) and not subject_pat.search(text):
+                defs.append(line)
+    if not defs:
+        return text
+    return "\n".join(defs) + "\n\n" + text
+
+
 def match_audio_subject(
     *,
     identity_id: str = "",
@@ -469,12 +534,12 @@ def build_contract(
             for item in (getattr(slot, "aliases", None) or [])
             if str(item or "").strip()
         ]
-        if role == "character" and picture is not None:
+        if role == "character":
             characters.append(
                 CharacterIdentityLayer(
                     tag=tag or "",
                     label=label or "this character",
-                    picture_index=int(picture),
+                    picture_index=int(picture) if picture is not None else 0,
                     asset_id=asset_id,
                     role="character",
                     identity_id=str(getattr(slot, "identityId", "") or ""),

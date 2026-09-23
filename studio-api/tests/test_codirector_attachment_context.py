@@ -31,8 +31,9 @@ def test_attachment_context_does_not_claim_vision():
         attachment_ids=["asset-1"],
     )
     assert "Facility Ref" in block
-    assert "not automatically run" in block.lower() or "were not performed" in block.lower() or "was not performed" in block.lower()
-    assert "do not invent" in block.lower()
+    assert "not automatically run" not in block.lower()
+    assert "was not performed" not in block.lower()
+    assert "adept can resolve these project images" in block.lower()
 
 
 def test_attachment_context_rejects_cross_project():

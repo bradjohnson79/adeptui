@@ -109,7 +109,7 @@ test.describe("Co-Director Prompt Intelligence V2", () => {
     // Seed certified path via force after evaluate
     const promoteForce = await request.post("/api/codirector/prompt-intelligence/v2/promote", {
       data: {
-        providerId: "ltx-local",
+        providerId: "ltx-2.5-distilled",
         domain: "video",
         category: "camera_movement",
         strategy: "refined-english",
@@ -122,7 +122,7 @@ test.describe("Co-Director Prompt Intelligence V2", () => {
       expect(body.ok).toBeTruthy();
       const rollback = await request.post("/api/codirector/prompt-intelligence/v2/rollback", {
         data: {
-          providerId: "ltx-local",
+          providerId: "ltx-2.5-distilled",
           domain: "video",
           category: "camera_movement",
         },
@@ -134,7 +134,7 @@ test.describe("Co-Director Prompt Intelligence V2", () => {
       data: {
         creatorPrompt: "Wide shot of a mountain cliff path, slow push-in",
         domain: "video",
-        providerId: "ltx-local",
+        providerId: "ltx-2.5-distilled",
         strategyMode: "recommend",
       },
     });

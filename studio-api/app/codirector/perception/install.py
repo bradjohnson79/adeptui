@@ -1,4 +1,4 @@
-"""Dedicated stills-perception installer. Never Hunyuan. Never VideoChat3 dest."""
+"""Dedicated stills-perception installer. Never VideoChat3 dest."""
 
 from __future__ import annotations
 

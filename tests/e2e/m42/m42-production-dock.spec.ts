@@ -65,4 +65,18 @@ test.describe("M42 Production Dock", () => {
     expect(sel.activeModelId).toBeTruthy();
     expect(sel.provenance || sel.source).toBeTruthy();
   });
+
+  test("E: audio menu is audio-only — no LLM leak @m42-dock ORDER20", async ({ page }) => {
+    await page.goto("/");
+    const expand = page.getByTestId("production-dock-expand");
+    if (await expand.isVisible().catch(() => false)) {
+      await expand.click();
+    }
+    await page.getByTestId("production-dock-menu-audio").click();
+    const dialog = page.getByTestId("production-dock-menu-audio");
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    const dialogText = (await dialog.innerText()).toLowerCase();
+    expect(dialogText).not.toMatch(/gemma|qwen3|qwen 3|llama-3|deepseek/);
+  });
+
 });

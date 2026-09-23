@@ -1,13 +1,20 @@
 /**
  * Creator-facing duration formatting.
  *
- * Raw float seconds like 5.004000000000001 must never reach the UI. Two
- * decimals is enough for creators and stays stable for frame-derived values
- * (e.g. 121 frames @ 24 fps = 5.0416… → "5.04 s").
+ * Raw float seconds like 5.166666666666667 (124 frames @ 24fps) must never reach
+ * the UI. Prefer whole seconds; otherwise a single clean decimal.
  */
 export function formatDurationSeconds(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  return `${value.toFixed(2)} s`;
+  const nearestInt = Math.round(value);
+  if (Math.abs(value - nearestInt) <= 1e-6) {
+    return `${nearestInt}s`;
+  }
+  const one = Math.round(value * 10) / 10;
+  if (Math.abs(one - Math.round(one)) <= 1e-9) {
+    return `${Math.round(one)}s`;
+  }
+  return `${one.toFixed(1)}s`;
 }
 
 /**

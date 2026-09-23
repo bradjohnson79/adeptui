@@ -100,3 +100,17 @@ test("sanitize policy allows a limited set of presentation attributes", () => {
     );
   }
 });
+
+test("sanitize policy allows safe anchor tags and link attrs", () => {
+  assert.ok(
+    SANITIZE_POLICY.ALLOWED_TAGS.includes("a"),
+    "expected a to be allowed",
+  );
+  for (const attr of ["href", "rel", "target"]) {
+    assert.ok(
+      SANITIZE_POLICY.ALLOWED_ATTR.includes(attr),
+      `expected ${attr} to be allowed`,
+    );
+  }
+});
+

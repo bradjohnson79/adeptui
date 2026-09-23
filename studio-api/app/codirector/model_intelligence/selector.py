@@ -61,6 +61,10 @@ def score_model(
     if manifest.status == PackStatus.QUARANTINED:
         risks.append("Pack quarantined / product approval required")
         return scores, reasons, risks
+    if manifest.status == PackStatus.DEPRECATED:
+        scores["capabilityFit"] = 0.0
+        risks.append(f"{model_id} is retired and is not a current Adept local video generator")
+        return scores, reasons, risks
 
     # capabilityFit
     mode_key = intent.mode.replace("-", "_")

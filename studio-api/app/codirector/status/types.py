@@ -63,6 +63,7 @@ class HealthCheckDefinition(BaseModel):
     projectScoped: bool = False
     sceneScoped: bool = False
     recoveryActions: list[RecoveryAction] = Field(default_factory=list)
+    readinessClass: Optional[str] = None
 
 
 class HealthCheckResult(BaseModel):
@@ -86,6 +87,11 @@ class HealthCheckResult(BaseModel):
     timedOut: bool = False
     partial: bool = False
     stale: bool = False
+    readinessClass: Optional[str] = None
+    v11Requirement: Optional[str] = None
+    workflowScope: Optional[str] = None
+    productionEffect: Optional[str] = None
+    severity: Optional[str] = None
 
 
 class HealthCategoryTally(BaseModel):
@@ -116,6 +122,8 @@ class HealthRunSummary(BaseModel):
     blockedChecks: int
     checkedAt: str
     scoreExplanation: str
+    scoreSemantics: str = "Adept Platform Production Readiness"
+    readinessPolicyVersion: str = "v1.1"
 
 
 class HealthRun(BaseModel):
@@ -132,6 +140,11 @@ class HealthRun(BaseModel):
     categories: list[HealthCategoryTally]
     explainability: HealthExplainability
     results: list[HealthCheckResult]
+    readOnly: bool = True
+    mutatesRuntime: bool = False
+    mutatesConfig: bool = False
+    installsModels: bool = False
+    forceRefresh: bool = False
 
 
 class StatusCheckRequest(BaseModel):
@@ -139,6 +152,7 @@ class StatusCheckRequest(BaseModel):
     sceneId: Optional[str] = None
     workspace: Optional[str] = None
     checkIds: list[str] = Field(default_factory=list)
+    forceRefresh: bool = False
 
 
 class DeepDiagnosticRequest(StatusCheckRequest):

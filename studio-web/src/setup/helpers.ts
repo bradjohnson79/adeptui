@@ -83,21 +83,44 @@ export function componentStateLabel(component: SetupComponentStatus): string {
 export function summarizeComponents(components: SetupComponentStatus[]): SetupSummaryCounts {
   return components.reduce<SetupSummaryCounts>(
     (summary, component) => {
+      const optional = !component.required;
       if (component.status === "ready" || component.status === "update_available") {
         summary.ready += 1;
+        if (optional) summary.optional_ready = (summary.optional_ready ?? 0) + 1;
+        else summary.required_ready = (summary.required_ready ?? 0) + 1;
       } else if (
         component.status === "not_installed"
         || component.status === "unknown"
         || component.status === "download_unavailable"
         || component.status === "source_pending"
       ) {
-        summary.not_installed += 1;
+        if (optional) {
+          summary.optional_not_installed = (summary.optional_not_installed ?? 0) + 1;
+        } else {
+          summary.not_installed += 1;
+          summary.required_not_installed = (summary.required_not_installed ?? 0) + 1;
+        }
       } else if (component.status === "error") {
-        summary.needs_attention += 1;
+        if (optional) {
+          summary.optional_needs_attention = (summary.optional_needs_attention ?? 0) + 1;
+        } else {
+          summary.needs_attention += 1;
+          summary.required_needs_attention = (summary.required_needs_attention ?? 0) + 1;
+        }
       }
       return summary;
     },
-    { ready: 0, not_installed: 0, needs_attention: 0 },
+    {
+      ready: 0,
+      not_installed: 0,
+      needs_attention: 0,
+      required_ready: 0,
+      required_not_installed: 0,
+      required_needs_attention: 0,
+      optional_ready: 0,
+      optional_not_installed: 0,
+      optional_needs_attention: 0,
+    },
   );
 }
 

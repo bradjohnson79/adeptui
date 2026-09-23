@@ -6,6 +6,12 @@ The Music/SFX tracks must paint the same clips at those scene offsets — otherw
 later batches audibly play with no visible clip (ghost playback).
 */
 import type { BatchBlock, BatchClip, SceneTimelineMaster } from "./contracts";
+import {
+  blankAudioClipDraft,
+  textFromAudioMetadata,
+  type AudioClipDraft,
+  type AudioClipModalKind,
+} from "./audioClipModal";
 
 export type BatchOwnedAudioKind = "audio" | "sfx";
 
@@ -16,6 +22,8 @@ export type DisplayBatchAudioClip = {
   length: number;
   trim_start: number;
   label: string;
+  title?: string;
+  description?: string;
   volume: number;
   muted?: boolean;
   fade_in?: number;
@@ -62,17 +70,19 @@ export function sceneAbsoluteBatchAudioClips(
   const out: DisplayBatchAudioClip[] = [];
   for (const { batch, start: batchStart } of batchWindows(master)) {
     for (const clip of clipsForKind(batch, kind)) {
+      // A new Music/SFX clip has no sound file yet. It still occupies the lane.
       const assetId = String(clip.assetId || "").trim();
-      if (!assetId) continue;
       const localStart = Number(clip.start || 0);
       const length = Math.max(0.05, Number(clip.length || 0));
       out.push({
         id: clip.id,
-        asset_id: assetId,
+        asset_id: assetId || null,
         start: batchStart + localStart,
         length,
         trim_start: Number(clip.trimStart || 0),
         label: clip.label || (kind === "sfx" ? "SFX" : "Music"),
+        title: textFromAudioMetadata(clip.metadata, "title"),
+        description: textFromAudioMetadata(clip.metadata, "description"),
         volume: Number(clip.volume ?? (kind === "sfx" ? 0.32 : 1)),
         muted: Boolean(clip.muted),
         fade_in: Number(clip.fade_in || 0),
@@ -99,6 +109,27 @@ export function resolveDisplayAudioClips<T extends { id: string }>(
     return sceneAbsoluteBatchAudioClips(master, kind);
   }
   return timelineClips || [];
+}
+
+/** Scene-absolute draft for the modal. Reads the Master clip, not a copied form. */
+export function readSceneAudioClip(
+  master: SceneTimelineMaster | null | undefined,
+  kind: AudioClipModalKind,
+  id: string,
+): AudioClipDraft | null {
+  const hit = sceneAbsoluteBatchAudioClips(master, kind).find((clip) => clip.id === id);
+  if (!hit) return null;
+  return {
+    ...blankAudioClipDraft(kind, hit.start),
+    id: hit.id,
+    title: hit.title || "",
+    description: hit.description || "",
+    label: hit.label || "",
+    start: hit.start,
+    length: hit.length,
+    volume: Number(hit.volume ?? 1),
+    assetId: hit.asset_id,
+  };
 }
 
 export function findBatchOwnedAudioClip(

@@ -34,10 +34,15 @@ export function LocalRuntimeSettings() {
     async (update: Partial<RuntimeManagerPreferences>) => {
       const merged = { ...prefs, ...update };
       try {
-        await api.runtimeManagerSavePreferences(merged);
-        setPrefs(merged);
-      } catch {
-        setMessage("Failed to save preferences.");
+        const saved = await api.runtimeManagerSavePreferences(merged);
+        setPrefs(saved);
+        try {
+          setStatus(await api.runtimeManagerStatus());
+        } catch {
+          /* keep saved prefs even if status refresh is delayed */
+        }
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "Failed to save preferences.");
       }
     },
     [prefs],
@@ -71,16 +76,48 @@ export function LocalRuntimeSettings() {
     setBusy(false);
   }, []);
 
-  const handleRestart = useCallback(async () => {
+  const handleRestartApi = useCallback(async () => {
     setBusy(true);
     setMessage("");
     try {
-      const res = await api.runtimeManagerRestart();
-      setMessage(res.success ? "Background services restarted." : `Restart failed: ${res.message.slice(0, 200)}`);
+      const res = await api.runtimeManagerRestartApi();
+      setMessage(res.success ? "Studio restart requested." : `Studio restart failed: ${res.message.slice(0, 200)}`);
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      try {
+        setStatus(await api.runtimeManagerStatus());
+      } catch {
+        setMessage("Studio is restarting. It will come back on its own.");
+      }
+    } catch {
+      setMessage("Failed to restart Studio.");
+    }
+    setBusy(false);
+  }, []);
+
+  const handleRestartComfy = useCallback(async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const res = await api.runtimeManagerRestartComfy();
+      setMessage(res.success ? "Pictures restart requested." : `Pictures restart failed: ${res.message.slice(0, 200)}`);
       const s = await api.runtimeManagerStatus();
       setStatus(s);
     } catch {
-      setMessage("Failed to restart services.");
+      setMessage("Failed to restart pictures.");
+    }
+    setBusy(false);
+  }, []);
+
+  const handleRepair = useCallback(async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const res = await api.runtimeManagerRepair();
+      setMessage(res.success ? "Background services repaired." : `Repair failed: ${res.message.slice(0, 200)}`);
+      const s = await api.runtimeManagerStatus();
+      setStatus(s);
+    } catch {
+      setMessage("Failed to repair services.");
     }
     setBusy(false);
   }, []);
@@ -108,6 +145,35 @@ export function LocalRuntimeSettings() {
         <p className="muted">
           Lifecycle controls are not available from browser-hosted Adept UI.
         </p>
+      )}
+
+      {status?.adeptRuntime && (
+        <div className="local-runtime-settings__card" data-testid="adept-runtime-service-status">
+          <div className="local-runtime-settings__card-header">
+            <span className="local-runtime-settings__card-title">Adept Background Services</span>
+            {statusBadge(
+              status.adeptRuntime.serviceState === "running"
+                ? "running"
+                : status.adeptRuntime.serviceState === "starting"
+                  ? "starting"
+                  : status.adeptRuntime.configured
+                    ? "error"
+                    : "not_configured",
+            )}
+          </div>
+          <p className="muted">Manager: {status.adeptRuntime.serviceState.replaceAll("_", " ")}</p>
+          <p className="muted">Studio: {String(status.adeptRuntime.studioApiHealth || status.studioApi.status).replaceAll("_", " ")}</p>
+          <p className="muted">Pictures: {status.adeptRuntime.comfyState.replaceAll("_", " ")}</p>
+          {status.gpu?.detected && <p className="muted">GPU: {status.gpu.name || "detected"}</p>}
+          {status.adeptRuntime.creatorMessage && <p className="muted">{status.adeptRuntime.creatorMessage}</p>}
+          <p className="muted" data-testid="adept-runtime-task-state">
+            {status.adeptRuntime.taskRegistered
+              ? "Starts when you sign in."
+              : status.adeptRuntime.windowsStartupPresent
+                ? "An older Windows startup task is still registered. Adept Background Services is not the owner."
+                : "Not set to start when you sign in."}
+          </p>
+        </div>
       )}
 
       <div className="local-runtime-settings__card">
@@ -146,6 +212,26 @@ export function LocalRuntimeSettings() {
         </label>
       </div>
 
+      <div className="local-runtime-settings__card">
+        <div className="local-runtime-settings__card-header">
+          <span className="local-runtime-settings__card-title">MiniMax Route A</span>
+          {status && statusBadge(status.routeA?.status)}
+        </div>
+        <p className="muted">
+          Isolated MiniMax runtime. Adept reports it when it is already running; a second
+          GPU stack is not started automatically.
+        </p>
+        {status?.routeA?.message && <p className="muted">{status.routeA.message}</p>}
+        {status?.gpuAdmission?.dualResident && (
+          <p className="pill warn">
+            Two local video runtimes are sharing the GPU. Finish or stop one before starting the other.
+          </p>
+        )}
+        {status?.gpuAdmission?.reason && !status.gpuAdmission.routeAAllowed && (
+          <p className="muted">{status.gpuAdmission.reason}</p>
+        )}
+      </div>
+
       <div className="local-runtime-settings__section">
         <label className="toggle-row">
           <input
@@ -162,10 +248,20 @@ export function LocalRuntimeSettings() {
         <button
           type="button"
           className="primary"
-          onClick={handleRestart}
+          data-testid="restart-studio-api"
+          onClick={handleRestartApi}
           disabled={hosted || busy}
         >
-          Restart Background Services
+          Restart Studio API
+        </button>
+        <button
+          type="button"
+          className="ghost"
+          data-testid="restart-comfy"
+          onClick={handleRestartComfy}
+          disabled={hosted || busy}
+        >
+          Restart Comfy
         </button>
         <button
           type="button"
@@ -182,6 +278,15 @@ export function LocalRuntimeSettings() {
           disabled={hosted || busy}
         >
           Stop
+        </button>
+        <button
+          type="button"
+          className="ghost"
+          data-testid="repair-background-services"
+          onClick={handleRepair}
+          disabled={hosted || busy}
+        >
+          Repair
         </button>
       </div>
 

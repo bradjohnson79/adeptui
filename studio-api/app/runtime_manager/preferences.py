@@ -49,9 +49,12 @@ def load_preferences() -> RuntimeManagerPreferences:
 
 
 def save_preferences(prefs: RuntimeManagerPreferences) -> RuntimeManagerPreferences:
+    from runtime_supervisor.bootstrap import actual_start_with_windows
+
     path = _prefs_path()
     data = prefs.model_dump()
+    data["startWithWindows"] = bool(actual_start_with_windows())
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(path)
-    return prefs
+    return RuntimeManagerPreferences.model_validate(data)

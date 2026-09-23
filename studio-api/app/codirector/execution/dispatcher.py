@@ -98,7 +98,10 @@ def creator_readable_handler_error(exc: BaseException, *, capability: str = "") 
         )
     labels = {
         "ers.generate": "Environment Reference Sheet",
+        "ers.repair": "ERS repair",
+        "ers.edit": "ERS edit",
         "atlas.generate": "Atlas Shot",
+        "atlas.assign": "Spatial Map",
         "image.generate": "Image generation",
         "scene.generate": "Scene generation",
         "storyboard.generate": "Storyboard",
@@ -162,6 +165,37 @@ async def dispatch(
         updated_at=_now(),
     )
 
+    # ORDER19: expose sourceAssetId/assetId on pack for FE leftover-card hints
+    try:
+        _atts = list(ctx.get("attachment_asset_ids") or [])
+        _primary = next((str(a).strip() for a in _atts if str(a or "").strip()), None)
+        _sid = str(ctx.get("scene_id") or ctx.get("sceneId") or "").strip() or None
+        if _primary or _sid:
+            pd = dict(plan.plan_data or {})
+            if _primary:
+                pd.setdefault("sourceAssetId", _primary)
+                pd.setdefault("assetId", _primary)
+            if _sid:
+                pd.setdefault("sceneId", _sid)
+            plan.plan_data = pd
+    except Exception:
+        logger.debug("ORDER19 plan_data asset stamp failed", exc_info=True)
+
+    # Production Planner pack bridge: stamp planned_steps + lineage when present.
+    try:
+        from app.codirector.production_planner.pack_bridge import apply_production_plan_to_pack
+
+        apply_production_plan_to_pack(
+            plan,
+            production_plan=ctx.get("production_plan"),
+            planned_steps=ctx.get("planned_steps"),
+            parent_execution_id=str(ctx.get("parent_execution_id") or ""),
+        )
+        if ctx.get("plan_id") and not plan.plan_id:
+            plan.plan_id = str(ctx.get("plan_id") or "")
+    except Exception:
+        logger.warning("production planner pack bridge failed (non-fatal)", exc_info=True)
+
     # Check approval policy (spec §50).
     if cap.approval_policy != ApprovalPolicy.DIRECT and not pre_approved:
         if cap.handler_kind == HandlerKind.TOOL:
@@ -195,8 +229,17 @@ async def dispatch(
     if cap.handler_kind == HandlerKind.CAPABILITY_HANDLER:
         return _dispatch_capability_handler(db, project_id, plan, cap, unified_intent, ctx)
     elif cap.handler_kind == HandlerKind.TOOL:
+        # ORDER19: DIRECT policy must execute without a second confirmation gate.
+        # Mutating tools still create an audit proposal, but approve immediately.
+        direct = cap.approval_policy == ApprovalPolicy.DIRECT
         return await _dispatch_tool(
-            db, project_id, plan, cap, unified_intent, ctx, pre_approved=pre_approved
+            db,
+            project_id,
+            plan,
+            cap,
+            unified_intent,
+            ctx,
+            pre_approved=pre_approved or direct,
         )
     else:
         plan.status = ExecutionStatus.FAILED
@@ -234,12 +277,24 @@ def _apply_handler_result(
         )
         for i, cj in enumerate(result.get("child_jobs", []))
     ]
-    plan.planned_steps = result.get("planned_steps", [])
+    _result_steps = result.get("planned_steps") or []
+    if _result_steps:
+        plan.planned_steps = _result_steps
+    # else keep Production Planner bridged planned_steps stamped earlier
     plan.surface_type = result.get("surface_type", plan.surface_type)
     if result.get("character_id"):
         plan.character_id = result.get("character_id", plan.character_id)
     if result.get("spatial_map_id"):
         plan.plan_data = {**dict(plan.plan_data or {}), "spatial_map_id": result.get("spatial_map_id")}
+    image_profile = {
+        k: result[k]
+        for k in ("creatorAck", "aspectRatio", "width", "height", "route", "providerKind")
+        if result.get(k) not in (None, "")
+    }
+    if context and isinstance(context, dict) and context.get("creator_ack"):
+        image_profile.setdefault("creatorAck", context.get("creator_ack"))
+    if image_profile:
+        plan.plan_data = {**dict(plan.plan_data or {}), **image_profile}
     # Retry context snapshot (scene generation): keep the inputs so a
     # frontend Retry can start a FRESH transaction with the same intent.
     if context and isinstance(context, dict):
@@ -250,6 +305,15 @@ def _apply_handler_result(
         retry_ctx = {k: v for k, v in retry_ctx.items() if v is not None}
         if retry_ctx:
             plan.plan_data = {**dict(plan.plan_data or {}), "retryContext": retry_ctx}
+
+    for asset_id in result.get("result_asset_ids") or []:
+        aid = str(asset_id or "").strip()
+        if aid and aid not in plan.result_asset_ids:
+            plan.result_asset_ids.append(aid)
+    for child in plan.child_jobs:
+        aid = str(child.asset_id or "").strip()
+        if aid and aid not in plan.result_asset_ids:
+            plan.result_asset_ids.append(aid)
 
     first_meta = ((result.get("child_jobs") or [{}])[0] or {}).get("metadata") or {}
     if first_meta.get("resolvedProvider") and not plan.provider:
@@ -272,6 +336,46 @@ def _apply_handler_result(
         plan.error = str(result.get("error") or ZERO_JOBS_ERROR)
         plan.progress = 0.0
         return plan
+
+    preparation_ready = bool(
+        result.get("preparationReady")
+        or (result.get("plan_data") or {}).get("sceneProduction")
+        or (result.get("plan_data") or {}).get("preparationReady")
+    )
+    if preparation_ready and str(result.get("status") or "").lower() != "queued":
+        if result.get("plan_data"):
+            plan.plan_data = {**dict(plan.plan_data or {}), **dict(result.get("plan_data") or {})}
+        msg = str(result.get("message") or "").strip()
+        if msg:
+            plan.plan_data = {**dict(plan.plan_data or {}), "creatorAck": msg}
+        if str(result.get("status") or "").lower() == "failed" or str(result.get("error") or ""):
+            plan.status = ExecutionStatus.FAILED
+            plan.error = str(result.get("error") or result.get("message") or "Scene preparation failed.")
+            plan.recompute_progress()
+            return plan
+        plan.status = ExecutionStatus.PREVIEW
+        plan.recompute_progress()
+        return plan
+
+    handoff = bool(result.get("handoff") or (result.get("plan_data") or {}).get("timelineHandoff"))
+    if handoff:
+        msg = str(result.get("message") or (result.get("plan_data") or {}).get("handoffMessage") or "").strip()
+        plan.status = ExecutionStatus.PREVIEW
+        if msg:
+            plan.plan_data = {
+                **dict(plan.plan_data or {}),
+                "creatorAck": msg,
+                "handoffMessage": msg,
+                "timelineHandoff": True,
+            }
+        plan.recompute_progress()
+        return plan
+
+    if str(result.get("status") or "").lower() in {"completed", "complete"}:
+        plan.recompute_progress()
+        if plan.child_jobs and all(c.status == ChildJobStatus.COMPLETED for c in plan.child_jobs):
+            plan.status = ExecutionStatus.COMPLETED
+            return plan
 
     plan.status = ExecutionStatus.QUEUED
     plan.recompute_progress()
@@ -308,17 +412,34 @@ def _dispatch_capability_handler(
             "prompt": ctx.get("prompt", ""),
             "character_name": ctx.get("character_name", ""),
             "character_id": ctx.get("character_id", ""),
+            "character_ids": ctx.get("character_ids") or [],
+            "character_names": ctx.get("character_names") or [],
             "scene_id": ctx.get("scene_id", ""),
             "visual_style": ctx.get("visual_style", ""),
             "attachment_asset_ids": ctx.get("attachment_asset_ids", []),
+            "reference_asset_ids": ctx.get("reference_asset_ids") or ctx.get("crs_asset_ids") or [],
             "scene_description": ctx.get("scene_description") or ctx.get("sceneDescription") or "",
             "scene_intent": ctx.get("scene_intent") or ctx.get("sceneIntent"),
             "aspect_ratio": ctx.get("aspect_ratio", "16:9"),
+            "width": ctx.get("width") or 0,
+            "height": ctx.get("height") or 0,
+            "provider_kind": ctx.get("provider_kind") or "",
+            "generation_route": ctx.get("generation_route") or "",
             "count": ctx.get("count", 1),
             "user_instructions": ctx.get("user_instructions", ""),
+            "original_user_instructions": ctx.get("original_user_instructions")
+            or ctx.get("canonical_original_instructions")
+            or "",
+            "resolved_creative_brief": ctx.get("resolved_creative_brief") or "",
+            "explicit_provider": ctx.get("explicit_provider") or ctx.get("model") or "",
+            "lock_level": ctx.get("lock_level") or "",
+            "lock_scope": ctx.get("lock_scope") or "",
+            "requested_provider": ctx.get("requested_provider") or "",
+            "requested_model_id": ctx.get("requested_model_id") or "",
             "project_style": ctx.get("project_style", ""),
             "scene_context": ctx.get("scene_context"),
             "character_names": ctx.get("character_names"),
+            "resolved_bindings": ctx.get("resolved_bindings") or [],
             "frame_index": ctx.get("frame_index", 0),
             "frame_metadata": ctx.get("frame_metadata"),
             "reference_asset_id": ctx.get("reference_asset_id"),
@@ -346,18 +467,68 @@ def _dispatch_capability_handler(
             "panelTask": ctx.get("panelTask") or ctx.get("panel_task") or "",
             "visual_canon_corrections": ctx.get("visual_canon_corrections")
             or ctx.get("visualCanonCorrections"),
+            # Env Creator Express / ERS: source + planning fields
+            "source_asset_id": ctx.get("source_asset_id") or ctx.get("sourceAssetId") or "",
+            "sourceAssetId": ctx.get("sourceAssetId") or ctx.get("source_asset_id") or "",
+            "reference_image": ctx.get("reference_image") or ctx.get("referenceImage") or "",
+            "referenceImage": ctx.get("referenceImage") or ctx.get("reference_image") or "",
+            "authoritative_source_asset_id": ctx.get("authoritative_source_asset_id")
+            or ctx.get("authoritativeSourceAssetId")
+            or "",
+            "authoritativeSourceAssetId": ctx.get("authoritativeSourceAssetId")
+            or ctx.get("authoritative_source_asset_id")
+            or "",
+            "forceFull": bool(ctx.get("forceFull") or ctx.get("force_full") or ctx.get("ers_force_full")),
+            "force_full": bool(ctx.get("force_full") or ctx.get("forceFull") or ctx.get("ers_force_full")),
+            "ers_force_full": bool(ctx.get("ers_force_full") or ctx.get("forceFull") or ctx.get("force_full")),
+            "ers_pipeline": ctx.get("ers_pipeline") or "",
+            "generationMode": ctx.get("generationMode") or "",
+            "templateId": ctx.get("templateId") or "",
+            "collageTemplate": ctx.get("collageTemplate") or "",
+            "environmentPrompt": ctx.get("environmentPrompt") or "",
+            "prompt": ctx.get("prompt") or ctx.get("environmentPrompt") or "",
+            "storyTheme": ctx.get("storyTheme") or "",
+            "aspectRatio": ctx.get("aspectRatio") or ctx.get("aspect_ratio") or "",
+            "aspect_ratio": ctx.get("aspect_ratio") or ctx.get("aspectRatio") or "",
+            "characters": ctx.get("characters") if isinstance(ctx.get("characters"), list) else None,
+            "props": ctx.get("props") if isinstance(ctx.get("props"), list) else None,
         }
         handler_kwargs = {k: v for k, v in all_kwargs.items() if k in accepted}
+        # Safe pass-through: any remaining ctx key the handler accepts (camel/snake).
+        for key, value in ctx.items():
+            if key in accepted and key not in handler_kwargs and value is not None:
+                handler_kwargs[key] = value
 
         result = handle(**handler_kwargs)
 
         # Populate the plan from the handler result (zero-job results are
         # terminal — never QUEUED with an empty work surface).
         plan = _apply_handler_result(plan, result, context=ctx)
+        production_caps = {
+            "image.generate",
+            "image.edit",
+            "image.generate_batch",
+            "video.generate",
+            "audio.sfx",
+            "audio.music",
+            "audio.ambience",
+        }
+        if cap.id in production_caps:
+            try:
+                from ..generation_memory.store import attach_canonical_request, snapshot_from_dispatch
 
-        save_pack(db, project_id, plan)
+                snap = snapshot_from_dispatch(plan=plan, ctx=ctx, result=result)
+                if (snap.originalUserInstructions or "").strip():
+                    plan = attach_canonical_request(db, plan, snap)
+                else:
+                    save_pack(db, project_id, plan)
+            except Exception:
+                logger.exception("canonical generation snapshot failed")
+                save_pack(db, project_id, plan)
+        else:
+            save_pack(db, project_id, plan)
 
-        if plan.is_terminal:
+        if plan.status == ExecutionStatus.FAILED:
             # ZERO-JOBS LAW: publish failure, never a started-with-zero event.
             _publish_event(ExecutionEvent(
                 event_type=ExecutionEventType.EXECUTION_FAILED,
@@ -367,6 +538,17 @@ def _dispatch_capability_handler(
                 error=plan.error,
                 surface_type=plan.surface_type,
                 total=0,
+                timestamp=_now(),
+            ))
+            return plan
+        if plan.status == ExecutionStatus.COMPLETED:
+            _publish_event(ExecutionEvent(
+                event_type=ExecutionEventType.EXECUTION_COMPLETED,
+                project_id=project_id,
+                execution_id=plan.execution_id,
+                status="completed",
+                surface_type=plan.surface_type,
+                total=plan.total_children,
                 timestamp=_now(),
             ))
             return plan
@@ -421,9 +603,12 @@ def _dispatch_capability_handler_plan_only(
             "prompt": ctx.get("prompt", ""),
             "character_name": ctx.get("character_name", ""),
             "character_id": ctx.get("character_id", ""),
+            "character_ids": ctx.get("character_ids") or [],
+            "character_names": ctx.get("character_names") or [],
             "scene_id": ctx.get("scene_id", ""),
             "visual_style": ctx.get("visual_style", ""),
             "attachment_asset_ids": ctx.get("attachment_asset_ids", []),
+            "reference_asset_ids": ctx.get("reference_asset_ids") or ctx.get("crs_asset_ids") or [],
             "count": ctx.get("count", 1),
             "user_instructions": ctx.get("user_instructions", ""),
             "project_style": ctx.get("project_style", ""),
@@ -521,7 +706,7 @@ async def approve_and_execute(
 
         save_pack(db, project_id, plan)
 
-        if plan.is_terminal:
+        if plan.status == ExecutionStatus.FAILED:
             _publish_event(ExecutionEvent(
                 event_type=ExecutionEventType.EXECUTION_FAILED,
                 project_id=project_id,
@@ -530,6 +715,17 @@ async def approve_and_execute(
                 error=plan.error,
                 surface_type=plan.surface_type,
                 total=0,
+                timestamp=_now(),
+            ))
+            return plan
+        if plan.status == ExecutionStatus.COMPLETED:
+            _publish_event(ExecutionEvent(
+                event_type=ExecutionEventType.EXECUTION_COMPLETED,
+                project_id=project_id,
+                execution_id=plan.execution_id,
+                status="completed",
+                surface_type=plan.surface_type,
+                total=plan.total_children,
                 timestamp=_now(),
             ))
             return plan
@@ -564,7 +760,42 @@ def _tool_params(ctx: dict[str, Any]) -> dict[str, Any]:
     free-form keys.
     """
     params = ctx.get("tool_params") or {}
-    return params if isinstance(params, dict) else {}
+    out = dict(params) if isinstance(params, dict) else {}
+    if not str(out.get("prompt") or "").strip():
+        if ctx.get("canonical_resolved"):
+            prompt = str(
+                ctx.get("canonical_original_instructions")
+                or ctx.get("original_user_instructions")
+                or ctx.get("prompt")
+                or ""
+            ).strip()
+        else:
+            prompt = str(
+                ctx.get("prompt")
+                or ctx.get("original_user_instructions")
+                or ctx.get("user_instructions")
+                or ""
+            ).strip()
+        if prompt:
+            out["prompt"] = prompt
+    if not str(out.get("sceneId") or "").strip() and ctx.get("scene_id"):
+        out["sceneId"] = str(ctx["scene_id"])
+    # ORDER19: chat attachments → assetId/sourceAssetId for timeline.add_asset / place_asset
+    attachments = ctx.get("attachment_asset_ids") or []
+    if isinstance(attachments, list):
+        primary = next((str(a).strip() for a in attachments if str(a or "").strip()), None)
+    else:
+        primary = None
+    if primary:
+        if not str(out.get("assetId") or "").strip():
+            out["assetId"] = primary
+        if not str(out.get("sourceAssetId") or "").strip():
+            out["sourceAssetId"] = primary
+    if not str(out.get("sceneId") or "").strip():
+        scene_id = ctx.get("sceneId")
+        if scene_id:
+            out["sceneId"] = str(scene_id)
+    return out
 
 
 def _extract_asset_id(tool_result: Any) -> str | None:
@@ -730,6 +961,17 @@ async def _dispatch_tool(
             ok = invocation.status == "succeeded"
             asset_id = _extract_asset_id(getattr(invocation, "result", None))
             error = None if ok else (invocation.errorMessage or "TOOL_EXECUTION_FAILED")
+            tool_result = getattr(invocation, "result", None)
+            if ok and isinstance(tool_result, dict):
+                from .ui_handoff import lift_ui_handoff
+
+                plan.plan_data = lift_ui_handoff(
+                    {
+                        **dict(plan.plan_data or {}),
+                        **tool_result,
+                        "toolId": tool_id,
+                    }
+                )
         elif definition.kind == "mutating" and not definition.requires_approval:
             invocation = await ToolExecutionService.execute_audited(
                 db,
@@ -740,8 +982,48 @@ async def _dispatch_tool(
                 request_id=request_id,
                 created_by=str(ctx.get("user_id") or "assistant"),
             )
+            tool_result = getattr(invocation, "result", None)
+            tool_result = tool_result if isinstance(tool_result, dict) else {}
+            batch_id = str(tool_result.get("batchId") or "").strip()
+            async_queued = bool(tool_result.get("async")) or str(tool_result.get("status") or "").lower() in {
+                "queued",
+                "running",
+            }
+            if batch_id and async_queued and invocation.status == "succeeded":
+                plan.child_jobs = [
+                    ChildJobView(
+                        job_id=batch_id,
+                        label=cap.title,
+                        status=ChildJobStatus.QUEUED,
+                        child_index=0,
+                        metadata={"batchId": batch_id, "toolId": tool_id, "async": True},
+                    )
+                ]
+                plan.status = ExecutionStatus.QUEUED
+                plan.error = None
+                plan.recompute_progress()
+                try:
+                    from ..generation_memory.store import attach_canonical_request, snapshot_from_dispatch
+
+                    snap = snapshot_from_dispatch(plan=plan, ctx=ctx, result=tool_result)
+                    if (snap.originalUserInstructions or "").strip():
+                        plan = attach_canonical_request(db, plan, snap)
+                    else:
+                        save_pack(db, project_id, plan)
+                except Exception:
+                    logger.exception("canonical generation snapshot failed")
+                    save_pack(db, project_id, plan)
+                _publish_event(ExecutionEvent(
+                    event_type=ExecutionEventType.EXECUTION_STARTED,
+                    project_id=project_id,
+                    execution_id=plan.execution_id,
+                    status="queued",
+                    surface_type=plan.surface_type,
+                    timestamp=_now(),
+                ))
+                return plan
             ok = invocation.status == "succeeded"
-            asset_id = _extract_asset_id(getattr(invocation, "result", None))
+            asset_id = _extract_asset_id(tool_result)
             error = None if ok else (invocation.errorMessage or "TOOL_EXECUTION_FAILED")
         else:
             # Approval-gated mutating tool → ProposalService bridge. The

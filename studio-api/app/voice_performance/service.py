@@ -307,25 +307,47 @@ def generate_segments(
                 spoken = text
                 try:
                     data["status"] = "generating"
+                    from ..character_identity.models import VoiceProfileRow
+
+                    voice_row = db.get(VoiceProfileRow, row.voice_version_id)
+                    clone_style_blocked = bool(
+                        voice_row
+                        and str(voice_row.source_mode or "").upper() == "CLONE"
+                        and str(voice_row.provider or "").lower().startswith("qwen")
+                    )
+                    style_emotion = (seg.emotion or {}).get("primary") or ""
+                    style_delivery = (seg.delivery or {}).get("style") or ""
+                    if clone_style_blocked and (style_emotion or style_delivery or seg.pace):
+                        request = DialogueGenerateRequest(
+                            text=spoken,
+                            language="en",
+                            allow_kokoro_fallback=allow_kokoro_fallback,
+                        )
+                    else:
+                        request = DialogueGenerateRequest(
+                            text=spoken,
+                            language="en",
+                            emotional_direction=style_emotion,
+                            performance_instruction=style_delivery,
+                            pace=str(seg.pace or ""),
+                            allow_kokoro_fallback=allow_kokoro_fallback,
+                        )
                     out = run_generate_dialogue(
                         db,
                         row.project_id,
                         row.character_id,
                         row.voice_version_id,
-                        DialogueGenerateRequest(
-                            text=spoken,
-                            language="en",
-                            emotional_direction=(seg.emotion or {}).get("primary") or "",
-                            performance_instruction=(seg.delivery or {}).get("style") or "",
-                            pace=str(seg.pace or ""),
-                            allow_kokoro_fallback=allow_kokoro_fallback,
-                        ),
+                        request,
                     )
                     data["outputAssetId"] = out.get("assetId")
                     data["status"] = "ready" if out.get("assetId") else "failed"
-                    data["supportMode"] = classify_feature(provider, "emotion") if seg.emotion else "Native"
-                    if guidance:
-                        data["supportMode"] = "Prompt-guided"
+                    if clone_style_blocked and guidance:
+                        data["supportMode"] = "Unsupported"
+                        data["styleUnsupported"] = True
+                    else:
+                        data["supportMode"] = classify_feature(provider, "emotion") if seg.emotion else "Native"
+                        if guidance:
+                            data["supportMode"] = "Prompt-guided"
                     if not out.get("assetId"):
                         any_failed = True
                         data["error"] = "No asset registered"

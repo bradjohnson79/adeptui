@@ -44,6 +44,7 @@ import {
   sendChatTurn,
   writeJson,
 } from "../codirector/helpers/autonomousCert";
+import { openCoDirectorContentTab } from "../codirector/helpers/audit";
 
 /** Force Beta API — never resolve relative to the UI origin (8760 SPA HTML). */
 const API_BASE = process.env.STUDIO_API_BASE?.trim() || "http://127.0.0.1:8758";
@@ -317,14 +318,14 @@ async function approveProposalFromUi(
   projectId: string,
   proposalId: string,
 ) {
-  await page.getByTestId("codirector-content-tab-approvals").click();
+  await openCoDirectorContentTab(page, "approvals");
   let card = page
     .getByTestId("codirector-approvals-panel")
     .getByTestId(`codirector-proposal-card-${proposalId}`);
   if (!(await card.isVisible().catch(() => false))) {
     await page.reload();
     await expect(page.getByTestId("codirector-composer-input")).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId("codirector-content-tab-approvals").click();
+    await openCoDirectorContentTab(page, "approvals");
     card = page
       .getByTestId("codirector-approvals-panel")
       .getByTestId(`codirector-proposal-card-${proposalId}`);
@@ -337,7 +338,7 @@ async function approveProposalFromUi(
 }
 
 async function openErsPlansPanel(page: Page) {
-  await page.getByTestId("codirector-content-tab-plans").click();
+  await openCoDirectorContentTab(page, "plans");
   const panel = page
     .getByTestId("codirector-ers-panel")
     .or(page.getByTestId("codirector-ers-empty"))
@@ -1409,7 +1410,7 @@ test.describe.serial("Adept UI Full Creator Pipeline (phases 0–17)", () => {
     // earlier is honoured. PoseCraft Experimental-only caps the verdict at CONDITIONAL.
     writeJson(ctx.artifactDir, "16-blockers.json", { blockers: ctx.blockers });
 
-    // Comfy :8188 / LTX / WAN unchanged — re-probe health surfaces (soft: Comfy may
+    // Comfy :8188 / LTX 2.5 unchanged — re-probe health surfaces (soft: Comfy may
     // have been wedged by image generation during the run; record honestly).
     const comfyRes = await request
       .get("http://127.0.0.1:8188/", { timeout: 15_000 })

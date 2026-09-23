@@ -31,7 +31,8 @@ def resolve_current_take(batch: Any, master: Any | None = None) -> dict[str, Any
     """Return {takeId, assetId, candidateId, source} for the CURRENT take only.
 
     Priority:
-      0. current whole-scene Take membership when master is provided
+      0. the rendering take's clip while a New Take is in flight, else the
+         selected whole-scene Take when master is provided
       1. batch.currentTakeId matching a candidate with assetId
       2. batch.activeTakeId matching a candidate with assetId
       3. batch.currentTakeAssetId only when it belongs to currentTakeId/activeTakeId candidate
@@ -42,10 +43,35 @@ def resolve_current_take(batch: Any, master: Any | None = None) -> dict[str, Any
         return None
     if master is not None:
         try:
-            from .scene_takes import current_scene_take
+            from .scene_takes import active_scene_take, current_scene_take
 
-            scene_take = current_scene_take(master)
             batch_id = str(getattr(batch, "id", "") or "")
+            # A New Take keeps the previous ready take selected until the creator
+            # makes the new one current. The clip that just finished still belongs
+            # to the rendering take. Continuity must read that clip, not the
+            # picture from the take the creator has not switched away from.
+            active = active_scene_take(master)
+            if active is not None and active.status == "rendering":
+                member = next(
+                    (
+                        m
+                        for m in (active.batches or [])
+                        if str(m.batchId) == batch_id and str(m.assetId or "").strip()
+                    ),
+                    None,
+                )
+                stamped = str(getattr(batch, "currentTakeAssetId", None) or "").strip()
+                asset_id = str(member.assetId).strip() if member is not None else stamped
+                if asset_id:
+                    return {
+                        "takeId": member.batchTakeId if member is not None else None,
+                        "assetId": asset_id,
+                        "candidateId": member.candidateId if member is not None else None,
+                        "source": "active_render",
+                        "candidate": None,
+                        "sceneTakeId": active.id,
+                    }
+            scene_take = current_scene_take(master)
             if scene_take and scene_take.status != "rendering":
                 member = next(
                     (
@@ -210,6 +236,8 @@ def _dialogue_qc_status_lines(batches: list[Any], *, completed: int, total: int,
             "ApprovedConfigurationChanged",
             "RegenerationRecommended",
             "NeedsDialogueRetake",
+            "QC_Pending",
+            "QC_RetryRequired",
             "Failed",
             "Cancelled",
         }:
@@ -305,8 +333,14 @@ def compute_generation_progress(master: Any) -> dict[str, Any]:
         progress = _job_progress(batch)
     elif queued:
         index, batch = queued[0]
-        scene_status = "queued"
-        progress = _job_progress(batch)
+        from .scene_render_progress import _batch_awaiting_sequential_slot
+
+        if _batch_awaiting_sequential_slot(batch):
+            scene_status = "waiting"
+            progress = 0.0
+        else:
+            scene_status = "queued"
+            progress = _job_progress(batch)
     elif waiting:
         index, batch = waiting[0]
         scene_status = "waiting"
@@ -351,15 +385,31 @@ def compute_generation_progress(master: Any) -> dict[str, Any]:
 
     grounded = float(progress or 0.0) > 0 and scene_status in ("generating", "queued", "waiting")
     if scene_status in ("generating", "queued", "waiting"):
-        message = format_render_status_line(
-            batch_index=n,
-            total_batches=m,
-            take_label=take_label,
-            scene_status=scene_status,
-            progress=float(progress or 0.0),
-            progress_grounded=grounded,
-            phase="queued" if scene_status == "queued" else ("preparing_model" if float(progress or 0) <= 0 else "sampling"),
-        )
+        if scene_status == "queued":
+            line_phase = "queued"
+        elif scene_status == "waiting":
+            line_phase = ""
+        elif float(progress or 0) <= 0:
+            line_phase = "preparing_model"
+        else:
+            line_phase = "sampling"
+        gate_message = ""
+        for ref in getattr(batch, "references", None) or []:
+            if isinstance(ref, dict) and ref.get("kind") == "handoffGate" and ref.get("message"):
+                gate_message = str(ref["message"])
+                break
+        if gate_message and scene_status in ("queued", "waiting"):
+            message = gate_message
+        else:
+            message = format_render_status_line(
+                batch_index=n,
+                total_batches=m,
+                take_label=take_label,
+                scene_status=scene_status,
+                progress=float(progress or 0.0),
+                progress_grounded=grounded,
+                phase=line_phase,
+            )
     elif scene_status in ("idle", "draft", "ready"):
         # Idle / Draft / Ready: no creator chrome message (statusLines stay empty below).
         message = ""
@@ -372,6 +422,8 @@ def compute_generation_progress(master: Any) -> dict[str, Any]:
     status_lines: list[str] = []
     if scene_status in ("generating", "queued", "waiting"):
         status_lines.append(message)
+        if scene_status == "waiting":
+            status_lines.append("The next parts of this scene are being prepared.")
         if total > 1:
             status_lines.append(overall)
     elif total > 1 or completed > 0:

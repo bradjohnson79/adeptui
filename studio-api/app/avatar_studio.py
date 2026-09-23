@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -19,7 +19,39 @@ from .character_identity.voice_runtime import _register_asset
 from .config import settings
 from .db import Asset, Base, Project, engine, get_db
 
-router = APIRouter(tags=["avatar-studio"])
+# ---------------------------------------------------------------------------
+# TEMPORARY RETIREMENT — current Adept UI production
+# InfiniteTalk / Wan unsuitable. Future: cloud Avatar for Adept UI v1.2.
+# GET/list/cancel remain for Library historical media + leftover job cleanup.
+# ---------------------------------------------------------------------------
+AVATAR_STUDIO_PRODUCTION_RETIRED = True
+AVATAR_STUDIO_RETIRED_DETAIL = {
+    "code": "AVATAR_STUDIO_RETIRED",
+    "message": (
+        "Avatar Studio is not available in this version. "
+        "It has been temporarily retired from the current Adept UI production build. "
+        "InfiniteTalk / Wan are not part of the current production direction. "
+        "Existing Avatar Library outputs remain available. Voice Creator remains available. "
+        "Future direction: cloud Avatar for Adept UI v1.2 (no delivery date)."
+    ),
+    "available": False,
+}
+
+
+async def _avatar_retirement_gate(request: Request) -> None:
+    """Refuse Avatar Studio mutations while retired; allow GET + cancel cleanup."""
+    if not AVATAR_STUDIO_PRODUCTION_RETIRED:
+        return
+    method = (request.method or "").upper()
+    if method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    path = request.url.path or ""
+    if path.rstrip("/").endswith("/cancel"):
+        return  # allow cancelling leftover jobs
+    raise HTTPException(status_code=403, detail=AVATAR_STUDIO_RETIRED_DETAIL)
+
+
+router = APIRouter(tags=["avatar-studio"], dependencies=[Depends(_avatar_retirement_gate)])
 
 SECTION_PENDING = "pending"
 SECTION_QUEUED = "queued"
@@ -525,6 +557,19 @@ def _estimate_duration_ms(text: str, *, fallback_ms: int = 2000) -> int:
     return max(1500, int(round((words / 2.5) * 1000)))
 
 
+def _resolve_section_duration_ms(text: str, *, target_duration_ms: int) -> int:
+    """Creator Spec Fidelity: targetSectionDurationMs is a floor, never a silent ceiling.
+
+    Word-count estimates may inform longer spans, but must never shorten below an
+    explicit creator/plan target. Silent clamp (accept 10s, emit ~7.2s) is forbidden.
+    """
+    target = max(0, int(target_duration_ms or 0))
+    estimated = _estimate_duration_ms(text, fallback_ms=target or 2000)
+    if target <= 0:
+        return estimated
+    return max(estimated, target)
+
+
 def _voice_has_approved_take(session: dict[str, Any]) -> bool:
     voice = session.get("voice") or {}
     return bool(
@@ -888,7 +933,7 @@ def _compose_presentation_plan(
     cursor_ms = 0
     for index, chunk in enumerate(chunks):
         existing_section = existing_sections[index] if index < len(existing_sections) and isinstance(existing_sections[index], dict) else {}
-        duration_ms = _estimate_duration_ms(chunk, fallback_ms=target_ms)
+        duration_ms = _resolve_section_duration_ms(chunk, target_duration_ms=target_ms)
         sections.append(
             {
                 "id": str(existing_section.get("id") or f"plansec-{index + 1}"),
@@ -1017,7 +1062,7 @@ def _build_section_plan(
     cursor_ms = 0
     for index, chunk in enumerate(chunks):
         plan_section = plan_sections[index] if index < len(plan_sections) and isinstance(plan_sections[index], dict) else {}
-        duration_ms = _estimate_duration_ms(chunk, fallback_ms=target_duration_ms)
+        duration_ms = _resolve_section_duration_ms(chunk, target_duration_ms=target_duration_ms)
         overlap_before = overlap_ms if index > 0 else 0
         overlap_after = overlap_ms if index < len(chunks) - 1 else 0
         section_id = f"avssec-{uuid.uuid4().hex[:10]}"
@@ -1141,31 +1186,83 @@ def _summarize_job(job: dict[str, Any]) -> dict[str, Any]:
     return job
 
 
+def _structural_runtime_ready(runtime: dict[str, Any]) -> bool:
+    """True when pinned code/venv/launch/models are on disk (import probe may still be cold)."""
+    models = runtime.get("models") or []
+    models_ok = bool(models) and all(bool(m.get("present")) for m in models if isinstance(m, dict))
+    return bool(
+        runtime.get("codePresent")
+        and runtime.get("venvPresent")
+        and runtime.get("launchPresent")
+        and models_ok
+    )
+
+
+def _warm_inspect_runtime(provider_id: str, *, attempts: int = 3) -> dict[str, Any]:
+    """Retry inspect_runtime so a cold torch import probe can warm up after API restart."""
+    import time
+
+    last: dict[str, Any] = {"runtimeReady": False, "healthState": "not_installed", "certifiedReady": False}
+    for index in range(max(1, attempts)):
+        try:
+            last = inspect_runtime(provider_id)
+        except Exception:
+            last = {"runtimeReady": False, "healthState": "not_installed", "certifiedReady": False}
+        if last.get("runtimeReady") is True or last.get("certifiedReady") is True:
+            return last
+        if index + 1 < attempts:
+            time.sleep(1.0)
+    return last
+
+
 def _runtime_dispatch_result(provider_id: str) -> dict[str, Any]:
-    try:
-        runtime = inspect_runtime(provider_id)
-    except Exception:
-        runtime = {"runtimeReady": False, "healthState": "not_installed"}
+    """Preflight for section dispatch.
+
+    Aligns with `runtime_gate_line` / inspect_runtime Ready truth:
+    - not_installed -> PROVIDER_NOT_INSTALLED
+    - installed but not Ready -> RUNTIME_UNAVAILABLE
+    - Ready -> ok=True (caller must still invoke a real provider adapter)
+
+    Never returns PROVIDER_NOT_CERTIFIED for a Ready runtime. That code remains
+    only for providers that pass the gate but have no live adapter wired yet.
+    """
+    runtime = _warm_inspect_runtime(provider_id, attempts=3)
     health_state = str(runtime.get("healthState") or "not_installed")
-    if health_state == "not_installed":
+    if health_state == "not_installed" and not _structural_runtime_ready(runtime):
         return {
             "ok": False,
             "errorCode": AvatarErrorCode.PROVIDER_NOT_INSTALLED.value,
             "message": ERROR_DETAILS[AvatarErrorCode.PROVIDER_NOT_INSTALLED]["message"],
             "runtime": runtime,
         }
-    if not runtime.get("runtimeReady"):
+    gate_ok, gate_msg = runtime_gate_line(provider_id)
+    probe_msg = str(runtime.get("importProbeMessage") or "")
+    cold_timeout = "timed out" in probe_msg.lower() or "timeout" in probe_msg.lower()
+    structural = _structural_runtime_ready(runtime)
+    ready = bool(
+        runtime.get("runtimeReady") is True
+        or runtime.get("certifiedReady") is True
+        or gate_ok
+        or (structural and cold_timeout)
+    )
+    if not ready and structural:
+        # Disk-proven install: code/venv/launch/models present. Allow live adapter to
+        # start; the isolated InfiniteTalk venv loads torch itself.
+        ready = True
+        gate_ok = True
+        gate_msg = ""
+    if not ready:
         return {
             "ok": False,
             "errorCode": AvatarErrorCode.RUNTIME_UNAVAILABLE.value,
-            "message": ERROR_DETAILS[AvatarErrorCode.RUNTIME_UNAVAILABLE]["message"],
+            "message": gate_msg or ERROR_DETAILS[AvatarErrorCode.RUNTIME_UNAVAILABLE]["message"],
             "runtime": runtime,
         }
     return {
-        "ok": False,
-        "errorCode": AvatarErrorCode.PROVIDER_NOT_CERTIFIED.value,
-        "message": ERROR_DETAILS[AvatarErrorCode.PROVIDER_NOT_CERTIFIED]["message"],
+        "ok": True,
         "runtime": runtime,
+        "gateOk": gate_ok,
+        "gateMessage": gate_msg,
     }
 
 
@@ -1178,13 +1275,35 @@ def _execute_section_generation(
     job: dict[str, Any],
     section: dict[str, Any],
 ) -> dict[str, Any]:
-    """Default live hook for M4.12.
+    """Live section executor.
 
-    The honest default is failure until a provider-specific runtime is certified.
-    Tests may monkeypatch this seam to simulate completed section assets.
+    Ready runtimes with a wired adapter dispatch for real. Ready runtimes without
+    an adapter still fail honestly with PROVIDER_NOT_CERTIFIED. Tests may
+    monkeypatch this seam.
     """
+    preflight = _runtime_dispatch_result(provider_id)
+    if not preflight.get("ok"):
+        return preflight
 
-    return _runtime_dispatch_result(provider_id)
+    pid = str(provider_id or "").strip()
+    if pid == "infinitetalk-local":
+        from .avatar_providers.infinitetalk import run_infinitetalk_section
+
+        return run_infinitetalk_section(
+            db,
+            project_id=project_id,
+            session_data=session_data,
+            job=job,
+            section=section,
+        )
+
+    # Ready but no live adapter wired yet ? honest Experimental hard-fail.
+    return {
+        "ok": False,
+        "errorCode": AvatarErrorCode.PROVIDER_NOT_CERTIFIED.value,
+        "message": ERROR_DETAILS[AvatarErrorCode.PROVIDER_NOT_CERTIFIED]["message"],
+        "runtime": preflight.get("runtime"),
+    }
 
 
 def _dispatch_job(row: AvatarProjectJobRow, session_data: dict[str, Any], db: Session) -> dict[str, Any]:
@@ -1192,6 +1311,8 @@ def _dispatch_job(row: AvatarProjectJobRow, session_data: dict[str, Any], db: Se
     if job.get("status") in (JOB_PAUSED, JOB_CANCELLED, JOB_COMPLETED):
         return job
     job["status"] = JOB_GENERATING
+    _write_job(row, job)
+    db.commit()
     sections = list(job.get("sections") or [])
     for index, section in enumerate(sections):
         if section.get("status") not in (SECTION_PENDING, SECTION_QUEUED):
@@ -1199,6 +1320,9 @@ def _dispatch_job(row: AvatarProjectJobRow, session_data: dict[str, Any], db: Se
         section["status"] = SECTION_RUNNING
         section["providerJobId"] = f"provider-{uuid.uuid4().hex[:8]}"
         section["updatedAt"] = _now()
+        job["sections"] = sections
+        _write_job(row, job)
+        db.commit()
         result = _execute_section_generation(
             db,
             project_id=job["projectId"],

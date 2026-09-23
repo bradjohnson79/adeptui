@@ -35,9 +35,14 @@ def _require(ctx: ToolContext) -> None:
 def _require_character(ctx: ToolContext, args: dict[str, Any]) -> str:
     _require(ctx)
     character_id = str(args.get("characterId") or "").strip()
-    if not character_id:
-        raise ValueError("characterId is required")
-    return character_id
+    if character_id:
+        return character_id
+    name = str(args.get("characterName") or args.get("name") or "").strip()
+    if name:
+        row = ci.resolve_character_by_name(ctx.db, ctx.project_id, name)
+        if row is not None:
+            return row.id
+    raise ValueError("characterId is required")
 
 
 def _profile_or_raise(ctx: ToolContext, character_id: str):
@@ -53,12 +58,23 @@ async def inspect_readiness(ctx: ToolContext, args: dict[str, Any]) -> dict[str,
     character_id = _require_character(ctx, args)
     profile = _profile_or_raise(ctx, character_id)
     cov = profile.coverage.model_dump() if profile.coverage else ci.coverage(ctx.db, ctx.project_id, character_id).model_dump()
+    sheet_gate: dict[str, Any] = {}
+    try:
+        from ....character_identity.cc_v2 import get_status
+
+        sheet_gate = dict((get_status(ctx.db, ctx.project_id, character_id).get("sheetGate") or {}))
+    except Exception:
+        sheet_gate = {}
+    sheet_ready = bool(sheet_gate.get("ready"))
+    sheet_next = str(sheet_gate.get("nextAction") or "").strip()
     return {
         "ok": True,
         "characterId": character_id,
         "readiness": cov,
-        "nextAction": cov.get("next_action") or "",
-        "criticalBlockers": cov.get("critical_blockers") or [],
+        "sheetGate": sheet_gate,
+        "sheetReady": sheet_ready,
+        "nextAction": sheet_next or cov.get("next_action") or "",
+        "criticalBlockers": list(sheet_gate.get("missing") or []),
     }
 
 
@@ -228,10 +244,37 @@ async def build_continuity_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[
 # ---------------------------------------------------------------------------
 
 
+def _reuse_character(ctx: ToolContext, name: str) -> dict[str, Any] | None:
+    from ....creator_scope.contract import ENTITY_CHARACTER
+    from ....creator_scope.service import reuse_existing_profile
+
+    reused = reuse_existing_profile(
+        ctx.db, entity_type=ENTITY_CHARACTER, project_id=ctx.project_id, name=name
+    )
+    if reused is None:
+        return None
+    profile = ci.get_profile(ctx.db, ctx.project_id, reused["entityId"])
+    reused["profile"] = profile.model_dump()
+    reused["created"] = False
+    return reused
+
+
 def preview_create_from_brief(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     _require(ctx)
     name = str(args.get("name") or "").strip() or "Untitled character"
     brief = str(args.get("brief") or "").strip()
+    reused = _reuse_character(ctx, name)
+    if reused:
+        return ToolPreview(
+            summary=f"{name} already exists. I'll use the existing Character profile.",
+            lines=[
+                "Does not create a second Character.",
+                f"Existing id: {reused['existingId']}",
+                "Global" if reused.get("isGlobal") else "Local to this project",
+            ],
+            resourceKind="project",
+            resourceId=ctx.project_id,
+        )
     return ToolPreview(
         summary=f"Create draft Character Profile “{name}” from brief.",
         lines=[
@@ -251,6 +294,9 @@ def apply_create_from_brief(ctx: ToolContext, args: dict[str, Any]) -> dict[str,
     name = str(args.get("name") or "").strip()
     if not name:
         raise ValueError("name is required")
+    reused = _reuse_character(ctx, name)
+    if reused:
+        return reused
     brief = str(args.get("brief") or "").strip()
     role = str(args.get("role") or "").strip()
     out = ci.create_profile(
@@ -629,6 +675,9 @@ def apply_create_from_script(ctx: ToolContext, args: dict[str, Any]) -> dict[str
     description = excerpt
     if script_ref:
         description = f"[Script ref: {script_ref}]\n{excerpt}"
+    reused = _reuse_character(ctx, name)
+    if reused:
+        return reused
     out = ci.create_profile(
         ctx.db,
         ctx.project_id,
@@ -713,9 +762,60 @@ def apply_submit_for_review(ctx: ToolContext, args: dict[str, Any]) -> dict[str,
     return result
 
 
+def preview_delete_profile(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    character_id = _require_character(ctx, args)
+    profile = _profile_or_raise(ctx, character_id)
+    from ....creator_scope.contract import ENTITY_CHARACTER
+    from ....creator_scope.service import delete_preview_payload
+    preview = delete_preview_payload(
+        ctx.db,
+        entity_type=ENTITY_CHARACTER,
+        entity_id=character_id,
+        name=profile.name,
+        is_global=profile.is_global,
+        owning_project_id=profile.project_id,
+    )
+    scope_label = "Global" if preview["isGlobal"] else "Local"
+    lines = [
+        f"This is a {scope_label} Character profile.",
+        f"Referenced by {preview['usageCount']} scene(s) across {preview['projectCount']} project(s).",
+        "Library images and voice assets are kept — only the canonical profile is removed.",
+        "This action cannot be undone.",
+    ]
+    if preview["isGlobal"]:
+        lines.insert(1, "Deleting it will remove the canonical profile from every project using it.")
+    return ToolPreview(
+        summary=f'Delete Character profile "{profile.name}".',
+        lines=lines,
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_delete_profile(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    character_id = _require_character(ctx, args)
+    profile = _profile_or_raise(ctx, character_id)
+    from ....character_identity.service import delete_profile
+    confirm = bool(args.get("confirmCrossProject") or args.get("confirm_cross_project"))
+    result = delete_profile(ctx.db, ctx.project_id, character_id, confirm_cross_project=confirm)
+    return {"ok": True, "deleted": result.get("deleted"), "name": result.get("name"), "characterId": character_id}
+
+
 # ---------------------------------------------------------------------------
 # Voice Creator workspace tools (Phase 4.3 corrective)
 # ---------------------------------------------------------------------------
+
+
+def _default_voice_message(character_name: str, active: dict[str, Any] | None, *, has_approved: bool) -> str:
+    name = (character_name or "").strip() or "This character"
+    if has_approved:
+        profile_name = str((active or {}).get("name") or "").strip()
+        version = (active or {}).get("version_number")
+        suffix = f" (v{version})" if version not in (None, "", 0) else ""
+        if profile_name:
+            return f"{name}'s current default voice is {profile_name}{suffix}."
+        return f"{name} has an approved default voice{suffix}."
+    return f"{name} doesn't have an approved default voice yet."
 
 
 async def get_voice_status(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -724,14 +824,19 @@ async def get_voice_status(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
 
     ws = get_voice_workspace(ctx.db, ctx.project_id, character_id)
     active = ws.get("activeVoice") or {}
+    has_approved = bool(ws.get("activeVoiceProfileId") and str(active.get("approval_status") or "").lower() == "approved")
     return {
         "ok": True,
         "characterId": character_id,
         "characterName": ws.get("characterName"),
-        "activeVoiceProfileId": ws.get("activeVoiceProfileId"),
-        "approvalStatus": active.get("approval_status"),
-        "sourceMode": active.get("source_mode"),
-        "provider": active.get("provider"),
+        "activeVoiceProfileId": ws.get("activeVoiceProfileId") if has_approved else None,
+        "approvalStatus": active.get("approval_status") if has_approved else None,
+        "sourceMode": active.get("source_mode") if has_approved else None,
+        "provider": active.get("provider") if has_approved else None,
+        "hasApprovedVoice": has_approved,
+        "versionNumber": active.get("version_number") if has_approved else None,
+        "message": _default_voice_message(str(ws.get("characterName") or ""), active if isinstance(active, dict) else None, has_approved=has_approved),
+        "offer": None if has_approved else "Open Voice Creator",
         "providers": ws.get("providers"),
         "methods": ws.get("methods"),
         "performanceAttached": ws.get("performanceAttached"),
@@ -858,11 +963,25 @@ async def get_reaction_coverage(ctx: ToolContext, args: dict[str, Any]) -> dict[
 
 async def open_voice_creator(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     character_id = _require_character(ctx, args)
+    from ....character_identity.voice_creator import get_voice_workspace
+
+    method = str(args.get("method") or args.get("preferredMethod") or "").strip().lower()
+    if method not in {"create", "clone", "existing"}:
+        method = ""
+    ws = get_voice_workspace(ctx.db, ctx.project_id, character_id)
+    active = ws.get("activeVoice") or {}
+    has_approved = bool(ws.get("activeVoiceProfileId") and str(active.get("approval_status") or "").lower() == "approved")
     return {
         "ok": True,
         "characterId": character_id,
+        "characterName": ws.get("characterName"),
+        "method": method or None,
+        "contentTab": "voice_creator",
         "uiAction": "open_voice_creator",
-        "workspaceUrl": f"/project/{ctx.project_id}?workspace=voicestudio&characterId={character_id}",
+        "hasApprovedVoice": has_approved,
+        "activeVoiceProfileId": ws.get("activeVoiceProfileId") if has_approved else None,
+        "message": _default_voice_message(str(ws.get("characterName") or ""), active if isinstance(active, dict) else None, has_approved=has_approved),
+        "offer": None if has_approved else "Open Voice Creator",
         "mock": False,
         "_evidence": {"source": "character_identity.voice_creator.ui"},
     }
@@ -973,11 +1092,11 @@ def apply_refine_voice_candidate(ctx: ToolContext, args: dict[str, Any]) -> dict
 
 def preview_approve_voice_candidate(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     return ToolPreview(
-        summary="Owner-approve voice candidate → immutable Character Voice Version.",
+        summary="Approve a voice sample as this character's current default voice.",
         lines=[
-            "Sets approved Voice Profile active on Character Profile.",
+            "Sets the selected Voice Profile as the character's current approved voice.",
+            "Previous approved voices stay in version history. Profile audio is not overwritten.",
             "Refreshes Prompt Package voice fields.",
-            "Further edits require a new draft version.",
         ],
         resourceKind="project",
         resourceId=ctx.project_id,
@@ -1118,4 +1237,169 @@ def apply_generate_voice_clone(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         "approved": False,
         "mock": False,
         "_evidence": {"source": "character_identity.voice_creator.clone"},
+    }
+
+
+_ANGLE_NAMES = ("side", "three_quarter", "back")
+
+
+def _normalize_angle(raw: Any) -> str:
+    text = str(raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "side": "side",
+        "profile": "side",
+        "three_quarter": "three_quarter",
+        "threequarter": "three_quarter",
+        "3_4": "three_quarter",
+        "3/4": "three_quarter",
+        "back": "back",
+        "rear": "back",
+    }
+    angle = aliases.get(text)
+    if angle not in _ANGLE_NAMES:
+        raise ValueError("angle must be side, three_quarter, or back.")
+    return angle
+
+
+async def get_angles(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    character_id = _require_character(ctx, args)
+    from ....character_identity.cc_v2 import get_status
+
+    state = get_status(ctx.db, ctx.project_id, character_id)
+    mv = (state.get("multiView") or {}).get("angles") or {}
+    front = ((state.get("views") or {}).get("front") or {})
+    angles = {}
+    for name in _ANGLE_NAMES:
+        slot = mv.get(name) or {}
+        angles[name] = {
+            "assetId": slot.get("assetId"),
+            "approved": bool(slot.get("approved")),
+            "source": slot.get("source"),
+            "status": slot.get("status"),
+        }
+    sheet_gate = dict(state.get("sheetGate") or {})
+    return {
+        "ok": True,
+        "characterId": character_id,
+        "characterName": state.get("name"),
+        "front": {
+            "assetId": front.get("assetId"),
+            "approved": bool(front.get("approved")),
+            "source": front.get("source"),
+            "status": front.get("status"),
+        },
+        "angles": angles,
+        "sheetGate": sheet_gate,
+        "sheetReady": bool(sheet_gate.get("ready")),
+        "nextAction": sheet_gate.get("nextAction") or "",
+        "sameStore": True,
+        "mock": False,
+    }
+
+
+def preview_adopt_angle(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    character_id = _require_character(ctx, args)
+    angle = _normalize_angle(args.get("angle"))
+    profile = _profile_or_raise(ctx, character_id)
+    return ToolPreview(
+        summary=f"Use this picture as {profile.name}'s {angle.replace('_', ' ')} view.",
+        lines=[
+            "Saves it to the Library and binds it to this character.",
+            "Does not approve the angle. The creator still clicks Approve.",
+            "Does not create a new character.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_adopt_angle(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    character_id = _require_character(ctx, args)
+    angle = _normalize_angle(args.get("angle"))
+    asset_id = str(args.get("assetId") or args.get("imageAssetId") or "").strip()
+    if not asset_id:
+        raise ValueError("assetId is required")
+    from ....character_identity.cc_v3_multiview import adopt_angle_from_asset
+
+    state = adopt_angle_from_asset(
+        ctx.db,
+        ctx.project_id,
+        character_id,
+        angle,
+        asset_id,
+        source_type="uploaded",
+    )
+    slot = ((state.get("multiView") or {}).get("angles") or {}).get(angle) or {}
+    return {
+        "ok": True,
+        "characterId": character_id,
+        "angle": angle,
+        "assetId": slot.get("assetId"),
+        "approved": bool(slot.get("approved")),
+        "source": slot.get("source"),
+        "status": slot.get("status"),
+    }
+
+
+def preview_approve_angle(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    character_id = _require_character(ctx, args)
+    angle = _normalize_angle(args.get("angle"))
+    profile = _profile_or_raise(ctx, character_id)
+    return ToolPreview(
+        summary=f"Approve {profile.name}'s {angle.replace('_', ' ')} view.",
+        lines=["Makes this angle the approved character view.", "Works the same for uploaded and generated pictures."],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_approve_angle(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    character_id = _require_character(ctx, args)
+    angle = _normalize_angle(args.get("angle"))
+    from ....character_identity.cc_v3_multiview import set_angle_approval
+
+    state = set_angle_approval(ctx.db, ctx.project_id, character_id, angle, approved=True)
+    slot = ((state.get("multiView") or {}).get("angles") or {}).get(angle) or {}
+    sheet_gate = dict(state.get("sheetGate") or {})
+    return {
+        "ok": True,
+        "characterId": character_id,
+        "angle": angle,
+        "assetId": slot.get("assetId"),
+        "approved": bool(slot.get("approved")),
+        "source": slot.get("source"),
+        "sheetGate": sheet_gate,
+        "sheetReady": bool(sheet_gate.get("ready")),
+        "nextAction": sheet_gate.get("nextAction") or "",
+    }
+
+
+def preview_generate_angles(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    character_id = _require_character(ctx, args)
+    profile = _profile_or_raise(ctx, character_id)
+    return ToolPreview(
+        summary=f"Generate missing Character Angles for {profile.name}.",
+        lines=[
+            "Uses Qwen Image Edit from the approved Front.",
+            "Skips uploaded and already approved angles.",
+            "Does not replace the current character.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_generate_angles(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    character_id = _require_character(ctx, args)
+    angle = str(args.get("angle") or "").strip()
+    from ....character_identity.cc_v3_multiview import generate_multiview, regenerate_angle
+
+    if angle:
+        state = regenerate_angle(ctx.db, ctx.project_id, character_id, _normalize_angle(angle))
+    else:
+        state = generate_multiview(ctx.db, ctx.project_id, character_id)
+    return {
+        "ok": True,
+        "characterId": character_id,
+        "multiView": state.get("multiView"),
     }

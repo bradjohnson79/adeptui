@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { Scene } from "../../types";
 import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
+import { rematerializeThenGenerateScene } from "../../timelineMaster/rematerializeThenGenerate";
 import { addTimelineBatch } from "../../timelineMaster/addTimelineBatch";
 import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
 import { anyTimelineGeneratorExecutable, resolveGeneratorOption } from "../../timelineMaster/draftCapabilities";
@@ -10,17 +11,18 @@ import { loadTimelineVideoGenerators } from "../../timelineMaster/useTimelineVid
 import { useDirectorSelection } from "../DirectorSelectionContext";
 import { ActionWithHelp, HelpTip } from "../HelpTip";
 import {
-  createLipSyncTrack,
-  lipSyncTrackHasContent,
-  normalizeLipSyncTracks,
-  type DirectorTimeline,
+  type TimelineBoardView,
   type PromptSegment,
   type TimelineClip,
 } from "../DirectorTracks";
 import { TimelineSettingsDrawer } from "./TimelineSettingsDrawer";
 import { registerTimelineCommand } from "../../timelineMaster/timelineHotkeys";
 import { stepTimelineZoom, sliderToZoom, zoomToSlider } from "../../timelineMaster/timelineZoom";
+import { TIMELINE_BATCHES_CREATOR_UI } from "../../timelineMaster/timelineBatchesCreatorUi";
+import { TIMELINE_LIPSYNC_CREATOR_UI } from "../../timelineMaster/timelineLipSyncCreatorUi";
 import { timelineActionError, timelineGenerateEmpty } from "../../timelineMaster/timelineErrors";
+import { findSameTrackIntersection } from "../../timelineMaster/sameTrackNoOverlap";
+import type { AudioClipModalKind } from "../../timelineMaster/audioClipModal";
 
 /** Header + transport generate controls for the Timeline board. */
 function nid() {
@@ -43,18 +45,6 @@ function batchHasContent(batch: BatchBlock) {
   return false;
 }
 
-function resolveSelectedLipSyncTrackId(
-  selection: ReturnType<typeof useDirectorSelection>["selection"],
-  trackIds: string[],
-) {
-  if (selection.kind === "lipsyncTrack") return selection.id;
-  if (selection.kind === "lipsyncClip") return selection.trackId;
-  if (selection.kind === "lipsync") {
-    const idx = selection.trackIndex ?? Number(selection.id || 0);
-    return trackIds[idx];
-  }
-  return undefined;
-}
 
 function PlusMinusGroup({
   label,
@@ -120,6 +110,7 @@ export function TimelineToolbar({
   onRedo,
   onGuidancePriorityChange,
   onOpenRetake,
+  onGenerationStandby,
   onActionError,
   retakeActive: _retakeActive,
   playing,
@@ -131,6 +122,7 @@ export function TimelineToolbar({
   onGoToSceneEnd,
   transportBounds,
   transportSceneId,
+  onOpenAudioClip,
 }: {
   projectId: string;
   scene: Scene;
@@ -138,13 +130,14 @@ export function TimelineToolbar({
   onRefresh: () => void | Promise<void>;
   /** Manual "Re-check now" — routes into the shell's always-on preflight hook. */
   onPreflightRecheck: () => void;
-  mutateTimeline: (mutator: (timeline: DirectorTimeline) => DirectorTimeline) => Promise<void>;
+  mutateTimeline: (mutator: (timeline: TimelineBoardView) => TimelineBoardView) => Promise<void>;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void | Promise<void>;
   onRedo: () => void | Promise<void>;
-  onGuidancePriorityChange: (value: DirectorTimeline["guidance_priority"]) => void;
+  onGuidancePriorityChange: (value: TimelineBoardView["guidance_priority"]) => void;
   onOpenRetake?: () => void;
+  onGenerationStandby?: (standby: boolean) => void;
   onActionError?: (message: string) => void;
   retakeActive?: boolean;
   playing: boolean;
@@ -161,6 +154,7 @@ export function TimelineToolbar({
     activeBatchEnd: number;
   };
   transportSceneId?: string;
+  onOpenAudioClip?: (request: { kind: AudioClipModalKind; clipId: string | null; start: number }) => void;
 }) {
   const { selection, snap, setSnap, zoom, setZoom, setSelection } = useDirectorSelection();
   const { t } = useTranslation("timeline");
@@ -210,128 +204,109 @@ export function TimelineToolbar({
   };
 
   const addPrompt = async () => {
-    await mutateTimeline((timeline) => {
-      const segments = timeline.prompt_segments || [];
-      const last = segments[segments.length - 1];
-      const start = last ? Math.min(scene.duration_sec - 0.5, last.start + last.length) : 0;
-      const segment: PromptSegment = {
-        id: nid(),
-        start: Math.max(0, start),
-        length: Math.min(2, scene.duration_sec || 5),
-        text: "",
-        weight: 1,
-        region: null,
-        reference_binding_ids: [],
-        reference_name_bindings: [],
-      };
-      return { ...timeline, prompt_segments: [...segments, segment] };
+    if (!master) return;
+    const { flattenMasterPrompts, patchMasterPrompt } = await import("../../timelineMaster/masterTimelineMutate");
+    const segments = flattenMasterPrompts(master);
+    const last = segments[segments.length - 1];
+    const start = last ? Math.min(scene.duration_sec - 0.5, last.start + last.length) : 0;
+    await patchMasterPrompt(projectId, scene.id, master, {
+      start: Math.max(0, start),
+      length: Math.min(2, scene.duration_sec || 5),
+      text: "",
     });
+    await onRefresh();
   };
 
   const removePrompt = async () => {
-    await mutateTimeline((timeline) => {
-      const segments = timeline.prompt_segments || [];
-      if (!segments.length) return timeline;
-      const selectedId = selection.kind === "promptSeg" ? selection.id : undefined;
-      const target = selectedId ? segments.find((s) => s.id === selectedId) : segments[segments.length - 1];
-      if (!target) return timeline;
-      if ((target.text || "").trim()) {
-        const ok = window.confirm(t("removeInstruction"));
-        if (!ok) return timeline;
-      }
-      const next = segments.filter((s) => s.id !== target.id);
-      if (selection.kind === "promptSeg" && selection.id === target.id) {
-        setSelection({ kind: "scene", id: scene.id });
-      }
-      return { ...timeline, prompt_segments: next };
-    });
+    if (!master) return;
+    const { flattenMasterPrompts, removeMasterPrompts } = await import("../../timelineMaster/masterTimelineMutate");
+    const segments = flattenMasterPrompts(master);
+    if (!segments.length) return;
+    const selectedId = selection.kind === "promptSeg" ? selection.id : undefined;
+    const target = selectedId ? segments.find((s) => s.id === selectedId) : segments[segments.length - 1];
+    if (!target) return;
+    if ((target.text || "").trim()) {
+      const ok = window.confirm(t("removeInstruction"));
+      if (!ok) return;
+    }
+    await removeMasterPrompts(projectId, scene.id, master, [target.id]);
+    if (selection.kind === "promptSeg" && selection.id === target.id) {
+      setSelection({ kind: "scene", id: scene.id });
+    }
+    await onRefresh();
   };
 
   const addImage = async () => {
-    await mutateTimeline((timeline) => {
-      const clips = timeline.image_clips || [];
-      const start = clips.reduce((max, clip) => Math.max(max, clip.start + clip.length), 0);
-      const next: TimelineClip = {
-        id: nid(),
-        start: Math.min(start, Math.max(0, (timeline.duration_sec || scene.duration_sec || 5) - 1)),
-        length: Math.min(2, timeline.duration_sec || scene.duration_sec || 5),
-        label: `Image ${clips.length + 1}`,
-        role: "guide",
-        asset_id: null,
-      };
-      return {
-        ...timeline,
-        media_mode: "image",
-        image_clips: [...clips, next],
-      };
+    if (!master) return;
+    const { projectMasterPreviewClips: projectClips, syncMasterClips } = await import(
+      "../../timelineMaster/masterTimelineMutate"
+    );
+    const projected = projectClips(master);
+    const lane = [...projected.imageClips, ...projected.videoClips];
+    const duration = Math.max(0.15, Number(scene.duration_sec || 5));
+    const wanted = Math.min(2, duration);
+    const sorted = [...lane].sort((a, b) => Number(a.start) - Number(b.start));
+    let cursor = 0;
+    let slot: { start: number; length: number } | null = null;
+    for (const clip of sorted) {
+      const start = Number(clip.start) || 0;
+      const length = Number(clip.length) || 0;
+      if (start >= cursor + wanted - 1e-9) {
+        slot = { start: cursor, length: wanted };
+        break;
+      }
+      cursor = Math.max(cursor, start + length);
+    }
+    if (!slot && cursor < duration - 0.15) {
+      slot = { start: cursor, length: Math.min(wanted, duration - cursor) };
+    }
+    if (!slot || findSameTrackIntersection(lane, { id: "__image_add__", ...slot })) {
+      onActionError?.("Cannot add Image — the Visual track has no free time in this scene.");
+      return;
+    }
+    await syncMasterClips(projectId, scene.id, master, {
+      attr: "visualClips",
+      upserts: [
+        {
+          id: nid(),
+          kind: "image",
+          start: slot.start,
+          length: slot.length,
+          label: `Image ${projected.imageClips.length + 1}`,
+          assetId: null,
+          role: "guide",
+        },
+      ],
     });
+    await onRefresh();
   };
 
   const removeImage = async () => {
-    await mutateTimeline((timeline) => {
-      const clips = timeline.image_clips || [];
-      if (!clips.length) return timeline;
-      const selectedId = selection.kind === "imageClip" ? selection.id : undefined;
-      const target = selectedId ? clips.find((c) => c.id === selectedId) : clips[clips.length - 1];
-      if (!target) return timeline;
-      if (target.asset_id) {
-        const ok = window.confirm(
-          "Remove this Image from the Timeline?\n\nSource assets remain in Project Library.",
-        );
-        if (!ok) return timeline;
-      }
-      if (selection.kind === "imageClip" && selection.id === target.id) {
-        setSelection({ kind: "scene", id: scene.id });
-      }
-      return { ...timeline, image_clips: clips.filter((c) => c.id !== target.id) };
-    });
-  };
-
-  const addBatch = async () => {
-    await run(async () => {
-      await addTimelineBatch(projectId, scene.id, master);
-    });
-  };
-
-  const removeBatch = async () => {
-    const batches = master?.batchBlocks || [];
-    if (!batches.length) return;
-    const selectedId = selection.kind === "batch" ? selection.id : undefined;
-    const target = selectedId ? batches.find((b) => b.id === selectedId) : batches[batches.length - 1];
+    if (!master) return;
+    const { projectMasterPreviewClips: projectClips, removeMasterClips } = await import(
+      "../../timelineMaster/masterTimelineMutate"
+    );
+    const clips = projectClips(master).imageClips;
+    if (!clips.length) return;
+    const selectedId = selection.kind === "imageClip" ? selection.id : undefined;
+    const target = selectedId ? clips.find((c) => c.id === selectedId) : clips[clips.length - 1];
     if (!target) return;
-    if (batchHasContent(target)) {
+    if (target.asset_id) {
       const ok = window.confirm(
-        `Remove “${target.label}”?\n\nThis Batch has content or job history. Source assets remain in Project Library.`,
+        "Remove this Image from the Timeline?\n\nSource assets remain in Project Library.",
       );
       if (!ok) return;
     }
-    await run(async () => {
-      await api.directorTimelineDeleteBatch(projectId, scene.id, target.id);
-      if (selection.kind === "batch" && selection.id === target.id) {
-        setSelection({ kind: "scene", id: scene.id });
-      }
-    });
-  };
-
-  const addAudioClip = async (kind: "audio" | "sfx") => {
-    await mutateTimeline((timeline) => {
-      const base: TimelineClip = {
-        id: nid(),
-        start: 0,
-        length: Math.min(2, timeline.duration_sec || scene.duration_sec || 5),
-        label: kind === "audio" ? "Audio" : "SFX",
-        asset_id: null,
-        volume: 1,
-      };
-      return kind === "audio"
-        ? { ...timeline, audio_clips: [...(timeline.audio_clips || []), base] }
-        : { ...timeline, sfx_clips: [...(timeline.sfx_clips || []), base] };
-    });
+    await removeMasterClips(projectId, scene.id, master, [target.id], "visualClips");
+    if (selection.kind === "imageClip" && selection.id === target.id) {
+      setSelection({ kind: "scene", id: scene.id });
+    }
+    await onRefresh();
   };
 
   const removeAudioClip = async (kind: "audio" | "sfx") => {
     await mutateTimeline((timeline) => {
-      const clips = kind === "audio" ? timeline.audio_clips || [] : timeline.sfx_clips || [];
+      const clips = kind === "audio" ? timeline.audioClips || [] : timeline.sfxClips || [];
       if (!clips.length) return timeline;
       const selKind = kind === "audio" ? "audio" : "sfx";
       const selectedId = selection.kind === selKind ? selection.id : undefined;
@@ -347,63 +322,11 @@ export function TimelineToolbar({
         setSelection({ kind: "scene", id: scene.id });
       }
       return kind === "audio"
-        ? { ...timeline, audio_clips: clips.filter((c) => c.id !== target.id) }
-        : { ...timeline, sfx_clips: clips.filter((c) => c.id !== target.id) };
+        ? { ...timeline, audioClips: clips.filter((c) => c.id !== target.id) }
+        : { ...timeline, sfxClips: clips.filter((c) => c.id !== target.id) };
     });
   };
 
-  const addLipSyncTrack = async () => {
-    await mutateTimeline((timeline) => {
-      const tracks = normalizeLipSyncTracks(timeline.lipsync?.tracks);
-      const nextTrack = createLipSyncTrack(tracks.length + 1);
-      setSelection({
-        kind: "lipsyncTrack",
-        id: nextTrack.id,
-        trackId: nextTrack.id,
-        trackIndex: tracks.length,
-      });
-      return {
-        ...timeline,
-        lipsync: {
-          ...timeline.lipsync,
-          tracks: [...tracks, nextTrack],
-        },
-      };
-    });
-  };
-
-  const removeLipSyncTrack = async () => {
-    await mutateTimeline((timeline) => {
-      const tracks = normalizeLipSyncTracks(timeline.lipsync?.tracks);
-      if (tracks.length <= 1) return timeline;
-      const selectedTrackId = resolveSelectedLipSyncTrackId(
-        selection,
-        tracks.map((track) => track.id),
-      );
-      const targetIndex = tracks.findIndex((track, index) => index > 0 && track.id === selectedTrackId);
-      if (targetIndex < 1) return timeline;
-      const target = tracks[targetIndex];
-      if (lipSyncTrackHasContent(target)) {
-        const ok = window.confirm(
-          `Remove “${target.label || `Lip Sync ${targetIndex + 1}`}”?\n\nIts clips and track settings will be removed from the Timeline.`,
-        );
-        if (!ok) return timeline;
-      }
-      if (
-        (selection.kind === "lipsyncTrack" && selection.id === target.id) ||
-        (selection.kind === "lipsyncClip" && selection.trackId === target.id)
-      ) {
-        setSelection({ kind: "scene", id: scene.id });
-      }
-      return {
-        ...timeline,
-        lipsync: {
-          ...timeline.lipsync,
-          tracks: tracks.filter((track) => track.id !== target.id),
-        },
-      };
-    });
-  };
 
   const toggleMode = async () => {
     const next = master?.mode === "video_finishing" ? "image_planning" : "video_finishing";
@@ -433,7 +356,36 @@ export function TimelineToolbar({
     scene.engine,
   );
 
-  const generateScene = async (scope: "full" | "selected") => {
+  const addBatch = async () => {
+    if (!TIMELINE_BATCHES_CREATOR_UI) return;
+    await run(async () => {
+      await addTimelineBatch(projectId, scene.id, master);
+    });
+  };
+
+  const removeBatch = async () => {
+    if (!TIMELINE_BATCHES_CREATOR_UI) return;
+    const batches = master?.batchBlocks || [];
+    if (!batches.length) return;
+    const selectedId = selection.kind === "batch" ? selection.id : undefined;
+    const target = selectedId ? batches.find((b) => b.id === selectedId) : batches[batches.length - 1];
+    if (!target) return;
+    if (batchHasContent(target)) {
+      const ok = window.confirm(
+        `Remove "${target.label}"?\n\nThis Batch has content or job history. Source assets remain in Project Library.`,
+      );
+      if (!ok) return;
+    }
+    await run(async () => {
+      await api.directorTimelineDeleteBatch(projectId, scene.id, target.id);
+      if (selection.kind === "batch" && selection.id === target.id) {
+        setSelection({ kind: "scene", id: scene.id });
+      }
+    });
+  };
+
+
+  const generateScene = async (_scope: "full" | "selected" = "full") => {
     if (!sceneCanGenerate) {
       onActionError?.(
         `Generate is not ready — ${selectedGen?.readiness || "no ready video engine is selected"}`,
@@ -441,17 +393,29 @@ export function TimelineToolbar({
       return;
     }
     await run(async () => {
-      const result =
-        scope === "selected" && selection.kind === "batch" && selection.id
-          ? await api.directorTimelineGenerateBatch(projectId, scene.id, selection.id)
-          : await api.directorTimelineGenerateScene(projectId, scene.id, { scope: "full" });
-      const err = timelineActionError(result);
-      if (err) {
-        onActionError?.(err);
-        return;
-      }
-      if (timelineGenerateEmpty(result)) {
-        onActionError?.("Nothing was queued to generate. Finished batches stay as they are.");
+      onGenerationStandby?.(true);
+      try {
+        const durationSeconds = Number(scene.duration_sec || 0) || undefined;
+        const result = await rematerializeThenGenerateScene({
+          projectId,
+          sceneId: scene.id,
+          generatorId: selectedGen?.id || master?.sceneGeneratorId || scene.engine,
+          durationSeconds,
+          draftMode: draftAvailable || undefined,
+        });
+        const err = timelineActionError(result);
+        if (err) {
+          onGenerationStandby?.(false);
+          onActionError?.(err);
+          return;
+        }
+        if (timelineGenerateEmpty(result)) {
+          onGenerationStandby?.(false);
+          onActionError?.("Nothing was queued to generate. Finished batches stay as they are.");
+        }
+      } catch (error) {
+        onGenerationStandby?.(false);
+        throw error;
       }
     });
   };
@@ -467,12 +431,11 @@ export function TimelineToolbar({
       registerTimelineCommand("zoomOut", () => setZoom(stepTimelineZoom(zoom, -1))),
       registerTimelineCommand("toggleSnap", () => setSnap(!snap)),
       registerTimelineCommand("addPrompt", () => void addPrompt()),
-      registerTimelineCommand("addLipSync", () => void addLipSyncTrack()),
     ];
     return () => {
       unsubscribers.forEach((off) => off());
     };
-  }, [addLipSyncTrack, addPrompt, generateScene, onOpenRetake, preflight, setMode, setSnap, setZoom, snap, zoom]);
+  }, [addPrompt, generateScene, onOpenRetake, preflight, setMode, setSnap, setZoom, snap, zoom]);
 
   const modeLabel = master?.mode === "video_finishing" ? "Video Finishing" : "Image Planning";
   const modeTitle =
@@ -482,23 +445,13 @@ export function TimelineToolbar({
   const addButtons = (
     <>
       <PlusMinusGroup
-        label="Batch"
-        helpId="add_batch"
-        testId="timeline-toolbar-batch"
-        onAdd={() => void addBatch()}
-        onRemove={() => void removeBatch()}
-        addTitle="Add a Batch Block to this Scene"
-        removeTitle="Remove the selected or last Batch Block"
-        disabled={busy}
-      />
-      <PlusMinusGroup
         label="Image"
         testId="timeline-toolbar-image"
         onAdd={() => void addImage()}
         onRemove={() => void removeImage()}
         addTitle="Add an Image clip to the Visual track"
         removeTitle="Remove the selected or last Image clip"
-        disabled={busy}
+        disabled={busy || !master}
       />
       <PlusMinusGroup
         label="Prompt"
@@ -512,7 +465,7 @@ export function TimelineToolbar({
       <PlusMinusGroup
         label="Audio"
         testId="timeline-toolbar-audio"
-        onAdd={() => void addAudioClip("audio")}
+        onAdd={() => onOpenAudioClip?.({ kind: "audio", clipId: null, start: playheadSec })}
         onRemove={() => void removeAudioClip("audio")}
         addTitle="Add an Audio clip"
         removeTitle="Remove the selected or last Audio clip"
@@ -521,19 +474,10 @@ export function TimelineToolbar({
       <PlusMinusGroup
         label="SFX"
         testId="timeline-toolbar-sfx"
-        onAdd={() => void addAudioClip("sfx")}
+        onAdd={() => onOpenAudioClip?.({ kind: "sfx", clipId: null, start: playheadSec })}
         onRemove={() => void removeAudioClip("sfx")}
         addTitle="Add an SFX clip"
         removeTitle="Remove the selected or last SFX clip"
-        disabled={busy}
-      />
-      <PlusMinusGroup
-        label="Lip Sync"
-        testId="timeline-toolbar-lipsync"
-        onAdd={() => void addLipSyncTrack()}
-        onRemove={() => void removeLipSyncTrack()}
-        addTitle="Add a Lip Sync track"
-        removeTitle="Remove the selected additional Lip Sync track"
         disabled={busy}
       />
     </>

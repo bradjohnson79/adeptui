@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from .catalog import TOOL_CATALOG, get_tool, tools_by_category
+from .retired import is_retired_generation_tool, retired_http_detail
 from . import ops
 
 router = APIRouter(tags=["generation-tools"])
@@ -58,6 +59,8 @@ def catalog() -> dict[str, Any]:
 
 @router.get("/generation-tools/{tool_id}/status")
 def tool_status(tool_id: str) -> dict[str, Any]:
+    if is_retired_generation_tool(tool_id):
+        raise HTTPException(410, detail=retired_http_detail(tool_id))
     return ops.probe_tool(tool_id)
 
 
@@ -69,6 +72,8 @@ def project_tool_status(project_id: str) -> dict[str, Any]:
 
 @router.post("/projects/{project_id}/generation-tools/run")
 def run_tool(project_id: str, body: RunBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    if is_retired_generation_tool(body.toolId):
+        raise HTTPException(410, detail=retired_http_detail(body.toolId))
     tool = get_tool(body.toolId)
     if not tool:
         raise HTTPException(404, f"Unknown tool {body.toolId}")
@@ -166,28 +171,6 @@ def run_tool(project_id: str, body: RunBody, db: Session = Depends(get_db)) -> d
                 document_type=body.documentType,
                 brief=body.prompt or body.title or "story brief",
                 title=body.title,
-            )
-        if body.toolId == "brand.studio":
-            return ops.run_brand_generate(
-                db,
-                project_id=project_id,
-                prompt=body.prompt or "promotional hero",
-                logo_asset_ids=body.logoAssetIds,
-                product_asset_ids=body.productAssetIds,
-                brand_colors=body.brandColors,
-                required_wording=body.requiredWording,
-                campaign_name=body.campaignName,
-                campaign_type=body.campaignType,
-                visual_direction=body.visualDirection,
-                composition=body.composition,
-                background=body.background,
-                format_name=body.format,
-                campaign_formats=body.campaignFormats,
-                typography_template=body.typographyTemplate,
-                product_name=body.productName,
-                style_notes=body.styleNotes,
-                bible_summary=body.bibleSummary,
-                result_lane=body.resultLane,
             )
         if body.toolId == "video.extend":
             if not body.sourceAssetId:

@@ -110,6 +110,38 @@ async def inspect_character_voice(ctx: ToolContext, args: dict[str, Any]) -> dic
     return {"ok": True, "voiceProfiles": items}
 
 
+def preview_approve_character_candidate(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    _require(ctx)
+    return ToolPreview(
+        summary="Approve this picture as the character's locked look.",
+        lines=[
+            "Uses the existing Character Creator approval path.",
+            "Does not generate a new picture.",
+            "Replacing a locked look needs your confirmation.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_approve_character_candidate(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    _require(ctx)
+    character_id = str(args.get("characterId") or "").strip()
+    asset_id = str(args.get("assetId") or "").strip()
+    if not character_id or not asset_id:
+        raise ValueError("characterId and assetId are required")
+    out = ci.approve_character_candidate(
+        ctx.db,
+        ctx.project_id,
+        character_id,
+        asset_id=asset_id,
+        reference_role=str(args.get("referenceRole") or "hero_identity"),
+        notes=str(args.get("notes") or "Approved casting candidate"),
+        owner_confirmed=bool(args.get("ownerConfirmed")),
+    )
+    return {"ok": True, "approved": "character_reference", "result": out}
+
+
 def preview_create_draft_character_profile(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     _require(ctx)
     name = str(args.get("name") or "").strip() or "Untitled character"
@@ -130,6 +162,16 @@ def apply_create_draft_character_profile(ctx: ToolContext, args: dict[str, Any])
     name = str(args.get("name") or "").strip()
     if not name:
         raise ValueError("name is required")
+    from ....creator_scope.contract import ENTITY_CHARACTER
+    from ....creator_scope.service import reuse_existing_profile
+
+    reused = reuse_existing_profile(
+        ctx.db, entity_type=ENTITY_CHARACTER, project_id=ctx.project_id, name=name
+    )
+    if reused is not None:
+        profile = ci.get_profile(ctx.db, ctx.project_id, reused["entityId"])
+        reused["profile"] = profile.model_dump()
+        return reused
     out = ci.create_profile(
         ctx.db,
         ctx.project_id,
@@ -137,6 +179,7 @@ def apply_create_draft_character_profile(ctx: ToolContext, args: dict[str, Any])
             name=name,
             role=str(args.get("role") or ""),
             description=str(args.get("description") or ""),
+            is_global=bool(args.get("isGlobal") or args.get("is_global")),
         ),
     )
     return {"ok": True, "created": "character_profile", "profile": out.model_dump()}

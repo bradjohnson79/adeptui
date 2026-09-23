@@ -161,12 +161,18 @@ def test_asset_file_route_remains_locked(client):
     aid = _mk_asset(pid, video)
     _enable_password(client, pid)
 
-    locked = client.get(f"/api/assets/{aid}/file")
+    scoped = f"/api/projects/{pid}/assets/{aid}/file"
+    locked = client.get(scoped)
     assert locked.status_code == 403, locked.text
     token = _unlock(client, pid)
-    ok = client.get(f"/api/assets/{aid}/file", headers={"X-Adept-Project-Unlock": token})
+    ok = client.get(scoped, headers={"X-Adept-Project-Unlock": token})
     assert ok.status_code == 200, ok.text
     assert ok.content == MEDIA_BYTES
+
+    # Retired unscoped route stays 403 even after unlock.
+    unscoped = client.get(f"/api/assets/{aid}/file", headers={"X-Adept-Project-Unlock": token})
+    assert unscoped.status_code == 403, unscoped.text
+    assert unscoped.json()["detail"]["error"] == "ASSET_SCOPE_REQUIRED"
 
 
 def test_unresolvable_project_media_fails_closed(client):
@@ -264,3 +270,99 @@ def test_permission_helpers_unit():
     assert file_path_is_ambiguous("C:/data/assets/not-a-uuid/x.png") is True
     assert file_path_is_ambiguous(win) is False
     assert file_path_is_ambiguous("C:/data/marketplace/hero.png") is False
+
+
+def test_project_asset_file_correct_project(client):
+    pid = _mk_project(client)["id"]
+    path = _write_media([f"projects/{pid}/renders", "ok.png"])
+    aid = _mk_asset(pid, path, "22222222-2222-4222-8222-222222222222")
+    ok = client.get(f"/api/projects/{pid}/assets/{aid}/file")
+    assert ok.status_code == 200, ok.text
+    assert ok.content == MEDIA_BYTES
+
+
+def test_project_asset_file_wrong_project(client):
+    owner = _mk_project(client, "Owner")["id"]
+    other = _mk_project(client, "Other")["id"]
+    path = _write_media([f"projects/{owner}/renders", "secret.png"])
+    aid = _mk_asset(owner, path, "33333333-3333-4333-8333-333333333333")
+    bad = client.get(f"/api/projects/{other}/assets/{aid}/file")
+    assert bad.status_code == 403, bad.text
+    assert bad.json()["detail"]["error"] == "ASSET_PROJECT_MISMATCH"
+
+
+def test_project_asset_file_unknown_asset(client):
+    pid = _mk_project(client)["id"]
+    missing = client.get(f"/api/projects/{pid}/assets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/file")
+    assert missing.status_code == 404, missing.text
+    assert missing.json()["detail"]["error"] == "ASSET_NOT_FOUND"
+
+
+def test_project_asset_file_malformed_ids(client):
+    pid = _mk_project(client)["id"]
+    bad_asset = client.get(f"/api/projects/{pid}/assets/not-a-uuid/file")
+    assert bad_asset.status_code == 400, bad_asset.text
+    bad_project = client.get("/api/projects/not-a-uuid/assets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/file")
+    assert bad_project.status_code == 400, bad_project.text
+
+
+def test_project_asset_file_traversal_path(client):
+    pid = _mk_project(client)["id"]
+    aid = _mk_asset(pid, "../outside.png", "44444444-4444-4444-8444-444444444444")
+    res = client.get(f"/api/projects/{pid}/assets/{aid}/file")
+    assert res.status_code == 403, res.text
+    assert res.json()["detail"]["error"] == "FILE_API_RESTRICTED"
+
+
+def test_project_asset_thumb_hex32_id_and_fallback(client):
+    from PIL import Image
+
+    from app.config import settings
+
+    pid = _mk_project(client)["id"]
+    src = settings.data_dir.joinpath("projects", pid, "renders", "hex_src.png")
+    src.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 64), (12, 34, 56)).save(src)
+    aid = _mk_asset(pid, src, "1e8000ad6dac40ecad1a64ae429dc8b8")
+    thumb = client.get(f"/api/projects/{pid}/assets/{aid}/thumb")
+    assert thumb.status_code == 200, thumb.text
+    assert thumb.headers.get("content-type", "").startswith("image/")
+
+    bogus = settings.data_dir.joinpath("projects", pid, "renders", "not_an_image.png")
+    bogus.write_bytes(b"\x00\x00\x00\x01gd\x002")
+    bad_id = _mk_asset(pid, bogus, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab")
+    fallback = client.get(f"/api/projects/{pid}/assets/{bad_id}/thumb")
+    assert fallback.status_code == 200, fallback.text
+    assert fallback.headers.get("x-adept-thumb") == "fallback"
+
+
+def test_project_asset_thumb_and_unscoped_forbidden(client):
+    from PIL import Image
+
+    from app.config import settings
+
+    pid = _mk_project(client)["id"]
+    src = settings.data_dir.joinpath("projects", pid, "renders", "thumb_src.png")
+    src.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 64), (12, 34, 56)).save(src)
+    aid = _mk_asset(pid, src, "55555555-5555-4555-8555-555555555555")
+    thumb = client.get(f"/api/projects/{pid}/assets/{aid}/thumb")
+    assert thumb.status_code == 200, thumb.text
+    assert thumb.headers.get("content-type", "").startswith("image/")
+    unscoped = client.get(f"/api/assets/{aid}/thumb")
+    assert unscoped.status_code == 403, unscoped.text
+    assert unscoped.json()["detail"]["error"] == "ASSET_SCOPE_REQUIRED"
+
+
+def test_canonical_url_helpers():
+    from app.project_security.asset_file import (
+        canonical_project_asset_file_url,
+        is_canonical_project_asset_file_url,
+    )
+
+    pid = "00e46c46-ead5-4b67-8d63-5962a8fab260"
+    aid = "11111111-1111-4111-8111-111111111111"
+    url = canonical_project_asset_file_url(pid, aid)
+    assert url == f"/api/projects/{pid}/assets/{aid}/file"
+    assert is_canonical_project_asset_file_url(url) is True
+    assert is_canonical_project_asset_file_url(f"/api/assets/{aid}/file") is False

@@ -551,6 +551,18 @@ def dismiss_continuity(project_id: str, suggestion_id: str, db: Session = Depend
 # ---------- Live preview ----------
 
 
+@router.post("/jobs/{job_id}/preview/clear")
+def clear_job_preview(job_id: str, db: Session = Depends(get_db)):
+    """Drop in-memory + disk preview cache for one job. Does not delete Library assets."""
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    preview_bus.purge_job(job_id)
+    job.preview_json = ""
+    db.commit()
+    return {"ok": True, "job_id": job_id}
+
+
 @router.get("/jobs/{job_id}/preview")
 def get_job_preview(job_id: str, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
@@ -568,12 +580,18 @@ def get_job_preview(job_id: str, db: Session = Depends(get_db)):
             preview = json.loads(job.preview_json)
         except Exception:
             preview = None
+    runtime_event = None
+    if preview:
+        from ..video_runtime.runtime_event_bridge import build_runtime_event_from_preview
+
+        runtime_event = build_runtime_event_from_preview({"preview": preview})
     return {
         "job_id": job_id,
         "stage": getattr(job, "stage", "") or "",
         "status": job.status,
         "progress": job.progress,
         "preview": preview,
+        "runtimeEvent": runtime_event.model_dump() if runtime_event else None,
         "capabilities": caps,
     }
 
@@ -878,10 +896,31 @@ def archive_project(project_id: str, archived: bool = True, db: Session = Depend
 @router.post("/projects/{project_id}/txt2vid")
 async def enqueue_txt2vid(project_id: str, body: dict, db: Session = Depends(get_db)):
     from ..queue_worker import job_queue
+    from ..video_runtime.legal_canvas import preflight_spec
 
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
+    payload = dict(body or {})
+    engine = str(payload.get("engine") or "auto")
+    if engine not in {"", "auto"}:
+        spec = preflight_spec(
+            engine,
+            width=int(payload.get("width") or project.width or 1280),
+            height=int(payload.get("height") or project.height or 704),
+            length_seconds=float(payload.get("duration_sec") or 5),
+            fps=int(payload.get("fps") or project.fps or 24) if str(payload.get("fps") or "").isdigit() else int(project.fps or 24),
+            surface="t2v",
+        )
+        if not spec["ok"]:
+            raise HTTPException(
+                400,
+                {
+                    "code": "SPEC_FIDELITY",
+                    "message": spec["message"],
+                    "suggestions": spec.get("suggestions") or [],
+                },
+            )
     job = Job(
         id=str(uuid.uuid4()),
         project_id=project_id,

@@ -163,7 +163,7 @@ async def m213_status() -> dict[str, Any]:
         "vpcSpecialist": "virtual-production-coordinator",
         "adapters": reconstruction.list_adapters(),
         "version11Guidance": (
-            "Use 360 panoramic environments and Spatial Map for camera and lighting direction."
+            "Use Environment Creator Express for place/ERS, Image Generator for production stills, and PoseCraft for pose snapshots — the v1.1 Env Creator / Image Generator / PoseCraft triad. Spatial Map is shelved; do not route camera or lighting through it."
         ),
     }
 

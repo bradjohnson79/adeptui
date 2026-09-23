@@ -184,3 +184,24 @@ def should_fallback_to_qwen(params: dict[str, Any] | None, result: CrsSingleFigu
     if auto is None:
         auto = ctx.get("autoSelect")
     return bool(auto)
+
+
+def is_default_four_view_pack_tile(params: Any) -> bool:
+    """True for the standard 4-camera sheet pack. Isolated 5-view law stays gated."""
+    if not is_crs_single_view_job(params):
+        return False
+    ctx = params.get("creativeContext") if isinstance(params.get("creativeContext"), dict) else {}
+    required = params.get("requiredViews") or ctx.get("requiredViews")
+    if isinstance(required, (list, tuple)) and required:
+        return required_views_are_default_four(required)
+    if params.get("isolatedFiveView") or ctx.get("isolatedFiveView"):
+        return False
+    view_count = str(params.get("viewCount") or ctx.get("viewCount") or "")
+    if view_count.lower() in {"5", "five"}:
+        return False
+    return True
+
+
+def required_views_are_default_four(required_views: Sequence[str] | None) -> bool:
+    views = {str(v).strip() for v in (required_views or []) if str(v).strip()}
+    return views == {"front_full", "side_full", "back_full", "face_closeup"}

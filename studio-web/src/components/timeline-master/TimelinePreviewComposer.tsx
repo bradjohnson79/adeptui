@@ -1,13 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { Asset, Job, Project, Scene } from "../../types";
 import { api } from "../../api";
 import { apiUrl } from "../../runtime/apiBase";
-import type { DirectorTimeline } from "../DirectorTracks";
+import type { TimelineBoardView } from "../DirectorTracks";
 import type { DirectorSelection } from "../../directorSelection";
 import { LivePreviewMonitor } from "../LivePreviewMonitor";
+import {
+  comfyProgressPercentFromJob,
+  comfyProgressPercentFromText,
+  previewGenerationNotice,
+  sceneGenerationCompleteNotice,
+} from "../../timelineMaster/sceneRenderProgress";
+import { batchWindowAtTime, buildBatchTimeWindows } from "../../timelineMaster/batchWindows";
+import { hasGeneratedTakeForRetake } from "../../timelineMaster/retakeEligibility";
+import { shouldMutePreviewVideoSoundtrack } from "./shouldMutePreviewVideoSoundtrack";
+import type { VideoRetakeSession } from "../../timelineMaster/videoRetake";
 import { TimelineDiagnostics } from "./TimelineDiagnostics";
 import { resolveTimelineAtTime } from "./resolveTimelineAtTime";
+import { resolveSceneTake } from "../../timelineMaster/playableVisualTakes";
+import { sceneTakeDisplayLabel } from "../../timelineMaster/sceneTakes";
 import type { SceneTimelineMaster } from "../../timelineMaster/contracts";
+import { shouldPreviewSceneStitch } from "../../timelineMaster/sceneStitch";
+import { resolvePublishChrome } from "../../timelineMaster/scenePublish";
+import { preferredPublishSource } from "../../timelineMaster/magiUpscaleTargets";
+import { pollMagiUpscaleJob } from "../../timelineMaster/pollMagiUpscaleJob";
+import { MagiUpscaleChooser, choiceFromChooser } from "./MagiUpscaleChooser";
+import { useProjectJobs } from "../../runtime/projectJobsStore";
+import { shouldSuspendDependentPolling } from "../../runtime/studioApiConnection";
+import { activeTakeLineage, selectActiveSceneJob } from "../../timelineMaster/activeSceneJob";
+
 
 /**
  * PREVIEW_COMPOSER_IS_SOLE_SOURCE_OF_TRUTH
@@ -49,6 +71,8 @@ export type PreviewComposition =
       batchId: string | null;
       batchLocalTime: number;
       visualLocalTime: number;
+      videoAssetId?: string | null;
+      sourceClipId?: string | null;
     };
 
 type PreviewPayload = {
@@ -82,13 +106,14 @@ export function useGenerationState(
   projectId: string,
   scene: Scene | undefined,
   pauseUpdates: boolean,
+  master?: SceneTimelineMaster | null,
 ): {
   jobs: Job[];
   activeJob: Job | null;
   preview: PreviewPayload | null;
   seq: number;
 } {
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const { jobs } = useProjectJobs(projectId);
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [seq, setSeq] = useState(0);
   const seqRef = useRef(0);
@@ -105,37 +130,39 @@ export function useGenerationState(
     seqRef.current = 0;
   }, [sceneId]);
 
+  const sceneJobs = jobs.filter((j) => j.scene_id === scene?.id);
+  const activeJob = selectActiveSceneJob(sceneJobs, activeTakeLineage(master));
+  const activePreviewJobId =
+    activeJob && (activeJob.status === "queued" || activeJob.status === "running")
+      ? activeJob.id
+      : undefined;
+
   useEffect(() => {
     let alive = true;
     const tick = async () => {
       // VISIBILITY_GATED_POLLING: skip network work while the tab is hidden;
       // the interval keeps ticking cheaply and the next visible tick resyncs.
       if (document.visibilityState === "hidden") return;
+      if (shouldSuspendDependentPolling()) return;
+      if (!activePreviewJobId || pauseUpdates) return;
       try {
-        const list = await api.listJobs(projectId);
+        const p = await api.getJobPreview(activePreviewJobId);
         if (!alive) return;
-        setJobs(list);
-        const job = list.find(
-          (j) => j.scene_id === scene?.id && (j.status === "queued" || j.status === "running"),
-        );
-        if (job && !pauseUpdates) {
-          const p = await api.getJobPreview(job.id);
-          if (p.preview && (p.preview.sequenceNumber || 0) >= seqRef.current) {
-            setSeq(p.preview.sequenceNumber || seqRef.current);
-            setPreview(p.preview);
-          }
+        if (p.preview && (p.preview.sequenceNumber || 0) >= seqRef.current) {
+          setSeq(p.preview.sequenceNumber || seqRef.current);
+          setPreview(p.preview);
         }
       } catch {
         /* ignore */
       }
     };
-    tick();
-    const id = setInterval(tick, 2500);
+    void tick();
+    const id = setInterval(() => void tick(), 2500);
     return () => {
       alive = false;
       clearInterval(id);
     };
-  }, [projectId, scene?.id, pauseUpdates]);
+  }, [activePreviewJobId, pauseUpdates]);
 
   useEffect(() => {
     try {
@@ -163,14 +190,6 @@ export function useGenerationState(
     }
   }, [projectId, scene?.id, pauseUpdates, scene?.name]);
 
-  const sceneJobs = jobs.filter((j) => j.scene_id === scene?.id);
-  const activeJob =
-    sceneJobs.find((j) => j.status === "queued" || j.status === "running") ||
-    // Newest terminal job wins — explicitly sorted, never reliant on listJobs
-    // response ordering (the failed-overlay dismissal logic depends on this).
-    sceneJobs.slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))[0] ||
-    null;
-
   return { jobs, activeJob, preview, seq };
 }
 
@@ -180,15 +199,32 @@ export function useGenerationState(
  */
 export function resolvePreviewComposition(args: {
   scene: Scene | undefined;
-  timeline: DirectorTimeline | null;
+  timeline: TimelineBoardView | null;
   master: SceneTimelineMaster | null;
   selection: DirectorSelection;
   playheadSec: number;
   libraryAsset: Asset | null;
   activeJob: Job | null;
   preview: PreviewPayload | null;
+  timelinePlaying?: boolean;
+  previewTakeId?: string | null;
 }): PreviewComposition {
   const { scene, libraryAsset, activeJob, preview } = args;
+  const previewTake = resolveSceneTake(args.master, args.previewTakeId);
+  const previewingOther = Boolean(args.previewTakeId && args.previewTakeId !== args.master?.currentSceneTakeId);
+
+  if (previewingOther && previewTake?.resultAssetId) {
+    return {
+      kind: "timeline_frame",
+      visualSrc: api.assetUrl(previewTake.resultAssetId),
+      mediaKind: "video",
+      promptText: null,
+      promptLabel: sceneTakeDisplayLabel(previewTake.label),
+      batchId: null,
+      batchLocalTime: args.playheadSec,
+      visualLocalTime: args.playheadSec,
+    };
+  }
 
   if (args.selection.kind === "imageReferenceClip") {
     const clip = (args.timeline?.image_reference_clips || []).find((item) => item.id === args.selection.id);
@@ -222,6 +258,30 @@ export function resolvePreviewComposition(args: {
     }
   }
 
+  // Play uses the stitched scene clip as one file, even if a Library preview
+  // or batch inspect is sitting underneath. Paused inspect stays below.
+  if (
+    args.timelinePlaying &&
+    shouldPreviewSceneStitch({
+      master: args.master,
+      selection: { kind: null },
+      playheadSec: args.playheadSec,
+      timelinePlaying: true,
+    }) &&
+    args.master?.sceneStitch?.assetId
+  ) {
+    return {
+      kind: "timeline_frame",
+      visualSrc: api.assetUrl(args.master.sceneStitch.assetId),
+      mediaKind: "video",
+      promptText: null,
+      promptLabel: "Full scene",
+      batchId: null,
+      batchLocalTime: args.playheadSec,
+      visualLocalTime: args.playheadSec,
+    };
+  }
+
   // 1. Library asset takes precedence (creator explicitly previewing a file).
   if (libraryAsset) {
     const src = api.assetUrl(libraryAsset.id);
@@ -251,26 +311,13 @@ export function resolvePreviewComposition(args: {
     };
   }
 
-  // 3. Completed generation -> final output.
-  if (activeJob && activeJob.status === "done") {
-    const finalSrc = scene?.lipsync_output_path
-      ? api.mediaUrl(scene.lipsync_output_path)
-      : scene?.output_path
-        ? api.mediaUrl(scene.output_path)
-        : "";
-    return {
-      kind: "final_output",
-      src: finalSrc,
-      mediaKind: finalSrc && isVideoSrc(finalSrc) ? "video" : "image",
-      job: activeJob,
-    };
-  }
-
-  // 4. Active generation with preview frames available.
+  // 3. Active generation with preview frames available.
   if (activeJob && (activeJob.status === "queued" || activeJob.status === "running")) {
     const previewSrc =
       preview?.sourceUrl || (preview?.localPath ? api.mediaUrl(preview.localPath) : "");
-    const sourceStill = scene?.start_asset_id ? api.assetUrl(scene.start_asset_id) : "";
+    // 1 Frame stores its opening still on scene.start_asset_id. That slot is not
+    // a Timeline picture. Draft preview waits for a real generation frame.
+    const sourceStill = "";
     const stage = (activeJob.stage || activeJob.message || "").toLowerCase();
     const isPreparing = stage.includes("prepar") || stage.includes("load");
     if (isPreparing && !previewSrc) return { kind: "preparing", job: activeJob };
@@ -282,26 +329,14 @@ export function resolvePreviewComposition(args: {
     };
   }
 
-  // 5. No active job — show final scene output if present.
-  const finalSrc = scene?.lipsync_output_path
-    ? api.mediaUrl(scene.lipsync_output_path)
-    : scene?.output_path
-      ? api.mediaUrl(scene.output_path)
-      : "";
-  if (finalSrc) {
-    return {
-      kind: "final_output",
-      src: finalSrc,
-      mediaKind: isVideoSrc(finalSrc) ? "video" : "image",
-    };
-  }
-
-  // 6. TIMELINE_DRIVEN_PREVIEW — resolve the active clip at the playhead.
-  // When there is no generation and no scene output, the Preview Monitor shows
-  // whatever image/video clip the playhead intersects, with the active prompt
-  // as a lower-third overlay (never burned into the asset). This is what makes
-  // the monitor "timeline-driven" instead of stuck on Idle.
-  const frame = resolveTimelineAtTime(args.timeline, args.master, args.playheadSec);
+  // 3.5 TIMELINE_DRIVEN_PREVIEW — composed Visual (videoClips / approved take /
+  // A|Retake|B rtclip_*) is the sole Visual playback authority.
+  // FE CONTRACT: do NOT read scene.lipsync_output_path or timeline.lipsync tracks
+  // for Preview Visual / dialogue authority (Timeline UX owns Lip Sync strip UI;
+  // field may still exist on the scene row for MAGI/legacy provenance).
+  const frame = resolveTimelineAtTime(args.timeline, args.master, args.playheadSec, {
+    takeId: args.previewTakeId,
+  });
   if (frame.activeVisual && frame.activeVisual.assetId) {
     return {
       kind: "timeline_frame",
@@ -312,6 +347,58 @@ export function resolvePreviewComposition(args: {
       batchId: frame.activeBatch?.id ?? null,
       batchLocalTime: frame.batchLocalTime,
       visualLocalTime: frame.visualLocalTime,
+      videoAssetId: frame.activeVisual.kind === "video" ? frame.activeVisual.assetId : null,
+      sourceClipId: frame.activeVisual.clipId,
+    };
+  }
+
+  // 3.6 lipsync_output_path DEMOTION — never Visual authority for Timeline Preview.
+  // Range retakes live on videoClips (rtclip_* via replace_visual_range). Gaps fall
+  // through to scene stitch / output_path only.
+
+  // 4. Stitched scene clip — Play (and parked scene preview) uses the joined
+  // file as one continuous source when no per-batch visual is at playhead.
+  // Inspecting a batch while paused still shows that batch's own take above.
+  if (
+    shouldPreviewSceneStitch({
+      master: args.master,
+      selection: args.selection,
+      playheadSec: args.playheadSec,
+      timelinePlaying: args.timelinePlaying,
+    }) &&
+    args.master?.sceneStitch?.assetId
+  ) {
+    return {
+      kind: "timeline_frame",
+      visualSrc: api.assetUrl(args.master.sceneStitch.assetId),
+      mediaKind: "video",
+      promptText: null,
+      promptLabel: "Full scene",
+      batchId: null,
+      batchLocalTime: args.playheadSec,
+      visualLocalTime: args.playheadSec,
+    };
+  }
+
+  // 6. Completed generation with no intersecting clip — show scene.output_path only
+  // (lipsync_output_path intentionally ignored for Preview).
+  if (activeJob && activeJob.status === "done") {
+    const finalSrc = scene?.output_path ? api.mediaUrl(scene.output_path) : "";
+    return {
+      kind: "final_output",
+      src: finalSrc,
+      mediaKind: finalSrc && isVideoSrc(finalSrc) ? "video" : "image",
+      job: activeJob,
+    };
+  }
+
+  // 7. No intersecting clip and no completed job — leftover scene.output_path only.
+  const finalSrc = scene?.output_path ? api.mediaUrl(scene.output_path) : "";
+  if (finalSrc) {
+    return {
+      kind: "final_output",
+      src: finalSrc,
+      mediaKind: isVideoSrc(finalSrc) ? "video" : "image",
     };
   }
 
@@ -325,6 +412,9 @@ export function TimelinePreviewComposer({
   master,
   selection,
   playheadSec,
+  timelinePlaying = false,
+  onTogglePlay,
+  sceneEndSec = 0,
   libraryAsset,
   onClearLibraryAsset,
   onPlayheadChange,
@@ -333,14 +423,32 @@ export function TimelinePreviewComposer({
   pauseUpdates,
   onPauseUpdatesChange,
   inlineActions = false,
+  cancelRenderSupported,
+  onCancelRender,
+  onOpenRetake,
+  retakeActive = false,
+  retakeSession,
+  onRetakeMarkIn,
+  onRetakeMarkOut,
+  onRetakePrompt,
+  onRetakeRemoveBackground,
+  onRetakeCancel,
+  onRetakeSubmit,
   onDismissFailure,
+  onApproved,
+  onMasterMutated,
+  previewTakeId = null,
+  generationStandby = false,
 }: {
   project: Project;
   scene: Scene | undefined;
-  timeline: DirectorTimeline | null;
+  timeline: TimelineBoardView | null;
   master: SceneTimelineMaster | null;
   selection: DirectorSelection;
   playheadSec: number;
+  timelinePlaying?: boolean;
+  onTogglePlay?: () => void;
+  sceneEndSec?: number;
   libraryAsset: Asset | null;
   onClearLibraryAsset?: () => void;
   onPlayheadChange?: (t: number) => void;
@@ -349,9 +457,27 @@ export function TimelinePreviewComposer({
   pauseUpdates?: boolean;
   onPauseUpdatesChange?: (value: boolean) => void;
   inlineActions?: boolean;
+  /** Timeline honesty: only true when generator supportsQueuedCancel/supportsRunningCancel and a job is generating. */
+  cancelRenderSupported?: boolean;
+  onCancelRender?: () => void;
+  onOpenRetake?: () => void;
+  retakeActive?: boolean;
+  retakeSession?: VideoRetakeSession;
+  onRetakeMarkIn?: () => void;
+  onRetakeMarkOut?: () => void;
+  onRetakePrompt?: (value: string) => void;
+  onRetakeRemoveBackground?: () => void;
+  onRetakeCancel?: () => void;
+  onRetakeSubmit?: () => void;
   onDismissFailure?: (jobId: string) => void;
+  onApproved?: () => void | Promise<void>;
+  /** Reload master after publish / MAGI (shell afterMutation). */
+  onMasterMutated?: () => void | Promise<void>;
+  previewTakeId?: string | null;
+  /** True from the click that starts Generate Scene, Re-Take, or New Take until live progress arrives. */
+  generationStandby?: boolean;
 }) {
-  const { activeJob, preview } = useGenerationState(project.id, scene, Boolean(pauseUpdates));
+  const { activeJob, preview } = useGenerationState(project.id, scene, Boolean(pauseUpdates), master);
 
   const composition = useMemo(
     () =>
@@ -364,9 +490,199 @@ export function TimelinePreviewComposer({
         libraryAsset,
         activeJob,
         preview,
+        timelinePlaying,
+        previewTakeId,
       }),
-    [scene, timeline, master, selection, playheadSec, libraryAsset, activeJob, preview],
+    [scene, timeline, master, selection, playheadSec, libraryAsset, activeJob, preview, timelinePlaying, previewTakeId],
   );
+
+  // ORIGINAL_VOICE_SUPPRESSION (Re-Take-only): Lip Sync tracks are NOT Timeline
+  // dialogue authority. Mute only when an enabled legacy lipsync clip would still
+  // be layered — shouldMutePreviewVideoSoundtrack ignores lipsync_output_path and
+  // returns false under rtclip_* / when tracks are absent (retake AAC owns AV).
+  // Legacy Lip Sync tracks no longer dialogue/mute authority (Re-Take AV owns window).
+  const hasGeneratedTakeAtPlayhead = useMemo(() => {
+    const windows = buildBatchTimeWindows(master?.batchBlocks);
+    const win = batchWindowAtTime(windows, playheadSec ?? 0);
+    const batch = (master?.batchBlocks || []).find((entry) => entry.id === win?.id);
+    return batch ? hasGeneratedTakeForRetake(batch) : false;
+  }, [master?.batchBlocks, playheadSec]);
+
+  const muteVideoAudio = shouldMutePreviewVideoSoundtrack({
+    lipsyncOutputPath: null,
+    tracks: [],
+    playheadSec: playheadSec ?? 0,
+    activeVisualClipId: composition?.kind === "timeline_frame" ? composition.sourceClipId ?? null : null,
+  });
+
+
+  const publishChrome = useMemo(() => {
+    const chrome = resolvePublishChrome(master);
+    const accepted = String(master?.sceneFinalCheck?.lifecycleStatus || "") === "SCENE_FINISHED_WITH_ACCEPTED_ISSUES";
+    return { ...chrome, acceptedIssues: accepted };
+  }, [master]);
+
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [upscaleBusy, setUpscaleBusy] = useState(false);
+  const [upscaleOpen, setUpscaleOpen] = useState(false);
+  const [upscaleLoading, setUpscaleLoading] = useState(false);
+  const [upscaleError, setUpscaleError] = useState<string | null>(null);
+  const [upscaleStatus, setUpscaleStatus] = useState<string | null>(null);
+  const [upscaleHonesty, setUpscaleHonesty] = useState<string | null>(null);
+  const [upscaleSourceRes, setUpscaleSourceRes] = useState("");
+  const [upscaleSourceAssetId, setUpscaleSourceAssetId] = useState("");
+  const [realesrganReady, setRealesrganReady] = useState(false);
+  const [upscaleEngines, setUpscaleEngines] = useState<Array<{ id: string; label?: string; available?: boolean; models?: Array<{ id: string; label?: string }> }>>([]);
+  const [upscaleTargets, setUpscaleTargets] = useState<Array<{ id: string; label: string; width: number; height: number }>>([]);
+  const [upscaleEngine, setUpscaleEngine] = useState("ffmpeg-scale");
+  const [upscaleModel, setUpscaleModel] = useState("lanczos");
+  const [upscaleTargetId, setUpscaleTargetId] = useState("");
+  const navigate = useNavigate();
+  const publishSource = preferredPublishSource(master?.scenePublish?.upscaledAssetId);
+
+  const handlePublish = async () => {
+    if (!scene?.id || publishBusy) return;
+    setPublishBusy(true);
+    try {
+      const result = await api.directorTimelinePublishScene(project.id, scene.id, {
+        update: false,
+        source: publishSource,
+      });
+      if (!result.ok) {
+        window.alert(result.creatorMessage || result.error || "Publish failed");
+        return;
+      }
+      await onMasterMutated?.();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Publish failed";
+      window.alert(message);
+    } finally {
+      setPublishBusy(false);
+    }
+  };
+
+  const handleUpdatePublished = async () => {
+    if (!scene?.id || publishBusy) return;
+    const expectedVersion = master?.scenePublish?.version;
+    setPublishBusy(true);
+    try {
+      const result = await api.directorTimelinePublishScene(project.id, scene.id, {
+        update: true,
+        expectedVersion,
+        source: publishSource,
+      });
+      if (!result.ok) {
+        window.alert(result.creatorMessage || result.error || "Update Published failed");
+        return;
+      }
+      await onMasterMutated?.();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Update Published failed";
+      window.alert(message);
+    } finally {
+      setPublishBusy(false);
+    }
+  };
+
+  const loadUpscaleOptions = async () => {
+    if (!scene?.id) return;
+    setUpscaleLoading(true);
+    setUpscaleError(null);
+    try {
+      const opts = await api.directorTimelineMagiUpscaleOptions(project.id, scene.id);
+      if (!opts.ok) {
+        setUpscaleError(opts.creatorMessage || opts.error || "MAGI could not read this master.");
+        return;
+      }
+      const targets = opts.targets || [];
+      const engines = (opts.engines || []) as Array<{
+        id: string;
+        label?: string;
+        available?: boolean;
+        models?: Array<{ id: string; label?: string }>;
+      }>;
+      const gpuReady = Boolean(opts.realesrganReady);
+      setUpscaleTargets(targets);
+      setUpscaleEngines(engines);
+      setRealesrganReady(gpuReady);
+      setUpscaleHonesty(opts.honesty || null);
+      setUpscaleSourceRes(opts.sourceResolution || "");
+      setUpscaleSourceAssetId(opts.sourceAssetId || "");
+      setUpscaleEngine(opts.defaultEngine || (gpuReady ? "realesrgan-ncnn-vulkan" : "ffmpeg-scale"));
+      setUpscaleModel(opts.defaultModel || (gpuReady ? "realesrgan-x4plus" : "lanczos"));
+      setUpscaleTargetId(opts.defaultTarget || targets[0]?.id || "");
+    } catch (err) {
+      setUpscaleError(err instanceof Error ? err.message : "MAGI could not read this master.");
+    } finally {
+      setUpscaleLoading(false);
+    }
+  };
+
+  const handleOpenUpscale = async () => {
+    if (!scene?.id || upscaleBusy) return;
+    setUpscaleOpen(true);
+    setUpscaleStatus(null);
+    await loadUpscaleOptions();
+  };
+
+  const handleConfirmUpscale = async () => {
+    if (!scene?.id || upscaleBusy) return;
+    const choice = choiceFromChooser({
+      engine: upscaleEngine,
+      model: upscaleModel,
+      targetId: upscaleTargetId,
+      targets: upscaleTargets,
+    });
+    setUpscaleBusy(true);
+    setUpscaleError(null);
+    setUpscaleStatus("Starting MAGI…");
+    try {
+      const result = await api.directorTimelineMagiUpscale(project.id, scene.id, {
+        engine: choice.engine,
+        model: choice.model,
+        targetResolution: choice.targetResolution,
+      });
+      if (!result.ok) {
+        setUpscaleError(result.creatorMessage || result.error || "MAGI upscale failed");
+        return;
+      }
+      const jobId = String(result.jobId || "").trim();
+      if (!jobId) {
+        setUpscaleError("MAGI did not start an upscale job.");
+        return;
+      }
+      setUpscaleStatus("Enhancing the full scene…");
+      const done = await pollMagiUpscaleJob(project.id, jobId, {
+        onTick: (snap) => {
+          const pct = Math.round((snap.progress || 0) * 100);
+          setUpscaleStatus(snap.message || (pct ? `Enhancing… ${pct}%` : "Enhancing the full scene…"));
+        },
+      });
+      if (!done.ok) {
+        setUpscaleError(done.message || "MAGI upscale failed");
+        return;
+      }
+      setUpscaleStatus("Saved. Reload to keep this enhanced master.");
+      setUpscaleOpen(false);
+      await onMasterMutated?.();
+    } catch (err) {
+      setUpscaleError(err instanceof Error ? err.message : "MAGI upscale failed");
+    } finally {
+      setUpscaleBusy(false);
+    }
+  };
+
+  const sceneGenerationStatus = useMemo(
+    () => previewGenerationNotice(master, generationStandby),
+    [master, generationStandby],
+  );
+  const generationCompleteNotice = useMemo(() => sceneGenerationCompleteNotice(master), [master]);
+  const comfyProgressPercent = useMemo(() => {
+    return (
+      comfyProgressPercentFromText(sceneGenerationStatus) ??
+      comfyProgressPercentFromJob(activeJob)
+    );
+  }, [sceneGenerationStatus, activeJob]);
 
   return (
     <>
@@ -376,14 +692,78 @@ export function TimelinePreviewComposer({
         libraryAsset={libraryAsset}
         onClearLibraryAsset={onClearLibraryAsset}
         playheadSec={playheadSec}
+        timelinePlaying={timelinePlaying}
+        onTogglePlay={onTogglePlay}
+        sceneEndSec={sceneEndSec}
         onPlayheadChange={onPlayheadChange}
         inlineActions={inlineActions}
+        cancelRenderSupported={cancelRenderSupported}
+        onCancelRender={onCancelRender}
         hideOverlay={hideOverlay}
         onHideOverlayChange={onHideOverlayChange}
         pauseUpdates={pauseUpdates}
         onPauseUpdatesChange={onPauseUpdatesChange}
         composition={composition}
+        muteVideoAudio={muteVideoAudio}
+        sceneMode={master?.mode}
+        onOpenRetake={onOpenRetake}
+        hasGeneratedTakeAtPlayhead={hasGeneratedTakeAtPlayhead}
+        retakeActive={retakeActive}
+        retakeSession={retakeSession}
+        onRetakeMarkIn={onRetakeMarkIn}
+        onRetakeMarkOut={onRetakeMarkOut}
+        onRetakePrompt={onRetakePrompt}
+        onRetakeRemoveBackground={onRetakeRemoveBackground}
+        onRetakeCancel={onRetakeCancel}
+        onRetakeSubmit={onRetakeSubmit}
         onDismissFailure={onDismissFailure}
+        onApproved={onApproved}
+        sceneGenerationStatus={sceneGenerationStatus}
+        generationCompleteNotice={generationCompleteNotice}
+        comfyProgressPercent={comfyProgressPercent}
+        publishChrome={publishChrome}
+        onPublish={handlePublish}
+        onUpdatePublished={handleUpdatePublished}
+        onUpscaleWithMagi={handleOpenUpscale}
+        publishBusy={publishBusy}
+        upscaleBusy={upscaleBusy}
+        upscalePanelOpen={upscaleOpen}
+        upscalePanel={
+          upscaleOpen ? (
+            <MagiUpscaleChooser
+              loading={upscaleLoading}
+              error={upscaleError}
+              honesty={upscaleHonesty}
+              sourceResolution={upscaleSourceRes}
+              realesrganReady={realesrganReady}
+              engines={upscaleEngines}
+              targets={upscaleTargets}
+              engine={upscaleEngine}
+              model={upscaleModel}
+              targetId={upscaleTargetId}
+              busy={upscaleBusy}
+              statusText={upscaleStatus}
+              onEngineChange={(next) => {
+                setUpscaleEngine(next);
+                if (next === "ffmpeg-scale") setUpscaleModel("lanczos");
+                else if (upscaleModel === "lanczos") setUpscaleModel("realesrgan-x4plus");
+              }}
+              onModelChange={setUpscaleModel}
+              onTargetChange={setUpscaleTargetId}
+              onCancel={() => {
+                if (!upscaleBusy) setUpscaleOpen(false);
+              }}
+              onConfirm={() => void handleConfirmUpscale()}
+              onOpenInMagi={() => {
+                const params = new URLSearchParams();
+                params.set("workspace", "magi");
+                if (scene?.id) params.set("sceneId", scene.id);
+                if (upscaleSourceAssetId) params.set("assetId", upscaleSourceAssetId);
+                navigate(`/project/${project.id}?${params.toString()}`);
+              }}
+            />
+          ) : null
+        }
       />
       <TimelineDiagnostics selection={selection} composition={composition} reloadKey={0} saveError={null} />
     </>

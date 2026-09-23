@@ -57,6 +57,9 @@ async def submit(
     outpaint_bottom: int = 256,
     lora_name: Optional[str] = None,
     lora_strength: Optional[float] = None,
+    scene_image: Any = None,
+    character_references: Any = None,
+    environment_references: Any = None,
     **_extra: Any,
 ) -> dict[str, Any]:
     """Queue a local Comfy graph. Same verb as kie/fal submit.
@@ -100,6 +103,9 @@ async def submit(
             outpaint_bottom=outpaint_bottom,
             lora_name=lora_name,
             lora_strength=lora_strength,
+            scene_image=scene_image,
+            character_references=character_references,
+            environment_references=environment_references,
         )
         wf = prepare_executable_graph(
             contract,

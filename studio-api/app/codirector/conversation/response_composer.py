@@ -99,7 +99,9 @@ _TITLE_PATTERNS = (
     re.compile(r"\bThe\s+([A-Z][\w'’\-]+(?:\s+[A-Z][\w'’\-]+)?)\b"),
 )
 _ATTACHMENT_HINT_RE = re.compile(
-    r"\b(attached|attachment|image as a reference|reference prompt|use the attached)\b",
+    r"\b(attached|attachment|image as a reference|reference prompt|use the attached|"
+    r"background|timeline\s+visual|visual\s+ref|as\s+(?:the\s+)?(?:background|set)|"
+    r"look\s+of\s+(?:the\s+)?(?:place|caf[eé]|location))\b",
     re.I,
 )
 _ANCHOR_PATTERNS = (
@@ -225,6 +227,27 @@ def _draft_plan_reply(user_message: str) -> str:
 
 
 def _attachment_reference_reply(user_message: str) -> str:
+    """Order 11A — dual-layer companion + Timeline plan; never ERS lecture by default."""
+    try:
+        from .attach_intent import (
+            classify_attach_intent,
+            build_dual_layer_attach_reply,
+            build_timeline_attach_handoff,
+            TIMELINE_REF_INTENTS,
+        )
+
+        intent = classify_attach_intent(user_message, has_image_attachment=True)
+        # Intelligence mission RC8/Phase 7: the canned dual-layer production
+        # plan is only for explicit Timeline attach intents. Discussion and
+        # neutral-image turns fall through to the honest reference fallback
+        # (no canned praise, no attach proposal from existence alone).
+        if intent.intent in TIMELINE_REF_INTENTS:
+            handoff = build_timeline_attach_handoff(asset_ids=[], intent=intent)
+            return sanitize_response(
+                build_dual_layer_attach_reply(user_message, intent, handoff=handoff)
+            )
+    except Exception:
+        pass
     named = _extract_named_title(user_message)
     project_hint = f" for {named}" if named else ""
     return (
@@ -406,6 +429,20 @@ def build_response_plan(
         )
 
     if _ATTACHMENT_HINT_RE.search(msg):
+        # Order 11A: long screenplay + attachment stays dual-layer (not attachment-only).
+        try:
+            from .attach_intent import classify_attach_intent
+
+            _intent = classify_attach_intent(user_message, has_image_attachment=True)
+            if _intent.has_long_creative:
+                return ResponsePlan(
+                    acknowledgement="I've got the screenplay and the visual together.",
+                    relevant=_attachment_reference_reply(user_message),
+                    shape="attachment-creative",
+                    include_next_steps=True,
+                )
+        except Exception:
+            pass
         return ResponsePlan(
             acknowledgement="I can use that reference.",
             relevant=_attachment_reference_reply(user_message),

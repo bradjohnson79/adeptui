@@ -17,7 +17,7 @@ test("spatial map live smoke", async ({ page }) => {
   await zoomIn.click();
   await zoomOut.click();
   await expect(page.getByTestId("map-toggle-grid")).toBeVisible();
-  await expect(page.getByTestId("map-toggle-circles")).toBeVisible();
+  await expect(page.getByTestId("map-toggle-circles")).toHaveCount(0);
   await expect(page.getByTestId("map-toggle-labels")).toBeVisible();
   await expect(page.getByRole("button", { name: /Environment Reference Sheet/i })).toBeVisible();
   const atlasCount = await page.getByTestId("atlas-view-btn").count();

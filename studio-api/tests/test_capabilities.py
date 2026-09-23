@@ -156,6 +156,9 @@ def test_capabilities_endpoint_returns_a_complete_snapshot(client) -> None:
     for item in snapshot["capabilities"]:
         assert item["status"] in EXPECTED_STATUSES
         assert item["lastCheckedAt"]
+        assert item["readinessClass"]
+        assert item["v11Requirement"]
+    assert snapshot.get("readinessPolicyVersion") == "v1.1"
 
 
 def test_callable_list_only_contains_available_capabilities(client) -> None:
@@ -265,13 +268,24 @@ def test_absent_features_are_reported_as_not_implemented(client) -> None:
         "project.scenes.reorder",
         "references.remove",
         "references.attach.scene",
-        "codirector.tools",
     ):
         item = capabilities[capability_id]
         assert item["status"] == "not_implemented", capability_id
         assert item["available"] is False
         assert item["reasonCode"] == "CAPABILITY_NOT_IMPLEMENTED"
         assert item["message"]
+
+
+def test_codirector_tools_evaluates_against_live_registry(client) -> None:
+    """The stale M2.2 `not_implemented` row is reconnected to the live tool registry:
+    the evaluator reports the observed catalog, never a hardcoded count."""
+    from app.codirector.tools import registry as tool_registry
+
+    item = _by_id(_snapshot(client))["codirector.tools"]
+    assert item["status"] == "locally_verified"
+    assert item["available"] is True
+    assert item["details"]["toolCount"] == len(tool_registry.catalog())
+    assert item["details"]["toolCount"] > 0
 
 
 def test_frontend_only_state_is_reported_as_ui_only(client) -> None:
@@ -347,7 +361,15 @@ def test_workflow_discovery_lists_registered_builders(client) -> None:
 def test_workflow_readiness_reports_missing_nodes_with_an_action() -> None:
     from app.workflows.readiness import workflow_readiness
 
-    readiness = workflow_readiness("ltx.scene", node_types=set(), model_states={"ltx_checkpoint": True})
+    readiness = workflow_readiness(
+        "ltx_25.t2v",
+        node_types=set(),
+        model_states={
+            "ltx_2_5_checkpoint": True,
+            "ltx_2_5_text_encoder": True,
+            "ltx_2_5_video_vae": True,
+        },
+    )
     assert readiness["status"] == "blocked"
     assert readiness["reasonCode"] == "WORKFLOW_MISSING_EXTENSIONS"
     assert readiness["missingExtensions"]
@@ -357,19 +379,35 @@ def test_workflow_readiness_reports_missing_nodes_with_an_action() -> None:
 def test_workflow_readiness_reports_missing_models_with_component_ids() -> None:
     from app.workflows.readiness import workflow_readiness
 
-    nodes = set(_required_nodes("ltx.scene"))
-    readiness = workflow_readiness("ltx.scene", node_types=nodes, model_states={"ltx_checkpoint": False})
+    nodes = set(_required_nodes("ltx_25.t2v"))
+    readiness = workflow_readiness(
+        "ltx_25.t2v",
+        node_types=nodes,
+        model_states={
+            "ltx_2_5_checkpoint": False,
+            "ltx_2_5_text_encoder": True,
+            "ltx_2_5_video_vae": True,
+        },
+    )
     assert readiness["status"] == "blocked"
     assert readiness["reasonCode"] == "WORKFLOW_MISSING_MODELS"
-    assert [item["componentId"] for item in readiness["missingModels"]] == ["ltx_checkpoint"]
+    assert "ltx_2_5_checkpoint" in {item["componentId"] for item in readiness["missingModels"]}
     assert readiness["recommendedAction"] == "open_source_manager"
 
 
 def test_workflow_readiness_is_ready_when_nodes_and_models_are_present() -> None:
     from app.workflows.readiness import workflow_readiness
 
-    nodes = set(_required_nodes("ltx.scene"))
-    readiness = workflow_readiness("ltx.scene", node_types=nodes, model_states={"ltx_checkpoint": True})
+    nodes = set(_required_nodes("ltx_25.t2v"))
+    readiness = workflow_readiness(
+        "ltx_25.t2v",
+        node_types=nodes,
+        model_states={
+            "ltx_2_5_checkpoint": True,
+            "ltx_2_5_text_encoder": True,
+            "ltx_2_5_video_vae": True,
+        },
+    )
     assert readiness["status"] == "ready"
     assert readiness["reasonCode"] is None
     assert readiness["missingExtensions"] == []
@@ -389,7 +427,15 @@ def test_latentsync_readiness_accepts_d_latentsync_alias() -> None:
 def test_workflow_readiness_is_unknown_without_a_node_catalogue() -> None:
     from app.workflows.readiness import workflow_readiness
 
-    readiness = workflow_readiness("ltx.scene", node_types=None, model_states={"ltx_checkpoint": True})
+    readiness = workflow_readiness(
+        "ltx_25.t2v",
+        node_types=None,
+        model_states={
+            "ltx_2_5_checkpoint": True,
+            "ltx_2_5_text_encoder": True,
+            "ltx_2_5_video_vae": True,
+        },
+    )
     assert readiness["status"] == "unknown"
     assert readiness["reasonCode"] == "WORKFLOW_READINESS_UNKNOWN"
     assert readiness["nodeCatalogAvailable"] is False
@@ -504,7 +550,8 @@ def test_health_endpoint_reports_component_ids_for_missing_models(client) -> Non
     assert res.status_code == 200
     payload = res.json()
     assert "missing_model_component_ids" in payload
-    assert payload["comfy_status"] in ("ready", "degraded", "unreachable", "unknown")
+    assert payload["comfy_status"] in ("ready", "degraded", "unreachable", "unknown", "not_probed")
+    assert payload.get("comfy_probed") is False
 
 
 # --------------------------------------------------------------------------
@@ -584,16 +631,21 @@ def test_reference_exclusion_is_the_supported_removal_path(client) -> None:
 
 def test_reference_capabilities_are_project_scoped(client) -> None:
     project_id = _create_project(client, "Reference Capability Project")
-    capabilities = _by_id(_snapshot(client, project_id))
+    snapshot = _snapshot(client, project_id)
+    capabilities = _by_id(snapshot)
     for capability_id in ("references.read", "references.attach.project", "references.exclude"):
         assert capabilities[capability_id]["scope"] == "project"
         assert capabilities[capability_id]["status"] == "locally_verified"
 
     ic_lora = capabilities["references.ic_lora.ready"]
-    assert ic_lora["status"] in ("locally_verified", "blocked", "not_configured", "unknown")
-    if ic_lora["status"] != "locally_verified":
-        assert ic_lora["reasonCode"]
-        assert ic_lora["recommendedAction"]
+    assert ic_lora["status"] == "deferred_version_1_2"
+    assert ic_lora["reasonCode"]
+    assert ic_lora["recommendedAction"] == "none"
+    assert all(item["capabilityId"] != "references.ic_lora.ready" for item in snapshot["blockers"])
+    assert all(
+        item["capabilityId"] != "references.ic_lora.ready"
+        for item in snapshot.get("productionBlockers") or []
+    )
 
 
 # --------------------------------------------------------------------------

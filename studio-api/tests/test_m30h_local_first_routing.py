@@ -19,7 +19,8 @@ from app.codirector.model_intelligence.registry import ENGINE_TO_MODEL
 
 
 def test_auto_maps_to_ltx_not_fal_seedance():
-    assert ENGINE_TO_MODEL["auto"] == "ltx_2_3"
+    assert ENGINE_TO_MODEL["auto"] == "ltx_2_5_distilled"
+    assert "fal" not in str(ENGINE_TO_MODEL["auto"])
 
 
 def test_recommend_engine_stays_local_even_with_fal_key(monkeypatch):
@@ -38,8 +39,9 @@ def test_recommend_engine_stays_local_even_with_fal_key(monkeypatch):
     rec = recommend_engine(project=project, scene=scene)
     assert rec["local"] is True
     assert not str(rec["engineId"]).startswith("fal_")
-    assert rec["engineId"] in ("ltx", "wan")
-    assert rec.get("requiresStartFrame") is True
+    assert rec["engineId"] in ("ltx-2.5", "minimax-h3")
+    if rec["engineId"] == "ltx-2.5":
+        assert rec.get("requiresStartFrame") is True
 
 
 def test_resolve_auto_never_returns_fal(monkeypatch):
@@ -55,11 +57,13 @@ def test_resolve_auto_never_returns_fal(monkeypatch):
         start_asset_id=None,
         engine="auto",
     )
-    assert resolve_engine_id("auto", project, scene) in ("ltx", "wan")
+    resolved = resolve_engine_id("auto", project, scene)
+    assert not str(resolved).startswith("fal_")
+    assert resolved in ("ltx-2.5", "minimax-h3")
 
 
 def test_local_start_frame_blocker_prefers_local_still():
-    blocker = local_start_frame_blocker(preferred_engine="ltx")
+    blocker = local_start_frame_blocker(preferred_engine="ltx-2.5")
     assert blocker["code"] == LOCAL_START_FRAME_REQUIRED
     assert blocker["preferredAction"] == "generate_local_start_frame"
     assert blocker["falSubmissionAllowedWithoutApproval"] is False

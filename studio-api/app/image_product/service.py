@@ -12,6 +12,20 @@ from ..db import Job
 from .compile import compile_image_request
 from .history import append_history
 
+_EDIT_OPERATIONS = {"image.edit", "image.reference", "image.inpaint", "native_inpaint"}
+
+
+def _edit_op_for_intent(intent: dict[str, Any]) -> str:
+    """Keep generate jobs on generate. Edit is only the explicit edit operation."""
+    meta = intent.get("metadata") if isinstance(intent.get("metadata"), dict) else {}
+    explicit = str(meta.get("edit_op") or "").strip()
+    if explicit:
+        return explicit
+    operation = str(intent.get("operation") or "").strip()
+    if operation in _EDIT_OPERATIONS:
+        return "edit"
+    return "generate"
+
 
 def generate_images(
     db: Session,
@@ -57,7 +71,7 @@ def generate_images(
             "aspect": (intent.get("metadata") or {}).get("aspect"),
             "source_asset_id": intent.get("sourceAssetId"),
             "edit": intent.get("operation") in {"image.edit", "image.reference"},
-            "edit_op": (intent.get("metadata") or {}).get("edit_op") or "edit",
+            "edit_op": _edit_op_for_intent(intent),
             "imageIntent": intent,
             "imageRuntime": pinned,
             "recommendation": compiled.get("recommendation"),
@@ -70,6 +84,10 @@ def generate_images(
             "spatialCameraId": (intent.get("metadata") or {}).get("spatialCameraId"),
             "spatialReferenceBundle": body.get("spatialReferenceBundle"),
             "refs": body.get("refs") or [],
+            # Identity reference ids (CRS/ERS/PRS/generic ~) for provenance.
+            # The worker stamps these into ImageProvenance.references when the
+            # job has no single source-asset hash (generate-with-reference).
+            "reference_ids": list(intent.get("referenceIds") or []),
             # Hosted pixel grounding (Kie input arrays). Only set by explicit
             # reference-conditioned paths (e.g. ERS on GPT Image 2); the worker
             # reads these directly for the Kie createTask input.
@@ -159,8 +177,15 @@ def generate_images(
             from ..codirector.executive.imagegen_adapter import schedule_job_queue_enqueue
 
             schedule_job_queue_enqueue(job.id)
-        except Exception:
-            pass
+        except Exception as exc:
+            job.status = "failed"
+            job.stage = "failed"
+            job.message = (
+                "This image never started. The studio could not hand it to the image worker: "
+                f"{exc}"
+            )[:4000]
+            db.commit()
+            raise RuntimeError(job.message) from exc
         jobs.append({"jobId": job.id, "workflowKey": pinned.get("workflowKey"), "kind": kind})
         append_history(
             project_id,

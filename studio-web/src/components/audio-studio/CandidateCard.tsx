@@ -1,4 +1,5 @@
 import { Button } from "../ui";
+import { AudioRow } from "./AudioRow";
 import type { AudioCandidate } from "./types";
 
 type CandidateCardProps = {
@@ -24,8 +25,13 @@ export function CandidateCard({
   onPrimary,
   primaryLabel,
 }: CandidateCardProps) {
+  const playable = Boolean(candidate.audioUrl);
+  const failed = candidate.status === "failed";
   return (
-    <article className="audio-candidate-card" data-testid={`audio-candidate-${candidate.id}`}>
+    <article
+      className={`audio-candidate-card${previewSelected ? " is-selected" : ""}${approved ? " is-approved" : ""}`}
+      data-testid={`audio-candidate-${candidate.id}`}
+    >
       <div className="audio-candidate-card__meta">
         <div>
           <p className="audio-candidate-card__eyebrow">{candidate.typeLabel || ctaLabel}</p>
@@ -33,40 +39,35 @@ export function CandidateCard({
         </div>
         <div className="audio-candidate-card__chips">
           {typeof candidate.durationSec === "number" ? (
-            <span className="audio-chip audio-chip--subtle">{candidate.durationSec}s</span>
+            <span className="audio-chip">{candidate.durationSec}s</span>
           ) : null}
-          {candidate.loop ? <span className="audio-chip audio-chip--subtle">Loopable</span> : null}
+          {candidate.loop ? <span className="audio-chip">Loop</span> : null}
           {approved ? <span className="audio-chip audio-chip--success">Approved</span> : null}
+          {failed ? <span className="audio-chip audio-chip--warn">Failed</span> : null}
         </div>
       </div>
 
-      {candidate.subtitle ? <p className="audio-candidate-card__subtitle">{candidate.subtitle}</p> : null}
-      {candidate.description ? <p className="audio-candidate-card__description">{candidate.description}</p> : null}
-      {candidate.audioUrl ? (
-        <audio
-          key={candidate.audioUrl}
-          controls
-          preload="metadata"
-          src={candidate.audioUrl}
-          className="audio-candidate-card__player"
-          data-asset-id={candidate.assetId || ""}
-          data-testid={`audio-candidate-player-${candidate.id}`}
-        />
-      ) : null}
+      {candidate.subtitle && failed ? <p className="audio-candidate-card__error">{candidate.subtitle}</p> : null}
+      {playable ? (
+        <AudioRow audioUrl={candidate.audioUrl} label={candidate.title} testId={`audio-candidate-player-${candidate.id}`} />
+      ) : (
+        <p className="muted">{failed ? "This take did not finish." : "Still making this take…"}</p>
+      )}
 
       <div className="audio-candidate-card__actions">
         <Button
           variant={previewSelected ? "secondary" : "ghost"}
           selected={previewSelected}
           onClick={onPreview}
+          disabled={!playable}
         >
-          {previewSelected ? "Selected for Preview" : "Select for Preview"}
+          {previewSelected ? "Selected" : "Select"}
         </Button>
-        <Button variant="primary" onClick={() => void onApprove()} disabled={busy || approved}>
-          {approved ? "Approved Track" : "Approve Track"}
+        <Button variant="primary" onClick={() => void onApprove()} disabled={busy || approved || !playable}>
+          {approved ? "Approved" : "Approve"}
         </Button>
         {onPrimary && primaryLabel ? (
-          <Button variant="secondary" onClick={() => void onPrimary()} disabled={busy}>
+          <Button variant="secondary" onClick={() => void onPrimary()} disabled={busy || !playable}>
             {primaryLabel}
           </Button>
         ) : null}

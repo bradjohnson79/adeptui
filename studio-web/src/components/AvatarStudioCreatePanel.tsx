@@ -59,6 +59,7 @@ export function AvatarStudioCreatePanel({
   session,
   patchSession,
   characters,
+  charactersError,
   characterStills,
   imageAssets,
   videoAssets,
@@ -90,6 +91,7 @@ export function AvatarStudioCreatePanel({
   session: AvatarSession;
   patchSession: (patch: Partial<AvatarSession>) => void;
   characters: ProfileItem[];
+  charactersError?: string;
   characterStills: Record<string, string>;
   imageAssets: AssetItem[];
   videoAssets: AssetItem[];
@@ -238,6 +240,15 @@ export function AvatarStudioCreatePanel({
                 </option>
               ))}
             </select>
+            {charactersError ? (
+              <p className="avatar-inline-tip" data-testid="avatar-characters-error" role="status">
+                {charactersError}
+              </p>
+            ) : !characters.length ? (
+              <p className="scene-meta" data-testid="avatar-no-characters" role="status">
+                No characters in this project yet. Create one in Character Creator and it will appear here.
+              </p>
+            ) : null}
             {!session.character_profile_id ? (
               <p className="scene-meta" data-testid="avatar-requires-character">
                 Pick a character from this project, or switch Source to Library Image.

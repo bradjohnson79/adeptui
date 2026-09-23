@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { HelpTip, PanelHeading } from "./HelpTip";
 import { useOpenCoDirector } from "./CoDirector";
 import { VoicePerformanceStudio } from "./voiceStudio/VoicePerformanceStudio";
 import {
-  CODIRECTOR_CHIPS,
   READINESS_LABELS,
+  voiceStudioCoDirectorChips,
   type StudioPhase,
 } from "./voiceStudio/constants";
 import {
@@ -14,13 +14,14 @@ import {
 } from "../contracts/voiceEnvironment";
 import { VoiceEnvironmentPanel } from "./voiceStudio/environment/VoiceEnvironmentPanel";
 import { VoiceIdentityPanel } from "./voiceStudio/VoiceIdentityPanel";
+import { isCurrentCharacterRequest } from "./voiceStudio/voiceStudioCharacter";
 
-const DEFAULT_DIALOGUE = `Light circuitry, not tattoos, doofus.
-I developed them with my sister in the Abode.`;
+const DEFAULT_DIALOGUE = "";
 
 type Props = {
   projectId: string;
   characterId: string;
+  characterName?: string;
   onMsg: (m: string) => void;
   onRefresh?: () => void;
   initialPhase?: StudioPhase | "voice" | "voicePerformance";
@@ -33,27 +34,51 @@ function mapInitialPhase(p?: Props["initialPhase"]): StudioPhase | undefined {
   return p;
 }
 
-function mapInitialWorkspaceTab(p?: Props["initialPhase"]): VoiceStudioWorkspaceTab {
-  if (p === "performance" || p === "voicePerformance") return "performance";
+function mapInitialWorkspaceTab(p?: Props["initialPhase"] | string): VoiceStudioWorkspaceTab {
+  const key = String(p || "").trim();
+  // ORDER 5 amend: top-level Scene Dialogue + Takes stages removed — both live inside Voice Performance.
+  if (
+    key === "performance"
+    || key === "voicePerformance"
+    || key === "sceneDialogue"
+    || key === "dialogue"
+    || key === "takes"
+  ) {
+    return "performance";
+  }
+  if (key === "environment" || key === "voiceEnvironment") return "environment";
+  if (key === "identity" || key === "voice" || key === "voiceIdentity") return "identity";
   return "identity";
 }
+
+function coerceWorkspaceTab(tab: string): VoiceStudioWorkspaceTab {
+  if (tab === "sceneDialogue" || tab === "dialogue" || tab === "takes") return "performance";
+  if (tab === "identity" || tab === "performance" || tab === "environment") {
+    return tab;
+  }
+  return "identity";
+}
+
+
 
 function chooseApprovedVoice(voices: any[] | undefined, activeId: string): any | null {
   const list = Array.isArray(voices) ? voices : [];
   if (!list.length) return null;
+  const isApproved = (voice: any) => String(voice?.approval_status || "").toLowerCase() === "approved";
+  const active = list.find((voice) => voice?.id === activeId);
+  if (active && isApproved(active)) return active;
   const approved = [...list]
-    .filter((voice) => String(voice?.approval_status || "").toLowerCase() === "approved")
+    .filter(isApproved)
     .sort((a, b) =>
       String(b?.approved_at || b?.updated_at || "").localeCompare(String(a?.approved_at || a?.updated_at || "")),
     );
-  if (approved[0]) return approved[0];
-  const active = list.find((voice) => voice?.id === activeId);
-  return String(active?.approval_status || "").toLowerCase() === "approved" ? active : null;
+  return approved[0] || null;
 }
 
 export function VoiceStudioWorkspace({
   projectId,
   characterId,
+  characterName: characterNameProp,
   onMsg,
   onRefresh,
   initialPhase,
@@ -68,8 +93,13 @@ export function VoiceStudioWorkspace({
   const [voiceId, setVoiceId] = useState("");
   const [testingCandidateId, setTestingCandidateId] = useState("");
   const [hasApprovedVoice, setHasApprovedVoice] = useState(false);
+  const [hasApprovedTake, setHasApprovedTake] = useState(false);
+  const [hasEnvironmentRender, setHasEnvironmentRender] = useState(false);
+  const [hasSceneDialogue, setHasSceneDialogue] = useState(false);
 
   const [dialogue, setDialogue] = useState(DEFAULT_DIALOGUE);
+  const characterIdRef = useRef(characterId);
+  characterIdRef.current = characterId;
 
   const persistDraft = useCallback(
     async (patch: Record<string, unknown>) => {
@@ -79,7 +109,9 @@ export function VoiceStudioWorkspace({
   );
 
   const load = useCallback(async () => {
-    const data = await api.getCharacterVoiceWorkspace(projectId, characterId);
+    const requestedId = characterId;
+    const data = await api.getCharacterVoiceWorkspace(projectId, requestedId);
+    if (!isCurrentCharacterRequest(requestedId, characterIdRef.current)) return;
     setWs(data);
     const draft = data.voiceStudioDraft || {};
 
@@ -101,8 +133,6 @@ export function VoiceStudioWorkspace({
 
     if (mapped === "performance" || initialPhase === "voicePerformance") {
       setWorkspaceTab("performance");
-    } else if (draft.phase === "performance" || draft.phase === "approve") {
-      setWorkspaceTab("performance");
     } else {
       setWorkspaceTab("identity");
     }
@@ -119,19 +149,51 @@ export function VoiceStudioWorkspace({
   }, [load, onMsg]);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !characterId) return;
+    const requestedId = characterId;
     (async () => {
       try {
-        const { voiceApprovedStatus } = await import("../api");
-        const result = await voiceApprovedStatus(projectId);
-        setHasApprovedVoice(result.items?.length > 0);
+        const result = await api.characterVoiceApprovedStatus(projectId, requestedId);
+        if (!isCurrentCharacterRequest(requestedId, characterIdRef.current)) return;
+        setHasApprovedVoice(Boolean(result.hasApprovedVoice));
       } catch { /* ignore */ }
     })();
-  }, [projectId]);
+  }, [projectId, characterId]);
 
-  const approvedVoice = useMemo(() => chooseApprovedVoice(ws?.voices, voiceId), [ws?.voices, voiceId]);
+  useEffect(() => {
+    if (!projectId || !characterId) return;
+    const requestedId = characterId;
+    (async () => {
+      try {
+        const response = await api.voicePerformanceM410.listProjectRecords(projectId);
+        if (!isCurrentCharacterRequest(requestedId, characterIdRef.current)) return;
+        const records = (response.records || []).filter((r) => r.characterId === requestedId);
+        setHasApprovedTake(Boolean(records.some((r) => r.approvedTakeId)));
+      } catch { setHasApprovedTake(false); }
+    })();
+  }, [projectId, characterId]);
 
-  const characterName = ws?.characterName || "Character";
+  useEffect(() => {
+    if (!projectId || !characterId) return;
+    const requestedId = characterId;
+    (async () => {
+      try {
+        const profiles = await api.voiceEnvironment.listProfiles(projectId, requestedId).catch(() => []);
+        const renders = await api.voiceEnvironment.listRenders(projectId, requestedId).catch(() => []);
+        if (!isCurrentCharacterRequest(requestedId, characterIdRef.current)) return;
+        setHasEnvironmentRender(Boolean((renders || []).length));
+        setHasSceneDialogue(Boolean((profiles || []).length));
+      } catch { setHasEnvironmentRender(false); setHasSceneDialogue(false); }
+    })();
+  }, [projectId, characterId]);
+
+  const approvedVoice = useMemo(
+    () => chooseApprovedVoice(ws?.voices, ws?.activeVoiceProfileId || voiceId),
+    [ws?.voices, ws?.activeVoiceProfileId, voiceId],
+  );
+
+  const characterName = characterNameProp || ws?.characterName || "Character";
+  const voiceProvider = useVoiceStudioProviderSource();
 
   return (
     <section className="panel voice-studio voice-studio-m43" data-testid="character-voice">
@@ -141,6 +203,16 @@ export function VoiceStudioWorkspace({
           tip="Create a character voice, choose one to test, perform dialogue, then approve when ready."
           as="h3"
         />
+        <div style={{ margin: "0.5rem 0 0.75rem" }}>
+          <ProviderSourceSelector
+            id="voice-studio"
+            label="Provider"
+            source={voiceProvider.source}
+            onChange={voiceProvider.setSource}
+            health={voiceProvider.health}
+            healthBusy={voiceProvider.healthBusy}
+          />
+        </div>
         <p className="voice-studio-readiness" data-testid="voice-studio-readiness">
           {READINESS_LABELS[readinessLabel]}
         </p>
@@ -173,7 +245,7 @@ export function VoiceStudioWorkspace({
           <span className="muted" style={{ fontSize: "0.85rem" }}>
             Co-Director
           </span>
-          {CODIRECTOR_CHIPS.map((prompt) => (
+          {voiceStudioCoDirectorChips(characterName).map((prompt) => (
             <button
               key={prompt}
               type="button"
@@ -188,7 +260,10 @@ export function VoiceStudioWorkspace({
       </header>
 
       <div className="workspace-tabs voice-studio-stage-tabs" role="tablist" data-testid="voice-studio-ia">
-        {VOICE_STUDIO_STAGE_ORDER.map((stage) => (
+        {VOICE_STUDIO_STAGE_ORDER.map((stage) => {
+          // Owner CLEAR 2026-09-19: all Voice Studio stages stay permanently unlocked.
+          const stageUnlocked = true;
+          return (
           <div
             key={stage.id}
             className="voice-studio-stage-tab"
@@ -198,36 +273,33 @@ export function VoiceStudioWorkspace({
               type="button"
               role="tab"
               aria-selected={workspaceTab === stage.id}
-              disabled={stage.id !== "identity" && !hasApprovedVoice}
+              disabled={!stageUnlocked}
               className={[
                 workspaceTab === stage.id ? "primary" : "",
-                stage.id !== "identity" && !hasApprovedVoice ? "is-locked" : "",
+                !stageUnlocked ? "is-locked" : "",
               ].filter(Boolean).join(" ")}
               data-testid={
                 stage.id === "identity"
                   ? "voice-identity-tab"
                   : stage.id === "performance"
                     ? "voice-performance-tab"
-                    : stage.id === "environment"
-                      ? "voice-environment-tab"
-                      : stage.id === "sceneDialogue"
-                        ? "voice-scene-dialogue-tab"
-                        : "voice-takes-tab"
+                    : "voice-environment-tab"
               }
               onClick={() => {
-                if (stage.id !== "identity" && !hasApprovedVoice) return;
-                setWorkspaceTab(stage.id);
+                if (!stageUnlocked) return;
+                setWorkspaceTab(coerceWorkspaceTab(stage.id));
                 if (stage.id === "identity" && (phase === "performance" || phase === "approve")) {
                   setPhase(testingCandidateId ? "select" : "create");
                 }
               }}
             >
-              {stage.id !== "identity" && !hasApprovedVoice && <span className="voice-studio-tab__lock-icon">🔒</span>}
+              {!stageUnlocked && <span className="voice-studio-tab__lock-icon">🔒</span>}
               {stage.label}
             </button>
             <HelpTip label={stage.label} content={stage.tip} />
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="voice-studio-stack" data-testid="voice-creator-workspace">
@@ -235,8 +307,9 @@ export function VoiceStudioWorkspace({
           <VoiceIdentityPanel
             projectId={projectId}
             characterId={characterId}
+            characterName={characterName}
             onVoiceApproved={() => setHasApprovedVoice(true)}
-            onNavigate={(v: string) => setWorkspaceTab(v as any)}
+            onNavigate={(v: string) => setWorkspaceTab(coerceWorkspaceTab(v))}
             onMsg={onMsg}
             onRefresh={onRefresh}
           />
@@ -255,14 +328,14 @@ export function VoiceStudioWorkspace({
                 : null
             }
             onMsg={onMsg}
-            onSelectStage={setWorkspaceTab}
+            onSelectStage={(tab) => setWorkspaceTab(coerceWorkspaceTab(tab))}
           />
         ) : (
           <VoicePerformanceStudio
             projectId={projectId}
             characterId={characterId}
             characterName={characterName}
-            activeView={workspaceTab === "sceneDialogue" ? "sceneDialogue" : workspaceTab === "takes" ? "takes" : "performance"}
+            activeView="performance"
             approvedVoiceIdentity={
               approvedVoice?.id
                 ? {

@@ -41,7 +41,9 @@ def test_api_health_and_startup(client, monkeypatch, isolated_data_dir: Path) ->
     health = client.get("/api/health")
     assert health.status_code == 200
     assert health.json()["ok"] is True
-    assert health.json()["comfy_reachable"] is True
+    assert health.json()["comfy_reachable"] is False
+    assert health.json()["comfy_probed"] is False
+    assert health.json()["comfy_status"] == "not_probed"
 
 
 def test_project_scene_job_and_library_contracts(client, monkeypatch) -> None:

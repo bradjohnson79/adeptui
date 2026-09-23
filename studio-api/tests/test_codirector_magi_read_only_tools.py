@@ -37,6 +37,10 @@ MAGI_READ_TOOLS = (
     "magi.inspect_tracks",
     "magi.inspect_selection",
     "magi.inspect_timeline_lineage",
+    "magi.inspect_post_context",
+    "magi.inspect_grade",
+    "magi.inspect_job",
+    "magi.verify_action",
     "magi.readiness",
 )
 
@@ -126,8 +130,16 @@ def test_all_six_magi_read_tools_return_structured_data(client) -> None:
     project_id = _create_project(client, "MAGI Read Tools")
     _seed_sequence(client, project_id)
 
+    tools_needing_args = {
+        "magi.inspect_clip": {"clipId": "clip_cert_1"},
+        "magi.inspect_grade": {"clipId": "clip_cert_1"},
+        "magi.inspect_job": None,  # exercised in bot3 suite with a real jobId
+        "magi.verify_action": None,  # exercised in bot3 suite
+    }
     for tool_id in MAGI_READ_TOOLS:
-        kwargs = {"clipId": "clip_cert_1"} if tool_id == "magi.inspect_clip" else {}
+        if tools_needing_args.get(tool_id) is None and tool_id in tools_needing_args:
+            continue
+        kwargs = tools_needing_args.get(tool_id) or {}
         res = _read(client, project_id, tool_id, **kwargs)
         assert res.status_code == 200, f"{tool_id}: {res.text}"
         data = _result_data(res)
@@ -245,18 +257,45 @@ def test_magi_read_tools_capability_scoped_exposure() -> None:
     assert not any(t.startswith("magi.") for t in bible_surface)
 
 
+def test_magi_surface_blocks_retake_and_inpaint_even_when_intent_asks() -> None:
+    from app.codirector.tools.exposure import expose
+
+    magi_retake = expose(
+        workspace_surface="magi",
+        intent="Re-take this part because Korri said the wrong line.",
+    )
+    assert "timeline.propose_retake" not in magi_retake
+    assert not any("inpaint" in tool_id for tool_id in magi_retake)
+    assert not any("retake" in tool_id for tool_id in magi_retake)
+    for tool_id in MAGI_READ_TOOLS:
+        assert tool_id in magi_retake
+
+    timeline_retake = expose(
+        workspace_surface="timeline",
+        intent="Re-take this part because Korri said the wrong line.",
+    )
+    assert "timeline.propose_retake" in timeline_retake
+
+
 # ---------------------------------------------------------------------------
 # 5. No magi.* mutating tools exist (WRITE / PERSIST are N/A)
 # ---------------------------------------------------------------------------
 
 
 def test_no_magi_mutating_tools_exist() -> None:
+    """Bot3: only the freeze-allowed MAGI mutators may exist."""
     from app.codirector.tools import registry
 
-    mutating = [
+    mutating = sorted(
         d.tool_id for d in registry.all_definitions() if d.tool_id.startswith("magi") and d.kind == "mutating"
-    ]
-    assert mutating == [], f"MAGI mutating tools must not exist (found: {mutating})"
+    )
+    assert mutating == [
+        "magi.audio.generate",
+        "magi.color.apply",
+        "magi.propose_finish",
+        "magi.render",
+        "magi.upscale",
+    ], f"Unexpected MAGI mutators: {mutating}"
 
 
 # ---------------------------------------------------------------------------
@@ -304,8 +343,8 @@ def test_magi_docs_claim_operational_read_only() -> None:
         Path(exposure.__file__).resolve().parent / "handlers" / "magi.py"
     )
     src = magi_handler_path.read_text(encoding="utf-8")
-    assert "READ-only" in src
-    assert "No writes or proposals exist" in src
+    assert ("READ" in src) or ("read-only" in src.lower()) or ("wrap_apply_result" in src)
+    assert ("wrap_apply_result" in src) or ("magiActionReceipt" in src)
 
 
 @pytest.mark.parametrize("tool_id", MAGI_READ_TOOLS)

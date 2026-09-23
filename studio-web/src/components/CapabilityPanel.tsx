@@ -152,7 +152,7 @@ export function CapabilityReadinessPanel({
 
   const blockers = useMemo(() => {
     if (!snapshot) return [];
-    const all = snapshot.blockers;
+    const all = snapshot.productionBlockers ?? snapshot.blockers;
     return subsystems ? all.filter((item) => subsystems.includes(item.subsystem)) : all;
   }, [snapshot, subsystems]);
 
@@ -310,10 +310,11 @@ export function CapabilityStatusBadge({
       />
     );
   }
-  const blocked = snapshot.blockers.length;
+  const productBlockers = snapshot.productionBlockers ?? snapshot.blockers;
+  const blocked = productBlockers.length;
   const title = blocked
-    ? snapshot.blockers.map((item) => `${item.displayName}: ${item.message}`).join("\n")
-    : "No blocked capabilities";
+    ? productBlockers.map((item) => `${item.displayName}: ${item.message}`).join("\n")
+    : "No blocked required capabilities";
   return (
     <StatusBadge
       kind={blocked ? "NeedsAttention" : "Ready"}

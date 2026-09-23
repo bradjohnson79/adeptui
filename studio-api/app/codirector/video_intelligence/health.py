@@ -11,10 +11,12 @@ from typing import Any
 
 from .paths import (
     INTERNVIDEO3_MARKERS,
+    QWEN_OMNI_MARKERS,
     VIDEOCHAT3_MARKERS,
     internvideo3_dir,
     model_present,
     poll_safe_integrity,
+    qwen_omni_dir,
     videochat3_dir,
     worker_python,
 )
@@ -37,8 +39,15 @@ def _config_ok(root: Path) -> tuple[bool, str]:
 
 
 def probe_component(component_id: str, *, spawn_worker: bool | None = None) -> dict[str, Any]:
-    dest = videochat3_dir() if component_id == "videochat3_4b" else internvideo3_dir()
-    markers = VIDEOCHAT3_MARKERS if component_id == "videochat3_4b" else INTERNVIDEO3_MARKERS
+    if component_id == "videochat3_4b":
+        dest = videochat3_dir()
+        markers = VIDEOCHAT3_MARKERS
+    elif component_id == "qwen2_5_omni_7b":
+        dest = qwen_omni_dir()
+        markers = QWEN_OMNI_MARKERS
+    else:
+        dest = internvideo3_dir()
+        markers = INTERNVIDEO3_MARKERS
     files_ok = model_present(dest, markers)
     cfg_ok, cfg_reason = _config_ok(dest) if dest.is_dir() else (False, "NOT_INSTALLED")
     integrity = (

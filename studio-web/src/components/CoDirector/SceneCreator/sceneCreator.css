@@ -1,4 +1,4 @@
-.scene-creator-core {
+﻿.scene-creator-core {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -255,12 +255,12 @@
 }
 
 .scene-creator-tool-accordion > summary::before {
-  content: "▸ ";
+  content: "â–¸ ";
   color: var(--text-secondary, #b7bfd0);
 }
 
 .scene-creator-tool-accordion[open] > summary::before {
-  content: "▾ ";
+  content: "â–¾ ";
 }
 
 .scene-creator-inpaint__body {
@@ -480,12 +480,12 @@
 }
 
 .cine-orient-accordion > summary::before {
-  content: "▸ ";
+  content: "â–¸ ";
   color: var(--text-secondary, #b7bfd0);
 }
 
 .cine-orient-accordion[open] > summary::before {
-  content: "▾ ";
+  content: "â–¾ ";
 }
 
 .cine-orient-collapsed-meta {
@@ -791,4 +791,82 @@
   margin: 0 0 0.55rem;
   font-size: 0.8rem;
   line-height: 1.4;
+}
+
+/* Standard calm reference form */
+.scene-creator-standard-form section { margin-bottom: 0.85rem; }
+.scene-creator-reference-summary ul { margin: 0.35rem 0 0; padding-left: 1.1rem; }
+.scene-creator-candidate-cards { display: grid; gap: 0.75rem; margin-top: 1rem; }
+.scene-creator-candidate-card { border: 1px solid var(--border, #333); border-radius: 8px; padding: 0.6rem; }
+.scene-creator-candidate-card.is-approved { outline: 1px solid var(--good, #4a8); }
+.scene-creator-candidate-card img { width: 100%; border-radius: 6px; display: block; }
+.scene-creator-add-menu { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+
+/* Co-Director Environment Creator: use full content pane (not Express launcher 28rem). */
+.environment-creator-surface.scene-creator-launcher,
+.environment-creator-surface {
+  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.environment-creator-surface .spatial-map__ers-monitor,
+.environment-creator-surface .spatial-map__ers-preview,
+.environment-creator-surface img {
+  max-width: 100%;
+  width: 100%;
+}
+
+.environment-creator-surface__header {
+  margin: 0 0 0.35rem;
+}
+.environment-creator-surface__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+  flex-wrap: wrap;
+}
+.environment-creator-surface__title-row .scene-creator-launcher__title {
+  margin: 0;
+}
+.environment-creator-surface__save-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+}
+.environment-creator-surface__profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.environment-creator-surface__save-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 1rem 0 0.25rem;
+}
+
+/* Environment Creator planning surface */
+.environment-creator-plan__section {
+  margin: 0.85rem 0 0.5rem;
+}
+.environment-creator-plan__section-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.environment-creator-plan__prompt {
+  width: 100%;
+  min-height: 5.5rem;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.environment-creator-plan__summary {
+  width: 100%;
+  box-sizing: border-box;
 }

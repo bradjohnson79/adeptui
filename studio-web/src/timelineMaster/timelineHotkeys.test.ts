@@ -39,7 +39,12 @@ test("defaults include generate, preflight, space, and open hotkeys", () => {
   assert.ok(ids.includes("generateScene"));
   assert.ok(ids.includes("preflight"));
   assert.ok(ids.includes("playPause"));
+  assert.ok(ids.includes("goToSceneStart"));
+  assert.ok(ids.includes("goToBatchIn"));
+  assert.ok(ids.includes("goToBatchOut"));
+  assert.ok(ids.includes("goToSceneEnd"));
   assert.ok(ids.includes("openHotkeys"));
+  assert.equal(DEFAULT_HOTKEYS.find((item) => item.actionId === "playPause")?.label, "Play / Pause Timeline");
   assert.ok(ids.includes("toggleLeftDrawer"));
   assert.ok(ids.includes("toggleRightDrawer"));
   assert.ok(ids.includes("focusTimeline"));

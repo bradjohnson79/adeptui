@@ -72,6 +72,68 @@ def test_capability_honesty_txt2vid_prompt_guided():
     assert support_status_for("one_frame") == "reference_conditioned"
 
 
+def test_attach_is_idempotent_for_same_scope_asset_type(db):
+    first = service.attach(
+        db,
+        "proj-w6p",
+        {
+            "asset_id": "asset-1",
+            "scope_type": "scene",
+            "scope_id": "scene-1",
+            "reference_type": "prop",
+            "usage_modes": ["prop"],
+            "alias": "VentureSpaceship",
+        },
+    )
+    second = service.attach(
+        db,
+        "proj-w6p",
+        {
+            "asset_id": "asset-1",
+            "scope_type": "scene",
+            "scope_id": "scene-1",
+            "reference_type": "prop",
+            "usage_modes": ["prop"],
+            "alias": "VentureSpaceship",
+        },
+    )
+    assert first["id"] == second["id"]
+    assert len(service.list_for_scope(db, "proj-w6p", "scene", "scene-1")) == 1
+
+
+def test_prop_creator_prompt_does_not_attach_as_environment(db):
+    from app.prop_creator.prompt import IDENTITY_VIEW
+
+    db.add(
+        Asset(
+            id="asset-prop-still",
+            project_id="proj-w6p",
+            tag="prop_schnickcoffeethermos_c1",
+            kind="image",
+            filename="imagegen_edit.png",
+            path="prop.png",
+            labels_json='["approved_prop"]',
+            prompt_meta_json='{"prompt": "Prop: Thermos. ' + IDENTITY_VIEW + '"}',
+        )
+    )
+    db.commit()
+    bound = service.attach(
+        db,
+        "proj-w6p",
+        {
+            "asset_id": "asset-prop-still",
+            "scope_type": "project",
+            "scope_id": "proj-w6p",
+            "reference_type": "prop",
+            "usage_modes": ["appearance"],
+            "reference_roles": ["prop"],
+            "alias": "SchnickCoffeeThermos",
+        },
+    )
+    assert bound["reference_type"] == "prop"
+    assert str(bound.get("display_token") or "").startswith("%")
+
+
 def test_attach_list_enable_remove(db):
     b = service.attach(
         db,

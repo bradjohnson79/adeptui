@@ -8,8 +8,16 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.db import Asset, Base, Project, Scene, SessionLocal, engine
-from app.director_timeline import parse_director_timeline
+from app.director_timeline_w46 import store as timeline_store
 from app.director_timeline_w46.audio_volume import set_timeline_audio_volume
+
+
+def _master_clips(db: Session, pid: str, sid: str, attr: str) -> list[dict]:
+    loaded = timeline_store.load_master(db, pid, sid)
+    clips: list[dict] = []
+    for batch in (loaded.get("master") or {}).get("batchBlocks") or []:
+        clips.extend(list(batch.get(attr) or []))
+    return clips
 
 
 def _scene_with_audio():
@@ -59,10 +67,9 @@ def test_clip_targeted_volume_percent_and_mute_preserves_volume():
         assert updated["a1"]["volume"] == 0.4
         assert updated["a1"]["muted"] is True
 
-        scene = db.get(Scene, sid)
-        tl = parse_director_timeline(scene.director_json)
-        assert tl.audio_clips[0].volume == 0.4
-        assert tl.audio_clips[0].muted is True
+        clips = _master_clips(db, pid, sid, "audioClips")
+        assert abs(float(clips[0]["volume"]) - 0.4) < 1e-9
+        assert clips[0]["muted"] is True
     finally:
         db.close()
 
@@ -93,10 +100,10 @@ def test_volume_change_while_muted_unmutes_clip_targeted():
         assert updated["s1"]["volume"] == 0.3
         assert updated["s1"]["muted"] is False
 
-        scene = db.get(Scene, sid)
-        tl = parse_director_timeline(scene.director_json)
-        assert tl.sfx_clips[0].volume == 0.3
-        assert tl.sfx_clips[0].muted is False
+        clips = _master_clips(db, pid, sid, "sfxClips")
+        target = next(c for c in clips if c.get("legacyClipId") == "s1" or c.get("id") == "s1")
+        assert abs(float(target["volume"]) - 0.3) < 1e-9
+        assert target["muted"] is False
     finally:
         db.close()
 
@@ -121,10 +128,10 @@ def test_mute_toggle_does_not_rewrite_volume():
         result = set_timeline_audio_volume(db, pid, sid, clip_id="s2", muted=True)
         assert result["ok"] is True
         assert result["changed"] is True
-        scene = db.get(Scene, sid)
-        tl = parse_director_timeline(scene.director_json)
-        assert tl.sfx_clips[1].muted is True
-        assert tl.sfx_clips[1].volume == 0.5
+        clips = _master_clips(db, pid, sid, "sfxClips")
+        target = next(c for c in clips if c.get("legacyClipId") == "s2" or c.get("id") == "s2")
+        assert target["muted"] is True
+        assert abs(float(target["volume"]) - 0.5) < 1e-9
     finally:
         db.close()
 
@@ -135,10 +142,10 @@ def test_unmute_existing_keeps_volume():
         result = set_timeline_audio_volume(db, pid, sid, clip_id="s1", muted=False)
         assert result["ok"] is True
         assert result["changed"] is True
-        scene = db.get(Scene, sid)
-        tl = parse_director_timeline(scene.director_json)
-        assert tl.sfx_clips[0].muted is False
-        assert tl.sfx_clips[0].volume == 1.0
+        clips = _master_clips(db, pid, sid, "sfxClips")
+        target = next(c for c in clips if c.get("legacyClipId") == "s1" or c.get("id") == "s1")
+        assert target["muted"] is False
+        assert abs(float(target["volume"]) - 1.0) < 1e-9
     finally:
         db.close()
 

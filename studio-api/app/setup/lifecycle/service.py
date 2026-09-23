@@ -17,7 +17,7 @@ from ...source_manager.install_jobs.service import (
 )
 from ...source_manager.service import save_verified_source_for_component, verify_and_select
 from ...vram_profiles import query_gpu_stats
-from ..catalog import COMPONENTS, get_component
+from ..catalog import get_component, public_components
 from ..diagnostics import utc_now, verify_component
 from .models import (
     CalibrationProfile,
@@ -398,7 +398,7 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
     "grounding_dino_tiny": {
         "group": "Co-Director",
         "subgroup": "Scene Perception",
-        "surfaceGroups": ["Co-Director", "Spatial Map"],
+        "surfaceGroups": ["Co-Director"],
         "capabilityTags": ["scene-perception", "boxes"],
         "badges": ["Testing", "Co-Director Scene Perception"],
         "bestFor": ["suggest where things sit on the map"],
@@ -413,7 +413,7 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
     "sam21_hiera_tiny": {
         "group": "Co-Director",
         "subgroup": "Scene Perception",
-        "surfaceGroups": ["Co-Director", "Spatial Map"],
+        "surfaceGroups": ["Co-Director"],
         "capabilityTags": ["scene-perception", "masks"],
         "badges": ["Testing", "Co-Director Scene Perception"],
         "bestFor": ["select an object in a picture"],
@@ -428,7 +428,7 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
     "depth_anything_v2_small": {
         "group": "Co-Director",
         "subgroup": "Scene Perception",
-        "surfaceGroups": ["Co-Director", "Spatial Map"],
+        "surfaceGroups": ["Co-Director"],
         "capabilityTags": ["scene-perception", "depth"],
         "badges": ["Testing", "Co-Director Scene Perception"],
         "bestFor": ["near and far in a still"],
@@ -440,45 +440,22 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
         "sourceRepo": "depth-anything/Depth-Anything-V2-Small-hf",
         "experimental": True,
     },
-    "ltx_checkpoint": {
-        "group": "Video",
-        "subgroup": "Local Models",
-        "surfaceGroups": ["Video"],
-        "capabilityTags": ["video", "image-to-video", "previz", "storyboard"],
-        "badges": ["Video", "Local GPU"],
-        "bestFor": ["storyboard motion", "image-to-video", "previz", "make a storyboard", "make a short film"],
-    },
     "ltx_2_5_checkpoint": {
         "group": "Video",
         "subgroup": "Local Models",
         "surfaceGroups": ["Video"],
-        "capabilityTags": ["video", "image-to-video", "previz", "storyboard"],
+        "capabilityTags": ["video", "image-to-video", "previz", "storyboard", "short film", "commercial"],
         "badges": ["Video", "Local GPU"],
-        "bestFor": ["storyboard motion", "image-to-video", "previz", "make a storyboard"],
-    },
-    "wan_models": {
-        "group": "Video",
-        "subgroup": "Local Models",
-        "surfaceGroups": ["Video"],
-        "capabilityTags": ["video", "commercial", "branded", "product video"],
-        "badges": ["Video", "Local GPU"],
-        "bestFor": ["branded product video", "commercial", "product video", "make a commercial", "make a branded product video", "make a short film"],
-    },
-    "hunyuan_video_15": {
-        "group": "Video",
-        "subgroup": "Local Models",
-        "surfaceGroups": ["Video"],
-        "capabilityTags": ["video", "short film", "film", "cinematic video"],
-        "badges": ["Video", "Local GPU"],
-        "bestFor": ["short film", "film", "cinematic video", "make a short film", "make an anime episode"],
-    },
-    "hunyuan_video_13b": {
-        "group": "Video",
-        "subgroup": "Local Models",
-        "surfaceGroups": ["Video"],
-        "capabilityTags": ["video", "short film", "high-resource film"],
-        "badges": ["Video", "Local GPU"],
-        "bestFor": ["short film", "high-resource film", "make a short film"],
+        "bestFor": [
+            "storyboard motion",
+            "image-to-video",
+            "previz",
+            "make a storyboard",
+            "make a short film",
+            "make a commercial",
+            "short film",
+            "cinematic video",
+        ],
     },
     "longcat-video-avatar-1-5-local": {
         "group": "Avatar",
@@ -927,7 +904,7 @@ def build_update_plan(component_id: str) -> UpdatePlan:
 def search_components(query: str = "", *, group: str | None = None) -> dict[str, Any]:
     q = query.strip().lower()
     items = []
-    for component in COMPONENTS:
+    for component in public_components():
         meta = component_metadata(component.id)
         if group and meta.get("group") != group:
             continue
@@ -967,16 +944,18 @@ def recommendation_reason(component_id: str, intent: str) -> str:
         return "Best fit for anime or stylized illustration intent."
     if component_id == "flux1_schnell_local" and any(word in text for word in ("fast", "preview", "quick")):
         return "Best fit for quick preview passes."
-    if component_id in {"hunyuan_video_15", "wan_models"} and "anime" in text and "episode" in text:
-        return "Best fit for anime episode video generation."
-    if component_id in {"hunyuan_video_15", "hunyuan_video_13b", "wan_models", "ltx_checkpoint", "ltx_2_5_checkpoint"} and (
+    if component_id == "ltx_2_5_checkpoint" and (
         "film" in text or ("short" in text and "preview" not in text)
     ) and "commercial" not in text and "branded" not in text:
         return "Best fit for short-film and cinematic video generation."
-    if component_id in {"wan_models", "hunyuan_video_15"} and (
+    if component_id == "ltx_2_5_checkpoint" and (
         "commercial" in text or "branded" in text or ("product" in text and "video" in text)
     ):
         return "Best fit for commercial and branded product video."
+    if component_id == "flux1_dev_local" and (
+        "branded" in text or ("product" in text and "video" in text)
+    ) and "mockup" not in text:
+        return "Best fit for branded product stills that precede local video."
     if component_id in {
         "longcat-video-avatar-1-5-local",
         "infinitetalk-local",
@@ -984,7 +963,7 @@ def recommendation_reason(component_id: str, intent: str) -> str:
         "echomimic-v2-local",
     } and any(word in text for word in ("talking", "presenter", "avatar")):
         return "Best fit for a talking presenter / avatar performance."
-    if component_id in {"flux1_dev_local", "pack_essential_cinematic", "ltx_checkpoint", "ltx_2_5_checkpoint"} and any(
+    if component_id in {"flux1_dev_local", "pack_essential_cinematic", "ltx_2_5_checkpoint"} and any(
         word in text for word in ("storyboard", "previz", "previs")
     ):
         return "Best fit for storyboard frames and motion previs."

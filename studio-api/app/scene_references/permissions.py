@@ -16,16 +16,31 @@ def require_project(db: Session, project_id: str) -> Project:
 
 
 def require_asset_in_project(db: Session, project_id: str, asset_id: str) -> Asset:
+    """Allow attach when the asset is owned by this project OR is Global-readable.
+
+    Ownership ≠ availability: Global creator assets (character/prop/env) remain
+    bindable as Timeline references from another project via the same
+    creator_scope.resolve_readable_asset gate used for Library/media reads.
+    Non-global foreign assets stay denied.
+    """
     asset = db.get(Asset, asset_id)
-    if not asset or asset.project_id != project_id:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "CROSS_PROJECT_ASSET_DENIED",
-                "message": "Asset is not in this project; cross-project reference reuse is denied.",
-            },
-        )
-    return asset
+    if asset and asset.project_id == project_id:
+        return asset
+    try:
+        from app.creator_scope.service import resolve_readable_asset
+
+        readable = resolve_readable_asset(db, project_id, asset_id)
+        if readable is not None:
+            return readable
+    except Exception:
+        pass
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "CROSS_PROJECT_ASSET_DENIED",
+            "message": "Asset is not in this project; cross-project reference reuse is denied.",
+        },
+    )
 
 
 def deny_external_url(url: str | None) -> None:

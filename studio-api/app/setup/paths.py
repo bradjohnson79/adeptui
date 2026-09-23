@@ -89,15 +89,6 @@ def ensure_suggested_path(component_id: str) -> Path:
     models = default_models_root()
     models.mkdir(parents=True, exist_ok=True)
 
-    if component.id == "ltx_checkpoint":
-        for folder in ("checkpoints", "diffusion_models"):
-            candidate = models / folder
-            if candidate.is_dir():
-                return candidate
-        checkpoints = models / "checkpoints"
-        checkpoints.mkdir(parents=True, exist_ok=True)
-        return checkpoints
-
     if component.id == "ltx_2_5_checkpoint":
         for folder in ("diffusion_models", "checkpoints"):
             candidate = models / folder
@@ -126,14 +117,6 @@ def ensure_suggested_path(component_id: str) -> Path:
         latent.mkdir(parents=True, exist_ok=True)
         return latent
 
-    if component.id == "wan_models":
-        return models
-
-    if component.id == "ltx23_ic_lora_ingredients" or component.verifier == "ic_lora_file":
-        loras = models / "loras"
-        loras.mkdir(parents=True, exist_ok=True)
-        return loras
-
     if component.installer == "asset_pack" or component.id.startswith("pack_"):
         # Never mkdir empty Essential pack destinations here.
         return recommended_pack_path(component_id)
@@ -143,7 +126,7 @@ def ensure_suggested_path(component_id: str) -> Path:
 
 def path_selector_mode(component_id: str) -> PathMode:
     component = get_component(component_id)
-    if component.verifier in ("ltx_file", "ltx_2_5_file", "ic_lora_file"):
+    if component.verifier in ("ltx_2_5_file",):
         return "file"
     return "directory"
 
@@ -151,8 +134,8 @@ def path_selector_mode(component_id: str) -> PathMode:
 def uses_auto_config_path(component_id: str) -> bool:
     """True when Adept can safely invent a default configured directory.
 
-    File-based model links (LTX), broad model roots (WAN), and downloadable
-    asset packs are left unbound so empty folders are never treated as installs.
+    File-based model links (LTX 2.5) and downloadable asset packs are left
+    unbound so empty folders are never treated as installs.
     """
     component = get_component(component_id)
     if component.installer == "asset_pack":
@@ -198,8 +181,12 @@ def ensure_configured_paths(state: dict[str, Any]) -> dict[str, str]:
     locations = state.setdefault("model_locations", {})
     created: dict[str, str] = {}
 
+    from .catalog import is_retired_video_setup_component
+
     for component in COMPONENTS:
         component_id = component.id
+        if is_retired_video_setup_component(component_id):
+            continue
         current = str(locations.get(component_id) or "").strip()
 
         if current:

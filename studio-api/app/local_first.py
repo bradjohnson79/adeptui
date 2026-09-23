@@ -10,8 +10,14 @@ import json
 from typing import Any
 
 from .fal_catalog import is_fal_engine
+from .hosted_providers.video_registry import (
+    RETIRED_LOCAL_VIDEO_ALIASES,
+    RETIRED_LOCAL_VIDEO_GENERATOR_IDS,
+    is_retired_local_video,
+)
 
-LOCAL_I2V_ENGINES = frozenset({"ltx", "wan"})
+LOCAL_I2V_ENGINES = frozenset({"minimax-h3", "ltx-2.5", "ltx-2.5-distilled", "ltx-2.5-full", "ltx-2.5-comfy"})
+RETIRED_LOCAL_ENGINES = RETIRED_LOCAL_VIDEO_GENERATOR_IDS | RETIRED_LOCAL_VIDEO_ALIASES
 LOCAL_START_FRAME_REQUIRED = "LOCAL_START_FRAME_REQUIRED"
 PAID_FAL_APPROVAL_REQUIRED = "PAID_FAL_APPROVAL_REQUIRED"
 LOCAL_RUNTIME_BLOCKED = "LOCAL_RUNTIME_BLOCKED"
@@ -37,12 +43,12 @@ def provider_prefers_local(params: dict[str, Any] | None) -> bool:
     return True
 
 
-def local_start_frame_blocker(*, preferred_engine: str = "ltx") -> dict[str, Any]:
+def local_start_frame_blocker(*, preferred_engine: str = "minimax-h3") -> dict[str, Any]:
     return {
         "code": LOCAL_START_FRAME_REQUIRED,
         "message": (
-            f"Local engine '{preferred_engine}' is image-to-video and requires a start frame. "
-            "Generate a local start frame and continue, or approve paid fal.ai fallback."
+            f"1 Frame needs a start image for '{preferred_engine}'. "
+            "Adept will not invent a first frame or switch to a hosted generator."
         ),
         "preferredAction": "generate_local_start_frame",
         "actions": [
@@ -100,7 +106,7 @@ def local_first_provenance(
     start_frame_provider: str | None = None,
     start_frame_model: str | None = None,
     video_provider: str = "comfyui",
-    video_model: str = "ltx-2.3",
+    video_model: str = "minimax-h3",
     paid_provider_used: bool = False,
     fal_request_id: str | None = None,
     historical_fal_submission_count: int = 1,
@@ -122,9 +128,19 @@ def local_first_provenance(
 
 
 def resolve_local_video_engine(preferred: str | None = None) -> str:
-    eng = (preferred or "minimax-h3").strip().lower()
+    eng = (preferred or "").strip().lower()
+    if not eng or eng in {"auto", "default"}:
+        return "minimax-h3"
+    if is_retired_local_video(eng):
+        raise RuntimeError(
+            f"Local video engine '{eng}' is retired. Adept UI uses MiniMax H3 and LTX 2.5 only."
+        )
     if eng in LOCAL_I2V_ENGINES:
         return eng
     if is_fal_engine(eng):
-        return "ltx"
-    return "ltx"
+        raise RuntimeError(
+            f"Engine '{eng}' is hosted. Local-first routing will not silently substitute MiniMax H3."
+        )
+    raise RuntimeError(
+        f"Unknown local video engine '{eng}'. Adept UI uses MiniMax H3 and LTX 2.5 only."
+    )

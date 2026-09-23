@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import "./ScriptTitleEditor.css";
 
 type Props = {
-  /** Canonical title from the script document bundle. */
+  /** Canonical title from the script or story document. */
   title: string;
-  /** Persist the new title to the canonical script document. Reject to revert. */
+  /** Persist the new title to the canonical document. Reject to revert. */
   onRename: (next: string) => Promise<void>;
   className?: string;
   testId?: string;
+  defaultTitle?: string;
+  ariaLabel?: string;
 };
 
 const DEFAULT_TITLE = "Untitled Script";
@@ -20,13 +22,13 @@ const DEFAULT_TITLE = "Untitled Script";
  * displayed value always comes from the canonical document; edit mode holds
  * only the in-progress draft text.
  */
-export function ScriptTitleEditor({ title, onRename, className, testId = "script-title" }: Props) {
+export function ScriptTitleEditor({ title, onRename, className, testId = "script-title", defaultTitle = DEFAULT_TITLE, ariaLabel }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const display = title || DEFAULT_TITLE;
+  const display = title || defaultTitle;
 
   useEffect(() => {
     if (editing) {
@@ -49,7 +51,7 @@ export function ScriptTitleEditor({ title, onRename, className, testId = "script
 
   const save = async () => {
     if (saving) return;
-    const next = draft.trim() || DEFAULT_TITLE;
+    const next = draft.trim() || defaultTitle;
     setEditing(false);
     if (next === display) return;
     setSaving(true);
@@ -82,7 +84,7 @@ export function ScriptTitleEditor({ title, onRename, className, testId = "script
           }
         }}
         maxLength={200}
-        aria-label="Script title"
+        aria-label={ariaLabel || "Script title"}
       />
     );
   }

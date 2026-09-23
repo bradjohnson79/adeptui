@@ -1104,6 +1104,18 @@
   cursor: pointer;
 }
 
+/*
+ * Legitimate project states (`not_configured`, `not_applicable`, `not_tested`)
+ * are informational, not failures — render them muted/neutral rather than red.
+ */
+.codirector-status-informational strong,
+.codirector-status-informational span {
+  color: #c2ced6;
+}
+.codirector-status-informational strong {
+  font-weight: 500;
+}
+
 .codirector-status-error {
   color: #f0c38a;
   margin: 0.25rem 0 0;
@@ -1156,4 +1168,63 @@
 .codirector-job-progress > div {
   height: 100%;
   background: rgba(120, 180, 220, 0.85);
+}
+
+
+/* Pending production plan brief (Production Planner) */
+.codirector-pending-plan-brief {
+  margin: 0.65rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(120, 160, 220, 0.35);
+  border-radius: 10px;
+  background: rgba(20, 28, 44, 0.72);
+}
+.codirector-pending-plan-brief.is-stale {
+  opacity: 0.78;
+  border-color: rgba(180, 120, 80, 0.45);
+}
+.codirector-pending-plan-brief__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+.codirector-pending-plan-brief__badge {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.8;
+}
+.codirector-pending-plan-brief__goal {
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+.codirector-pending-plan-brief__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+.codirector-pending-plan-brief__meta .muted {
+  opacity: 0.65;
+  margin-right: 0.25rem;
+}
+.codirector-pending-plan-brief__preflight {
+  font-size: 0.82rem;
+  margin-bottom: 0.5rem;
+}
+.codirector-pending-plan-brief__preflight ul {
+  margin: 0.2rem 0 0 1rem;
+  padding: 0;
+}
+.codirector-pending-plan-brief__stale {
+  color: #e0b080;
+  font-size: 0.85rem;
+}
+.codirector-pending-plan-brief__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
 }

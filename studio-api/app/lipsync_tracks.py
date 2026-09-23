@@ -25,12 +25,16 @@ class LipSyncClip(BaseModel):
     start: float = 0.0
     length: float = 2.0
     label: str = "Lip Sync Clip"
+    # Canonical media labels (timeline_media_labels) — title full; label truncated face.
+    title: Optional[str] = None
+    description: Optional[str] = None
     status: str = "draft"
     speaker_binding_id: Optional[str] = None
     character_id: Optional[str] = None
     character_name: Optional[str] = None
     audio_asset_id: Optional[str] = None
     follow_policy: str = "follow_audio"
+    line: str = ""
 
 
 class LipSyncTrack(BaseModel):
@@ -64,7 +68,13 @@ def _default_track(slot: int) -> LipSyncTrack:
     )
 
 
-def _normalize_clip(raw: LipSyncClip, *, fallback_audio_asset_id: Optional[str] = None) -> LipSyncClip:
+def _normalize_clip(
+    raw: LipSyncClip,
+    *,
+    fallback_audio_asset_id: Optional[str] = None,
+    fallback_character_id: Optional[str] = None,
+    fallback_character_name: Optional[str] = None,
+) -> LipSyncClip:
     clip = raw.model_copy(deep=True)
     if not (clip.label or "").strip():
         clip.label = "Lip Sync Clip"
@@ -74,6 +84,10 @@ def _normalize_clip(raw: LipSyncClip, *, fallback_audio_asset_id: Optional[str] 
         clip.status = "draft"
     if clip.audio_asset_id is None and fallback_audio_asset_id:
         clip.audio_asset_id = fallback_audio_asset_id
+    if not (clip.character_id or "").strip() and fallback_character_id:
+        clip.character_id = fallback_character_id
+    if not (clip.character_name or "").strip() and fallback_character_name:
+        clip.character_name = fallback_character_name
     clip.start = max(0.0, float(clip.start or 0.0))
     clip.length = max(0.1, float(clip.length or 0.1))
     return clip
@@ -85,7 +99,12 @@ def _normalize_track(raw: LipSyncTrack, *, index: int) -> LipSyncTrack:
     if not (track.label or "").strip():
         track.label = f"Lip Sync {track.slot}"
     normalized_clips = [
-        _normalize_clip(clip, fallback_audio_asset_id=track.audio_asset_id)
+        _normalize_clip(
+            clip,
+            fallback_audio_asset_id=track.audio_asset_id,
+            fallback_character_id=track.character_id,
+            fallback_character_name=track.character_name,
+        )
         for clip in sorted(track.clips or [], key=lambda item: (item.start, item.id))
     ]
     track.clips = normalized_clips
@@ -98,19 +117,35 @@ def _normalize_track(raw: LipSyncTrack, *, index: int) -> LipSyncTrack:
     return track
 
 
+
+def _empty_or_default_lipsync_tracks() -> LipSyncTracks:
+    """Prefer empty tracks under Owner Lip Sync lock; else legacy Lip Sync 1 default."""
+    try:
+        from .director_timeline_w46.creator_lipsync_surface import (
+            empty_lipsync_tracks,
+            owner_lipsync_ux_reintroduce_forbidden,
+        )
+
+        if owner_lipsync_ux_reintroduce_forbidden():
+            return empty_lipsync_tracks()
+    except Exception:
+        pass
+    return LipSyncTracks.default()
+
+
 def parse_lipsync_tracks(raw: str | None) -> LipSyncTracks:
     if not raw or not raw.strip():
-        return LipSyncTracks.default()
+        return _empty_or_default_lipsync_tracks()
     try:
         data = json.loads(raw)
         parsed = LipSyncTracks.model_validate(data)
         ordered = sorted(parsed.tracks or [], key=lambda track: (track.slot, track.id))
         if not ordered:
-            return LipSyncTracks.default()
+            return _empty_or_default_lipsync_tracks()
         normalized = [_normalize_track(track, index=index) for index, track in enumerate(ordered)]
         return LipSyncTracks(tracks=normalized)
     except Exception:
-        return LipSyncTracks.default()
+        return _empty_or_default_lipsync_tracks()
 
 
 def dumps_lipsync_tracks(tracks: LipSyncTracks) -> str:

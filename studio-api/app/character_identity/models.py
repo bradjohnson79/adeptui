@@ -39,6 +39,7 @@ class CharacterProfileRow(Base):
     emotion_json: Mapped[str] = mapped_column(Text, default="{}")
     relationships_json: Mapped[str] = mapped_column(Text, default="[]")
     prompt_package_json: Mapped[str] = mapped_column(Text, default="{}")
+    is_global: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[str] = mapped_column(String(64), default="")
     updated_at: Mapped[str] = mapped_column(String(64), default="")
 

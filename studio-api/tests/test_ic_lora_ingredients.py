@@ -24,15 +24,16 @@ def _png(path: Path, size: tuple[int, int] = (512, 512), color=(200, 100, 50)) -
     return path
 
 
-def test_registry_entry_exists():
+def test_reference_model_persistence_remains_but_workflow_is_retired():
     from app.references.models import INGREDIENTS_MODEL_ID, get_reference_model
     from app.workflows.registry import DEFAULT_WORKFLOW_REGISTRY
 
     model = get_reference_model(INGREDIENTS_MODEL_ID)
     assert model.filename.endswith(".safetensors")
     assert model.gated is True
-    assert DEFAULT_WORKFLOW_REGISTRY.get("ltx.ingredients_ic_lora").key == "ltx.ingredients_ic_lora"
-    assert "ic_lora" in DEFAULT_WORKFLOW_REGISTRY.get("ltx.ingredients_ic_lora").capabilities
+    # Ingredients IC-LoRA execution path is retired; the workflow registry entry is gone.
+    with pytest.raises(KeyError):
+        DEFAULT_WORKFLOW_REGISTRY.get("ltx.ingredients_ic_lora")
 
 
 def test_empty_dir_not_ready(data_dir: Path):
@@ -172,6 +173,68 @@ def test_compiler_inserts_lora_and_reference(data_dir: Path):
     assert "Bearer" not in dumped
 
 
+def test_compiler_image_only_skips_reference_video(data_dir: Path):
+    from app.references.models import INGREDIENTS_FILENAME
+    from app.workflows.ltx_ingredients_compiler import compile_ingredients_workflow
+
+    (data_dir / "models" / "loras" / INGREDIENTS_FILENAME).write_bytes(b"0" * (2 * 1024 * 1024))
+    compiled = compile_ingredients_workflow(
+        object_info={
+            "LTXICLoRALoaderModelOnly": {},
+            "LTXAddVideoICLoRAGuide": {},
+            "LoadImage": {},
+            "EmptyLTXVLatentVideo": {},
+            "VHS_LoadVideo": {},
+        },
+        checkpoint="ltx-2.3.safetensors",
+        positive="Korri walks the corridor",
+        negative="",
+        width=768,
+        height=448,
+        length=113,
+        fps=24,
+        seed=7,
+        reference_image="studio/ref_sheet.png",
+        reference_video=None,
+        skip_model_check=True,
+    )
+    classes = {n["class_type"] for n in compiled["workflow"].values()}
+    assert "VHS_LoadVideo" not in classes
+    guide = next(n for n in compiled["workflow"].values() if n["class_type"] == "LTXAddVideoICLoRAGuide")
+    assert guide["inputs"]["image"] == ["2", 0]
+
+
+def test_compiler_caps_reference_video_to_latent_length(data_dir: Path):
+    from app.references.models import INGREDIENTS_FILENAME
+    from app.workflows.ltx_ingredients_compiler import compile_ingredients_workflow
+
+    (data_dir / "models" / "loras" / INGREDIENTS_FILENAME).write_bytes(b"0" * (2 * 1024 * 1024))
+    compiled = compile_ingredients_workflow(
+        object_info={
+            "LTXICLoRALoaderModelOnly": {},
+            "LTXAddVideoICLoRAGuide": {},
+            "LoadImage": {},
+            "EmptyLTXVLatentVideo": {},
+            "VHS_LoadVideo": {},
+        },
+        checkpoint="ltx-2.3.safetensors",
+        positive="Korri walks the corridor",
+        negative="",
+        width=768,
+        height=448,
+        length=113,
+        fps=24,
+        seed=7,
+        reference_image="studio/ref_sheet.png",
+        reference_video="studio/ref_sheet.mp4",
+        skip_model_check=True,
+    )
+    vhs = next(n for n in compiled["workflow"].values() if n["class_type"] == "VHS_LoadVideo")
+    empty = next(n for n in compiled["workflow"].values() if n["class_type"] == "EmptyLTXVLatentVideo")
+    assert vhs["inputs"]["frame_load_cap"] == 113
+    assert empty["inputs"]["length"] == 113
+
+
 def test_disabled_ingredients_uses_normal_path():
     from app.workflows.ltx_ingredients_compiler import wants_ingredients_ic_lora
 
@@ -265,13 +328,13 @@ def test_replace_ingredient_new_sheet_version(data_dir: Path, monkeypatch: pytes
     assert old["id"] != new["id"]
 
 
-def test_setup_catalog_has_ic_lora_component():
-    from app.setup.catalog import get_component
+def test_setup_catalog_ic_lora_component_is_retired():
+    from app.setup.catalog import get_component, is_retired_video_setup_component, public_components
 
-    component = get_component("ltx23_ic_lora_ingredients")
-    assert component.verifier == "ic_lora_file"
-    assert component.installer == "path_link"
-    assert "ltx_checkpoint" in component.dependencies
+    comp = get_component("ltx23_ic_lora_ingredients")
+    assert comp.id == "ltx23_ic_lora_ingredients"
+    assert is_retired_video_setup_component("ltx23_ic_lora_ingredients")
+    assert "ltx23_ic_lora_ingredients" not in {item.id for item in public_components()}
 
 
 def test_ic_lora_option_hidden_when_nodes_missing(data_dir: Path, monkeypatch: pytest.MonkeyPatch):

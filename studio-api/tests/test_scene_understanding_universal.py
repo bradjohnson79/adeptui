@@ -23,7 +23,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.codirector.production.contracts import ResolvedReference
+from app.codirector.production.contracts import (
+    CameraPlan,
+    DirectorSceneIntent,
+    ResolvedReference,
+    SceneBeat,
+    SceneIntentEnvironment,
+    SceneIntentSubject,
+    TimedBeat,
+)
 from app.codirector.production.generator_validator import (
     per_batch_duration,
     validate_scene_spec_against_generator,
@@ -293,6 +301,85 @@ def test_sample_f_multi_beat_order_and_end_state() -> None:
     # Batch 1 carries the early beats; batch 2 carries the exit.
     assert "wades" in prompts[0].lower()
     assert "exits" in prompts[1].lower() or "exit" in prompts[1].lower()
+
+
+def test_compile_batch_prompts_does_not_restage_event_across_windows() -> None:
+    """Live Sample F defect: the same launch sentence landed in both batch
+    ACTION windows. Discrete events stage once; later windows drop the
+    already-used sentence. Continuity language may persist."""
+    refs = [
+        _ref("Jun Park", "@JunPark", "character"),
+        _ref("Canyon Crossing", "#CanyonCrossing", "environment"),
+        _ref("Signal Kite", "%SignalKite", "prop"),
+    ]
+    launch = "Jun Park launches the Signal Kite into the wind."
+    spec = parse_scene_intent(
+        "Build a Timeline scene. 20 seconds, 2 batches, MiniMax H3, 21:9, 1.0 MP.",
+        project_id="proj",
+    )
+    spec.director_intent = DirectorSceneIntent(
+        scene_type="action",
+        environment=SceneIntentEnvironment(
+            name="Canyon Crossing",
+            tag="#CanyonCrossing",
+            verified=True,
+            verification="found",
+        ),
+        subjects=[
+            SceneIntentSubject(
+                name="Jun Park",
+                tag="@JunPark",
+                role="lead",
+                verified=True,
+                verification="found",
+                asset_type="character",
+            ),
+            SceneIntentSubject(
+                name="Signal Kite",
+                tag="%SignalKite",
+                role="key prop",
+                verified=True,
+                verification="found",
+                asset_type="prop",
+            ),
+        ],
+        scene_beats=[
+            SceneBeat(
+                index=0,
+                kind="approach",
+                description="Jun Park walks in from the left, carrying the Signal Kite.",
+            ),
+            SceneBeat(index=1, kind="action", description=launch),
+            SceneBeat(index=2, kind="action", description=launch),
+            SceneBeat(
+                index=3,
+                kind="exit",
+                description="The camera rises with the climbing kite, ending on a wide shot of the canyon.",
+            ),
+        ],
+        timed_beats=[
+            TimedBeat(start_sec=0, end_sec=5, description="walk"),
+            TimedBeat(start_sec=5, end_sec=10, description="launch-1"),
+            TimedBeat(start_sec=10, end_sec=15, description="launch-2"),
+            TimedBeat(start_sec=15, end_sec=20, description="rise"),
+        ],
+        action_text=(
+            "Jun Park walks in from the left, carrying the Signal Kite. "
+            f"{launch} {launch} "
+            "The camera rises with the climbing kite, ending on a wide shot of the canyon."
+        ),
+        camera_plan=CameraPlan(shot_type="wide", movement="tracking"),
+    )
+    spec.duration_seconds = 20.0
+    spec.batch_count = 2
+    spec.generator_id = "minimax-h3"
+    prompts = compile_batch_prompts(spec, refs)
+    assert len(prompts) == 2
+    first = extract_prompt_section(prompts[0], "ACTION").lower()
+    second = extract_prompt_section(prompts[1], "ACTION").lower()
+    assert first.count("launches the signal kite") == 1
+    assert second.count("launches the signal kite") == 0
+    assert "rises with the climbing kite" in second
 
 
 # ---------------------------------------------------------------------------

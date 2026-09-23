@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { SceneTimelineMaster } from "./contracts";
-import type { DirectorTimeline } from "../components/DirectorTracks";
 
 /**
  * Always-on Timeline Preflight (event-driven — NO polling).
  *
  * Watches a stable signature over exactly what the backend `run_preflight`
  * reads (batch generatorId / plannedDuration / promptSegments / references /
- * sourceAnchors, master.turboLora, master.sceneGeneratorId, director camera /
- * lipsync / prompt segments) and re-runs the cheap pure-DB preflight check
+ * sourceAnchors, master.turboLora, master.sceneGeneratorId, Master camera /
+ * prompt segments) and re-runs the cheap pure-DB preflight check
  * when that signature changes. Both Preflight buttons converge on this hook's
  * single state, so the Generate gate and the Inspector can never diverge.
  *
@@ -32,17 +31,18 @@ export interface TimelinePreflightState {
   summary: string;
   blockingCount: number;
   findings: TimelinePreflightFinding[];
-  /** Manual "Re-check now" — bypasses the debounce, still single-flight. */
-  recheckNow: () => void;
+  /** Manual Preflight — bypasses the debounce, still single-flight. */
+  recheckNow: () => Promise<void>;
 }
 
 const BLOCKING_SEVERITIES = new Set(["error", "critical", "blocker"]);
-const ADVISORY_SEVERITIES = new Set(["warning", "advisory", "info"]);
+const ADVISORY_SEVERITIES = new Set(["warning", "advisory"]);
+const INFO_SEVERITIES = new Set(["info"]);
 
 /** Project exactly the fields run_preflight reads into a stable string. */
 export function buildPreflightSignature(
   master: SceneTimelineMaster | null,
-  director: DirectorTimeline | null,
+  lipsyncTracksJson?: string | null,
 ): string {
   const batches = (master?.batchBlocks ?? []).map((b) => ({
     id: b.id,
@@ -63,33 +63,26 @@ export function buildPreflightSignature(
     ]),
     a: (b.sourceAnchors ?? []).map((a) => a.kind),
   }));
-  const dir = director
-    ? {
-        c: director.camera_clips ?? [],
-        l: (director.lipsync?.tracks ?? []).map((t) => ({
-          id: t.id,
-          ch: t.character_id ?? null,
-          clips: (t.clips ?? []).map((c) => [
-            c.id,
-            c.audio_asset_id ?? null,
-            c.character_id ?? null,
-            c.speaker_binding_id ?? null,
-          ]),
-        })),
-        p: (director.prompt_segments ?? []).map((s) => [
-          s.id,
-          s.start,
-          s.length,
-          s.text,
-          (s.reference_binding_ids ?? []).join(","),
-        ]),
-      }
-    : null;
+  const cameras = (master?.batchBlocks ?? []).flatMap((b) =>
+    (b.cameraInstructions ?? []).map((c) => [c.id, c.start, c.length, c.motion_type || c.text]),
+  );
+  // SINGLE-STORE: prompt segments hash from Master batch.promptSegments only.
+  const masterPrompts = (master?.batchBlocks ?? []).flatMap((b) =>
+    (b.promptSegments ?? []).map((s) => [
+      s.id,
+      s.start,
+      s.length,
+      s.text,
+      (s.referenceBindingIds ?? []).join(","),
+    ]),
+  );
   return JSON.stringify({
     b: batches,
     t: master?.turboLora ? 1 : 0,
     sg: master?.sceneGeneratorId ?? null,
-    dir,
+    cam: cameras,
+    ls: lipsyncTracksJson || "",
+    mp: masterPrompts,
   });
 }
 
@@ -104,6 +97,9 @@ export function summarizePreflightFindings(findings: TimelinePreflightFinding[])
   const advisories = findings.filter((f) =>
     ADVISORY_SEVERITIES.has(String(f.severity || "").toLowerCase()),
   );
+  const infos = findings.filter((f) =>
+    INFO_SEVERITIES.has(String(f.severity || "").toLowerCase()),
+  );
   const parts: string[] = [];
   if (blocking.length) {
     const codes = [...new Set(blocking.map((f) => f.code || f.severity).filter(Boolean))];
@@ -111,6 +107,9 @@ export function summarizePreflightFindings(findings: TimelinePreflightFinding[])
   }
   if (advisories.length) {
     parts.push(`${advisories.length} advisory`);
+  }
+  if (infos.length) {
+    parts.push(`${infos.length} additional info`);
   }
   const summary = blocking.length
     ? `Blocked: ${parts.join(" · ")}`
@@ -128,10 +127,10 @@ export function useTimelinePreflight(opts: {
   projectId: string;
   sceneId: string | null | undefined;
   master: SceneTimelineMaster | null;
-  director: DirectorTimeline | null;
+  lipsyncTracksJson?: string | null;
   debounceMs?: number;
 }): TimelinePreflightState {
-  const { projectId, sceneId, master, director } = opts;
+  const { projectId, sceneId, master, lipsyncTracksJson } = opts;
   const debounceMs = opts.debounceMs ?? 400;
 
   const [status, setStatus] = useState<TimelinePreflightStatus>("idle");
@@ -140,8 +139,8 @@ export function useTimelinePreflight(opts: {
   const [findings, setFindings] = useState<TimelinePreflightFinding[]>([]);
 
   const signature = useMemo(
-    () => buildPreflightSignature(master, director),
-    [master, director],
+    () => buildPreflightSignature(master, lipsyncTracksJson),
+    [master, lipsyncTracksJson],
   );
 
   const tokenRef = useRef(0);
@@ -213,13 +212,13 @@ export function useTimelinePreflight(opts: {
     };
   }, [signature, sceneId, debounceMs, runCheck]);
 
-  const recheckNow = useCallback(() => {
+  const recheckNow = useCallback(async () => {
     if (timerRef.current != null) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
     setStatus("checking");
-    void runCheck(latestSignatureRef.current);
+    await runCheck(latestSignatureRef.current);
   }, [runCheck]);
 
   return { status, summary, blockingCount, findings, recheckNow };

@@ -1,5 +1,6 @@
 export type MagiPaneId =
   | "project"
+  | "library"
   | "media"
   | "assets"
   | "graphics"
@@ -59,17 +60,14 @@ export const DEFAULT_LAYOUT: MagiWorkspaceLayoutV1 = {
   timelineCollapsed: false,
   leftPaneOrder: [
     "project",
-    "media",
-    "assets",
+    "library",
     "recipes",
-    "graphics",
-    "actions",
-    "command",
   ],
-  rightPaneOrder: ["inspector"],
+  rightPaneOrder: ["graphics", "actions", "command", "inspector"],
   accordionState: {
     project: false,
-    media: true,
+    library: true,
+    media: false,
     assets: false,
     recipes: false,
     graphics: false,
@@ -102,7 +100,8 @@ export const DEFAULT_LAYOUT: MagiWorkspaceLayoutV1 = {
 
 function normalizeLegacyPane(value: unknown): MagiPaneId | null {
   if (value === "textGraphics") return "graphics";
-  if (value === "project" || value === "media" || value === "assets" || value === "graphics") return value;
+  if (value === "media" || value === "assets") return "library";
+  if (value === "project" || value === "library" || value === "graphics") return value;
   if (value === "recipes" || value === "actions" || value === "command" || value === "inspector") return value;
   if (value === "renderQueue") return value;
   return null;
@@ -122,6 +121,9 @@ function migrateAccordionState(state: Record<string, boolean> | undefined): Reco
   }
   if (typeof next.compareVersions === "boolean" && typeof next.compare !== "boolean") {
     next.compare = next.compareVersions;
+  }
+  if (typeof next.media === "boolean" && typeof next.library !== "boolean") {
+    next.library = next.media;
   }
   if (typeof next.metadata === "boolean" && typeof next.clipProperties !== "boolean") {
     next.clipProperties = next.metadata;
@@ -165,8 +167,16 @@ export function validateMagiLayout(raw: unknown): MagiWorkspaceLayoutV1 | null {
   const rightPaneOrder = (parsed.rightPaneOrder || parsed.rightDock) as unknown[] | undefined;
   if (!Array.isArray(leftPaneOrder) || !Array.isArray(rightPaneOrder)) return null;
 
-  const left = leftPaneOrder.map(normalizeLegacyPane).filter((p): p is MagiPaneId => Boolean(p));
-  const right = rightPaneOrder.map(normalizeLegacyPane).filter((p): p is MagiPaneId => Boolean(p));
+  const unique = (items: MagiPaneId[]) => {
+    const seenPanes = new Set<string>();
+    return items.filter((pane) => {
+      if (seenPanes.has(pane)) return false;
+      seenPanes.add(pane);
+      return true;
+    });
+  };
+  const left = unique(leftPaneOrder.map(normalizeLegacyPane).filter((p): p is MagiPaneId => Boolean(p)));
+  const right = unique(rightPaneOrder.map(normalizeLegacyPane).filter((p): p is MagiPaneId => Boolean(p)));
 
   const seen = new Set<string>();
   for (const p of [...left, ...right]) {
@@ -192,7 +202,9 @@ export function validateMagiLayout(raw: unknown): MagiWorkspaceLayoutV1 | null {
     leftPaneOrder: left.length ? left : [...DEFAULT_LAYOUT.leftPaneOrder],
     rightPaneOrder: right.length ? right : [...DEFAULT_LAYOUT.rightPaneOrder],
     accordionState: migrateAccordionState((parsed.accordionState as Record<string, boolean>) || {}),
-    activePreset: (parsed.activePreset || parsed.preset || "custom") as MagiWorkspacePreset,
+    activePreset: ((parsed.activePreset === "mask-editing"
+      ? "default"
+      : parsed.activePreset || parsed.preset || "custom") as MagiWorkspacePreset),
     renderQueueOpen: Boolean(parsed.renderQueueOpen),
   };
 }
@@ -240,7 +252,7 @@ export function applyPreset(
         accordionState: {
           ...base.accordionState,
           project: false,
-          media: true,
+          library: true,
           recipes: false,
           graphics: false,
           actions: true,
@@ -253,25 +265,13 @@ export function applyPreset(
         timelineHeight: 260,
       };
     case "mask-editing":
-      return {
-        ...base,
-        leftDockCollapsed: false,
-        rightDockCollapsed: false,
-        accordionState: {
-          ...base.accordionState,
-          media: true,
-          graphics: true,
-          transform: true,
-          prompt: false,
-        },
-        timelineHeight: LAYOUT_LIMITS.timelineMin,
-      };
+      return { ...DEFAULT_LAYOUT, accordionState: { ...DEFAULT_LAYOUT.accordionState } };
     case "compare-review":
       return {
         ...base,
         accordionState: {
           ...base.accordionState,
-          media: false,
+          library: false,
           compare: true,
           clipProperties: true,
           color: true,

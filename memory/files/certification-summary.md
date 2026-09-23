@@ -19,6 +19,8 @@
 | CK | Knowledge Cards | 9 | GO | 2026-08-09 |
 | HB | Hosted Beta Infrastructure | 79 (Python) + 24 (Playwright) | GO | 2026-08-10 |
 | SM | Spatial Map + Atlas + ERS + Scene Creator | Independent verifier VERIFIED; Playwright DEFERRED | READY FOR MANUAL BETA | 2026-08-11 |
+| AV | Avatar Studio Character Propagation + UI Convergence | Live E2E: 12/12 verdicts PASS | GO | 2026-09-13 |
+| H3 | FM4/FM5 H3 R2V Quality baseline (3-ref) | Graph SHA 33fa6665…; MiniMaxH3ReferenceToVideo | GO (Comfy baseline; Timeline product rebuild separate) | 2026-09-10 |
 
 ## Test Counts by Suite
 

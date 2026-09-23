@@ -22,6 +22,7 @@ import type {
 import { isAgentWork, isTerminal } from "./types";
 import { persistThenOpenSceneCreator } from "../SceneCreator/persistThenOpenSceneCreator";
 import { normalizeErsError } from "../SpatialMap/ersErrorMessage";
+import { isSpatialMapEnabled } from "../../../core/featureFlags";
 import "./agentWorkSurface.css";
 
 const POLL_INTERVAL_MS = 3000;
@@ -29,6 +30,20 @@ const MAX_POLL_ATTEMPTS = 80; // ~4 minutes
 
 /** Surface types that come from the Spatial Map workflow. */
 const SPATIAL_SURFACE_TYPES: SurfaceType[] = ["atlas_shot_generation", "ers_generation", "scene_generation"];
+
+
+/** Creator-facing Spatial Map continue CTA — gated while Spatial Map is shelved. */
+export function showSpatialWorkflowContinueCta(
+  surfaceType: SurfaceType,
+  resultAssetCount: number,
+): boolean {
+  if (resultAssetCount <= 0) return false;
+  if (!SPATIAL_SURFACE_TYPES.includes(surfaceType)) return false;
+  // atlas_shot_generation is the Spatial Map continue path; hide when shelved.
+  if (surfaceType === "atlas_shot_generation") return isSpatialMapEnabled();
+  return true;
+}
+
 
 /** Honest regenerate-failure copy: the existing look is untouched. */
 export const REGENERATE_FAILED_MESSAGE =
@@ -46,6 +61,34 @@ export function pollPausedFor(
   maxAttempts: number = MAX_POLL_ATTEMPTS,
 ): boolean {
   return Boolean(pack && !isTerminal(pack) && pollAttempts >= maxAttempts);
+}
+
+/** True when every child is still queued — the provider has not started. */
+export function jobsStillQueuedOnly(pack: WorkSurfaceState | null): boolean {
+  const jobs = pack?.child_jobs || [];
+  return jobs.length > 0 && jobs.every((job) => job.status === "queued");
+}
+
+export function pollPausedMessage(pack: WorkSurfaceState | null): string {
+  if (jobsStillQueuedOnly(pack)) {
+    return (
+      "This image never started. It is still waiting in line and has not reached an image engine. " +
+      "The overlay stopped checking so it does not poll forever; the job is not marked failed."
+    );
+  }
+  return (
+    "Live progress paused — generation may still be running. The overlay stopped checking so it does not " +
+    "poll forever; the job is not marked failed."
+  );
+}
+
+export function imageJobProgressLabel(job: { status: string; stage?: string }): string {
+  if (job.status === "queued") return "Waiting to start — not generating yet";
+  if (job.status === "running" || job.status === "preview") return job.stage || "Generating…";
+  if (job.status === "failed") return "Failed";
+  if (job.status === "cancelled") return "Cancelled";
+  if (job.status === "completed") return "Complete";
+  return job.stage || job.status;
 }
 
 export type SceneGenerationPhase = 
@@ -285,7 +328,7 @@ export function AgentWorkSurface() {
     }
   }, [projectId, pack, retrying, buildPack, setActiveExecution, advance]);
 
-  const handleContinueToSceneCreator = useCallback(async () => {
+  const handleContinueToImageGenerator = useCallback(async () => {
     setContinueError(null);
     setContinuing(true);
     try {
@@ -296,7 +339,7 @@ export function AgentWorkSurface() {
         onClose: handleClose,
       });
     } catch (err) {
-      setContinueError(err instanceof Error ? err.message : "Could not continue to Scene Creator.");
+      setContinueError(err instanceof Error ? err.message : "Could not continue to the Image Generator.");
     } finally {
       setContinuing(false);
     }
@@ -427,7 +470,7 @@ export function AgentWorkSurface() {
               Regenerate All
             </button>
           )}
-          {SPATIAL_SURFACE_TYPES.includes(surfaceType) && pack.result_asset_ids.length > 0 && (
+          {showSpatialWorkflowContinueCta(surfaceType, pack.result_asset_ids.length) && (
             <button
               type="button"
               className="ui-btn ui-btn--primary"
@@ -436,7 +479,7 @@ export function AgentWorkSurface() {
                   handleClose();
                   return;
                 }
-                void handleContinueToSceneCreator();
+                void handleContinueToImageGenerator();
               }}
               disabled={continuing}
               data-testid="agent-work-continue"
@@ -444,8 +487,8 @@ export function AgentWorkSurface() {
               {surfaceType === "atlas_shot_generation"
                 ? "Continue to Spatial Map"
                 : continuing
-                  ? "Opening Scene Creator…"
-                  : "Continue to Scene Creator"}
+                  ? "Opening Image Generator…"
+                  : "Continue to Image Generator"}
             </button>
           )}
           {pack.result_asset_ids.length > 0 && (
@@ -521,8 +564,7 @@ export function AgentWorkSurface() {
       {pollPaused && (
         <div className="agent-work-surface__poll-paused" role="status" data-testid="agent-work-poll-paused">
           <span>
-            Live progress paused — generation may still be running. The overlay stopped checking so it does not
-            poll forever; the job is not marked failed.
+            {pollPausedMessage(pack)}
           </span>
           <button
             type="button"
@@ -717,7 +759,8 @@ function FrameCard({
   const hasImage = !!job.asset_id;
   const isCompleted = job.status === "completed";
   const isFailed = job.status === "failed";
-  const isRunning = job.status === "running" || job.status === "queued" || job.status === "preview";
+  const isQueued = job.status === "queued";
+  const isRunning = job.status === "running" || job.status === "preview";
 
   const handleRetry = () => {
     if (onRegenerate) {
@@ -744,10 +787,12 @@ function FrameCard({
               <span className="agent-work-surface__frame-failed">Failed</span>
             ) : isRunning ? (
               <span className="agent-work-surface__frame-generating">
-                {busy ? "Regenerating…" : (job.stage || "Generating…")}
+                {busy ? "Regenerating…" : imageJobProgressLabel(job)}
               </span>
+            ) : isQueued ? (
+              <span className="muted">{imageJobProgressLabel(job)}</span>
             ) : (
-              <span className="muted">Queued</span>
+              <span className="muted">{imageJobProgressLabel(job)}</span>
             )}
           </div>
         )}

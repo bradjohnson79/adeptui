@@ -28,13 +28,10 @@ async function postJson(request: APIRequestContext, path: string, data: unknown)
 
 async function openTxt2Vid(page: Page, projectId: string) {
   await page.goto(`/project/${projectId}?workspace=txt2vid`);
-  // Fallback common workspace keys
-  if (!(await page.locator("#txt2vid-engine").isVisible().catch(() => false))) {
-    await page.goto(`/project/${projectId}?workspace=video`);
-  }
-  if (!(await page.locator("#txt2vid-engine").isVisible().catch(() => false))) {
-    await page.getByText(/Text.?to.?Video|Txt2Vid/i).first().click();
-  }
+  await page.waitForLoadState("domcontentloaded");
+  // ?workspace=txt2vid is the canonical T2V deep link — wait for the engine
+  // selector instead of a racy immediate check + legacy ?workspace=video fallback
+  // (which resolves to Home and strands the test).
   await expect(page.locator("#txt2vid-engine")).toBeVisible({ timeout: 45_000 });
 }
 
@@ -107,20 +104,17 @@ test.describe("MiniMax H3 Adept UI Surface Cert", () => {
     }
   });
 
-  test("B — Text2Video selects MiniMax H3 and prepares plan + LTX fallback", async ({ page, request }) => {
+  test("B — Text2Video honestly excludes MiniMax H3 (R2V/I2V, not true T2V)", async ({ page, request }) => {
     projectId = await createProjectViaHomeUi(page, request, ctx.projectName);
     ctx.createdProjectIds.push(projectId);
     await openTxt2Vid(page, projectId);
-    await page.locator("#txt2vid-engine").selectOption("minimax-h3");
-    const prompt = page.locator("textarea").first();
-    await prompt.fill("Cinematic rain alley push-in with quiet tension and stereo ambience.");
-    await expect(page.getByTestId("minimax-h3-plan-panel")).toBeVisible();
-    await page.getByTestId("minimax-h3-prepare").click();
-    await expect(page.getByTestId("minimax-h3-preflight")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("minimax-h3-ltx-fallback")).toBeVisible();
-    await page.getByTestId("minimax-h3-accept-ltx").click();
-    await expect(page.getByTestId("minimax-h3-message")).toContainText(/LTX|fallback/i);
-    await page.screenshot({ path: `${ctx.artifactDir}/B-txt2vid-h3.png`, fullPage: true });
+    // TEXT-ONLY CONTRACT: MiniMax H3 is Reference/Image-to-Video, not true
+    // Text-to-Video. It must be disabled on the T2V surface (honest exclusion, not
+    // a silent I2V conversion). The H3 plan panel belongs on 1 Frame / 3 Frame.
+    const h3Option = page.locator("#txt2vid-engine option[value=minimax-h3]");
+    await expect(h3Option).toHaveCount(0);
+    await expect(page.getByTestId("minimax-h3-plan-panel")).toHaveCount(0);
+    await page.screenshot({ path: `${ctx.artifactDir}/B-txt2vid-h3-excluded.png`, fullPage: true });
   });
 
   test("C — One Frame Adept UI plan (Start Frame)", async ({ page }) => {

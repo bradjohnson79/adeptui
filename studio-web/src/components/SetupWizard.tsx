@@ -420,15 +420,22 @@ function VideoIntelligenceStatus() {
   const caps = (profile?.capabilities || {}) as Record<string, boolean>;
   const ready = Boolean(caps.timelineVisualReview);
   return (
-    <div className="setup-capability-blockers" data-testid="setup-video-intelligence">
-      <p className="setup-issue">Co-Director Video Intelligence</p>
+    <div
+      className={ready ? "setup-capability-status" : "setup-capability-blockers"}
+      data-testid="setup-video-intelligence"
+      data-state={ready ? "ready" : "blocked"}
+    >
+      <p className={ready ? "setup-capability-ok" : "setup-issue"}>Co-Director Video Intelligence</p>
       <ul>
         <li data-testid="setup-vi-adept">{ready ? "✓ Ready" : "○ VideoChat3 required"} — Adept UI</li>
         <li data-testid="setup-vi-continuity">{ready ? "✓" : "○"} Co-Director Temporal Continuity{ready ? " Ready" : " — VideoChat3 required"}</li>
         <li>{ready ? "✓" : "○"} Automatic Review</li>
         <li>{ready ? "✓" : "○"} 3-second Review</li>
         <li>{ready ? "✓" : "○"} 5-second Review</li>
-        <li>{caps.deepSequenceReasoning ? "✓" : "○"} Deep sequence reasoning{caps.deepSequenceReasoning ? "" : " — Additional GPU memory recommended"}</li>
+        <li className={caps.deepSequenceReasoning ? undefined : "setup-capability-advisory"}>
+          {caps.deepSequenceReasoning ? "✓" : "○"} Deep sequence reasoning
+          {caps.deepSequenceReasoning ? "" : " — Enhanced capability unavailable / additional GPU memory recommended"}
+        </li>
       </ul>
     </div>
   );
@@ -464,9 +471,9 @@ function SetupSummary({
         <div>
           <div className="section-label">System Status</div>
           <div className="setup-counts" id="setup-system-status">
-            <span><strong>{counts.ready}</strong> Ready</span>
-            <span><strong>{counts.not_installed}</strong> Not Installed</span>
-            <span><strong>{counts.needs_attention}</strong> Needs Attention</span>
+            <span><strong>{counts.required_ready ?? counts.ready}</strong> Required Ready</span>
+            <span><strong>{counts.optional_not_installed ?? 0}</strong> Optional — Not Installed</span>
+            <span><strong>{counts.required_needs_attention ?? counts.needs_attention}</strong> Needs Attention</span>
           </div>
         </div>
         <div className="setup-overall" role="status" aria-live="polite">
@@ -614,45 +621,118 @@ function SetupAdvancedPanel({
   );
 }
 
+function creatorConfigIssue(error: string): string {
+  const e = error.toLowerCase();
+  if (e.includes("comfyroot") || e.includes("main.py")) {
+    return "Adept could not find the local picture engine folder.";
+  }
+  if (e.includes("comfypython")) {
+    return "Adept could not find the picture engine program.";
+  }
+  if (e.includes("modelroot")) {
+    return "Adept could not find the model folder.";
+  }
+  if (e.includes("studioapi.python") || e.includes("studioapi.approot")) {
+    return "Adept could not find Studio itself.";
+  }
+  if (e.includes("port")) {
+    return "Saved runtime settings need a configuration repair.";
+  }
+  return error;
+}
+
 function BackgroundServicesSection({
   comfyuiReady,
 }: {
   comfyuiReady: boolean;
 }) {
-  const [comfyuiEnabled, setComfyuiEnabled] = useState(false);
-  const [localhostEnabled, setLocalhostEnabled] = useState(false);
   const [startWithWindows, setStartWithWindows] = useState(false);
+  const [taskRegistered, setTaskRegistered] = useState<boolean | null>(null);
+  const [windowsStartupPresent, setWindowsStartupPresent] = useState(false);
   const [activating, setActivating] = useState(false);
   const [activeStatus, setActiveStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [validation, setValidation] = useState<{ ok: boolean; message: string; issues: string[] } | null>(null);
 
-  const handleEnableRecommended = async () => {
+  const refreshStatus = async () => {
+    const status = await api.runtimeManagerStatus();
+    const adept = status.adeptRuntime;
+    setTaskRegistered(Boolean(adept?.taskRegistered));
+    setWindowsStartupPresent(Boolean(adept?.windowsStartupPresent));
+    setStartWithWindows(Boolean(adept?.startWithWindows));
+    return status;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await api.runtimeManagerStatus();
+        if (cancelled) return;
+        setTaskRegistered(Boolean(status.adeptRuntime?.taskRegistered));
+        setWindowsStartupPresent(Boolean(status.adeptRuntime?.windowsStartupPresent));
+        setStartWithWindows(Boolean(status.adeptRuntime?.startWithWindows));
+      } catch {
+        if (!cancelled) setTaskRegistered(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const runConfigAction = async (label: string, action: () => Promise<{ success: boolean; message: string }>) => {
     setActivating(true);
     setError(null);
-    setActiveStatus("Preparing background services...");
-    setComfyuiEnabled(true);
-    setLocalhostEnabled(true);
-
+    setValidation(null);
+    setActiveStatus(label);
     try {
-      await api.runtimeManagerSavePreferences({
-        comfyuiBackgroundManagerEnabled: true,
-        localhostBackgroundManagerEnabled: true,
-        startWithWindows: false,
-        remoteAccessEnabled: false,
-      });
-      setActiveStatus("Starting ComfyUI...");
-      const res = await api.runtimeManagerStart();
+      const res = await action();
+      try {
+        await refreshStatus();
+      } catch {
+        /* status refresh is informational */
+      }
       if (res.success) {
-        setActiveStatus("Starting local services...");
-        setActiveStatus("Checking runtime...");
-        setActiveStatus("Ready");
-        setTimeout(() => setActiveStatus(null), 2000);
+        setActiveStatus(res.message || "Done");
+        setTimeout(() => setActiveStatus(null), 2500);
+      } else if (/CONFIGURATION ERROR/i.test(res.message)) {
+        setError("Setup could not find a valid local image runtime. Check model and engine folders in Advanced.");
+        setActiveStatus(null);
+      } else if (/permission to start Background Services|needsElevation|Access is denied/i.test(res.message)) {
+        setError(
+          "Windows needs permission once so Adept can start when you sign in. Approve that once. Adept will not use a weaker startup method.",
+        );
+        setActiveStatus(null);
       } else {
-        setError("Failed to start background services. Check Local Runtime settings for details.");
+        setError(res.message || "That action did not finish.");
         setActiveStatus(null);
       }
     } catch {
-      setError("Could not enable background services.");
+      setError("Could not reach runtime configuration.");
+      setActiveStatus(null);
+    }
+    setActivating(false);
+  };
+
+  const validateConfig = async () => {
+    setActivating(true);
+    setError(null);
+    setValidation(null);
+    setActiveStatus("Checking configuration...");
+    try {
+      const result = await api.runtimeManagerValidateConfig();
+      const issues = (result.errors ?? []).map(creatorConfigIssue);
+      setValidation({
+        ok: Boolean(result.ok),
+        message: result.ok
+          ? "Runtime configuration looks good."
+          : result.message || "Runtime configuration needs attention.",
+        issues,
+      });
+      setActiveStatus(null);
+    } catch {
+      setError("Could not check runtime configuration.");
       setActiveStatus(null);
     }
     setActivating(false);
@@ -661,79 +741,59 @@ function BackgroundServicesSection({
   const hosted = !!import.meta.env.VITE_API_BASE;
 
   return (
-    <section className="setup-component-section" aria-labelledby="background-services-heading">
+    <section className="setup-component-section" aria-labelledby="background-services-heading" data-testid="adept-background-services">
       <div className="setup-section-heading">
         <div>
-          <h2 id="background-services-heading">Background Services</h2>
+          <h2 id="background-services-heading">Adept Runtime</h2>
           <p>
-            Adept UI can keep your local AI services running quietly in the background
-            so you don't have to launch them manually each time.
+            Setup checks that Studio, pictures, and Local AI are installed and configured. Adept starts them for you.
           </p>
         </div>
       </div>
 
-      <div className="setup-component-card" data-testid="comfyui-background-card">
+      <div className="setup-component-card" data-testid="adept-runtime-managed-card">
         <div className="setup-component-card__header">
-          <span className="setup-component-card__title">
-            ComfyUI Background Manager
-            <span className="setup-component-card__badge setup-component-card__badge--recommended">Recommended</span>
+          <span className="setup-component-card__title" data-testid="adept-runtime-managed-state">
+            Adept Runtime — Managed Automatically
           </span>
-          {comfyuiReady ? (
-            <span className="setup-component-card__status setup-component-card__status--ready">Detected</span>
-          ) : (
-            <span className="setup-component-card__status setup-component-card__status--missing">Not Installed</span>
-          )}
         </div>
         <p className="muted">
-          Run ComfyUI quietly in the background whenever Adept UI needs it.
-          No ComfyUI Desktop window required.
+          Adept Runtime starts Studio, pictures, and Local AI when you need them. You do not start or stop those services here.
         </p>
-        {comfyuiReady && (
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={comfyuiEnabled}
-              disabled={hosted || activating}
-              onChange={(e) => setComfyuiEnabled(e.target.checked)}
-            />
-            Enable Background Manager
-          </label>
+        {!comfyuiReady && (
+          <p className="muted" data-testid="adept-runtime-pictures-missing">
+            Pictures are not installed yet. Install them above — Adept will start them for you.
+          </p>
         )}
-      </div>
-
-      <div className="setup-component-card" data-testid="localhost-background-card">
-        <div className="setup-component-card__header">
-          <span className="setup-component-card__title">
-            Localhost Background Manager
-            <span className="setup-component-card__badge setup-component-card__badge--recommended">Recommended</span>
-          </span>
-          <span className="setup-component-card__status setup-component-card__status--ready">Available</span>
-        </div>
-        <p className="muted">
-          Keep Adept Studio Runtime, Local AI Services, and Runtime Health available
-          without starting backend terminals manually.
-        </p>
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={localhostEnabled}
-            disabled={hosted || activating}
-            onChange={(e) => setLocalhostEnabled(e.target.checked)}
-          />
-          Enable Background Manager
-        </label>
       </div>
 
       <div className="setup-component-section__actions">
         <button
           type="button"
           className="primary"
-          onClick={handleEnableRecommended}
-          disabled={hosted || activating || !comfyuiReady}
+          data-testid="validate-runtime-configuration"
+          onClick={() => void validateConfig()}
+          disabled={activating}
         >
-          {activating
-            ? activeStatus ?? "Preparing..."
-            : "Enable Recommended Background Services"}
+          {activating && activeStatus === "Checking configuration..." ? "Checking..." : "Validate Runtime Configuration"}
+        </button>
+        <button
+          type="button"
+          className="ghost"
+          data-testid="enable-recommended-background-services"
+          onClick={() => runConfigAction("Saving recommended settings...", () => api.runtimeManagerEnableRecommended(startWithWindows))}
+          disabled={hosted || activating}
+        >
+          Enable Recommended
+        </button>
+        <button
+          type="button"
+          className="ghost"
+          data-testid="repair-background-services"
+          disabled={hosted || activating}
+          onClick={() => runConfigAction("Repairing configuration...", () => api.runtimeManagerRepair())}
+        >
+          Repair Configuration
         </button>
 
         <label className="toggle-row" style={{ marginTop: "0.5rem" }}>
@@ -747,8 +807,36 @@ function BackgroundServicesSection({
         </label>
       </div>
 
+      {validation && (
+        <div
+          className={`setup-message${validation.ok ? "" : " setup-message--error"}`}
+          role={validation.ok ? "status" : "alert"}
+          data-testid="runtime-config-validation-result"
+        >
+          {validation.message}
+          {!validation.ok && validation.issues.length > 0 && (
+            <ul>
+              {validation.issues.map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {error && <div className="setup-message setup-message--error" role="alert">{error}</div>}
       {activeStatus && <div className="setup-message" role="status">{activeStatus}</div>}
+      <p className="muted" data-testid="background-services-task-state">
+        {taskRegistered
+          ? "Starts when you sign in."
+          : error && /permission once so Adept can start when you sign in/i.test(error)
+            ? "Windows needs permission once before Adept can start when you sign in."
+            : windowsStartupPresent
+              ? "An older Windows startup task is still registered. Adept Runtime is not the owner."
+              : "Not set to start when you sign in."}
+      </p>
+      <p className="muted" data-testid="background-services-runtime-note">
+        Adept Runtime is managed automatically. Setup configures it. The Runtime Supervisor runs it.
+      </p>
     </section>
   );
 }
@@ -852,12 +940,12 @@ function SetupPathChooser({
         try {
           const current = await api.setupStatus();
           const component = current.components.find((item) => item.id === componentId);
-          const ltx = current.components.find((item) => item.id === "ltx_checkpoint");
+          const ltx = current.components.find((item) => item.id === "ltx_2_5_checkpoint");
           const verifiedPath = component?.installation_path || ltx?.installation_path || "";
           let fallback = verifiedPath;
           const normalized = verifiedPath.replace(/\//g, "\\");
           const modelsMarker = normalized.toLowerCase().lastIndexOf("\\models\\");
-          if (componentId !== "ltx_checkpoint" && modelsMarker >= 0) {
+          if (componentId !== "ltx_2_5_checkpoint" && modelsMarker >= 0) {
             fallback = normalized.slice(0, modelsMarker + "\\models".length);
           }
           if (!fallback) {
@@ -1556,6 +1644,7 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   });
   const required = visibleComponents.filter((component) => component.required);
   const optional = visibleComponents.filter((component) => !component.required);
+  const comfyuiReady = status.components.some((component) => component.id === "comfyui" && component.status === "ready");
   const preparing = trackedOperationIds.length > 0 || status.overall_status === "preparing";
   const openLifecyclePreflight = (component: SetupComponentStatus) => setPreflightFor(component);
   const repairLifecycleComponent = (component: SetupComponentStatus) => {
@@ -1708,14 +1797,6 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
         </div>
       </section>
 
-          {/* Background Services (shown when ComfyUI is detected) */}
-          {(() => {
-            const comfyuiComponent = status?.components?.find((c: { id: string }) => c.id === "comfyui");
-            const comfyuiReady = comfyuiComponent?.status === "ready";
-            if (!comfyuiReady) return null;
-            return <BackgroundServicesSection comfyuiReady={comfyuiReady} />;
-          })()}
-
           <SetupAdvancedPanel
             status={status}
             legacy={legacyDetection}
@@ -1734,6 +1815,8 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
           />
         </>
       )}
+
+      <BackgroundServicesSection comfyuiReady={Boolean(comfyuiReady)} />
 
       {plan && (
         <PreparationPlanDialog

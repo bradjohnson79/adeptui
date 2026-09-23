@@ -137,6 +137,9 @@ class DirectionModeBody(BaseModel):
 class GenerateTakesBody(BaseModel):
     count: int = 1
     labels: list[str] = Field(default_factory=list)
+    preferredProvider: Optional[str] = None  # ORDER15: local | elevenlabs
+    voiceId: Optional[str] = None  # ElevenLabs voice id when preferredProvider=elevenlabs
+    modelId: Optional[str] = None
 
     @field_validator("count")
     @classmethod

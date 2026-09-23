@@ -20,6 +20,15 @@ class PidRecord:
     cmd: str
     owned: bool
     written_at: str
+    started_at: str = ""
+    last_exit: str = ""
+    restart_count: int = 0
+    last_restart_reason: str = ""
+    executable: str = ""
+    cwd: str = ""
+    log_path: str = ""
+    health: str = ""
+    state: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -27,6 +36,15 @@ class PidRecord:
             "cmd": self.cmd,
             "owned": self.owned,
             "written_at": self.written_at,
+            "started_at": self.started_at,
+            "last_exit": self.last_exit,
+            "restart_count": self.restart_count,
+            "last_restart_reason": self.last_restart_reason,
+            "executable": self.executable,
+            "cwd": self.cwd,
+            "log_path": self.log_path,
+            "health": self.health,
+            "state": self.state,
         }
 
     @classmethod
@@ -36,6 +54,15 @@ class PidRecord:
             cmd=str(data.get("cmd") or ""),
             owned=bool(data.get("owned")),
             written_at=str(data.get("written_at") or ""),
+            started_at=str(data.get("started_at") or data.get("written_at") or ""),
+            last_exit=str(data.get("last_exit") or ""),
+            restart_count=int(data.get("restart_count") or 0),
+            last_restart_reason=str(data.get("last_restart_reason") or ""),
+            executable=str(data.get("executable") or ""),
+            cwd=str(data.get("cwd") or ""),
+            log_path=str(data.get("log_path") or ""),
+            health=str(data.get("health") or ""),
+            state=str(data.get("state") or ""),
         )
 
 
@@ -53,7 +80,15 @@ class SupervisorState:
         override = os.environ.get("ADEPT_SUPERVISOR_STATE_DIR", "").strip()
         if override:
             return cls(Path(override))
-        return cls(repo_root / ".runtime" / "supervisor")
+        try:
+            from .canonical_config import default_state_dir, try_load_runtime_config
+
+            cfg = try_load_runtime_config()
+            if cfg and cfg.stateDir:
+                return cls(Path(cfg.stateDir))
+            return cls(default_state_dir())
+        except Exception:
+            return cls(repo_root / ".runtime" / "supervisor")
 
     def ensure(self) -> None:
         self.pid_dir.mkdir(parents=True, exist_ok=True)
@@ -61,12 +96,22 @@ class SupervisorState:
     def pid_path(self, service: str) -> Path:
         return self.pid_dir / f"{service}.pid"
 
-    def write_pid(self, service: str, pid: int, cmd: str, owned: bool) -> PidRecord:
+    def write_pid(self, service: str, pid: int, cmd: str, owned: bool, **extra: Any) -> PidRecord:
+        now = datetime.now(timezone.utc).isoformat()
         rec = PidRecord(
             pid=int(pid),
             cmd=cmd,
             owned=bool(owned),
-            written_at=datetime.now(timezone.utc).isoformat(),
+            written_at=now,
+            started_at=str(extra.get("started_at") or now),
+            last_exit=str(extra.get("last_exit") or ""),
+            restart_count=int(extra.get("restart_count") or 0),
+            last_restart_reason=str(extra.get("last_restart_reason") or ""),
+            executable=str(extra.get("executable") or ""),
+            cwd=str(extra.get("cwd") or ""),
+            log_path=str(extra.get("log_path") or ""),
+            health=str(extra.get("health") or ""),
+            state=str(extra.get("state") or ""),
         )
         self.pid_path(service).write_text(json.dumps(rec.to_dict(), indent=2), encoding="utf-8")
         return rec

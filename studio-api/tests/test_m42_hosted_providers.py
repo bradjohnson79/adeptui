@@ -116,6 +116,7 @@ def test_dock_api_models_all_keyed_excludes_adapter_unavailable(monkeypatch) -> 
     assert "flux-fal" in ids  # adapterAvailable=True row stays
     assert "flux-kontext-fal" not in ids  # adapterAvailable=False row excluded
     assert "nano-banana-2-fal" in ids
+    assert "gpt-image-2-fal" in ids
     for m in rows:
         assert m.get("adapterAvailable") is True
         assert m.get("executable") is True

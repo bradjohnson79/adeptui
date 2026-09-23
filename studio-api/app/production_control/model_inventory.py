@@ -85,6 +85,10 @@ def _discover_all_models() -> dict[str, Any]:
             else:
                 m["group"] = "NATIVE LOCAL"
 
+        from .generator_authority import apply_authority_to_models
+
+        local_models = apply_authority_to_models(local_models)
+        api_models = apply_authority_to_models(api_models)
         sections[mod] = {
             "local": local_models,
             "api": api_models,

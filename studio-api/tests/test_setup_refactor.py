@@ -39,7 +39,10 @@ def test_status_uses_only_canonical_states_and_requires_verification(
     states = {item["component_id"]: item["status"] for item in result["components"]}
 
     assert states["python"] == "ready"
-    assert states["ltx_checkpoint"] == "not_installed"
+    assert states["ltx_2_5_checkpoint"] == "not_installed"
+    assert "ltx_checkpoint" not in states
+    assert "wan_models" not in states
+    assert "hunyuan_video_15" not in states
     assert set(states.values()) <= status.CANONICAL_STATUSES
     assert result["overall_status"] == "additional_setup_required"
     ready = next(item for item in result["components"] if item["component_id"] == "python")
@@ -53,12 +56,12 @@ def test_ltx_ready_only_when_required_checkpoint_exists(setup_data_dir: Path) ->
 
     model_dir = setup_data_dir / "models"
     model_dir.mkdir()
-    save_state({"components": {}, "model_locations": {"ltx_checkpoint": str(model_dir)}})
-    assert verify_component("ltx_checkpoint").healthy is False
+    save_state({"components": {}, "model_locations": {"ltx_2_5_checkpoint": str(model_dir)}})
+    assert verify_component("ltx_2_5_checkpoint").healthy is False
 
-    checkpoint = model_dir / settings.ltx_checkpoint
+    checkpoint = model_dir / settings.ltx_2_5_checkpoint
     checkpoint.write_bytes(b"verified-model-content")
-    result = verify_component("ltx_checkpoint")
+    result = verify_component("ltx_2_5_checkpoint")
     assert result.healthy is True
     assert result.path == str(checkpoint)
 
@@ -83,7 +86,7 @@ def test_prepare_plan_excludes_optional_components(
     from app.setup import orchestrator
 
     component_statuses = []
-    for component in orchestrator.COMPONENTS:
+    for component in orchestrator.public_components():
         component_statuses.append(
             {
                 "component_id": component.id,
@@ -142,13 +145,13 @@ def test_status_exposes_active_operation(
 
     local_registry = OperationRegistry()
     operation = local_registry.create(
-        "prepare", ["ltx_checkpoint"], global_operation=True
+        "prepare", ["ltx_2_5_checkpoint"], global_operation=True
     )
     local_registry.update(
         operation["operation_id"],
         status="running",
         phase="installing",
-        stage="Preparing LTX Video Checkpoint",
+        stage="Preparing LTX 2.5 Video Checkpoint",
         progress=0.25,
     )
     monkeypatch.setattr(operations, "registry", local_registry)
@@ -156,9 +159,9 @@ def test_status_exposes_active_operation(
         status,
         "verify_component",
         lambda component_id, state=None: Verification(
-            component_id != "ltx_checkpoint",
-            component_id == "ltx_checkpoint",
-            None if component_id != "ltx_checkpoint" else "missing",
+            component_id != "ltx_2_5_checkpoint",
+            component_id == "ltx_2_5_checkpoint",
+            None if component_id != "ltx_2_5_checkpoint" else "missing",
             "checked",
         ),
     )
@@ -167,12 +170,12 @@ def test_status_exposes_active_operation(
     ltx = next(
         item
         for item in result["components"]
-        if item["component_id"] == "ltx_checkpoint"
+        if item["component_id"] == "ltx_2_5_checkpoint"
     )
 
     assert result["active_operation"]["operation_id"] == operation["operation_id"]
     assert ltx["operation_id"] == operation["operation_id"]
-    assert ltx["stage"] == "Preparing LTX Video Checkpoint"
+    assert ltx["stage"] == "Preparing LTX 2.5 Video Checkpoint"
     assert ltx["status"] == "installing"
 
 
@@ -216,15 +219,15 @@ def test_model_checkpoint_requires_license_and_auto_verifies(
         lambda: {"overall_status": "ready", "components": []},
     )
     operation = local_registry.create(
-        "component_action", ["ltx_checkpoint"]
+        "component_action", ["ltx_2_5_checkpoint"]
     )
     operation_id = operation["operation_id"]
     checkpoint = local_registry.pause(
         operation_id,
         {
             "type": "model_path",
-            "component_id": "ltx_checkpoint",
-            "summary": "Choose the LTX checkpoint.",
+            "component_id": "ltx_2_5_checkpoint",
+            "summary": "Choose the LTX 2.5 checkpoint.",
             "required_fields": ["path", "license_accepted"],
             "requires_license_acceptance": True,
         },
@@ -232,7 +235,7 @@ def test_model_checkpoint_requires_license_and_auto_verifies(
     orchestrator._CONTEXTS[operation_id] = {
         "actions": [
             {
-                "component_id": "ltx_checkpoint",
+                "component_id": "ltx_2_5_checkpoint",
                 "action": "install",
                 "phase": "configuring",
             }
@@ -242,7 +245,7 @@ def test_model_checkpoint_requires_license_and_auto_verifies(
         "preflight": False,
     }
 
-    model = setup_data_dir / settings.ltx_checkpoint
+    model = setup_data_dir / settings.ltx_2_5_checkpoint
     model.write_bytes(b"verified-model-content")
 
     with pytest.raises(ValueError, match="license_accepted"):
@@ -269,7 +272,7 @@ def test_model_checkpoint_requires_license_and_auto_verifies(
         snapshot = local_registry.snapshot(operation_id)
 
     assert snapshot["status"] == "completed"
-    assert verify_component("ltx_checkpoint").healthy is True
+    assert verify_component("ltx_2_5_checkpoint").healthy is True
 
 
 def test_legacy_link_auto_verifies_without_false_ready(setup_data_dir: Path) -> None:
@@ -278,7 +281,7 @@ def test_legacy_link_auto_verifies_without_false_ready(setup_data_dir: Path) -> 
     empty_model_dir = setup_data_dir / "empty-model-directory"
     empty_model_dir.mkdir()
     result = approve_install(
-        "ltx_checkpoint", action="link", path=str(empty_model_dir)
+        "ltx_2_5_checkpoint", action="link", path=str(empty_model_dir)
     )
 
     # Compatibility status remains, while the additive verification is honest.
@@ -286,7 +289,7 @@ def test_legacy_link_auto_verifies_without_false_ready(setup_data_dir: Path) -> 
     assert result["verified"] is False
     assert result["verification"]["issue_code"] == "required_model_missing"
     state = load_setup_state()
-    assert state["model_locations"]["ltx_checkpoint"] == str(empty_model_dir)
+    assert state["model_locations"]["ltx_2_5_checkpoint"] == str(empty_model_dir)
 
 
 def test_atomic_state_preserves_legacy_fields(setup_data_dir: Path) -> None:
@@ -549,8 +552,8 @@ def test_status_exposes_install_kind_and_path_selector(setup_data_dir: Path) -> 
 
     status = build_status()
     by_id = {item["component_id"]: item for item in status["components"]}
-    assert by_id["ltx_checkpoint"]["install_kind"] == "path_link"
-    assert by_id["ltx_checkpoint"]["path_selector"] == "file"
+    assert by_id["ltx_2_5_checkpoint"]["install_kind"] == "path_link"
+    assert by_id["ltx_2_5_checkpoint"]["path_selector"] == "file"
     assert by_id["pack_essential_photoreal"]["install_kind"] == "asset_pack"
     assert by_id["pack_essential_photoreal"]["path_selector"] == "directory"
     assert by_id["ffmpeg"]["path_selector"] is None

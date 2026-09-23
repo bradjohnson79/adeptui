@@ -1,11 +1,11 @@
-export type StudioMethod = "existing" | "create" | "clone" | "upload";
+export type StudioMethod = "existing" | "create" | "clone";
 export type StudioPhase = "method" | "create" | "select" | "performance" | "approve";
 
 export const METHOD_CARDS: {
   id: StudioMethod;
   label: string;
   description: string;
-  legacyId: "LIBRARY" | "DESIGN" | "CLONE" | "UPLOAD";
+  legacyId: "LIBRARY" | "DESIGN" | "CLONE";
 }[] = [
   {
     id: "existing",
@@ -24,12 +24,6 @@ export const METHOD_CARDS: {
     label: "Clone from Recording",
     description: "Create a reusable voice from an authorized speaker sample.",
     legacyId: "CLONE",
-  },
-  {
-    id: "upload",
-    label: "Upload Voice",
-    description: "Import a reusable voice package or audio reference.",
-    legacyId: "UPLOAD",
   },
 ];
 
@@ -125,14 +119,19 @@ export const ADJUSTMENT_CHIPS = [
   "Remove Reaction",
 ] as const;
 
-export const CODIRECTOR_CHIPS = [
-  "Make Korri more sarcastic",
+export const CODIRECTOR_CHIP_TEMPLATES = [
+  "Make {name} more sarcastic",
   "Warmer delivery",
   "Younger voice",
   "Sharper comic timing",
   "Add playful scoff",
   "Soften final line",
 ] as const;
+
+export function voiceStudioCoDirectorChips(characterName: string): string[] {
+  const name = characterName.trim() || "this character";
+  return CODIRECTOR_CHIP_TEMPLATES.map((template) => template.replace("{name}", name));
+}
 
 export const UPLOAD_KINDS: { id: string; label: string; hint: string }[] = [
   {

@@ -89,32 +89,62 @@ class VideoGeneratorRegistration:
 # ---------------------------------------------------------------------------
 
 _LTX_25_COMPONENTS = ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae", "ltx_2_5_audio_vae")
+# Inventory lists LTXVBaseSampler (video-only). Audio-on graphs use SamplerCustomAdvanced;
+# treat either as satisfying the sampler gate (see missing_required_nodes / certified nodeAliasGroups).
 _LTX_25_NODES = ("UNETLoader", "LTXVBaseSampler", "LTXVScheduler", "LTXVImgToVideo", "LoadImage")
+_LTX_25_SAMPLER_ALTERNATES = frozenset({"LTXVBaseSampler", "SamplerCustomAdvanced"})
 _H3_NODES = ("MiniMaxH3ReferenceToVideo", "UNETLoader", "CLIPLoader", "VAELoader", "LoadImage")
+
+# Canonical Adept UI local video architecture: MiniMax H3 + LTX 2.5 only.
+# API / hosted video products are a separate catalog and must stay intact.
+SUPPORTED_LOCAL_VIDEO_FAMILIES = frozenset({"minimax", "ltx"})
+SUPPORTED_LOCAL_VIDEO_GENERATOR_IDS = frozenset(
+    {
+        "minimax-h3",
+        "minimax-h3-i2v-local",
+        "ltx-2.5-full",
+        "ltx-2.5-distilled",
+        "ltx-2.5-comfy",
+    }
+)
+RETIRED_LOCAL_VIDEO_GENERATOR_IDS = frozenset(
+    {
+        "ltx-local",
+        "wan-local",
+        "hunyuan-video-1.5-local",
+        "hunyuan-video-13b-local",
+    }
+)
+RETIRED_LOCAL_VIDEO_ALIASES = frozenset(
+    {
+        "ltx",
+        "ltx-2.3",
+        "ltx_2_3",
+        "wan",
+        "wan_2_2",
+        "wan-2.1",
+        "wan-2.2",
+        "wan-3",
+        "wan-3.0",
+        "wan_3",
+        "wan_3_0",
+        "wan-3.0-prime",
+        "hunyuan",
+        "hunyuan15",
+        "hunyuan13b",
+        "hunyuan-video-15",
+        "hunyuan-video-13b",
+    }
+)
+
+
+def is_retired_local_video(product_id: str | None) -> bool:
+    token = str(product_id or "").strip()
+    return token in RETIRED_LOCAL_VIDEO_GENERATOR_IDS or token in RETIRED_LOCAL_VIDEO_ALIASES
+
 
 CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
     # -- Video — local (Comfy :8188) --------------------------------------
-    VideoGeneratorRegistration(
-        product_id="ltx-local",
-        label="LTX 2.3 (Local)",
-        family="ltx",
-        version="2.3",
-        provider="comfy",
-        locality="local",
-        live_submit=True,
-        adapter_id="ltx-local",
-        aliases=("ltx",),
-        setup_components=("ltx_checkpoint",),
-        required_nodes=("LTXVImgToVideo", "CheckpointLoaderSimple", "LoadImage"),
-        surface_workflows={"i2v": "ltx.simple_i2v", "r2v": "ltx.scene"},
-        capability="Certified",
-        lifecycle="Installed",
-        supports=("image_to_video", "continuation"),
-        vram=22.0,
-        gpu=True,
-        executable_default=True,
-        exposed=True,
-    ),
     VideoGeneratorRegistration(
         product_id="ltx-2.5-full",
         label="LTX 2.5 Full",
@@ -200,67 +230,6 @@ CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
         vram=12.0,
         gpu=True,
         executable_default=True,
-        exposed=True,
-    ),
-    VideoGeneratorRegistration(
-        product_id="wan-local",
-        label="WAN 2.2 First/Last Frame",
-        family="wan",
-        version="2.2",
-        provider="comfy",
-        locality="local",
-        live_submit=True,
-        adapter_id="wan-local",
-        setup_components=("wan_models",),
-        required_nodes=("WanFirstLastFrameToVideo", "UNETLoader", "CLIPLoader"),
-        surface_workflows={"multiFrame": "wan.first_last_frame"},
-        capability="Certified",
-        lifecycle="Installed",
-        supports=("start_end_frame", "continuation"),
-        does_not_support=("text_to_video",),
-        vram=14.0,
-        gpu=True,
-        executable_default=True,
-        exposed=True,
-    ),
-    VideoGeneratorRegistration(
-        product_id="hunyuan-video-1.5-local",
-        label="HunyuanVideo 1.5 (Local)",
-        family="hunyuan",
-        version="1.5",
-        provider="comfy",
-        locality="local",
-        live_submit=True,
-        adapter_id="hunyuan-video-1.5-local",
-        setup_components=("hunyuan_video_15",),
-        required_nodes=("HyVideoModelLoader", "HyVideoSampler", "HyVideoVAELoader"),
-        capability="Testing",
-        lifecycle="Installed",
-        supports=("image_to_video", "timeline_batch"),
-        does_not_support=("text_to_video", "start_end_frame"),
-        vram=24.0,
-        gpu=True,
-        executable_default=False,
-        exposed=True,
-    ),
-    VideoGeneratorRegistration(
-        product_id="hunyuan-video-13b-local",
-        label="HunyuanVideo 13B (Local Advanced)",
-        family="hunyuan",
-        version="13b",
-        provider="comfy",
-        locality="local",
-        live_submit=True,
-        adapter_id="hunyuan-video-13b-local",
-        setup_components=("hunyuan_video_13b",),
-        required_nodes=("HyVideoModelLoader", "HyVideoSampler", "HyVideoVAELoader"),
-        capability="Testing",
-        lifecycle="Installed",
-        supports=("image_to_video", "timeline_batch"),
-        does_not_support=("text_to_video", "start_end_frame"),
-        vram=32.0,
-        gpu=True,
-        executable_default=False,
         exposed=True,
     ),
     VideoGeneratorRegistration(
@@ -361,8 +330,8 @@ CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
             "r2v": "bytedance/seedance-2.0/reference-to-video",
         },
         duration_min_sec=4.0,
-        duration_max_sec=12.0,
-        durations_sec=(4, 5, 6, 7, 8, 9, 10, 11, 12),
+        duration_max_sec=15.0,
+        durations_sec=(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         resolutions=("480p", "720p"),
         audio=True,
         live_submit=True,
@@ -384,7 +353,76 @@ CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
         exposed=True,
     ),
     VideoGeneratorRegistration(
+        product_id="seedance-2.0-mini",
+        label="Seedance 2.0 Mini",
+        family="seedance",
+        version="2.0-mini",
+        provider="fal",
+        locality="hosted",
+        endpoints={
+            "t2v": "bytedance/seedance-2.0/mini/reference-to-video",
+            "i2v": "bytedance/seedance-2.0/mini/reference-to-video",
+            "r2v": "bytedance/seedance-2.0/mini/reference-to-video",
+        },
+        duration_min_sec=4.0,
+        duration_max_sec=15.0,
+        durations_sec=(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+        resolutions=("480p", "720p"),
+        audio=True,
+        live_submit=True,
+        create_live=True,
+        adapter_id="seedance-2.0-mini",
+        aliases=("fal_seedance_mini", "seedance-mini"),
+        hosted_secret="fal_api_key",
+        surface_workflows={
+            "r2v": "fal.seedance-2.0-mini.r2v",
+        },
+        create_engine_token="seedance-2.0-mini",
+        create_engine_label="Seedance 2.0 Mini",
+        create_engine_group="hosted",
+        adapter_only=("fal_seedance_mini", "seedance-mini"),
+        capability="Available",
+        supports=("image_to_video",),
+        exposed=True,
+        notes="Scene 12 Mini R2V only — bytedance/seedance-2.0/mini/reference-to-video; no T2V/full remap.",
+    ),
+    VideoGeneratorRegistration(
+        product_id="seedance-2.0-fast",
+        label="Seedance 2.0 Fast",
+        family="seedance",
+        version="2.0-fast",
+        provider="fal",
+        locality="hosted",
+        endpoints={
+            "t2v": "bytedance/seedance-2.0/fast/text-to-video",
+            "i2v": "bytedance/seedance-2.0/fast/image-to-video",
+            "r2v": "bytedance/seedance-2.0/fast/reference-to-video",
+        },
+        duration_min_sec=4.0,
+        duration_max_sec=15.0,
+        durations_sec=(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+        resolutions=("480p", "720p"),
+        audio=True,
+        live_submit=True,
+        create_live=True,
+        adapter_id="seedance-2.0-fast",
+        aliases=("fal_seedance_fast", "seedance-fast"),
+        hosted_secret="fal_api_key",
+        surface_workflows={
+            "t2v": "fal.seedance-2.0-fast.t2v",
+            "i2v": "fal.seedance-2.0-fast.i2v",
+            "r2v": "fal.seedance-2.0-fast.r2v",
+        },
+        create_engine_token="seedance-2.0-fast",
+        create_engine_label="Seedance 2.0 Fast",
+        create_engine_group="hosted",
+        capability="Available",
+        supports=("text_to_video", "image_to_video"),
+        exposed=True,
+    ),
+    VideoGeneratorRegistration(
         product_id="seedance-2.5",
+
         label="Seedance 2.5",
         family="seedance",
         version="2.5",
@@ -396,8 +434,8 @@ CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
             "r2v": "bytedance/seedance-2.5/reference-to-video",
         },
         duration_min_sec=4.0,
-        duration_max_sec=12.0,
-        durations_sec=(4, 5, 6, 7, 8, 9, 10, 11, 12),
+        duration_max_sec=30.0,
+        durations_sec=tuple(range(4, 31)),
         resolutions=("480p", "720p"),
         audio=True,
         live_submit=True,
@@ -499,6 +537,8 @@ _CREATE_ENGINE_ORDER: tuple[str, ...] = (
     "minimax-h3",
     "ltx-2.5",
     "seedance-2.0",
+    "seedance-2.0-mini",
+    "seedance-2.0-fast",
     "seedance-2.5",
     "fal_kling",
     "fal_veo",
@@ -557,6 +597,17 @@ def setup_components() -> dict[str, tuple[str, ...]]:
 def required_nodes() -> dict[str, tuple[str, ...]]:
     """= video_readiness.REQUIRED_NODES."""
     return {row.product_id: row.required_nodes for row in CORE_VIDEO_REGISTRY if row.required_nodes}
+
+
+
+
+def missing_required_nodes(product_id: str, present: set[str]) -> list[str]:
+    """Return required nodes absent from Comfy inventory, honoring LTX sampler alternates."""
+    needed = required_nodes().get(product_id) or ()
+    missing = {name for name in needed if name not in present}
+    if missing & _LTX_25_SAMPLER_ALTERNATES and (present & _LTX_25_SAMPLER_ALTERNATES):
+        missing -= _LTX_25_SAMPLER_ALTERNATES
+    return sorted(missing)
 
 
 def adapter_only_ids() -> frozenset[str]:
@@ -691,3 +742,17 @@ def catalog_registrations() -> list[VideoGeneratorRegistration]:
 def merged_registry() -> list[VideoGeneratorRegistration]:
     """Core rows + approved catalog rows (review inventory, never creator views)."""
     return list(CORE_VIDEO_REGISTRY) + catalog_registrations()
+
+
+def supported_local_video_ids() -> frozenset[str]:
+    """Canonical local video product ids currently exposed for Adept UI."""
+    return frozenset(
+        row.product_id
+        for row in CORE_VIDEO_REGISTRY
+        if row.locality == "local" and row.family in SUPPORTED_LOCAL_VIDEO_FAMILIES
+    )
+
+
+def supported_hosted_video_ids() -> frozenset[str]:
+    """API / hosted video product ids (not subject to the two-family local rule)."""
+    return frozenset(row.product_id for row in CORE_VIDEO_REGISTRY if row.locality == "hosted")

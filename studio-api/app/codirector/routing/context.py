@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DEFAULT_WORKSPACES: frozenset[str] = frozenset({
-    "script_writer", "timeline", "audiostudio", "voicestudio",
+    "script_writer", "timeline", "audiostudio", "voicestudio", "voice_creator",
     "magi", "continuity", "bible", "posecraft", "runtime_manager",
     "references", "characters", "casting", "editor",
 })

@@ -124,13 +124,13 @@ def plan_spec_batches(
     capability — otherwise the capability floor decides. Returns the effective
     count and the temporal windows for prompt compilation.
     """
+    # CLEAR P2+: creator/requested batch count is NON-AUTHORITATIVE.
+    # Execution Windows = ceil(duration / maxSingleGenerationSeconds) only.
+    del requested_batch_count  # retained in signature for call-site compatibility
     max_window = resolve_max_single_generation_seconds(spec.generator_id)
-    effective_requested = requested_batch_count if requested_batch_count is not None else None
-    if effective_requested is None and int(spec.batch_count or 0) > 1:
-        effective_requested = int(spec.batch_count)
     windows = capability_batch_plan(
         duration_seconds=spec.duration_seconds,
         max_single_generation_seconds=max_window,
-        requested_batch_count=effective_requested,
+        requested_batch_count=None,
     )
     return max(len(windows), 1), windows

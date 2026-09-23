@@ -1,10 +1,11 @@
-﻿import type {
+import type {
   Capability,
   CapabilitySnapshot,
   ComfyHealth,
   WorkflowDescriptor,
   WorkflowReadiness,
 } from "./capabilities";
+import type { CreatorDeletePreview } from "./components/creators/creatorProfileDelete";
 import { resolveMiniMaxH3Territory } from "./core/minimaxH3Territory";
 import { getProjectUnlockToken, projectIdFromApiPath } from "./projectSecurity.ts";
 import type { Asset, EngineName, Health, Job, Project, Scene, SceneSetup, SpatialMap } from "./types";
@@ -96,6 +97,27 @@ export interface ApiErrorDetailShape {
   model?: string | null;
   technical_evidence?: Record<string, unknown>;
   partial_work_created?: boolean;
+}
+
+/** Unwrap FastAPI/MAGI `{ detail: { error: { code, message } } }` without exposing raw JSON. */
+export function flattenStudioApiDetail(detail: unknown): ApiErrorDetailShape | string | undefined {
+  if (detail == null) return undefined;
+  if (typeof detail === "string") return detail.trim() ? detail : undefined;
+  if (typeof detail !== "object") return undefined;
+  const rec = detail as Record<string, unknown>;
+  const nested = rec.error;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const inner = nested as Record<string, unknown>;
+    if (typeof inner.message === "string" || typeof inner.code === "string") {
+      const fields = inner.fields && typeof inner.fields === "object" ? (inner.fields as Record<string, unknown>) : undefined;
+      return {
+        code: typeof inner.code === "string" ? inner.code : undefined,
+        message: typeof inner.message === "string" ? inner.message : undefined,
+        details: fields,
+      };
+    }
+  }
+  return rec as ApiErrorDetailShape;
 }
 
 export class ApiError extends Error {
@@ -1052,12 +1074,16 @@ async function reqInner<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       detail = undefined;
     }
-    if (detail && typeof detail === "object") {
-      const d = detail as ApiErrorDetailShape;
+    const flat = flattenStudioApiDetail(detail);
+    if (flat && typeof flat === "object") {
+      const d = flat;
       const code = d.error_code || d.code;
-      const err = new ApiError(d.message || text || res.statusText, res.status, {
+      const err = new ApiError(d.message || res.statusText || "Request failed", res.status, {
         code,
-        details: d.details,
+        details: {
+          ...(d.details && typeof d.details === "object" ? d.details : {}),
+          ...d,
+        },
         recoverable: d.recoverable ?? d.retryable,
         recommendedAction: d.recommendedAction || d.recommended_action,
         category: d.category,
@@ -1081,10 +1107,10 @@ async function reqInner<T>(path: string, init?: RequestInit): Promise<T> {
       }
       throw err;
     }
-    if (typeof detail === "string" && detail.trim()) {
-      throw new ApiError(detail, res.status);
+    if (typeof flat === "string" && flat.trim() && !flat.trim().startsWith("{")) {
+      throw new ApiError(flat, res.status);
     }
-    throw new ApiError(text || res.statusText, res.status);
+    throw new ApiError(res.statusText || "Request failed", res.status);
   }
   // Successful API traffic clears outage state (health probes also mark healthy).
   if (path === "/api/health" || path.startsWith("/api/health?")) {
@@ -1109,18 +1135,25 @@ async function reqBlob(path: string, init?: RequestInit): Promise<{ blob: Blob; 
     } catch {
       detail = undefined;
     }
-    if (detail && typeof detail === "object") {
-      const d = detail as ApiErrorDetailShape;
-      throw new ApiError(d.message || text || res.statusText, res.status, {
+    const flat = flattenStudioApiDetail(detail);
+    if (flat && typeof flat === "object") {
+      const d = flat;
+      throw new ApiError(d.message || res.statusText || "Request failed", res.status, {
         code: d.error_code || d.code,
-        details: d.details,
+        details: {
+          ...(d.details && typeof d.details === "object" ? d.details : {}),
+          ...d,
+        },
         recoverable: d.recoverable ?? d.retryable,
         recommendedAction: d.recommendedAction || d.recommended_action,
         category: d.category,
         retryable: d.retryable ?? d.recoverable,
       });
     }
-    throw new ApiError(text || res.statusText, res.status);
+    if (typeof flat === "string" && flat.trim() && !flat.trim().startsWith("{")) {
+      throw new ApiError(flat, res.status);
+    }
+    throw new ApiError(res.statusText || "Request failed", res.status);
   }
   return {
     blob: await res.blob(),
@@ -1594,7 +1627,54 @@ export const api = {
       body: JSON.stringify({ entryIds }),
     }),
 
-  foundationStatus: (projectId: string) =>
+    scenePromptTemplatesList: (projectId: string) =>
+    req<Array<{
+      id: string; projectId: string; sourceSceneId?: string; name: string; promptText: string;
+      generatorFamily?: string; generatorFamilyUsed?: string; generatorId?: string;
+      createdAt?: string; updatedAt?: string; promptTextLength?: number;
+    }>>(`/api/projects/${encodeURIComponent(projectId)}/scene-prompt-templates`),
+
+  scenePromptTemplatesGet: (projectId: string, templateId: string) =>
+    req<{
+      id: string; projectId: string; sourceSceneId?: string; name: string; promptText: string;
+      generatorFamily?: string; generatorFamilyUsed?: string; generatorId?: string;
+      createdAt?: string; updatedAt?: string; promptTextLength?: number;
+    }>(`/api/projects/${encodeURIComponent(projectId)}/scene-prompt-templates/${encodeURIComponent(templateId)}`),
+
+  scenePromptTemplatesCreate: (projectId: string, body: {
+    name: string; promptText: string; generatorFamily?: string; generatorFamilyUsed?: string;
+    generatorId?: string; sourceSceneId?: string;
+  }) =>
+    req<any>(`/api/projects/${encodeURIComponent(projectId)}/scene-prompt-templates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  scenePromptTemplatesUpdate: (projectId: string, templateId: string, body: {
+    name?: string; promptText?: string; generatorFamily?: string; generatorFamilyUsed?: string;
+    generatorId?: string; sourceSceneId?: string;
+  }) =>
+    req<any>(`/api/projects/${encodeURIComponent(projectId)}/scene-prompt-templates/${encodeURIComponent(templateId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  scenePromptTemplatesRename: (projectId: string, templateId: string, name: string) =>
+    req<any>(`/api/projects/${encodeURIComponent(projectId)}/scene-prompt-templates/${encodeURIComponent(templateId)}/rename`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+
+  scenePromptTemplatesDelete: (projectId: string, templateId: string) =>
+    req<{ ok: boolean }>(
+      `/api/projects/${encodeURIComponent(projectId)}/scene-prompt-templates/${encodeURIComponent(templateId)}`,
+      { method: "DELETE" },
+    ),
+
+foundationStatus: (projectId: string) =>
     req<{
       story: { status: string; exists: boolean; last_updated: string | null; item_count: number };
       script: { status: string; exists: boolean; last_updated: string | null; item_count: number };
@@ -2153,12 +2233,10 @@ export const api = {
     ),
   applyLipSyncTracks: (projectId: string, sceneId: string) =>
     req<Job>(`/api/projects/${projectId}/scenes/${sceneId}/lipsync-tracks/apply`, { method: "POST" }),
-  getDirector: (projectId: string, sceneId: string) =>
-    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director`),
   getTimelineReferences: (projectId: string, sceneId: string, itemId: string) =>
-    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references`),
+    req<any>(`/api/director-timeline/projects/${projectId}/scenes/${sceneId}/items/${itemId}/references`),
   addTimelineReference: (projectId: string, sceneId: string, itemId: string, body: Record<string, unknown>) =>
-    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references`, {
+    req<any>(`/api/director-timeline/projects/${projectId}/scenes/${sceneId}/items/${itemId}/references`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -2171,7 +2249,7 @@ export const api = {
     body: Record<string, unknown>
   ) =>
     req<any>(
-      `/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references/${bindingId}`,
+      `/api/director-timeline/projects/${projectId}/scenes/${sceneId}/items/${itemId}/references/${bindingId}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -2180,30 +2258,24 @@ export const api = {
     ),
   deleteTimelineReference: (projectId: string, sceneId: string, itemId: string, bindingId: string) =>
     req<any>(
-      `/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references/${bindingId}`,
+      `/api/director-timeline/projects/${projectId}/scenes/${sceneId}/items/${itemId}/references/${bindingId}`,
       { method: "DELETE" }
     ),
   clearTimelineReferences: (projectId: string, sceneId: string, itemId: string) =>
-    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references/clear`, {
+    req<any>(`/api/director-timeline/projects/${projectId}/scenes/${sceneId}/items/${itemId}/references/clear`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     }),
   getTimelineReferencePackage: (projectId: string, sceneId: string, itemId: string) =>
-    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/reference-package`),
+    req<any>(`/api/director-timeline/projects/${projectId}/scenes/${sceneId}/items/${itemId}/reference-package`),
   continuityPreviousReference: (projectId: string, sceneId: string, itemId: string) =>
     req<any>(
-      `/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references/continuity-previous`,
+      `/api/director-timeline/projects/${projectId}/scenes/${sceneId}/items/${itemId}/references/continuity-previous`,
       { method: "POST" }
     ),
   listTimelineReferencePresets: (projectId: string) =>
     req<any[]>(`/api/projects/${projectId}/reference-presets`),
-  putDirector: (projectId: string, sceneId: string, body: any) =>
-    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
   recommendEngine: (projectId: string, sceneId: string) =>
     req<{
       engineId: string;
@@ -3777,7 +3849,9 @@ export const api = {
         body: JSON.stringify(body || {}),
       }
     ),
+  /** @deprecated Read-compat only — projects MAGI sequence.json. Prefer api.magi.getSequence. */
   getEditor: (projectId: string) => req<any>(`/api/projects/${projectId}/editor`),
+  /** @deprecated Writes refused (409). Prefer api.magi.putSequence / sequence.json. */
   putEditor: (projectId: string, body: Record<string, unknown>) =>
     req<any>(`/api/projects/${projectId}/editor`, {
       method: "PUT",
@@ -3809,6 +3883,18 @@ export const api = {
       allowCpuFallback?: boolean;
       brief?: Record<string, unknown>;
       asyncMode?: boolean;
+      intent?: Record<string, unknown>;
+      sfxIntent?: Record<string, unknown>;
+      physicalEvent?: string;
+      material?: string;
+      context?: string;
+      temporal?: Record<string, unknown>;
+      negatives?: string[];
+      distance?: string;
+      environment?: string;
+      reverb?: string;
+      perspective?: string;
+      adherence?: string;
     }
   ) => {
     const mood = Array.isArray(body.mood) ? body.mood : body.mood ? [body.mood] : undefined;
@@ -3838,9 +3924,63 @@ export const api = {
         allowCpuFallback: body.allowCpuFallback ?? false,
         brief: body.brief,
         asyncMode: body.asyncMode ?? true,
+        intent: body.intent,
+        sfxIntent: body.sfxIntent,
+        physicalEvent: body.physicalEvent,
+        material: body.material,
+        context: body.context,
+        temporal: body.temporal,
+        negatives: body.negatives,
+        distance: body.distance,
+        environment: body.environment,
+        reverb: body.reverb,
+        perspective: body.perspective,
+        adherence: body.adherence,
       }),
     });
   },
+  audioStudioMutateSfxIntent: (
+    projectId: string,
+    body: {
+      intent: Record<string, unknown>;
+      op: string;
+      materialHint?: string;
+      physicalEventHint?: string;
+      deltaEventCount?: number;
+      generate?: boolean;
+      candidateCount?: number;
+    },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/audio-studio/projects/${encodeURIComponent(projectId)}/sfx/mutate-intent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  audioStudioMutateSfxCandidateIntent: (
+    projectId: string,
+    batchId: string,
+    candidateId: string,
+    body: {
+      op: string;
+      materialHint?: string;
+      physicalEventHint?: string;
+      deltaEventCount?: number;
+      generate?: boolean;
+      candidateCount?: number;
+      intent?: Record<string, unknown>;
+    },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/audio-studio/projects/${encodeURIComponent(projectId)}/batches/${encodeURIComponent(batchId)}/candidates/${encodeURIComponent(candidateId)}/mutate-intent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
   audioStudioGetBatch: (projectId: string, batchId: string) =>
     req<Record<string, unknown>>(
       `/api/audio-studio/projects/${encodeURIComponent(projectId)}/batches/${encodeURIComponent(batchId)}`
@@ -3915,8 +4055,35 @@ export const api = {
     req<DirectorTimelineCameraCatalog>("/api/director-timeline/camera-catalog"),
   directorTimelineGenerators: () => req<Record<string, unknown>>("/api/director-timeline/generators"),
   directorTimelineMaster: (projectId: string, sceneId: string) =>
-    req<{ ok: boolean; master: import("./timelineMaster/contracts").SceneTimelineMaster; mock: boolean }>(
+    req<{
+      ok: boolean;
+      master: import("./timelineMaster/contracts").SceneTimelineMaster;
+      libraryAssetIds?: string[];
+      mock: boolean;
+    }>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/master`,
+    ),
+  directorTimelineSetLibraryAssets: (projectId: string, sceneId: string, libraryAssetIds: string[]) =>
+    req<{ ok: boolean; libraryAssetIds: string[] }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/library-assets`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ libraryAssetIds }),
+      },
+    ),
+  directorTimelinePatchSceneMetadata: (
+    projectId: string,
+    sceneId: string,
+    body: { promptIntelligence?: Record<string, unknown> },
+  ) =>
+    req<{ ok: boolean; promptIntelligence?: unknown }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/metadata`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
     ),
   directorTimelinePutMaster: (
     projectId: string,
@@ -3955,6 +4122,7 @@ export const api = {
       alreadyCurrent?: boolean;
       incremental?: boolean;
       sceneStitch?: import("./timelineMaster/contracts").SceneStitch;
+      sceneFinalCheck?: import("./timelineMaster/contracts").SceneFinalCheck;
       master?: import("./timelineMaster/contracts").SceneTimelineMaster;
       assetId?: string;
       sourceBatchIds?: string[];
@@ -3963,6 +4131,121 @@ export const api = {
     }>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/stitch`,
       { method: "POST" },
+    ),
+  directorTimelineFinalCheckOpen: (projectId: string, sceneId: string) =>
+    req<{
+      ok: boolean;
+      sceneFinalCheck?: import("./timelineMaster/contracts").SceneFinalCheck;
+      master?: import("./timelineMaster/contracts").SceneTimelineMaster;
+      mock: boolean;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/final-check/open`,
+      { method: "POST" },
+    ),
+  directorTimelineFinalCheckDecision: (
+    projectId: string,
+    sceneId: string,
+    body: {
+      decision:
+        | "repair_automatically"
+        | "review_first"
+        | "keep_current"
+        | "decline"
+        | "dismiss"
+        | "auto_retake";
+      runtimeKind?: "local" | "api";
+    },
+  ) =>
+    req<{
+      ok: boolean;
+      decision?: string;
+      sceneFinalCheck?: import("./timelineMaster/contracts").SceneFinalCheck;
+      master?: import("./timelineMaster/contracts").SceneTimelineMaster;
+      apiCallCount?: number;
+      apiCallsDelta?: number;
+      mock: boolean;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/final-check/decision`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  directorTimelinePublishScene: (
+    projectId: string,
+    sceneId: string,
+    body?: { update?: boolean; expectedVersion?: number; source?: "stitch" | "upscaled" | "published" },
+  ) =>
+    req<{
+      ok: boolean;
+      updated?: boolean;
+      scenePublish?: import("./timelineMaster/contracts").ScenePublishState;
+      master?: import("./timelineMaster/contracts").SceneTimelineMaster;
+      publishedAssetId?: string;
+      contentFingerprint?: string;
+      changesPending?: boolean;
+      creatorMessage?: string;
+      error?: string;
+      mock: boolean;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/publish`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      },
+    ),
+  directorTimelineMagiUpscaleOptions: (projectId: string, sceneId: string, assetId?: string) => {
+    const q = new URLSearchParams();
+    if (assetId) q.set("assetId", assetId);
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return req<{
+      ok: boolean;
+      sourceAssetId?: string;
+      sourceWidth?: number;
+      sourceHeight?: number;
+      sourceResolution?: string;
+      targets?: Array<{ id: string; label: string; width: number; height: number }>;
+      defaultTarget?: string;
+      defaultEngine?: string;
+      defaultModel?: string;
+      realesrganReady?: boolean;
+      honesty?: string;
+      engines?: Array<Record<string, unknown>>;
+      creatorMessage?: string;
+      error?: string;
+      mock: boolean;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/magi-upscale/options${suffix}`,
+    );
+  },
+  directorTimelineMagiUpscale: (
+    projectId: string,
+    sceneId: string,
+    body?: { engine?: string; model?: string; targetResolution?: string; assetId?: string },
+  ) =>
+    req<{
+      ok: boolean;
+      queued?: boolean;
+      jobId?: string | null;
+      magi?: Record<string, unknown>;
+      sourceAssetId?: string;
+      upscaledAssetId?: string | null;
+      autoPublished?: boolean;
+      scenePublish?: import("./timelineMaster/contracts").ScenePublishState | null;
+      master?: import("./timelineMaster/contracts").SceneTimelineMaster;
+      creatorMessage?: string;
+      error?: string;
+      mock: boolean;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/magi-upscale`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          engine: body?.engine,
+          model: body?.model,
+          targetResolution: body?.targetResolution,
+          assetId: body?.assetId,
+        }),
+      },
     ),
   directorTimelineAddBatch: (
     projectId: string,
@@ -3997,6 +4280,27 @@ export const api = {
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}`,
       {
         method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  placeVisualImageRange: (
+    projectId: string,
+    sceneId: string,
+    body: {
+      markIn: number;
+      markOut: number;
+      imageAssetId: string;
+      placementId?: string;
+      batchId?: string;
+      sourceAssetId?: string;
+      label?: string;
+    },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/place-visual-image-range`,
+      {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       },
@@ -4070,6 +4374,28 @@ export const api = {
         body: JSON.stringify(body),
       },
     ),
+  directorTimelineRematerializeExecutionWindows: (
+    projectId: string,
+    sceneId: string,
+    body?: {
+      windows?: Array<Record<string, number>>;
+      plan?: Record<string, unknown>;
+      generatorId?: string;
+      durationSeconds?: number;
+      allowSceneTakeId?: string;
+      allowRevision?: number;
+      previousSceneTakeId?: string;
+      force?: boolean;
+    },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/execution-windows/rematerialize`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      },
+    ),
   directorTimelineGenerateScene: (
     projectId: string,
     sceneId: string,
@@ -4081,6 +4407,88 @@ export const api = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body || { scope: "full" }),
+      },
+    ),
+  directorTimelineListSceneTakes: (projectId: string, sceneId: string) =>
+    req<{
+      ok: boolean;
+      takes: Array<Record<string, unknown>>;
+      currentSceneTakeId?: string | null;
+      activeSceneTakeId?: string | null;
+      publishedTakeId?: string | null;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/scene-takes`,
+    ),
+  directorTimelineNewSceneTake: (projectId: string, sceneId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/scene-takes`,
+      { method: "POST" },
+    ),
+  directorTimelineBeginExecutionRevision: (
+    projectId: string,
+    sceneId: string,
+    body?: { reason?: string },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/scene-takes`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          intent: "execution_revision",
+          reason: body?.reason || "generator_switch_window_topology_change",
+        }),
+      },
+    ),
+  directorTimelineMakeSceneTakeCurrent: (projectId: string, sceneId: string, takeId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/scene-takes/${encodeURIComponent(takeId)}/make-current`,
+      { method: "POST" },
+    ),
+  directorTimelineResumeSceneTake: (projectId: string, sceneId: string, takeId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/scene-takes/${encodeURIComponent(takeId)}/resume`,
+      { method: "POST" },
+    ),
+  directorTimelineDeleteSceneTake: (projectId: string, sceneId: string, takeId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/scene-takes/${encodeURIComponent(takeId)}`,
+      { method: "DELETE" },
+    ),
+  directorTimelineGetSpokenLanguage: (projectId: string) =>
+    req<{
+      ok: boolean;
+      projectId: string;
+      spokenLanguage: { projectLanguage?: string | null } | null;
+      uiLanguage?: Record<string, unknown> | null;
+      authority?: Record<string, unknown>;
+      mock: boolean;
+    }>(`/api/director-timeline/projects/${encodeURIComponent(projectId)}/spoken-language`),
+  directorTimelinePutSpokenLanguage: (projectId: string, language: string) =>
+    req<{
+      ok: boolean;
+      projectId: string;
+      spokenLanguage: { projectLanguage?: string | null };
+      mock: boolean;
+    }>(`/api/director-timeline/projects/${encodeURIComponent(projectId)}/spoken-language`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language, source: "explicit" }),
+    }),
+  directorTimelinePutSceneSpokenLanguage: (projectId: string, sceneId: string, language: string) =>
+    req<{
+      ok: boolean;
+      projectId: string;
+      sceneId: string;
+      sceneLanguage: string;
+      spokenLanguage: Record<string, unknown>;
+      mock: boolean;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/spoken-language`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language }),
       },
     ),
   directorTimelineCancel: (
@@ -4111,7 +4519,11 @@ export const api = {
       },
     ),
   directorTimelinePreflight: (projectId: string, sceneId: string) =>
-    req<{ ok: boolean; findings: Array<{ severity: string; message: string; code?: string }> }>(
+    req<{
+      ok: boolean;
+      findings: Array<{ severity: string; message: string; code?: string }>;
+      productionReadiness?: Record<string, unknown> | null;
+    }>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/preflight`,
     ),
   directorTimelineSetContinuityPolicy: (
@@ -4199,6 +4611,8 @@ export const api = {
       referenceFrameTime?: number;
       frameAssetId?: string;
       removeBackground?: boolean;
+      /** When marks overlap imgclip_ / image_frame — I2V first-frame from that Visual still. */
+      referenceImageAssetId?: string;
     },
   ) =>
     req<Record<string, unknown>>(
@@ -4727,6 +5141,46 @@ export const api = {
         `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}`,
         { cache: "no-store" }
       ),
+    upsert: (
+      projectId: string,
+      body: {
+        sheetId?: string;
+        sheet_id?: string;
+        name: string;
+        description?: string;
+        environmentPrompt?: string;
+        isGlobal?: boolean;
+        is_global?: boolean;
+        referenceImageAssetId?: string | null;
+        storyTheme?: unknown;
+        aspectRatio?: string;
+        generator?: string;
+        characters?: unknown[];
+        props?: unknown[];
+        plan?: Record<string, unknown>;
+      },
+    ) =>
+      req<{
+        sheet: import("./contracts/environmentReferenceSheet").EnvironmentReferenceSheet;
+        summary: import("./contracts/environmentReferenceSheet").EnvironmentReferenceSheetSummary;
+        created: boolean;
+      }>(`/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    patchIdentity: (
+      projectId: string,
+      sheetId: string,
+      body: { name?: string; isGlobal?: boolean; is_global?: boolean },
+    ) =>
+      req<{
+        sheet: import("./contracts/environmentReferenceSheet").EnvironmentReferenceSheet;
+        summary: import("./contracts/environmentReferenceSheet").EnvironmentReferenceSheetSummary;
+      }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/identity`,
+        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
     getSheet: (projectId: string, sheetId: string) =>
       req<{
         sheet: import("./contracts/environmentReferenceSheet").EnvironmentReferenceSheet;
@@ -4738,6 +5192,171 @@ export const api = {
       req<{ ok: boolean }>(
         `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/semantic-gate/use-anyway`,
         { method: "POST" }
+      ),
+    /** Path A: approve the attached reference image as the official environment visual. */
+    approveReference: (projectId: string, sheetId: string, assetId: string) =>
+      req<{
+        ok: boolean;
+        sheet: import("./contracts/environmentReferenceSheet").EnvironmentReferenceSheet;
+        summary: import("./contracts/environmentReferenceSheet").EnvironmentReferenceSheetSummary;
+        approved: boolean;
+        assetId: string;
+        canonicalSheetId?: string | null;
+        path?: string;
+      }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/approve-reference`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assetId }) }
+      ),
+    /** Creator explicit: clear approval + official visual. Library bytes kept. */
+    clearApproval: (projectId: string, sheetId: string) =>
+      req<{
+        ok: boolean;
+        sheet: import("./contracts/environmentReferenceSheet").EnvironmentReferenceSheet;
+        summary: import("./contracts/environmentReferenceSheet").EnvironmentReferenceSheetSummary;
+        approved: boolean;
+        clearedAssetId?: string | null;
+        canonicalCleared?: boolean;
+      }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/clear-approval`,
+        { method: "POST" }
+      ),
+    /** ERS-scoped region edit enqueue → Comfy zimage.inpaint / Image Core purpose=region_edit. Derivative only. */
+    editEnqueue: (
+      projectId: string,
+      sheetId: string,
+      body: {
+        editPrompt: string;
+        maskAssetId: string;
+        sourceAssetId?: string;
+        maskPng?: string | null;
+        width?: number | null;
+        height?: number | null;
+        /** Guidance-only overlay (never baked into derivative unless prompt asks). */
+        drawingOverlay?: {
+          rasterPngBase64?: string | null;
+          rasterAssetId?: string | null;
+          vectors?: Array<{ type: string; points: number[]; stroke: string; width: number }>;
+        } | null;
+        textLabels?: Array<{
+          id: string;
+          text: string;
+          x: number;
+          y: number;
+          fontSize: number;
+          color: string;
+        }> | null;
+        numberedMarkers?: Array<{
+          id: string;
+          number: number;
+          x: number;
+          y: number;
+          label?: string;
+        }> | null;
+        overlayBakePolicy?: "guidance_only" | "bake_if_prompt_asks" | null;
+      },
+    ) =>
+      req<{
+        jobId?: string;
+        queueJobId?: string;
+        status?: string;
+        workflowKey?: string;
+        family?: string;
+        operation?: string;
+        sheetId?: string;
+        sourceAssetId?: string;
+        derivativeAssetId?: string | null;
+        resultAssetId?: string | null;
+        previewUrl?: string | null;
+        derivativeOnly?: boolean;
+      }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/edit/enqueue`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    /** Optional poll route for ERS edit jobs (may 404 until Backend ships it). */
+    getEditJob: (projectId: string, sheetId: string, jobId: string) =>
+      req<{
+        jobId?: string;
+        queueJobId?: string;
+        status?: string;
+        message?: string | null;
+        progress?: number | null;
+        error?: string | null;
+        workflowKey?: string;
+        sheetId?: string;
+        sourceAssetId?: string;
+        derivativeAssetId?: string | null;
+        resultAssetId?: string | null;
+        previewUrl?: string | null;
+        derivativeOnly?: boolean;
+      }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/edit/jobs/${encodeURIComponent(jobId)}`,
+        { cache: "no-store" },
+      ),
+    /** Create draft ERS vN from edit derivative — does NOT overwrite parent sheet. */
+    createVersion: (
+      projectId: string,
+      sheetId: string,
+      body: { derivativeAssetId: string; editPrompt?: string },
+    ) =>
+      req<{
+        versionSheetId?: string;
+        sheetId?: string;
+        parentSheetId?: string;
+        status?: string;
+        derivativeAssetId?: string;
+        versionNumber?: number;
+        [key: string]: unknown;
+      }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/versions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    /** Creator Approve only — promotes draft ERS version; never auto-approve. */
+    approveVersion: (projectId: string, sheetId: string, versionSheetId: string) =>
+      req<{
+        ok?: boolean;
+        versionSheetId?: string;
+        sheetId?: string;
+        status?: string;
+        [key: string]: unknown;
+      }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/versions/${encodeURIComponent(versionSheetId)}/approve`,
+        { method: "POST" },
+      ),
+    /** Optional list of ERS edit versions for View/Compare/Revert. */
+    listVersions: (projectId: string, sheetId: string) =>
+      req<{
+        versions?: Array<{
+          versionSheetId?: string;
+          sheetId?: string;
+          parentSheetId?: string;
+          status?: string;
+          derivativeAssetId?: string;
+          versionNumber?: number;
+          [key: string]: unknown;
+        }>;
+      }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/versions`,
+        { cache: "no-store" },
+      ),
+    deleteSheet: (projectId: string, sheetId: string, confirmCrossProject = false) =>
+      req<{ deleted: boolean; sheet_id: string; name: string; library_assets_kept: boolean }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}${
+          confirmCrossProject ? "?confirm_cross_project=true" : ""
+        }`,
+        { method: "DELETE" },
+      ),
+    getDeletePreview: (projectId: string, sheetId: string) =>
+      req<CreatorDeletePreview>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/delete-preview`,
+        { cache: "no-store" },
       ),
   },
   sceneCreator: {
@@ -5121,6 +5740,12 @@ export const api = {
         approved_asset_id?: string | null;
         library_asset_id?: string | null;
         identity_asset_id?: string;
+        mode?: "standard" | "advanced";
+        advanced_type?: string | null;
+        primary_prompt?: string;
+        hero_optional?: boolean;
+        is_global?: boolean;
+        isGlobal?: boolean;
       },
     ) =>
       req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
@@ -5170,10 +5795,17 @@ export const api = {
         `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/candidates/${encodeURIComponent(candidateId)}/retry`,
         { method: "POST" },
       ),
-    delete: (projectId: string, propId: string) =>
+    delete: (projectId: string, propId: string, confirmCrossProject = false) =>
       req<{ ok: boolean; prop_id: string; library_assets_kept: boolean; spatial_unlinked: number }>(
-        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}`,
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}${
+          confirmCrossProject ? "?confirm_cross_project=true" : ""
+        }`,
         { method: "DELETE" },
+      ),
+    deletePreview: (projectId: string, propId: string) =>
+      req<CreatorDeletePreview>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/delete-preview`,
+        { cache: "no-store" },
       ),
     useAsIdentity: (projectId: string, propId: string, assetId: string) =>
       req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
@@ -5182,6 +5814,116 @@ export const api = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ asset_id: assetId }),
+        },
+      ),
+    composeReferenceSheet: (projectId: string, propId: string) =>
+      req<{
+        prop: import("./components/CoDirector/PropCreator/types").PropEntity;
+        sheet_asset_id: string;
+        canonical_tag: string;
+      }>(`/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/reference-sheet/compose`, {
+        method: "POST",
+      }),
+    advancedEngine: (projectId: string, propId: string) =>
+      req<Record<string, unknown>>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/engine`,
+        { cache: "no-store" },
+      ),
+    advancedPrimaryGenerate: (
+      projectId: string,
+      propId: string,
+      body: {
+        local_enabled?: boolean;
+        api_enabled?: boolean;
+        local_family?: string;
+        api_model?: string;
+        candidate_count?: number;
+        generatorSources?: Record<string, unknown>;
+      } = {},
+    ) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/primary/generate`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    advancedPrimaryApprove: (
+      projectId: string,
+      propId: string,
+      body: { candidate_id?: string; asset_id?: string } = {},
+    ) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/primary/approve`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    advancedAngleGenerate: (projectId: string, propId: string, angle: string) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/angles/${encodeURIComponent(angle)}/generate`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      ),
+    advancedAngleRegenerate: (projectId: string, propId: string, angle: string) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/angles/${encodeURIComponent(angle)}/regenerate`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      ),
+    advancedAngleApprove: (projectId: string, propId: string, angle: string, approved = true) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/angles/${encodeURIComponent(angle)}/approve`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approved }) },
+      ),
+    advancedReferenceSheetGenerate: (projectId: string, propId: string) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/reference-sheet/generate`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      ),
+    advancedReferenceSheetCancel: (projectId: string, propId: string) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/reference-sheet/cancel`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      ),
+    advancedPrimaryUpload: async (projectId: string, propId: string, file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/primary/upload`,
+        { method: "POST", body: fd },
+      );
+    },
+    advancedAngleUpload: async (projectId: string, propId: string, angle: string, file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/angles/${encodeURIComponent(angle)}/upload`,
+        { method: "POST", body: fd },
+      );
+    },
+    advancedAngleAdopt: (
+      projectId: string,
+      propId: string,
+      angle: string,
+      body: { assetId: string; sourceType?: string },
+    ) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/advanced/angles/${encodeURIComponent(angle)}/adopt`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assetId: body.assetId, sourceType: body.sourceType || "uploaded" }),
+        },
+      ),
+    uploadPropView: async (projectId: string, propId: string, file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/views/upload`,
+        { method: "POST", body: fd },
+      );
+    },
+    adoptPropView: (projectId: string, propId: string, body: { assetId: string; sourceType?: string }) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/views/adopt`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assetId: body.assetId, sourceType: body.sourceType || "uploaded" }),
         },
       ),
   },
@@ -5721,6 +6463,11 @@ export const api = {
         `/api/projects/${projectId}/references${qs ? `?${qs}` : ""}`
       );
     },
+    get: (projectId: string, bindingId: string) =>
+      req<Record<string, unknown>>(
+        `/api/projects/${encodeURIComponent(projectId)}/references/id/${encodeURIComponent(bindingId)}`,
+        { cache: "no-store" },
+      ),
     attach: (projectId: string, body: Record<string, unknown>) =>
       req<Record<string, unknown>>(`/api/projects/${projectId}/references`, {
         method: "POST",
@@ -5950,6 +6697,20 @@ export const api = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+      }),
+    ingestPublishedMaster: (projectId: string, sceneId: string) =>
+      req<{
+        ok: boolean;
+        sequence?: Record<string, unknown>;
+        publishedAssetId?: string;
+        hasAudio?: boolean;
+        durationFrames?: number;
+        idempotent?: boolean;
+        alignedSceneId?: string;
+        requestedSceneId?: string;
+        message?: string;
+      }>(`/api/magi/projects/${projectId}/scenes/${encodeURIComponent(sceneId)}/ingest-published-master`, {
+        method: "POST",
       }),
     importTimelineAsset: (projectId: string, body: Record<string, unknown>) =>
       req<{ ok: boolean; clip?: Record<string, unknown>; message?: string }>(
@@ -7332,6 +8093,16 @@ export const api = {
           imageReferencesReady: boolean;
           voiceReady: boolean;
           generationPlanReady: boolean;
+          liveComputed?: boolean;
+          departments?: Array<{
+            category: string;
+            status: "ready" | "not_required" | "blocked";
+            reason: string;
+            resolved: number;
+            required: number;
+            items: string[];
+            missing: string[];
+          }>;
         };
         gateLevel: "EXPLORATION" | "PRODUCTION_WARNING" | "PRODUCTION_LOCK";
         sceneStatus: string;
@@ -7620,6 +8391,13 @@ export const api = {
     if (rev == null || String(rev).trim() === "") return base;
     const join = base.includes("?") ? "&" : "?";
     return `${base}${join}rev=${encodeURIComponent(String(rev))}`;
+  },
+  assetThumbUrl: (assetId: string, projectId?: string | null, w = 256) => {
+    const pid = String(projectId || getBoundAssetProjectId() || "").trim();
+    if (!pid || !assetId) return "";
+    return apiUrl(
+      `/api/projects/${encodeURIComponent(pid)}/assets/${encodeURIComponent(assetId)}/thumb?w=${encodeURIComponent(String(w))}`,
+    );
   },
   m28Status: () => req<Record<string, boolean>>("/api/codirector/m28/status"),
   m28RadarDiscover: (source: "huggingface" | "github") =>
@@ -8101,10 +8879,17 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}`,
       { method: "PATCH", body: JSON.stringify(body) },
     ),
-  deleteCharacterProfile: (projectId: string, characterId: string) =>
+  deleteCharacterProfile: (projectId: string, characterId: string, confirmCrossProject = false) =>
     req<{ deleted: boolean; name: string }>(
-      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}`,
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}${
+        confirmCrossProject ? "?confirm_cross_project=true" : ""
+      }`,
       { method: "DELETE" },
+    ),
+  getCharacterDeletePreview: (projectId: string, characterId: string) =>
+    req<CreatorDeletePreview>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/delete-preview`,
+      { cache: "no-store" },
     ),
   listCharacterVersions: (projectId: string, characterId: string) =>
     req<{ items: any[] }>(
@@ -8252,6 +9037,10 @@ export const api = {
     req<any>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/voice/design/generate`,
       { method: "POST", body: JSON.stringify(body) },
+    ),
+  getCharacterVoiceGenerateStatus: (projectId: string, characterId: string) =>
+    req<any>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/voice/generate/status`,
     ),
   characterVoiceApprovedStatus: (projectId: string, characterId: string) =>
     req<{ hasApprovedVoice: boolean; voiceProfileId?: string; previewAssetId?: string; voiceProfileName?: string }>(
@@ -8413,25 +9202,43 @@ export const api = {
       req<{ ok: boolean; presets: VoicePerformanceEmotionPreset[]; mock?: boolean }>(
         "/api/voice-performance/m410/emotion-presets",
       ),
-    createRecord: (body: Record<string, unknown>) =>
-      req<VoicePerformanceRecord>("/api/voice-performance/m410/records", {
+    createRecord: (body: Record<string, unknown>) => {
+      const projectId = String(body.projectId || "").trim();
+      const characterId = String(body.characterId || "").trim();
+      const voiceIdentityId = String(body.voiceIdentityId || "").trim();
+      if (!projectId || !characterId || !voiceIdentityId) {
+        return Promise.reject(new Error("Voice Identity Required"));
+      }
+      return req<VoicePerformanceRecord>("/api/voice-performance/m410/records", {
         method: "POST",
         body: JSON.stringify(body),
-      }),
-    getRecord: (recordId: string) =>
-      req<VoicePerformanceRecord>(`/api/voice-performance/m410/records/${encodeURIComponent(recordId)}`),
-    listProjectRecords: (projectId: string) =>
-      req<VoicePerformanceRecordList>(
-        `/api/voice-performance/m410/projects/${encodeURIComponent(projectId)}/records`,
-      ),
-    generatePerformancePlan: (recordId: string, body?: { context?: Record<string, unknown> }) =>
-      req<VoicePerformanceRecord>(
-        `/api/voice-performance/m410/records/${encodeURIComponent(recordId)}/performance-plan`,
+      });
+    },
+    getRecord: (recordId: string) => {
+      const id = String(recordId || "").trim();
+      if (!id) return Promise.reject(new Error("Voice record is required."));
+      return req<VoicePerformanceRecord>(`/api/voice-performance/m410/records/${encodeURIComponent(id)}`);
+    },
+    listProjectRecords: (projectId: string) => {
+      const id = String(projectId || "").trim();
+      if (!id) {
+        return Promise.resolve({ projectId: "", records: [] } satisfies VoicePerformanceRecordList);
+      }
+      return req<VoicePerformanceRecordList>(
+        `/api/voice-performance/m410/projects/${encodeURIComponent(id)}/records`,
+      );
+    },
+    generatePerformancePlan: (recordId: string, body?: { context?: Record<string, unknown> }) => {
+      const id = String(recordId || "").trim();
+      if (!id) return Promise.reject(new Error("Voice record is required."));
+      return req<VoicePerformanceRecord>(
+        `/api/voice-performance/m410/records/${encodeURIComponent(id)}/performance-plan`,
         {
           method: "POST",
           body: JSON.stringify(body || {}),
         },
-      ),
+      );
+    },
     patchPerformancePlan: (
       recordId: string,
       body: {
@@ -8459,8 +9266,10 @@ export const api = {
           body: JSON.stringify(body),
         },
       ),
-    generateTakes: (recordId: string, body?: { count?: number; labels?: string[] }) =>
-      req<{
+    generateTakes: (recordId: string, body?: { count?: number; labels?: string[]; preferredProvider?: string }) => {
+      const id = String(recordId || "").trim();
+      if (!id) return Promise.reject(new Error("Voice record is required."));
+      return req<{
         ok: boolean;
         recordId: string;
         providerId: string;
@@ -8468,14 +9277,20 @@ export const api = {
         modelRevision?: string | null;
         takes: VoicePerformanceRecord["takes"];
         mock?: boolean;
-      }>(`/api/voice-performance/m410/records/${encodeURIComponent(recordId)}/generate-takes`, {
+      }>(`/api/voice-performance/m410/records/${encodeURIComponent(id)}/generate-takes`, {
         method: "POST",
         body: JSON.stringify(body || {}),
-      }),
-    listTakes: (recordId: string) =>
-      req<VoicePerformanceTakeList>(
-        `/api/voice-performance/m410/records/${encodeURIComponent(recordId)}/takes`,
-      ),
+      });
+    },
+    listTakes: (recordId: string) => {
+      const id = String(recordId || "").trim();
+      if (!id) {
+        return Promise.resolve({ recordId: "", takes: [] } satisfies VoicePerformanceTakeList);
+      }
+      return req<VoicePerformanceTakeList>(
+        `/api/voice-performance/m410/records/${encodeURIComponent(id)}/takes`,
+      );
+    },
     approveTake: (recordId: string, takeId: string, body?: { approvedBy?: string }) =>
       req<{
         ok: boolean;
@@ -8562,10 +9377,10 @@ export const api = {
         `/api/voice-environment/projects/${encodeURIComponent(projectId)}/renders` + (qs ? `?${qs}` : ""),
       );
     },
-    approve: (renderId: string, approved = true) =>
+    approve: (renderId: string, approved = true, opts?: { isGlobal?: boolean }) =>
       req<any>(`/api/voice-environment/renders/${encodeURIComponent(renderId)}/approve`, {
         method: "POST",
-        body: JSON.stringify({ approved }),
+        body: JSON.stringify({ approved, isGlobal: Boolean(opts?.isGlobal) }),
       }),
     applyToScene: (renderId: string, sceneId: string) =>
       req<any>(`/api/voice-environment/renders/${encodeURIComponent(renderId)}/apply-to-scene`, {
@@ -8619,6 +9434,29 @@ export const api = {
     req<Record<string, unknown>>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/multiview/angles/${encodeURIComponent(angle)}/regenerate`,
       { method: "POST", body: "{}" },
+    ),
+  uploadCharacterAngle: async (
+    projectId: string,
+    characterId: string,
+    angle: "side" | "three_quarter" | "back",
+    file: File,
+  ) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/multiview/angles/${encodeURIComponent(angle)}/upload`,
+      { method: "POST", body: fd },
+    );
+  },
+  adoptCharacterAngle: (
+    projectId: string,
+    characterId: string,
+    angle: "side" | "three_quarter" | "back",
+    body: { assetId: string; sourceType?: "uploaded" | "upload" | "library" },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/multiview/angles/${encodeURIComponent(angle)}/adopt`,
+      { method: "POST", body: JSON.stringify({ assetId: body.assetId, sourceType: body.sourceType || "uploaded" }) },
     ),
   approveCharacterAngle: (
     projectId: string,
@@ -9051,47 +9889,6 @@ export const api = {
       phase41bGo?: boolean;
       message: string;
     }>("/api/video-runtime/gate"),
-  hunyuanLibrary: () =>
-    req<{
-      ok: boolean;
-      defaultProviderId: string;
-      providers: Array<Record<string, unknown>>;
-    }>("/api/video-runtime/hunyuan/library"),
-  hunyuanProviders: () =>
-    req<{ ok: boolean; providers: Array<Record<string, unknown>> }>("/api/video-runtime/hunyuan/providers"),
-  hunyuanPreflight: (providerId: string) =>
-    req<Record<string, unknown>>(
-      `/api/video-runtime/hunyuan/providers/${encodeURIComponent(providerId)}/preflight`,
-    ),
-  hunyuanHealth: (providerId: string) =>
-    req<Record<string, unknown>>(
-      `/api/video-runtime/hunyuan/providers/${encodeURIComponent(providerId)}/health`,
-    ),
-  hunyuanInstall: (providerId: string) =>
-    req<Record<string, unknown>>(
-      `/api/video-runtime/hunyuan/providers/${encodeURIComponent(providerId)}/install`,
-      { method: "POST" },
-    ),
-  hunyuanRemove: (providerId: string) =>
-    req<Record<string, unknown>>(
-      `/api/video-runtime/hunyuan/providers/${encodeURIComponent(providerId)}/remove`,
-      { method: "POST" },
-    ),
-  hunyuanRepair: (providerId: string) =>
-    req<Record<string, unknown>>(
-      `/api/video-runtime/hunyuan/providers/${encodeURIComponent(providerId)}/repair`,
-      { method: "POST" },
-    ),
-  hunyuanBenchmark: (providerId: string) =>
-    req<Record<string, unknown>>(
-      `/api/video-runtime/hunyuan/providers/${encodeURIComponent(providerId)}/benchmark`,
-      { method: "POST" },
-    ),
-  hunyuanBenchmarkLatest: (providerId: string) =>
-    req<Record<string, unknown>>(
-      `/api/video-runtime/hunyuan/providers/${encodeURIComponent(providerId)}/benchmark`,
-    ),
-
   /** M42 Production Control Dock */
   productionControlStatus: (projectId?: string) =>
     req<import("./modelRegistry/contracts").ProductionControlStatus>(

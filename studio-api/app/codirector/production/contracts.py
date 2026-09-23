@@ -200,8 +200,14 @@ class SceneProductionSpec(BaseModel):
     camera: CameraSpec = Field(default_factory=CameraSpec)
     scale_relationships: list[ScaleRelationship] = Field(default_factory=list)
     compiled_prompt: str = ""
+    batchWindows: list[dict[str, float]] = Field(default_factory=list)
     preparation_state: PreparationState = "parsing"
     follow_up: bool = False
+    # Same-Take continuity keys for VerifiedContinuityMemory (Batch N+1).
+    take_id: str = ""
+    scene_revision: str = ""
+    # Locked Dialogue Manifest for this compile (fail-closed: Omni never fills this).
+    dialogue_manifest: Optional[dict[str, Any]] = None
 
 
 class PreparedSceneResult(BaseModel):

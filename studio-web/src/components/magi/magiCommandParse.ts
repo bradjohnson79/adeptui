@@ -1,7 +1,7 @@
-/** MAGI Command → operation / overlay proposal (no execution). */
+/** MAGI Command → finishing proposal (no production generation / inpaint). */
 
 export type MagiCommandProposal = {
-  kind: "image_edit" | "overlay";
+  kind: "image_edit" | "overlay" | "audio" | "color" | "render";
   operation: string;
   actionId: string;
   label: string;
@@ -21,6 +21,10 @@ export type MagiCommandProposal = {
 export function proposeFromCommand(text: string): MagiCommandProposal | null {
   const t = text.trim().toLowerCase();
   if (!t) return null;
+
+  if (/\b(re-?take|inpaint|mask\s*repair|timed\s*prompt)\b/.test(t)) {
+    return null;
+  }
 
   if (/\b(lower\s*third|name\s*plate|identifier)\b/.test(t)) {
     const primary = (text.match(/identifying\s+([A-Za-z][\w\s-]{0,40})/i) || [])[1]?.trim() || "NAME";
@@ -80,37 +84,37 @@ export function proposeFromCommand(text: string): MagiCommandProposal | null {
       overlayPayload: {},
     };
   }
-  if (/\b(remove|erase|delete|inpaint)\b/.test(t) && /\b(object|person|people|background|thing)\b/.test(t)) {
+  if (/\b(no music|without music|music:?\s*none)\b/.test(t)) {
     return {
-      kind: "image_edit",
-      operation: "image.object_remove",
-      actionId: "object_remove",
-      label: "Remove Object / Inpaint",
-      requiresMask: true,
-      confidence: "high",
-    };
-  }
-  if (/\binpaint\b/.test(t)) {
-    return {
-      kind: "image_edit",
-      operation: "image.inpaint",
-      actionId: "inpaint",
-      label: "Inpaint",
-      requiresMask: true,
-      confidence: "high",
-    };
-  }
-  if (/\b(outpaint|extend|expand|canvas)\b/.test(t)) {
-    return {
-      kind: "image_edit",
-      operation: "image.outpaint",
-      actionId: "outpaint",
-      label: "Outpaint",
+      kind: "audio",
+      operation: "magi.music.none",
+      actionId: "music_none",
+      label: "No Music",
       requiresMask: false,
       confidence: "high",
     };
   }
-  if (/\b(upscale|enhance resolution|2x|4k)\b/.test(t)) {
+  if (/\b(keep original audio|original audio untouched|do not (change|touch) (the )?audio)\b/.test(t)) {
+    return {
+      kind: "audio",
+      operation: "magi.audio.keep_original",
+      actionId: "keep_audio",
+      label: "Keep Original Audio",
+      requiresMask: false,
+      confidence: "high",
+    };
+  }
+  if (/\bprofessionally finish\b/.test(t) || /\bfinish this scene\b/.test(t)) {
+    return {
+      kind: "render",
+      operation: "magi.propose_finish",
+      actionId: "propose_finish",
+      label: "Finish Scene",
+      requiresMask: false,
+      confidence: "high",
+    };
+  }
+  if (/\b(upscale|enhance resolution|2k|4k|2x)\b/.test(t)) {
     return {
       kind: "image_edit",
       operation: "image.upscale",
@@ -120,42 +124,35 @@ export function proposeFromCommand(text: string): MagiCommandProposal | null {
       confidence: "high",
     };
   }
-  if (/\b(reference|style|look like)\b/.test(t)) {
+  if (/\b(grade|color|exposure|contrast|saturation|cinematic|look)\b/.test(t)) {
     return {
-      kind: "image_edit",
-      operation: "image.reference_edit",
-      actionId: "reference_edit",
-      label: "Reference Edit",
+      kind: "color",
+      operation: "magi.color.apply",
+      actionId: "color_grade",
+      label: "Color Grade",
+      requiresMask: false,
+      confidence: "high",
+    };
+  }
+  if (/\b(music|soundtrack|score|ambience|sfx|sound\s*mix)\b/.test(t)) {
+    return {
+      kind: "audio",
+      operation: "magi.audio.generate",
+      actionId: "audio_finish",
+      label: "Audio Finish",
       requiresMask: false,
       confidence: "medium",
     };
   }
-  if (/\b(relight|lighting|moonlight)\b/.test(t)) {
+  if (/\b(render|export|deliver|finish|publish)\b/.test(t)) {
     return {
-      kind: "image_edit",
-      operation: "image.relight",
-      actionId: "relight",
-      label: "Relight",
+      kind: "render",
+      operation: "magi.render",
+      actionId: "render",
+      label: "Final Render",
       requiresMask: false,
       confidence: "medium",
     };
   }
-  if (/\b(face|hands|repair)\b/.test(t)) {
-    return {
-      kind: "image_edit",
-      operation: "image.face_restore",
-      actionId: "face_restore",
-      label: "Repair Face",
-      requiresMask: false,
-      confidence: "medium",
-    };
-  }
-  return {
-    kind: "image_edit",
-    operation: "image.inpaint",
-    actionId: "inpaint",
-    label: "Inpaint (default proposal)",
-    requiresMask: true,
-    confidence: "low",
-  };
+  return null;
 }

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type {
   ImageGenerationPlan,
@@ -8,6 +9,7 @@ import type {
   ProductionImageRequest,
 } from "../../contracts/imagePipeline";
 import { COLOR_GRADE_OPTIONS, DEFAULT_COLOR_GRADE, type ColorGradePresetId } from "../../contracts/colorGrades";
+import { CHARACTER_STYLE_OPTIONS } from "../character/types";
 
 function qualityLabel(value: ImagePipelineQualityProfile): string {
   switch (value) {
@@ -63,6 +65,8 @@ type ProductionPipelinePanelProps = {
   spatialMapVersion?: string;
   colorGradePreset?: ColorGradePresetId;
   onColorGradeChange?: (id: ColorGradePresetId) => void;
+  visualStyle?: string;
+  onVisualStyleChange?: (id: string) => void;
   hideTitle?: boolean;
 };
 
@@ -77,8 +81,11 @@ export function ProductionPipelinePanel({
   spatialMapVersion,
   colorGradePreset = DEFAULT_COLOR_GRADE,
   onColorGradeChange,
+  visualStyle = "live_action",
+  onVisualStyleChange,
   hideTitle = false,
 }: ProductionPipelinePanelProps) {
+  const { t } = useTranslation(["imageGenerator"]);
   const [qualityProfile, setQualityProfile] = useState<ImagePipelineQualityProfile>("enhanced");
   const [plan, setPlan] = useState<ImageGenerationPlan | null>(null);
   const [candidateGroup, setCandidateGroup] = useState<ImagePipelineCandidateGroup | null>(null);
@@ -229,6 +236,21 @@ export function ProductionPipelinePanel({
             <option value="enhanced">Enhanced</option>
             <option value="cinematic">Cinematic</option>
             <option value="studio-master">Studio Master</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="image-pipeline-scene-style">{t("imageGenerator:sceneStyle")}</label>
+          <select
+            id="image-pipeline-scene-style"
+            data-testid="cis-scene-style"
+            value={visualStyle || "live_action"}
+            onChange={(event) => onVisualStyleChange?.(event.target.value)}
+          >
+            {CHARACTER_STYLE_OPTIONS.filter((o) => o.value).map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
           </select>
         </div>
         <div className="field">

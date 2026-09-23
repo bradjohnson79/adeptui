@@ -4,7 +4,7 @@
   --timeline-left-width: 280px;
   --timeline-right-width: 320px;
   --timeline-drawer-handle-width: 14px;
-  --timeline-track-label-width: 132px;
+  --timeline-track-label-width: 220px;
   --timeline-v2-track-label-color: #e1e8f2;
   --timeline-v2-track-label-muted: #c5d0dc;
   --timeline-v2-track-label-bg: #080c13;
@@ -97,6 +97,13 @@
   margin: 0;
   color: #ffd4a8;
   font-size: 0.78rem;
+  white-space: pre-line;
+}
+
+/* Secondary mirror — primary creator chrome lives inside Preview Monitor. */
+.timeline-v2__action-notice[data-secondary="true"] {
+  opacity: 0.75;
+  font-size: 0.72rem;
 }
 
 .timeline-v2__body {
@@ -403,6 +410,32 @@
   height: 100%;
   direction: ltr;
   unicode-bidi: isolate;
+}
+
+.scene-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.7rem;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  /* Stay inside the rounded tracks panel; do not sit under the left drawer handle. */
+  padding: 0.2rem 0.75rem 0.05rem 0.85rem;
+}
+
+.timeline-v2__body[data-left-open="false"] .scene-status-strip {
+  padding-left: calc(var(--timeline-drawer-handle-width, 14px) + 0.65rem);
+}
+
+.scene-status-pill {
+  font-size: 0.82rem;
+  color: var(--timeline-v2-track-label-muted, #c5d0dc);
+}
+
+.scene-status-pill--preview-take {
+  font-weight: 600;
+  color: var(--timeline-v2-track-label-color, #e1e8f2);
+  white-space: nowrap;
 }
 
 .timeline-v2__tabs {

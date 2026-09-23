@@ -1,13 +1,23 @@
-"""Port owner detection via netstat. No PowerShell."""
+"""Port owner detection. Windows uses IP Helper — never NETSTAT.EXE.
+
+NETSTAT.EXE 0xc0000142 (DLL init failure) was observed on the Adept host and
+pops a blocking error dialog. Do not spawn netstat from the supervisor.
+"""
 
 from __future__ import annotations
 
 import re
-import subprocess
+import socket
+import struct
+import sys
 import time
 
 _LISTENING_RE = re.compile(r":(?P<port>\d+)\s+\S+\s+LISTENING\s+(?P<pid>\d+)\s*$", re.IGNORECASE)
 _LISTENING_RE_ALT = re.compile(r":(?P<port>\d+).+LISTENING\s+(?P<pid>\d+)\s*$", re.IGNORECASE)
+
+_MIB_TCP_STATE_LISTEN = 2
+_AF_INET = 2
+_TCP_TABLE_OWNER_PID_ALL = 5
 
 
 def parse_netstat_owner(netstat_text: str, port: int) -> int | None:
@@ -33,18 +43,55 @@ def parse_netstat_owner(netstat_text: str, port: int) -> int | None:
     return None
 
 
-def port_owner_pid(port: int) -> int | None:
-    try:
-        completed = subprocess.run(
-            ["netstat", "-ano"],
-            capture_output=True,
-            text=True,
-            timeout=8,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+def _port_owner_pid_iphlpapi(port: int) -> int | None:
+    """Look up a LISTENING owner via GetExtendedTcpTable. No netstat.exe."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _Row(ctypes.Structure):
+        _fields_ = [
+            ("dwState", wintypes.DWORD),
+            ("dwLocalAddr", wintypes.DWORD),
+            ("dwLocalPort", wintypes.DWORD),
+            ("dwRemoteAddr", wintypes.DWORD),
+            ("dwRemotePort", wintypes.DWORD),
+            ("dwOwningPid", wintypes.DWORD),
+        ]
+
+    iphlpapi = ctypes.WinDLL("iphlpapi", use_last_error=True)
+    size = wintypes.DWORD(0)
+    iphlpapi.GetExtendedTcpTable(None, ctypes.byref(size), False, _AF_INET, _TCP_TABLE_OWNER_PID_ALL, 0)
+    if size.value <= 0:
         return None
-    return parse_netstat_owner(completed.stdout or "", port)
+    buf = ctypes.create_string_buffer(size.value)
+    status = iphlpapi.GetExtendedTcpTable(buf, ctypes.byref(size), False, _AF_INET, _TCP_TABLE_OWNER_PID_ALL, 0)
+    if status != 0:
+        return None
+    count = struct.unpack_from("I", buf, 0)[0]
+    offset = ctypes.sizeof(wintypes.DWORD)
+    row_size = ctypes.sizeof(_Row)
+    want = int(port)
+    for index in range(count):
+        row = _Row.from_buffer_copy(buf, offset + index * row_size)
+        local_port = socket.ntohs(row.dwLocalPort & 0xFFFF)
+        pid = int(row.dwOwningPid)
+        if local_port != want or pid <= 0:
+            continue
+        # Only a LISTEN row means a server owns the port. FIN_WAIT/TIME_WAIT
+        # leftovers from a just-stopped API must not block a new bind.
+        if int(row.dwState) == _MIB_TCP_STATE_LISTEN:
+            return pid
+    return None
+
+
+def port_owner_pid(port: int) -> int | None:
+    if sys.platform == "win32":
+        try:
+            return _port_owner_pid_iphlpapi(port)
+        except (OSError, ValueError, AttributeError, BufferError):
+            return None
+    # Non-Windows tests may still feed parse_netstat_owner directly.
+    return None
 
 
 def port_is_free(port: int) -> bool:

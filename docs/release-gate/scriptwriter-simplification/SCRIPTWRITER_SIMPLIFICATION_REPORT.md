@@ -1,5 +1,7 @@
 # Script Writer Simplification + Co-Director Story/Script Access — Completion Report
 
+> **SUPERSEDED (Story navigation only, 2026-09-11):** Script Writer Standard → Story no longer routes to Co-Director. Current authority: `docs/release-gate/scriptwriter-story-document/SCRIPT_WRITER_STORY_DOCUMENT.md`. Co-Director Story Express remains available independently. Canonical store is still `story_entries`.
+
 Date: 2026-09-11
 Branch: `feat/character-creator-final-closure`
 Surface under test: local creator UI `http://127.0.0.1:5173/` + Studio API `http://127.0.0.1:8758/` (live Beta target, `ADEPT_BETA_TARGET=1`)

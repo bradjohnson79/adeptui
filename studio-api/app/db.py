@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from .config import settings
@@ -22,7 +22,7 @@ class Project(Base):
     global_prompt: Mapped[str] = mapped_column(Text, default="")
     negative_prompt: Mapped[str] = mapped_column(Text, default="blurry, low quality, watermark")
     width: Mapped[int] = mapped_column(Integer, default=1280)
-    height: Mapped[int] = mapped_column(Integer, default=720)
+    height: Mapped[int] = mapped_column(Integer, default=704)
     fps: Mapped[int] = mapped_column(Integer, default=24)
     seed: Mapped[int] = mapped_column(Integer, default=-1)
     preset: Mapped[str] = mapped_column(String(32), default="quality")
@@ -135,6 +135,23 @@ class Job(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="jobs")
+
+
+@event.listens_for(Job, "before_insert")
+def _stamp_job_runtime_session(_mapper, _connection, target: Job) -> None:
+    """New rows belong to this process. Existing rows keep the id they were given."""
+    import json
+
+    from .runtime_session import stamp_runtime_session
+
+    try:
+        params = json.loads(target.params_json or "{}")
+    except json.JSONDecodeError:
+        params = {}
+    if not isinstance(params, dict):
+        params = {}
+    stamp_runtime_session(params)
+    target.params_json = json.dumps(params)
 
 
 class CoDirectorConversation(Base):
@@ -771,6 +788,12 @@ def init_db() -> None:
         from .story_entries.store import ensure_story_entries_tables
 
         ensure_story_entries_tables()
+    except Exception:
+        pass
+    try:
+        from .scene_prompt_templates.store import ensure_scene_prompt_template_tables
+
+        ensure_scene_prompt_template_tables()
     except Exception:
         pass
     try:

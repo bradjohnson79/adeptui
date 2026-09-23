@@ -59,7 +59,7 @@ test.describe("@critical @beta timeline draft-first aspect video-ref UI", () => 
     expect(batchId).toBeTruthy();
     await request.patch(
       `${API}/api/director-timeline/projects/${project.id}/scenes/${scene.id}/batches/${batchId}`,
-      { data: { generatorId: "ltx-local", promptSegments: [{ text: "draft preview walk", start: 0, length: 5, role: "primary", strength: 1, anchorIds: [], executionStrategy: "compiled" }] } },
+      { data: { generatorId: "ltx-2.5-distilled", promptSegments: [{ text: "draft preview walk", start: 0, length: 5, role: "primary", strength: 1, anchorIds: [], executionStrategy: "compiled" }] } },
     );
 
     await page.route("**/director-timeline/**/generate", async (route) => {
@@ -69,7 +69,7 @@ test.describe("@critical @beta timeline draft-first aspect video-ref UI", () => 
         body: JSON.stringify({
           ok: true,
           mock: true,
-          generatorId: "ltx-local",
+          generatorId: "ltx-2.5-distilled",
           hostedCancelSupport: "supported",
         }),
       });
@@ -86,13 +86,13 @@ test.describe("@critical @beta timeline draft-first aspect video-ref UI", () => 
     }
 
     await expect(page.getByTestId("timeline-batch-generator")).toBeVisible({ timeout: 20_000 });
-    await page.getByTestId("timeline-batch-generator").selectOption("ltx-local");
+    await page.getByTestId("timeline-batch-generator").selectOption("ltx-2.5-distilled");
     await expect(page.getByTestId("timeline-draft-mode")).toBeVisible();
     await expect(page.getByTestId("timeline-draft-mode")).toBeChecked();
     await expect(page.getByTestId("timeline-draft-pathway-copy")).toContainText("Low-resolution preview");
     await expect(page.getByTestId("timeline-generate-draft")).toBeVisible();
 
-    for (const ratio of ["1:1", "4:3", "16:9", "21:9"]) {
+    for (const ratio of ["1:1", "4:3", "16:9", "9:16", "21:9"]) {
       await page.getByTestId("timeline-viewer-aspect").selectOption(ratio);
       await expect(page.getByTestId("timeline-viewer-aspect")).toHaveValue(ratio);
     }

@@ -85,6 +85,14 @@ class QwenVoiceDesignSandboxAdapter(BaseSandboxAudioAdapter):
             "--voice-description",
             str(voice_desc),
         ]
+        seed = getattr(request, "seed", None)
+        if seed is not None:
+            cmd.extend(["--seed", str(int(seed))])
+        if getattr(request, "preview", False):
+            cmd.append("--preview")
+            max_new = getattr(request, "maxNewTokens", None)
+            if max_new:
+                cmd.extend(["--max-new-tokens", str(int(max_new))])
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, check=False)
         if proc.returncode != 0 or not out.is_file():
             raise ProviderUnavailable(

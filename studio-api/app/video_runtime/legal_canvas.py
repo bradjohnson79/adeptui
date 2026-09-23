@@ -65,7 +65,7 @@ _ALIGN32_PRODUCTS = frozenset(
         "ltx-2.5-comfy",
     }
 )
-_SEEDANCE_PRODUCTS = frozenset({"seedance-2.0", "seedance-2.5"})
+_SEEDANCE_PRODUCTS = frozenset({"seedance-2.0", "seedance-2.0-mini", "seedance-2.5"})
 
 
 class SpecFidelityError(ValueError):
@@ -138,6 +138,8 @@ def _canonical_product(product_id: str) -> str:
         return "seedance-2.0"
     if token in {"fal_seedance_25"}:
         return "seedance-2.5"
+    if token in {"fal_seedance_mini", "seedance-mini", "seedance-2.0-mini"}:
+        return "seedance-2.0-mini"
     return token
 
 
@@ -381,7 +383,10 @@ def exact_frame_count(length_seconds: float, fps: int) -> int:
         raise SpecFidelityError("Duration and frame rate must be positive.", code="ILLEGAL_DURATION")
     raw = seconds * rate
     frames = int(round(raw))
-    if abs(raw - frames) > 1e-6:
+    # Durations are often persisted to ~4 decimals (8.0417 for 193/24).
+    # Allow up to half of 1e-4 seconds of drift in frame space.
+    tol = max(1e-6, (0.5 * 1e-4) * rate + 1e-9)
+    if abs(raw - frames) > tol:
         raise SpecFidelityError(
             f"{seconds}s at {rate} fps is not a whole number of frames ({raw}).",
             suggestions=[f"{frames / rate:.4g}s ({frames} frames)", f"{(frames + 1) / rate:.4g}s ({frames + 1} frames)"],
@@ -431,7 +436,7 @@ def is_h3_default_engine(engine: str | None) -> bool:
 def is_ltx_default_engine(engine: str | None) -> bool:
     """Scene/project engine that resolves to LTX 2.5 at generation time."""
     token = str(engine or "").strip().lower().replace("_", "-")
-    if token in {"ltx", "ltx-local", "ltx2.5", "ltx-2.5"}:
+    if token in {"ltx2.5", "ltx-2.5"}:
         return True
     return token.startswith("ltx-2.5") or token.startswith("ltx2.5")
 

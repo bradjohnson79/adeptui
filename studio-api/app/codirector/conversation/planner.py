@@ -37,6 +37,28 @@ _ANNOUNCE_PREFIX_RE = re.compile(
     r"^(?:i am going to tell you|i'm going to tell you|let me explain|let me begin with|begin with|i'll explain|i want to tell you|here's the lore)\b"
 )
 
+# Final-closure mission 2026-09-19 (Memory Principle — active scene state):
+# creator declarative production-fact statements. Narrow by design: a fact
+# verb + a named subject, no question mark, bounded length. These are USER
+# statements (Build Law #20 authority), captured as confirmed snapshot facts.
+_CREATOR_FACT_VERB_RE = re.compile(
+    r"\b(?:is|are|was|were|holds|holding|sits|sitting|stays|staying|remains|remained|"
+    r"stands|standing|wears|wearing|talks|speaks|tells|said|says|drinks|drinking|"
+    r"hosts|hosting|making|make|put|placed|place|set|setting|tighten|tightens|gets|"
+    r"appears|arrives|enters|walks|runs|looks)\b",
+    re.I,
+)
+
+
+def _is_creator_production_fact(text: str) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned or len(cleaned) > 220 or cleaned.endswith("?"):
+        return False
+    if not _CREATOR_FACT_VERB_RE.search(cleaned):
+        return False
+    # A named subject or title token ("Korri", "Schnick Coffee") — not pure chat.
+    return bool(re.search(r"\b[A-Z][a-z]", cleaned))
+
 
 def _clean(text: str) -> str:
     return _SPACE_RE.sub(" ", (text or "").strip())
@@ -337,7 +359,16 @@ def plan_conversation(
     else:
         primary_intent = "receive_information"
         response_mode = inquiry.mode if inquiry.mode != "conversation" else "receive_information"
-        if not _is_residue(text):
+        if _is_creator_production_fact(text):
+            # Final-closure mission 2026-09-19 (Memory Principle): a creator
+            # declarative production fact ("Korri is holding the thermos in
+            # her left hand.", "We're making a Schnick Coffee social ad.") is
+            # USER AUTHORITY (Build Law #20) — confirm it into the snapshot's
+            # active scene state so exact recalls copy authoritative facts
+            # instead of inventing. Auto-Wiki stays disabled (Phase CK): these
+            # candidates feed snapshot.confirmedFacts only.
+            wiki_candidates.append(_candidate(text, state="confirmed", section=section))
+        elif not _is_residue(text):
             wiki_candidates.append(_candidate(text, state="proposed", section=section))
             should_write_wiki = True
 

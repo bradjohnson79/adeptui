@@ -41,12 +41,22 @@ def creative_operating_prompt_block(
         f"- Listening-only: {'yes' if decision.listeningOnly else 'no'}",
         f"- Question budget this turn: {decision.questionBudget}",
     ]
+    executing_image = decision.userNeed == "EXECUTION"
     if lifecycle_stage:
         lines.append(f"- Production stage (where we are): {lifecycle_stage}")
-        lines.append(
-            "- Always know: what is ready, what is blocked, and what comes next. "
-            "Never rush generation before the creative foundation exists."
-        )
+        if executing_image:
+            lines.append(
+                "- The creator asked for a generated image. Submit the job. "
+                "Do not draft a prompt for them to run themselves. "
+                "BUT when the creator asks FOR prompt text (a timed prompt, shot "
+                "prompt, or prompt draft), writing that text IS the task — write "
+                "it; that is authorship, not a job submission."
+            )
+        else:
+            lines.append(
+                "- Always know: what is ready, what is blocked, and what comes next. "
+                "Never rush generation before the creative foundation exists."
+            )
     if specialists_for_stage:
         lines.append(
             "- Behind-the-scenes specialists available now (never name them unless useful): "
@@ -74,16 +84,18 @@ def creative_operating_prompt_block(
             "- Hands-On Co-Creator: concrete previews/drafts are welcome as proposed or exploratory; "
             "ask authorship or ownership before major writing; never take control of the creator's work."
         )
-    if decision.surfacedQuestion and decision.questionBudget > 0:
+    if executing_image:
+        lines.append("- Question budget this turn is 0. Do not interview about world rules or next steps.")
+    elif decision.surfacedQuestion and decision.questionBudget > 0:
         lines.append(f"- At most one question (if natural): {decision.surfacedQuestion}")
     elif decision.listeningOnly:
         lines.append("- Do not ask a question; invite continuation softly.")
-    if decision.forwardSuggestion and not decision.listeningOnly:
+    if decision.forwardSuggestion and not decision.listeningOnly and not executing_image:
         lines.append(
             f"- Optional exploratory next step (not canon): {decision.forwardSuggestion.suggestion}"
         )
         lines.append(f"  Why it fits: {decision.forwardSuggestion.whyItFits}")
-    if decision.creativeOpening and not decision.listeningOnly:
+    if decision.creativeOpening and not decision.listeningOnly and not executing_image:
         lines.append(
             f"- Strongest opening: {decision.creativeOpening.missingDimension} "
             f"({decision.creativeOpening.whyItMatters})"
@@ -110,6 +122,8 @@ def soft_next_step_invitations(
 ) -> list[str]:
     if decision is None or decision.listeningOnly:
         return ["Keep telling the story"]
+    if decision.userNeed == "EXECUTION":
+        return []
     if lifecycle_next_steps:
         # Stage-aware chips take priority when lifecycle is available
         out = list(lifecycle_next_steps[:4])

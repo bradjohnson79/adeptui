@@ -84,3 +84,38 @@ def api_auto_mask(project_id: str, body: AutoMaskBody, db: Session = Depends(get
     from .auto_mask import resolve_auto_mask
 
     return resolve_auto_mask(db, project_id, body.mapId, body.label)
+
+
+class RemoveBackgroundBody(BaseModel):
+    assetId: str
+    saveToLibrary: bool = False
+    tag: str = "retake-background-mask"
+    fillColor: str | None = None
+
+
+@router.post("/projects/{project_id}/remove-background")
+def api_remove_background(
+    project_id: str,
+    body: RemoveBackgroundBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from pathlib import Path
+    import base64
+
+    from ...image_product.masks import get_mask_path
+    from .selection_service import remove_background
+
+    result = remove_background(
+        db,
+        project_id,
+        body.assetId,
+        fill_color=body.fillColor,
+        save_to_library=body.saveToLibrary,
+        tag=body.tag,
+    )
+    if result.get("ok") and not result.get("maskPngBase64"):
+        mask_id = str(result.get("maskAssetId") or "")
+        mask_path = get_mask_path(project_id, mask_id) if mask_id else None
+        if mask_path and Path(mask_path).is_file():
+            result["maskPngBase64"] = base64.b64encode(Path(mask_path).read_bytes()).decode("ascii")
+    return result

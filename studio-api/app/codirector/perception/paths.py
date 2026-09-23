@@ -1,4 +1,4 @@
-"""Isolated stills-perception install roots. Never VideoChat3 or Hunyuan."""
+"""Isolated stills-perception install roots. Never VideoChat3 or image-model trees."""
 
 from __future__ import annotations
 

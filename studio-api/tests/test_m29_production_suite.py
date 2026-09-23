@@ -353,8 +353,11 @@ def test_export_pack_includes_director_timeline_and_cue_placements(db, monkeypat
     monkeypatch.setattr(queue_worker.settings, "data_dir", tmp_path)
     asyncio.run(queue_worker.JobQueue()._export(db, job, db.get(Project, "proj-m29")))
 
+    db.expire_all()
+    scene2 = db.get(Scene, "scene-b18")
     exported_scene = captured["scenes"][0]
-    assert exported_scene["director_json"] == scene.director_json
+    assert exported_scene["director_json"] == scene2.director_json
+    assert "audio-1" in (exported_scene["director_json"] or "")
     cue = next(item for item in captured["cue_placements"] if item["id"] == "cue-b18")
     assert cue["metadata"]["volume"] == 0.8
 
@@ -466,10 +469,17 @@ def test_edit_apply_trim_and_undo(db, monkeypatch):
     )
     assert out["status"] == "applied"
     assert out.get("fixture") is False
+    from app.director_timeline_w46 import store as timeline_store
+
+    def _visual_length() -> float:
+        loaded = timeline_store.load_master(db, "proj-m29", scene.id)
+        clips = []
+        for batch in (loaded.get("master") or {}).get("batchBlocks") or []:
+            clips.extend(list(batch.get("visualClips") or []))
+        return float(clips[0]["length"])
+
     db.expire_all()
-    scene2 = db.get(Scene, scene.id)
-    tl2 = parse_director_timeline(scene2.director_json)
-    assert abs(tl2.video_clips[0].length - 2.5) < 0.01
+    assert abs(_visual_length() - 2.5) < 0.01
 
     EditingService.execute_job(
         db,
@@ -477,9 +487,7 @@ def test_edit_apply_trim_and_undo(db, monkeypatch):
         "proj-m29",
     )
     db.expire_all()
-    scene3 = db.get(Scene, scene.id)
-    tl3 = parse_director_timeline(scene3.director_json)
-    assert abs(tl3.video_clips[0].length - 4.0) < 0.01
+    assert abs(_visual_length() - 4.0) < 0.01
 
 
 def test_asset_version_status_persistence(db):

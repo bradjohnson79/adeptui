@@ -296,11 +296,30 @@ def parse_spatial_doc(row: SpatialSceneRow | None, fallback_project_json: str | 
 
 
 def save_spatial_doc(db: Session, row: SpatialSceneRow, doc: SpatialSceneDoc) -> SpatialSceneDoc:
+    """Write authority is spatial_scenes. Project JSON is a projection."""
+    import logging
+
+    logger = logging.getLogger(__name__)
     doc.version = 2
     row.map_json = doc.model_dump_json()
     row.calibration_json = json.dumps(doc.calibration or {})
     row.guidance = doc.guidance
     row.updated_at = datetime.utcnow()
+    try:
+        from .db import Project
+
+        project = db.get(Project, row.project_id)
+        if project is not None:
+            project.spatial_map_json = doc.model_dump_json()
+            project.updated_at = datetime.utcnow()
+    except Exception:
+        logger.warning(
+            "spatial project JSON projection failed project=%s scene=%s — document remains authority",
+            row.project_id,
+            row.scene_id,
+            exc_info=True,
+        )
+        raise
     db.commit()
     db.refresh(row)
     return doc

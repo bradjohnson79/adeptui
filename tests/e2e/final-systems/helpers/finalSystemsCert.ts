@@ -208,7 +208,13 @@ export async function openTxt2VidH3(page: Page, projectId: string, prompt: strin
   }
 
   if (await engine.isVisible().catch(() => false)) {
-    await engine.selectOption("minimax-h3");
+    // TEXT-ONLY CONTRACT: MiniMax H3 is R2V/I2V and is disabled on the
+    // text-only T2V surface. Only select it when actually enabled here; never
+    // block on a disabled option.
+    const h3Enabled = await engine.locator("option[value=minimax-h3]").isEnabled().catch(() => false);
+    if (h3Enabled) {
+      await engine.selectOption("minimax-h3");
+    }
   }
 
   const promptBox = page.locator("textarea").first();
@@ -261,7 +267,7 @@ async function generateTake1H3JobFromUi(
         const sceneId = (body.scenes || body)?.[0]?.id;
         if (!sceneId) throw new Error("no scene for retake drawer");
         await page.goto(`/project/${projectId}?workspace=timeline&sceneId=${encodeURIComponent(sceneId)}`);
-        await page.getByTestId("timeline-open-retake").click();
+        await page.getByTestId("preview-video-retake").click();
         const drawer = page.getByTestId("timeline-retake-drawer");
         await expect(drawer).toBeVisible({ timeout: 15_000 });
         return generateH3ViaUiPanel(page, request, projectId, { panelRoot: drawer });
@@ -326,7 +332,7 @@ export async function generateTake1ViaTimelineUi(
   ).toBeTruthy();
 
   await page.goto(`/project/${projectId}?workspace=timeline&sceneId=${encodeURIComponent(sceneId)}`);
-  await expect(page.getByTestId("timeline-open-retake")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("preview-video-retake")).toBeVisible({ timeout: 60_000 });
 
   return { take1Id: take1, shotId, jobId: h3.jobId, assetId: h3.assetId, baselineBody };
 }

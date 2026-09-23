@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -184,6 +184,25 @@ def m410_capabilities():
 @router.get("/m410/emotion-presets")
 def m410_emotion_presets():
     return m410_service.get_emotion_presets()
+
+
+@router.get("/m410/records")
+def m410_list_records_query(
+    project_id: str | None = Query(default=None, alias="projectId"),
+    db: Session = Depends(get_db),
+):
+    if not (project_id or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "PROJECT_ID_REQUIRED",
+                "message": "List voice records with /m410/projects/{projectId}/records.",
+            },
+        )
+    return {
+        "projectId": project_id,
+        "records": [r.model_dump() for r in m410_service.list_records(db, project_id)],
+    }
 
 
 @router.post("/m410/records")

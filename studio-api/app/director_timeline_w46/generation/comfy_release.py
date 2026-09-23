@@ -20,6 +20,16 @@ def release_comfy_after_timeline_generation(*, reason: str = "") -> dict[str, An
         "comfyFreeRequested": False,
     }
     try:
+        from ...codirector.video_intelligence.gpu_lease import release_active_generator_once
+
+        owned = release_active_generator_once()
+    except Exception:
+        owned = None
+    if owned is not None:
+        evidence.update(owned)
+        evidence["reason"] = reason or evidence.get("reason") or "timeline-generation-complete"
+        return evidence
+    try:
         import httpx
 
         from ...config import settings

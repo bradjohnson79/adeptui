@@ -16,6 +16,36 @@ from .schemas import (
 
 SYSTEM_PROMPT_VERSION = "codirector-foundation-response-v1"
 
+_IDENTITY_DOC_CACHE: dict[str, str] = {}
+
+
+def identity_prompt_block(*, char_cap: int = 1800) -> str:
+    """Canonical Co-Director identity from the prompt library.
+
+    Intelligence mission 2026-09-19 (Phase 7 / audit finding): the canonical
+    creator-facing identity doc (``prompts/core/codirector.md``) was never
+    injected into the chat system prompt — the model inferred its identity from
+    scattered instructions. This wires the library's core identity doc into the
+    foundation system prompt (bounded; cached; empty on any failure so a
+    missing doc never blocks a turn).
+    """
+
+    cached = _IDENTITY_DOC_CACHE.get("block")
+    if cached is not None:
+        return cached
+    block = ""
+    try:
+        from ...prompts.loader import get_prompt_library
+
+        record = get_prompt_library().get("codirector")
+        body = (getattr(record, "body", "") or "").strip() if record is not None else ""
+        if body:
+            block = body[:char_cap]
+    except Exception:  # noqa: BLE001
+        block = ""
+    _IDENTITY_DOC_CACHE["block"] = block
+    return block
+
 
 def _compact_tool_catalog(curated_tool_ids: list[str]) -> str:
     """Render a compact tool catalog (name + parameters + purpose).
@@ -55,10 +85,26 @@ def _trim_messages_to_budget(
     total = sum(estimate_tokens(m.get("content") or "") for m in messages)
     if total <= max_tokens:
         return messages
-    # Keep system + latest user; drop oldest middle turns first.
+    # Keep system + latest user; trim oldest ASSISTANT prose first.
+    # Final-closure memory law (2026-09-19): creator turns are the
+    # authoritative active-fact source — when the budget forces trimming,
+    # assistant verbosity is dropped before any user turn, so established
+    # facts (characters, positions, props, setting, audio, camera) survive.
     system = [m for m in messages if m.get("role") == "system"][:1]
     rest = [m for m in messages if m.get("role") != "system"]
-    while rest and sum(estimate_tokens(m.get("content") or "") for m in system + rest) > max_tokens:
+
+    def _over() -> bool:
+        return sum(estimate_tokens(m.get("content") or "") for m in system + rest) > max_tokens
+
+    # Pass 1: drop oldest assistant turns (keep at most the newest assistant
+    # reply) while over budget.
+    assistant_idx = [i for i, m in enumerate(rest) if m.get("role") == "assistant"]
+    while _over() and len(assistant_idx) > 1:
+        rest.pop(assistant_idx.pop(0))
+        assistant_idx = [i for i, m in enumerate(rest) if m.get("role") == "assistant"]
+    # Pass 2: still over — drop oldest middle messages of any role except the
+    # final user turn (previous behavior, now the fallback).
+    while rest and _over():
         if len(rest) <= 1:
             # Hard-trim system context block if still oversized.
             if system:
@@ -96,14 +142,27 @@ def build_generation_messages(
     personality = personality or default_personality()
     compact = bool(max_context_tokens and max_context_tokens <= 3000)
     # Bound context injection — full Wiki/Bible dumps must not land here.
-    context_cap = 900 if compact else 6000
-    bounded_context = (context_block or "")[:context_cap]
+    # Intelligence repair 2026-09-19: the old compact cap (900 chars) silently
+    # discarded ranked production context while history was crushed to 2x400.
+    # Context now keeps meaningful guidance under both budget classes; the
+    # token budget still governs the total via _trim_messages_to_budget.
+    context_cap = 4000 if compact else 6000
+    # Final-closure memory law (2026-09-19): the ranked conversation recap and
+    # its anti-invention guidance live at the TAIL of context_block (the
+    # doctrine/coi/momentum front-matter is prepended upstream). A pure
+    # head slice cut exactly that tail. Keep both ends when over cap.
+    block = context_block or ""
+    if len(block) > context_cap:
+        tail_keep = max(800, context_cap // 3)
+        bounded_context = block[: context_cap - tail_keep] + "\n…\n" + block[-tail_keep:]
+    else:
+        bounded_context = block
     if compact:
         # Prefill-sensitive path: keep warmth + plan, drop verbose dumps.
         system = "\n".join(
             [
                 "You are Co-Director — a warm, attentive creative partner. Never sound canned or procedural.",
-                "Follow the Dialogue Plan. Do not invent tools or facts. Specialists never speak for you.",
+                "Follow the Creative guidance below. Do not invent tools or facts. Specialists never speak for you.",
                 f"Project: {project_title}",
                 f"Intent: {intent.primary_intent.value} — {intent.user_goal_summary}",
                 f"Purpose: {plan.response_purpose}",
@@ -113,16 +172,30 @@ def build_generation_messages(
                 *[f"- {item}" for item in plan.required_elements[:4]],
                 "Avoid:",
                 *[f"- {item}" for item in plan.prohibited_elements[:4]],
+                (
+                    "When a generation job runs internally, optimized prompts are internal to the job — "
+                    "do not dump sampler parameters as the answer. When the creator asks FOR prompt text "
+                    "(a timed prompt, shot prompt, or prompt draft), write the prompt text itself."
+                    if any(getattr(p, "value", str(p)) == "EXECUTE" for p in plan.posture)
+                    else ""
+                ),
                 bounded_context,
             ]
         )
-        history_n, history_chars = 2, 400
+        # Intelligence repair 2026-09-19: memory is no longer crushed to 2x400
+        # on short turns. The conversational window (server-folded, execution
+        # rows excluded) carries the recent turns; _trim_messages_to_budget
+        # enforces the token ceiling by dropping oldest middles first.
+        history_n, history_chars = 16, 4000
     else:
+        identity_block = identity_prompt_block()
+        identity_lines = [identity_block] if identity_block else []
         system = "\n".join(
             [
                 "You are Co-Director inside Adept UI — an attentive creative production partner.",
-                "Generate a natural reply from the Dialogue Plan below. Do not invent tools or facts.",
+                "Generate a natural reply from the Creative guidance below. Do not invent tools or facts.",
                 f"System prompt version: {SYSTEM_PROMPT_VERSION}",
+                *identity_lines,
                 personality_guidance(personality),
                 "",
                 f"Project: {project_title}",
@@ -135,7 +208,7 @@ def build_generation_messages(
                 f"Goal summary: {intent.user_goal_summary}",
                 f"Evidence: {'; '.join(intent.evidence_spans) or '(none)'}",
                 "",
-                "=== Dialogue plan (AUTHORITATIVE — do not contradict) ===",
+                "=== Creative guidance (advisory — follow unless the creator's latest message overrides it) ===",
                 f"Purpose: {plan.response_purpose}",
                 f"Posture: {', '.join(p.value for p in plan.posture)}",
                 f"Question budget: {plan.question_budget}",
@@ -147,10 +220,17 @@ def build_generation_messages(
                 "Prohibited elements:",
                 *[f"- {item}" for item in plan.prohibited_elements[:8]],
                 "",
+                (
+                    "When a generation job runs internally, optimized prompts are internal to the job — "
+                    "do not dump sampler parameters as the answer. When the creator asks FOR prompt text "
+                    "(a timed prompt, shot prompt, or prompt draft), write the prompt text itself."
+                    if any(getattr(p, "value", str(p)) == "EXECUTE" for p in plan.posture)
+                    else ""
+                ),
                 bounded_context,
             ]
         )
-        history_n, history_chars = 6, 1200
+        history_n, history_chars = 16, 4000
     if repair_notes:
         system += "\n\n=== Repair instructions (previous draft failed grounding) ===\n"
         system += "\n".join(f"- {n}" for n in repair_notes)
@@ -181,7 +261,13 @@ def build_generation_messages(
     # Ensure latest user message is last
     if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != user_message:
         messages.append({"role": "user", "content": user_message})
-    return _trim_messages_to_budget(messages, max_tokens=max_context_tokens)
+    trimmed = _trim_messages_to_budget(messages, max_tokens=max_context_tokens)
+    try:
+        from ...vision_input import copy_images_onto_last_user
+
+        return copy_images_onto_last_user(trimmed, recent_messages)
+    except Exception:
+        return trimmed
 
 
 def _named_subject(user_message: str, project_title: str) -> str:

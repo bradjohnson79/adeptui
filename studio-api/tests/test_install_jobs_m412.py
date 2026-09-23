@@ -233,29 +233,36 @@ def test_stall_detector_distinguishes_slow_alive_interrupted_and_source_silent()
     }
 
 
-def test_requirements_resolution_for_hunyuan_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_retired_video_components_are_not_public_install_targets() -> None:
+    from app.comfy_health import MODEL_COMPONENT_IDS
+    from app.setup.catalog import RETIRED_VIDEO_SETUP_COMPONENT_IDS, public_components
+
+    public_ids = {item.id for item in public_components()}
+    for component_id in RETIRED_VIDEO_SETUP_COMPONENT_IDS:
+        assert component_id not in public_ids
+        assert component_id not in MODEL_COMPONENT_IDS
+    assert "ltx_2_5_checkpoint" in public_ids
+    assert "hunyuan_image_local" in public_ids
+
+
+def test_requirements_resolution_for_hunyuan_capability_is_retired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hunyuan video is retired from Adept UI v1.1 local video generation."""
+    from app.setup.catalog import is_retired_video_setup_component
     from app.source_manager.install_jobs import requirements
 
-    def fake_readiness(workflow_id: str, *, node_types=None, model_states=None):
-        return {
-            "requiredNodeTypes": ["HunyuanVideo15Loader", "VHS_VideoCombine"],
-            "missingExtensions": ["HunyuanVideo15Loader"],
-            "requiredComponentIds": ["hunyuan_video_15"],
-            "missingModels": [],
-            "message": f"{workflow_id} is blocked on Hunyuan nodes.",
-        }
-
-    monkeypatch.setattr(requirements, "_live_node_types", lambda: set())
-    monkeypatch.setattr(requirements, "workflow_readiness", fake_readiness)
-
+    assert is_retired_video_setup_component("hunyuan_video_15")
+    assert is_retired_video_setup_component("comfyui_hunyuan_nodes")
+    assert "hunyuan_video_15" not in {
+        item.id for item in __import__(
+            "app.setup.catalog", fromlist=["public_components"]
+        ).public_components()
+    }
+    # No registered workflows match retired Hunyuan capability; resolution is unknown.
     resolution = requirements.resolve_requirements("hunyuan15")
-
-    assert resolution.workflow_ids
-    assert "HunyuanVideo15Loader" in resolution.missing_node_types
-    assert resolution.node_resolutions[0].extension_component_id is None
-    assert resolution.node_resolutions[0].source_status == "user_required"
-    assert "No catalogued extension component" in resolution.node_resolutions[0].message
-    assert resolution.recommended_action == "install_comfyui_extensions"
+    assert resolution.status == "unknown"
+    assert resolution.recommended_action in (None, "review_workflows")
 
 
 def test_source_validate_rejects_bad_url() -> None:
@@ -320,7 +327,7 @@ def test_avatar_runtime_component_registration_uses_isolated_runtime_path(
 
     assert component.installer == "avatar_runtime"
     assert component.verifier == "avatar_runtime"
-    assert component.category == "Avatar Runtimes"
+    assert component.category in {"Avatar Runtimes", "Avatar Runtimes (RETIRED)"}
     from app.model_storage.store import category_root
 
     expected = str(category_root("video") / "musetalk-1-5")
@@ -427,94 +434,21 @@ def test_create_job_and_get_job_roundtrip(
     assert fetched["error"]["code"] == "INSTALL_SOURCE_MISSING"
 
 
-def test_comfy_extension_clone_does_not_mark_ready(
+def test_comfy_extension_retired_hunyuan_component_is_not_install_target(
     isolated_install_jobs: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.source_manager.install_jobs import comfy_extension_installer as installer
+    """comfyui_hunyuan_nodes is a retired local video setup component and must
+    not be offered as a public install target, and installs must not reach ready."""
+    from app.setup.catalog import is_retired_video_setup_component, public_components
     from app.source_manager.install_jobs import service
-    from app.source_manager.install_jobs.states import InstallState
-    import time
 
-    custom_nodes = isolated_install_jobs / "custom_nodes"
-    custom_nodes.mkdir(parents=True)
-
-    monkeypatch.setattr(installer, "resolve_custom_nodes_dir", lambda explicit=None: custom_nodes)
-    monkeypatch.setattr(
-        installer,
-        "resolve_extension_source",
-        lambda component_id, source_url=None: {
-            "url": "https://github.com/example/ComfyUI-HunyuanVideoWrapper",
-            "revision": None,
-            "packageName": "ComfyUI-HunyuanVideoWrapper",
-            "provider": "git",
-            "officialDefault": True,
-            "executesCode": True,
-        },
-    )
-    monkeypatch.setattr(
-        installer,
-        "clone_or_update_extension",
-        lambda **kwargs: {
-            "ok": True,
-            "step": "clone",
-            "message": "cloned",
-            "path": str(custom_nodes / "ComfyUI-HunyuanVideoWrapper"),
-        },
-    )
-    monkeypatch.setattr(
-        installer,
-        "install_extension_dependencies",
-        lambda target: {"ok": True, "skipped": True, "message": "no deps"},
-    )
-    monkeypatch.setattr(installer, "probe_required_nodes", lambda required=None: {
-        "ok": False,
-        "available": True,
-        "missing": ["HyVideoModelLoader"],
-        "detected": [],
-        "message": "0 of 1 nodes detected",
-    })
-
+    assert is_retired_video_setup_component("comfyui_hunyuan_nodes")
+    public_ids = {item.id for item in public_components()}
+    assert "comfyui_hunyuan_nodes" not in public_ids
     job = service.create_or_resume_install("comfyui_hunyuan_nodes", confirm=True)
-    job_id = job["id"]
-
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        current = service.get_job(job_id)
-        if current.get("phase") == "restart_required":
-            break
-        time.sleep(0.05)
-    current = service.get_job(job_id)
-    assert current["state"] == InstallState.CONFIGURING.value
-    assert current["phase"] == "restart_required"
-    assert current.get("raw", {}).get("nodesReady") is False
-    assert current["state"] != "ready"
-
-    # Simulate restart + still missing nodes
-    monkeypatch.setattr(
-        installer,
-        "restart_comfyui_best_effort",
-        lambda: {"ok": True, "method": "fixture"},
-    )
-    repaired = service.repair(job_id, "restart_comfyui")
-    assert repaired["state"] == "repair_required"
-    assert repaired["error"]["code"] == "INSTALL_EXTENSION_MISSING"
-
-    # Nodes appear after restart probe
-    monkeypatch.setattr(
-        installer,
-        "probe_required_nodes",
-        lambda required=None: {
-            "ok": True,
-            "available": True,
-            "missing": [],
-            "detected": ["HyVideoModelLoader"],
-            "message": "1 of 1 nodes detected",
-        },
-    )
-    ready = service.repair(job_id, "reverify")
-    assert ready["state"] == "ready"
-    assert ready["progress"]["percent"] == 100.0
+    assert job["state"] != "ready"
+    assert job["componentId"] == "comfyui_hunyuan_nodes"
+    assert job["preflight"]["currentVerification"]["issueCode"] == "retired_video_generator"
 
 
 def test_serialize_includes_heartbeat_and_phase_steps(

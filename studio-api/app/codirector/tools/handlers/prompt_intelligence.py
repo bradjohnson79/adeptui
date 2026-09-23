@@ -319,24 +319,16 @@ def apply_prompt_apply_enhancement(ctx: ToolContext, args: dict[str, Any]) -> di
         record = result.record
         final = record.finalProviderPrompt
 
-    # Persist working prompt as final for generation; keep intelligence record on director_json
-    director: dict[str, Any] = {}
-    raw = scene.director_json
-    if isinstance(raw, str) and raw.strip():
-        try:
-            director = json.loads(raw)
-        except Exception:
-            director = {}
-    elif isinstance(raw, dict):
-        director = dict(raw)
-    director["promptIntelligence"] = record.model_dump(mode="json")
-    # Never overwrite creator original inside the record
+    # Persist working prompt; intelligence record is a server-owned metadata merge.
     previous = scene.prompt or ""
-    scene = SceneService.update(
+    scene = SceneService.update(ctx.db, ctx.project_id, scene.id, {"prompt": final})
+    from ....director_timeline_w46.store import patch_scene_metadata
+
+    patch_scene_metadata(
         ctx.db,
         ctx.project_id,
         scene.id,
-        {"prompt": final, "director_json": json.dumps(director, ensure_ascii=False)},
+        {"promptIntelligence": record.model_dump(mode="json")},
     )
     return {
         "updated": "scene.prompt+promptIntelligence",

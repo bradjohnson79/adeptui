@@ -251,6 +251,11 @@ def build_creative_context(project_id: str, *, extras: dict[str, Any] | None = N
         "approvedReferences",
         "spatial",
         "spatialHints",
+        # Locked CIS/CD stamps — must survive Bible digest merge.
+        "visualStyle",
+        "colorGrade",
+        "colorGradePreset",
+        "generationIntent",
     ):
         if k in extras:
             ctx[k] = extras[k]
@@ -278,6 +283,17 @@ def compile_image_request(
             if not body.get("prompt") and preset_applied.get("prompt"):
                 body["prompt"] = preset_applied["prompt"]
             body.setdefault("modelFamilyPreference", preset_applied.get("modelFamilyPreference"))
+
+    # CIS Image Generator: preserve typed authority refs and bind pixels
+    # (qwen2512.ref / Qwen Edit 2509 multi / zimage.ref_edit). Never silent txt2img.
+    try:
+        from .cis_ref_binding import apply_cis_reference_binding
+
+        body = apply_cis_reference_binding(body)
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
 
     purpose = str(body.get("purpose") or "")
     if purpose != "environment_reference_sheet":
@@ -327,36 +343,65 @@ def compile_image_request(
         body.pop("edit", None)
     if purpose in {"storyboard", "storyboard_frame"}:
         operation = "image.storyboard_frame"
-    if purpose == "environment_reference_sheet":
-        # ERS uses an image-to-image-capable generator (binding law): the
-        # authoritative environment pixels ride sourceAssetId/referenceImage
-        # and are consumed by the ref workflow. Operation stays image.generate
-        # (reference conditioning is not an edit); only a stray "edit" flag is
-        # dropped so it can never flip this into an edit request.
-        operation = "image.generate"
-        body.pop("edit", None)
-        blob = " ".join(
-            str(body.get(k) or "")
-            for k in (
-                "hostedModelId",
-                "kieImageModelId",
-                "model",
-                "modelFamilyPreference",
-                "forceWorkflowKey",
-            )
-        ).lower()
-        is_qwen = "qwen2512" in blob or "qwen-image-2512" in blob
+    strategy_a_edit = str(body.get("forceWorkflowKey") or "").strip() in {
+        "qwen_edit_2509.edit",
+        "zimage.ref_edit",
+    }
+    if strategy_a_edit:
+        # Strategy A already bound dual-ref / zimage pixels. Do not collapse
+        # Co-Director or ERS back to generate+.ref (that is single-LoadImage).
+        operation = str(body.get("operation") or operation or "image.edit")
+        if not operation:
+            operation = "image.edit"
+    elif purpose in {"environment_reference_sheet", "codirector_image_generate"}:
+        # ERS and Co-Director "make it more like this" bind real pixels on
+        # the certified ref workflow. Operation stays image.generate
+        # (reference conditioning is not an edit). Character-sheet purpose
+        # stays out of this block so CRS never steals qwen2512.ref.
         has_source = bool(
-            str(body.get("sourceAssetId") or body.get("source_asset_id") or body.get("referenceImage") or "").strip()
+            str(
+                body.get("sourceAssetId")
+                or body.get("source_asset_id")
+                or body.get("referenceImage")
+                or body.get("reference_image")
+                or ""
+            ).strip()
         )
-        if (
-            is_qwen
-            and has_source
-            and "gpt-image-2" not in blob
-            and not str(body.get("forceWorkflowKey") or "").strip()
-        ):
-            body["forceWorkflowKey"] = "qwen2512.ref"
-            body["allow_force_workflow_key"] = True
+        if purpose == "environment_reference_sheet" or has_source:
+            operation = "image.generate"
+            body.pop("edit", None)
+            blob = " ".join(
+                str(body.get(k) or "")
+                for k in (
+                    "hostedModelId",
+                    "kieImageModelId",
+                    "model",
+                    "modelFamilyPreference",
+                    "forceWorkflowKey",
+                )
+            ).lower()
+            is_qwen = "qwen2512" in blob or "qwen-image-2512" in blob
+            is_flux = "flux" in blob and "gpt-image-2" not in blob
+            if not (body.get("sourceAssetId") or body.get("source_asset_id")) and has_source:
+                body["sourceAssetId"] = str(
+                    body.get("referenceImage") or body.get("reference_image") or ""
+                ).strip()
+            if (
+                is_qwen
+                and has_source
+                and "gpt-image-2" not in blob
+                and not str(body.get("forceWorkflowKey") or "").strip()
+            ):
+                body["forceWorkflowKey"] = "qwen2512.ref"
+                body["allow_force_workflow_key"] = True
+            elif (
+                is_flux
+                and has_source
+                and purpose == "codirector_image_generate"
+                and not str(body.get("forceWorkflowKey") or "").strip()
+            ):
+                body["forceWorkflowKey"] = "flux.img2img"
+                body["allow_force_workflow_key"] = True
 
     creative_extras = dict(body.get("creativeContext") or {})
     continuity_session_id = body.get("continuitySessionId") or body.get("continuityId")
@@ -543,7 +588,7 @@ def compile_image_request(
         referenceIds=ref_ids,
         style=dict(body.get("style") or {}),
         quality=str(body.get("quality") or "standard"),
-        providerPreference="cloud" if family in {"imagen", "kie"} or bool(_kie_image_route(body)) else "local",
+        providerPreference="cloud" if family in {"imagen", "kie", "gptimage2"} or bool(_kie_image_route(body)) or bool(_fal_image_route(body)) else "local",
         enginePreference=family,
         workflowPreference=None,  # resolver chooses — no product workflow key
         seed=int(body["seed"]) if body.get("seed") is not None else None,
@@ -724,6 +769,29 @@ def compile_image_request(
     pinned = _local_execution_pin(contract.to_pinned_snapshot(), family)
     pinned["canExecute"] = True
     pinned.setdefault("reason", "local comfy path")
+    try:
+        from .cis_ref_binding import refuse_silent_txt2img_if_needed
+
+        refuse_silent_txt2img_if_needed(body, pinned.get("workflowKey") or getattr(contract, "workflow_key", None))
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+    # Stamp taskType into intent metadata for worker / provenance honesty.
+    if body.get("taskType") and isinstance(intent.metadata, dict):
+        intent.metadata = {**intent.metadata, "taskType": body.get("taskType")}
+        if body.get("authorityReferences"):
+            intent.metadata["authorityReferences"] = list(body.get("authorityReferences") or [])
+        bind = (body.get("creativeContext") or {}).get("referenceBinding") if isinstance(body.get("creativeContext"), dict) else None
+        if bind:
+            intent.metadata["referenceBinding"] = bind
+        scene_id = body.get("sceneReferenceAssetId") or (
+            (body.get("creativeContext") or {}).get("sceneReferenceAssetId")
+            if isinstance(body.get("creativeContext"), dict)
+            else None
+        )
+        if scene_id:
+            intent.metadata["sceneReferenceAssetId"] = scene_id
     return {
         "imageIntent": intent.model_dump(),
         "imageRuntime": pinned,

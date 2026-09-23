@@ -22,6 +22,11 @@ GROUNDING_BLOCKED_PROFILE = (
 GROUNDING_BLOCKED_CHARACTER = "Korri's approved character picture is missing."
 GROUNDING_BLOCKED_PROP = "The approved prop picture is missing."
 GROUNDING_BLOCKED_ERS = "The environment picture is missing."
+UNAVAILABLE_FOR_PACKAGE = (
+    "Unavailable for current reference package. "
+    "This generator cannot consume every attached CRS/PRS/ERS/PoseCraft picture."
+)
+ERS_VIEWS = frozenset({"auto", "center", "n", "e", "s", "w", "north", "east", "south", "west", "floor_plan", "floor plan"})
 
 
 class GroundingBlocked(ValueError):
@@ -46,9 +51,14 @@ def compile_reference_packet(
     *,
     char_meta: list[dict[str, Any]] | None = None,
     prop_meta: list[dict[str, Any]] | None = None,
+    prs_meta: list[dict[str, Any]] | None = None,
     ers_composite_asset_id: str = "",
     ers_package_id: str = "",
+    ers_view: str = "auto",
     spatial_map_id: str = "",
+    posecraft_asset_id: str = "",
+    story_theme: str = "",
+    style: str = "",
     structured_blocking: dict[str, Any] | None = None,
     cinematographer: dict[str, Any] | None = None,
     aspect_ratio: str = "",
@@ -85,25 +95,64 @@ def compile_reference_packet(
                 "relationship": str(prop.get("relationship") or ""),
             }
         )
+    prs: list[dict[str, Any]] = []
+    for row in prs_meta or []:
+        asset = _aid(row.get("approved_asset_id") or row.get("library_asset_id") or row.get("assetId"))
+        pid = _aid(row.get("id") or row.get("prs_id") or row.get("prop_id"))
+        if not pid and not asset:
+            continue
+        prs.append(
+            {
+                "role": "prs_reference",
+                "entityId": pid,
+                "name": str(row.get("display_label") or row.get("name") or row.get("tag") or ""),
+                "assetId": asset or None,
+            }
+        )
+    # PRS sheets are identity refs; merge into props list for slot accounting while keeping role.
+    for row in prs:
+        props.append(row)
     ers = _aid(ers_composite_asset_id)
+    view = (_aid(ers_view) or "auto").lower().replace("-", "_").replace(" ", "_")
+    if view in {"n", "north"}:
+        view = "north"
+    elif view in {"e", "east"}:
+        view = "east"
+    elif view in {"s", "south"}:
+        view = "south"
+    elif view in {"w", "west"}:
+        view = "west"
+    elif view in {"floorplan", "floor_plan"}:
+        view = "floor_plan"
+    elif view not in {"auto", "center", "north", "east", "south", "west", "floor_plan"}:
+        view = "auto"
+    pose = _aid(posecraft_asset_id)
     blocking = structured_blocking if isinstance(structured_blocking, dict) else {}
     cine = cinematographer if isinstance(cinematographer, dict) else {}
     mode = (diagnostic_mode or "").strip().lower()
     if mode == "prompt_only":
-        characters, props, ers = [], [], ""
+        characters, props, ers, pose = [], [], "", ""
     elif mode == "ers_only":
-        characters, props = [], []
+        characters, props, pose = [], [], ""
     elif mode == "character":
         props, ers = [], ers  # keep ERS as semantic environment id; pixels decided in apply
     return {
         "characters": characters,
         "props": props,
+        "prs": [p for p in props if p.get("role") == "prs_reference"],
         "environment": {
             "role": "environment_reference",
             "assetId": ers or None,
             "ersPackageId": _aid(ers_package_id) or None,
+            "ersView": view,
             "spatialMapId": _aid(spatial_map_id) or None,
         },
+        "posecraft": {
+            "role": "posecraft_reference",
+            "assetId": pose or None,
+        },
+        "storyTheme": _aid(story_theme),
+        "style": _aid(style),
         "spatial": {
             "lines": list(blocking.get("lines") or []),
             "placements": blocking.get("placements") or blocking.get("items") or [],
@@ -136,9 +185,14 @@ def apply_reference_packet(
     packet = compile_reference_packet(
         char_meta=list(ctx.get("characters") or []),
         prop_meta=list(ctx.get("prop_entities") or []),
+        prs_meta=list(ctx.get("prs") or ctx.get("prs_entities") or []),
         ers_composite_asset_id=_aid(ctx.get("ers_composite_asset_id")),
         ers_package_id=_aid(ctx.get("ers_package_id") or ctx.get("ersPackageId")),
+        ers_view=_aid(ctx.get("ersView") or ctx.get("ers_view") or body.get("ersView") or "auto"),
         spatial_map_id=_aid(body.get("spatialMapId") or ctx.get("spatialMapId")),
+        posecraft_asset_id=_aid(ctx.get("posecraftAssetId") or ctx.get("poseImageAssetId") or body.get("posecraftAssetId")),
+        story_theme=_aid(ctx.get("storyTheme") or body.get("storyTheme")),
+        style=_aid(ctx.get("style") or body.get("style")),
         structured_blocking=ctx.get("structured_blocking") if isinstance(ctx.get("structured_blocking"), dict) else {},
         cinematographer=ctx.get("cinematographer") if isinstance(ctx.get("cinematographer"), dict) else {},
         aspect_ratio=_aid(body.get("aspectRatio") or body.get("aspect")),
@@ -189,6 +243,11 @@ def apply_reference_packet(
         env = _assign(packet["environment"], prefer_slot=mode == "ers_only")
         packet["environment"] = env
         roles.append(env)
+        pose_row = packet.get("posecraft") if isinstance(packet.get("posecraft"), dict) else {"role": "posecraft_reference", "assetId": None}
+        pose_row = _assign(pose_row, prefer_slot=False)
+        packet["posecraft"] = pose_row
+        if _aid(pose_row.get("assetId")):
+            roles.append(pose_row)
 
     spatial_ok = bool((packet.get("spatial") or {}).get("lines")) or bool(
         (packet.get("spatial") or {}).get("placements")
@@ -219,45 +278,45 @@ def apply_reference_packet(
         if profile_grounded and not env_asset:
             issues.append({"type": "blocking", "code": "environment", "message": GROUNDING_BLOCKED_ERS})
             blocking = True
-        visual_needed = any(_aid(r.get("assetId")) for r in roles)
-        if visual_needed and slots <= 0:
-            issues.append({"type": "blocking", "code": "provider", "message": GROUNDING_BLOCKED_QWEN})
-            blocking = True
-        for row in roles:
-            if row.get("consumption") == "semantic_only":
-                name = str(row.get("name") or row.get("role") or "reference")
-                issues.append(
-                    {
-                        "type": "advisory",
-                        "code": "provider_slot",
-                        "message": f"{name} picture will not be loaded by this generator.",
-                    }
-                )
-            if row.get("consumption") == "unsupported" and _aid(row.get("assetId")):
-                issues.append(
-                    {
-                        "type": "blocking",
-                        "code": "provider",
-                        "message": GROUNDING_BLOCKED_QWEN,
-                    }
-                )
-                blocking = True
 
-    # CDX-040: disclose pixel-slot limits even when the shot is not
-    # profile-grounded, so a qwen2512 scene shot never silently drops the ERS
-    # composite environment picture (or character/prop pictures) with no signal.
-    if not any(i.get("type") == "blocking" for i in issues):
-        for row in roles:
-            if row.get("consumption") == "unsupported" and _aid(row.get("assetId")):
-                role_name = str(row.get("name") or row.get("role") or "reference")
-                issues.append(
-                    {
-                        "type": "advisory",
-                        "code": "provider_slot",
-                        "message": f"{role_name} picture will not be loaded by this generator.",
-                    }
-                )
-                break
+    # No silent drop: every attached picture must be consumable by this generator.
+    # Diagnostic modes keep A/B/C/D consumption probes; production path blocks honestly.
+    pixel_refs = [r for r in roles if _aid(r.get("assetId"))]
+    production_mode = mode not in {"prompt_only", "ers_only", "character"}
+    if production_mode and pixel_refs:
+        if slots <= 0:
+            issues.append(
+                {
+                    "type": "blocking",
+                    "code": "provider",
+                    "message": GROUNDING_BLOCKED_QWEN,
+                }
+            )
+            blocking = True
+            for row in pixel_refs:
+                if row.get("consumption") != "missing":
+                    row["consumption"] = "unsupported"
+        elif len(pixel_refs) > slots:
+            issues.append(
+                {
+                    "type": "blocking",
+                    "code": "provider",
+                    "message": UNAVAILABLE_FOR_PACKAGE,
+                }
+            )
+            blocking = True
+            for row in pixel_refs:
+                if row.get("consumption") in {"semantic_only", "unsupported", "consumed"}:
+                    # Keep the first `slots` consumed marks from _assign; mark extras unsupported.
+                    pass
+            # Re-mark: only first `slots` stay consumed; rest unsupported (honest, not silent).
+            kept = 0
+            for row in pixel_refs:
+                if row.get("consumption") == "consumed" and kept < slots:
+                    kept += 1
+                    continue
+                if _aid(row.get("assetId")):
+                    row["consumption"] = "unsupported"
 
     packet["issues"] = issues
     packet["blocking"] = blocking
@@ -280,7 +339,7 @@ def apply_reference_packet(
         ctx["reference_image_ids"] = []
 
     if blocking and mode not in {"prompt_only"}:
-        raise GroundingBlocked(issues[0]["message"] if issues else GROUNDING_BLOCKED_QWEN)
+        raise GroundingBlocked(issues[0]["message"] if issues else UNAVAILABLE_FOR_PACKAGE)
     return body
 
 

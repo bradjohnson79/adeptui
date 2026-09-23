@@ -43,6 +43,7 @@ def build_leaf_graph(
     character_references: Optional[list[Any]] = None,
     environment_references: Optional[list[Any]] = None,
     moodboard_references: Optional[list[Any]] = None,
+    scene_image: Optional[str] = None,
     lora_id: Optional[str] = None,
     lora_strength: Optional[float] = None,
     lora_name: Optional[str] = None,
@@ -197,6 +198,17 @@ def build_leaf_graph(
             raise RuntimeError("qwen_edit_2509.edit requires an IDENTITY_REFERENCE image")
         from ..config import settings as _settings
 
+        scene = scene_image
+        if not scene and environment_references:
+            for item in environment_references:
+                if isinstance(item, str) and item.strip():
+                    scene = item.strip()
+                    break
+                if isinstance(item, dict):
+                    cand = str(item.get("image") or item.get("comfyName") or item.get("name") or "").strip()
+                    if cand:
+                        scene = cand
+                        break
         return build_qwen_edit_2509_i2i_workflow(
             image_name=img,
             positive=prompt,
@@ -211,6 +223,8 @@ def build_leaf_graph(
             cfg=cfg,
             filename_prefix=filename_prefix or "studio/qwen_edit_2509",
             identity_role="IDENTITY_REFERENCE",
+            scene_image=scene,
+            scene_role="SCENE_REFERENCE",
         )
 
     if key in {

@@ -45,7 +45,7 @@ export function LibraryQuickPreviewModal({
 
   if (!asset || !kind) return null;
 
-  const title = asset.tag || asset.name || asset.filename || t("quickPreview");
+  const title = asset.name || asset.tag || asset.filename || t("quickPreview");
   const src = api.assetUrl(asset.id);
 
   return createPortal(

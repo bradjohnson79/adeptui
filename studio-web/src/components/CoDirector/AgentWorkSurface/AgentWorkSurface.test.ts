@@ -19,10 +19,14 @@ vi.mock("../SceneCreator/persistThenOpenSceneCreator", () => ({
 
 import {
   REGENERATE_FAILED_MESSAGE,
+  imageJobProgressLabel,
+  jobsStillQueuedOnly,
   pollPausedFor,
+  pollPausedMessage,
   pollerShouldRun,
   sceneGenerationPhase,
   sceneGenerationProgressText,
+  showSpatialWorkflowContinueCta,
 } from "./AgentWorkSurface";
 import { NORMAL_WORK_SURFACE, isAgentWork } from "./types";
 import type { WorkSurfaceState } from "./types";
@@ -61,6 +65,21 @@ describe("FE-007 poll-expiration honesty", () => {
   it("respects an explicit budget", () => {
     expect(pollPausedFor(livePack, 4, 5)).toBe(false);
     expect(pollPausedFor(livePack, 5, 5)).toBe(true);
+  });
+
+  it("says a still-queued job never started, not that generation may still be running", () => {
+    const queuedPack: WorkSurfaceState = {
+      ...livePack,
+      status: "queued",
+      child_jobs: [
+        { job_id: "j1", label: "Generated Image", status: "queued", progress: 0, stage: "Queued", child_index: 0, metadata: {} },
+      ],
+    };
+    expect(jobsStillQueuedOnly(queuedPack)).toBe(true);
+    expect(pollPausedMessage(queuedPack).toLowerCase()).toContain("never started");
+    expect(pollPausedMessage(queuedPack).toLowerCase()).not.toContain("may still be running");
+    expect(imageJobProgressLabel({ status: "queued", stage: "Queued" })).toContain("not generating");
+    expect(imageJobProgressLabel({ status: "running", stage: "Sampling" })).toBe("Sampling");
   });
 });
 
@@ -167,6 +186,23 @@ describe("ZERO-JOBS LAW — scene generation 0/0 loop (Phase 21)", () => {
   it("F: phantom copy is the terminal-empty message, never 0 / 0", () => {
     expect(sceneGenerationProgressText("scene_generation", "phantom", 0, 0)).toBe("Scene generation could not start.");
     expect(sceneGenerationProgressText("scene_generation", "phantom", 0, 0)).not.toContain("0 / 0");
+  });
+});
+
+describe("Spatial Map shelf — Continue CTA gate", () => {
+  it("hides Continue to Spatial Map (atlas) when Spatial Map is shelved", () => {
+    expect(showSpatialWorkflowContinueCta("atlas_shot_generation", 1)).toBe(false);
+    expect(showSpatialWorkflowContinueCta("atlas_shot_generation", 0)).toBe(false);
+  });
+
+  it("still allows ERS / scene-generation continue when results exist (not Spatial Map CTA)", () => {
+    expect(showSpatialWorkflowContinueCta("ers_generation", 1)).toBe(true);
+    expect(showSpatialWorkflowContinueCta("scene_generation", 1)).toBe(true);
+    expect(showSpatialWorkflowContinueCta("ers_generation", 0)).toBe(false);
+  });
+
+  it("does not show continue for unrelated surfaces", () => {
+    expect(showSpatialWorkflowContinueCta("storyboard_generation", 1)).toBe(false);
   });
 });
 

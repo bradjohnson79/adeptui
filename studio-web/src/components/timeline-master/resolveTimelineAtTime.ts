@@ -9,8 +9,10 @@
  * batch and clips, but also the relative time within the active batch/clip so
  * video preview and later audio synchronization have what they need.
  */
-import type { DirectorTimeline } from "../DirectorTracks";
-import type { BatchBlock } from "../../timelineMaster/contracts";
+import type { TimelineBoardView } from "../DirectorTracks";
+import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
+import { filterVideoClipsForSceneTake, resolveSceneTake } from "../../timelineMaster/playableVisualTakes";
+import { isImageFrameClip } from "../../timelineMaster/imageFrameVisual";
 
 export interface ResolvedTimelineFrame {
   /** Active batch at playhead (by cumulative planned duration), if any. */
@@ -55,22 +57,32 @@ export function resolveBatchAtTime(
 ): { batch: BatchBlock; localTime: number } | null {
   const sorted = batches.slice().sort((a, b) => a.order - b.order);
   let cursor = 0;
-  for (const batch of sorted) {
+  for (let i = 0; i < sorted.length; i += 1) {
+    const batch = sorted[i];
     const len = Math.max(0.1, batch.duration.plannedDuration || 0);
-    if (t >= cursor && t < cursor + len) {
-      return { batch, localTime: t - cursor };
+    const start = cursor;
+    const end = cursor + len;
+    const isLast = i === sorted.length - 1;
+    // Exclusive end except the last batch, so the scene-end playhead still
+    // resolves Batch N instead of falling through to a leftover single clip.
+    if (t >= start && (t < end || (isLast && t <= end))) {
+      return { batch, localTime: Math.min(Math.max(0, t - start), Math.max(0, len - 1e-3)) };
     }
-    cursor += len;
+    cursor = end;
   }
   return null;
 }
 
 export function resolveTimelineAtTime(
-  timeline: DirectorTimeline | null,
+  timeline: TimelineBoardView | null,
   master: { batchBlocks?: BatchBlock[] } | null,
   playheadSec: number,
+  options?: { takeId?: string | null },
 ): ResolvedTimelineFrame {
   const t = Math.max(0, playheadSec || 0);
+  const sceneMaster = master as SceneTimelineMaster | null;
+  const sceneTake = resolveSceneTake(sceneMaster, options?.takeId);
+  const previewingOther = Boolean(options?.takeId && options.takeId !== sceneMaster?.currentSceneTakeId);
 
   const batchRes = master?.batchBlocks?.length
     ? resolveBatchAtTime(master.batchBlocks, t)
@@ -78,10 +90,60 @@ export function resolveTimelineAtTime(
   const activeBatch = batchRes?.batch ?? null;
   const batchLocalTime = batchRes?.localTime ?? 0;
 
-  // Visual: prefer batch-owned visualClips, else legacy scene-global tracks.
+  // Visual: Timeline videoClips (Generation A|Retake|B) are authoritative when
+  // present — same contract as resolveVisualVideoClips. Source local time is
+  // timelineLocal + trim_start (field name trim_start only; never sourceIn).
   let activeVisual: ResolvedTimelineFrame["activeVisual"] = null;
   let visualLocalTime = 0;
-  if (activeBatch && (activeBatch.visualClips || []).length) {
+  const timelineVideoClips = previewingOther
+    ? []
+    : filterVideoClipsForSceneTake(timeline?.videoClips || [], sceneTake);
+  if (timelineVideoClips.length > 0) {
+    const videoClip = timelineVideoClips.find((c) => intersects(c.start, c.length, t));
+    if (videoClip && videoClip.asset_id) {
+      // Image-Frame still: media_type=image / imgclip_ / role=image_frame until rtclip_ lands.
+      const still = isImageFrameClip(videoClip);
+      activeVisual = {
+        kind: still ? "image" : "video",
+        clipId: videoClip.id,
+        assetId: videoClip.asset_id,
+        label: videoClip.label || "",
+      };
+      const timelineLocal = Math.max(0, t - (videoClip.start || 0));
+      // Stills ignore source scrub offset (trim_start stays 0 on imgclip_).
+      visualLocalTime = still ? timelineLocal : timelineLocal + Number(videoClip.trim_start || 0);
+    }
+  }
+  const visualPlacementAuthoritative = timeline?.media_mode === "video";
+  const hasManagedVisuals = Boolean(
+    activeBatch &&
+      (activeBatch.visualClips || []).some((clip) => (clip.kind === "video" || clip.kind === "image") && clip.assetId),
+  );
+  if (
+    !activeVisual &&
+    sceneTake &&
+    activeBatch &&
+    (previewingOther || (!visualPlacementAuthoritative && !hasManagedVisuals))
+  ) {
+    const member = (sceneTake.batches || []).find((row) => row.batchId === activeBatch.id && row.assetId);
+    if (member?.assetId) {
+      activeVisual = {
+        kind: "video",
+        clipId: `${activeBatch.id}-scene-take`,
+        assetId: member.assetId,
+        label: activeBatch.label || "Take",
+      };
+      visualLocalTime = batchLocalTime;
+    }
+  }
+  // Batch-owned visualClips when director Visual track is empty.
+  if (
+    !activeVisual &&
+    !visualPlacementAuthoritative &&
+    !previewingOther &&
+    activeBatch &&
+    (activeBatch.visualClips || []).length
+  ) {
     const clip = (activeBatch.visualClips || []).find((c) =>
       intersects(c.start, c.length, batchLocalTime),
     );
@@ -92,38 +154,53 @@ export function resolveTimelineAtTime(
         assetId: clip.assetId,
         label: clip.label || "",
       };
-      visualLocalTime = batchLocalTime - clip.start;
+      const timelineLocal = Math.max(0, batchLocalTime - clip.start);
+      visualLocalTime = timelineLocal + Number(clip.trimStart || 0);
+    }
+  }
+  // Playable take when visualClips was never written: approved first, else
+  // the latest finished candidate so a draft generate still plays on Visual.
+  if (!activeVisual && !visualPlacementAuthoritative && !previewingOther && activeBatch?.approvedClip?.assetId) {
+    activeVisual = {
+      kind: "video",
+      clipId: `${activeBatch.id}-approved`,
+      assetId: activeBatch.approvedClip.assetId,
+      label: activeBatch.label || "Approved take",
+    };
+    visualLocalTime = batchLocalTime;
+  }
+  if (!activeVisual && !visualPlacementAuthoritative && !previewingOther && activeBatch) {
+    const latest = [...(activeBatch.candidateVersions || [])]
+      .filter((candidate) => candidate.assetId)
+      .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")))
+      .at(-1);
+    if (latest?.assetId) {
+      activeVisual = {
+        kind: "video",
+        clipId: `${activeBatch.id}-candidate`,
+        assetId: latest.assetId,
+        label: latest.label || activeBatch.label || "Latest take",
+      };
+      visualLocalTime = batchLocalTime;
     }
   }
   if (!activeVisual && timeline) {
-    const videoClip = (timeline.video_clips || []).find((c) =>
+    const imageClip = (timeline.imageClips || []).find((c) =>
       intersects(c.start, c.length, t),
     );
-    if (videoClip && videoClip.asset_id) {
+    if (imageClip && imageClip.asset_id) {
       activeVisual = {
-        kind: "video",
-        clipId: videoClip.id,
-        assetId: videoClip.asset_id,
-        label: videoClip.label || "",
+        kind: "image",
+        clipId: imageClip.id,
+        assetId: imageClip.asset_id,
+        label: imageClip.label || imageClip.role || "",
       };
-      visualLocalTime = t - videoClip.start;
-    } else {
-      const imageClip = (timeline.image_clips || []).find((c) =>
-        intersects(c.start, c.length, t),
-      );
-      if (imageClip && imageClip.asset_id) {
-        activeVisual = {
-          kind: "image",
-          clipId: imageClip.id,
-          assetId: imageClip.asset_id,
-          label: imageClip.label || imageClip.role || "",
-        };
-        visualLocalTime = t - imageClip.start;
-      }
+      const timelineLocal = Math.max(0, t - (imageClip.start || 0));
+      visualLocalTime = timelineLocal + Number(imageClip.trim_start || 0);
     }
   }
 
-  // Prompt: prefer batch-owned promptSegments (relative to batch), else legacy.
+  // Prompt: Master batch.promptSegments only (single store). Legacy retired.
   let activePrompt: ResolvedTimelineFrame["activePrompt"] = null;
   if (activeBatch && (activeBatch.promptSegments || []).length) {
     const seg = (activeBatch.promptSegments || []).find((s) =>
@@ -133,29 +210,23 @@ export function resolveTimelineAtTime(
       activePrompt = { segmentId: seg.id, text: seg.text, label: "" };
     }
   }
-  if (!activePrompt && timeline) {
-    const seg = (timeline.prompt_segments || []).find((s) =>
-      intersects(s.start, s.length, t),
-    );
-    if (seg && seg.text) {
-      activePrompt = { segmentId: seg.id, text: seg.text, label: "" };
-    }
-  }
 
-  // Audio
+  // Audio — batch-owned authority when any batch has audioClips (WYSIWYG).
   let activeAudio: ResolvedTimelineFrame["activeAudio"] = null;
   let audioLocalTime = 0;
-  if (activeBatch && (activeBatch.audioClips || []).length) {
-    const clip = (activeBatch.audioClips || []).find((c) =>
-      intersects(c.start, c.length, batchLocalTime),
-    );
-    if (clip && clip.assetId) {
-      activeAudio = { clipId: clip.id, assetId: clip.assetId, label: clip.label || "" };
-      audioLocalTime = batchLocalTime - clip.start;
+  const anyBatchAudio = (master?.batchBlocks || []).some((b) => (b.audioClips || []).length > 0);
+  if (anyBatchAudio) {
+    if (activeBatch) {
+      const clip = (activeBatch.audioClips || []).find((c) =>
+        intersects(c.start, c.length, batchLocalTime),
+      );
+      if (clip && clip.assetId) {
+        activeAudio = { clipId: clip.id, assetId: clip.assetId, label: clip.label || "" };
+        audioLocalTime = batchLocalTime - clip.start;
+      }
     }
-  }
-  if (!activeAudio && timeline) {
-    const clip = (timeline.audio_clips || []).find((c) =>
+  } else if (timeline) {
+    const clip = (timeline.audioClips || []).find((c) =>
       intersects(c.start, c.length, t),
     );
     if (clip && clip.asset_id) {
@@ -164,18 +235,20 @@ export function resolveTimelineAtTime(
     }
   }
 
-  // SFX
+  // SFX — same batch-owned authority rule.
   let activeSfx: ResolvedTimelineFrame["activeSfx"] = null;
-  if (activeBatch && (activeBatch.sfxClips || []).length) {
-    const clip = (activeBatch.sfxClips || []).find((c) =>
-      intersects(c.start, c.length, batchLocalTime),
-    );
-    if (clip && clip.assetId) {
-      activeSfx = { clipId: clip.id, assetId: clip.assetId, label: clip.label || "" };
+  const anyBatchSfx = (master?.batchBlocks || []).some((b) => (b.sfxClips || []).length > 0);
+  if (anyBatchSfx) {
+    if (activeBatch) {
+      const clip = (activeBatch.sfxClips || []).find((c) =>
+        intersects(c.start, c.length, batchLocalTime),
+      );
+      if (clip && clip.assetId) {
+        activeSfx = { clipId: clip.id, assetId: clip.assetId, label: clip.label || "" };
+      }
     }
-  }
-  if (!activeSfx && timeline) {
-    const clip = (timeline.sfx_clips || []).find((c) =>
+  } else if (timeline) {
+    const clip = (timeline.sfxClips || []).find((c) =>
       intersects(c.start, c.length, t),
     );
     if (clip && clip.asset_id) {
@@ -199,7 +272,7 @@ export function resolveTimelineAtTime(
     }
   }
   if (!activeCameraInstruction && timeline) {
-    const clip = (timeline.camera_clips || []).find((c) =>
+    const clip = (timeline.cameraClips || []).find((c) =>
       intersects(c.start, c.length, t),
     );
     if (clip) {

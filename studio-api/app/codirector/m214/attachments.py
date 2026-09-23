@@ -38,8 +38,37 @@ def classify_content(
     text_body: str = "",
     mime_type: str = "",
     filename: str = "",
+    user_text: str = "",
 ) -> tuple[str, float, list[str]]:
-    """Classify by content signals; filename is a weak hint only."""
+    """Classify by content signals; filename is a weak hint only.
+
+    When ``user_text`` carries chat intent (background / Timeline visual /
+    explicit sheet validate), user language overrides MIME guessing so an
+    ordinary café photo is not treated as an ERS lecture target.
+    """
+    # Order 11A — user intent overrides asset guessing (chat attach path).
+    combined = " ".join(x for x in (user_text, text_body) if x).strip()
+    if combined or mime_type.startswith("image/") or filename:
+        try:
+            from ..conversation.attach_intent import classify_attach_intent
+
+            intent = classify_attach_intent(
+                combined,
+                mime_type=mime_type,
+                filename=filename,
+            )
+            if intent.intent in {
+                "timeline_background_ref",
+                "timeline_visual_ref",
+                "ers_sheet_validate",
+                "crs_sheet_validate",
+                "prs_sheet_validate",
+            }:
+                return intent.intent, float(intent.confidence), list(intent.signals) + [
+                    f"attach_intent:{intent.intent}"
+                ]
+        except Exception:
+            pass
     signals = _signals_from_text(text_body or "")
     scores: dict[str, int] = {}
     for sig in signals:
@@ -76,10 +105,14 @@ def interpret_attachment(
     text_body: str = "",
     mime_type: str = "",
     filename: str = "",
+    user_text: str = "",
 ) -> dict[str, Any]:
     ensure_m214_tables()
     kind, confidence, signals = classify_content(
-        text_body=text_body, mime_type=mime_type, filename=filename
+        text_body=text_body,
+        mime_type=mime_type,
+        filename=filename,
+        user_text=user_text,
     )
     interp = AttachmentInterpretation(
         project_id=project_id,
@@ -87,13 +120,26 @@ def interpret_attachment(
         classified_kind=kind,
         confidence=confidence,
         summary=f"Proposed classification: {kind} (content-based; pending confirmation).",
-        proposals=[
-            {
-                "action": "import_as",
-                "kind": kind,
-                "sections": ["summary", "beats"] if kind in {"treatment", "screenplay"} else ["media"],
-            }
-        ],
+        proposals=(
+            [
+                {
+                    "action": "propose_timeline_attach",
+                    "kind": kind,
+                    "toolId": "timeline.attach_optional_reference",
+                    "role": "background" if kind == "timeline_background_ref" else "supporting",
+                    "approvalRequired": True,
+                    "silentMutation": False,
+                }
+            ]
+            if kind in {"timeline_background_ref", "timeline_visual_ref"}
+            else [
+                {
+                    "action": "import_as",
+                    "kind": kind,
+                    "sections": ["summary", "beats"] if kind in {"treatment", "screenplay"} else ["media"],
+                }
+            ]
+        ),
         status="proposed",
         content_signals=signals,
         honesty=default_honesty(),

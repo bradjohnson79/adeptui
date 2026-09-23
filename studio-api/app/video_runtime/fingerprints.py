@@ -89,7 +89,7 @@ def builder_source_hash(builder_path: str | None, *, repo_root: Path | None = No
     if not builder_path or ":" not in builder_path:
         return None
     module_path, _fn = builder_path.split(":", 1)
-    # app.workflows.wan_builder → studio-api/app/workflows/wan_builder.py
+    # app.workflows.ltx_25_builder → studio-api/app/workflows/ltx_25_builder.py
     rel = Path(*module_path.split("."))
     if repo_root is None:
         repo_root = Path(__file__).resolve().parents[3]

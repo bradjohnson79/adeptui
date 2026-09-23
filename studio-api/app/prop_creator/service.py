@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from ..db import Asset, Job
 from ..scene_creator.generation import list_local_generator_families
+from ..creator_scope.contract import is_ephemeral_creator_fixture, strip_machine_notes
 from ..spatial_map.ers_contracts import (
     GeneratorSourceSelection,
     PropCandidate,
@@ -19,6 +22,8 @@ from ..spatial_map.ers_contracts import (
 from ..spatial_map.ers_persistence import (
     delete_prop_entity,
     list_prop_entities,
+    load_prop_entities_by_ids,
+    load_prop_entity_anywhere,
     load_prop_entity_by_id,
     save_prop_entity,
 )
@@ -33,9 +38,11 @@ logger = logging.getLogger(__name__)
 
 
 class PropCreatorError(Exception):
-    def __init__(self, message: str, status_code: int = 400):
+    def __init__(self, message: str, status_code: int = 400, code: str = "", extra: dict[str, Any] | None = None):
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
+        self.extra = extra or {}
 
 
 def is_approved(prop: PropEntity) -> bool:
@@ -46,7 +53,70 @@ def visual_identity_id(prop: PropEntity) -> str:
     return (prop.approved_asset_id or "").strip() or (prop.library_asset_id or "").strip()
 
 
+def _prop_is_global(prop: PropEntity) -> bool:
+    return bool(getattr(prop, "is_global", False) or getattr(prop, "isGlobal", False))
+
+
+def _sync_prop_scope(db: Session, prop: PropEntity) -> None:
+    from ..creator_scope.contract import ENTITY_PROP
+    from ..creator_scope.service import sync_scope
+
+    sync_scope(
+        db,
+        entity_type=ENTITY_PROP,
+        entity_id=prop.id,
+        owning_project_id=prop.project_id,
+        is_global=_prop_is_global(prop),
+        tag=(prop.canonical_tag or prop.display_label or prop.tag),
+        name=prop.display_label or prop.tag,
+        identity_asset_id=visual_identity_id(prop),
+    )
+
+
+def _check_prop_tag_collision(
+    db: Session,
+    *,
+    project_id: str,
+    tag: str,
+    exclude_id: str = "",
+    making_global: bool = False,
+) -> None:
+    from ..creator_scope.contract import ENTITY_PROP, canonical_tag
+    from ..creator_scope.service import find_tag_collision
+
+    token = canonical_tag(tag)
+    if not token:
+        return
+    hit = find_tag_collision(
+        db,
+        entity_type=ENTITY_PROP,
+        tag=token,
+        exclude_id=exclude_id,
+        owning_project_id=project_id,
+        making_global=making_global,
+    )
+    if hit is not None:
+        raise PropCreatorError(
+            f"#{token} is already used by {hit.name or 'another prop'} "
+            f"{'as a Global asset' if hit.is_global else 'in this project'}. Choose a different name.",
+            409,
+        )
+    for prop in list_visible_props(db, project_id):
+        if exclude_id and prop.id == exclude_id:
+            continue
+        other = canonical_tag(prop.tag or prop.display_label).lower()
+        if other != token.lower():
+            continue
+        if prop.project_id == project_id or _prop_is_global(prop) or making_global:
+            raise PropCreatorError(
+                f"#{token} is already used by {prop.display_label or 'another prop'} "
+                f"{'as a Global asset' if _prop_is_global(prop) else 'in this project'}. Choose a different name.",
+                409,
+            )
+
+
 def unique_tag(db: Session, project_id: str, label: str, *, exclude_id: str = "") -> str:
+    """Internal database slug only. Never generator-facing. Collision suffixes stay here."""
     base = normalize_prop_tag(label)
     tags = {p.tag for p in list_prop_entities(db, project_id) if p.id != exclude_id}
     if base not in tags:
@@ -58,21 +128,123 @@ def unique_tag(db: Session, project_id: str, label: str, *, exclude_id: str = ""
     return f"{base}-{__import__('uuid').uuid4().hex[:6]}"
 
 
+def _check_prop_name_collision(
+    db: Session,
+    *,
+    project_id: str,
+    name: str,
+    exclude_id: str = "",
+    making_global: bool = False,
+) -> None:
+    from ..creator_scope.contract import ENTITY_PROP, CreatorScopeError
+    from ..creator_scope.service import require_unique_profile_name
+
+    try:
+        require_unique_profile_name(
+            db,
+            entity_type=ENTITY_PROP,
+            name=name,
+            owning_project_id=project_id,
+            exclude_id=exclude_id,
+            making_global=making_global,
+        )
+    except CreatorScopeError as exc:
+        raise PropCreatorError(exc.message, exc.status, exc.code, extra=exc.extra) from exc
+
+
+def list_visible_props(db: Session, project_id: str) -> list[PropEntity]:
+    from ..creator_scope.contract import ENTITY_PROP
+    from ..creator_scope.service import list_visible_scope
+
+    local = list_prop_entities(db, project_id)
+    for prop in local:
+        try:
+            _sync_prop_scope(db, prop)
+        except Exception:
+            pass
+    visible = list_visible_scope(db, project_id, entity_type=ENTITY_PROP)
+    extra_ids = [row.entity_id for row in visible if row.owning_project_id != project_id and row.is_global]
+    extras = [p for p in load_prop_entities_by_ids(db, extra_ids) if _prop_is_global(p)]
+    seen: set[str] = {p.id for p in local}
+    out = list(local)
+    for prop in extras:
+        if prop.id in seen:
+            continue
+        seen.add(prop.id)
+        out.append(prop)
+    return [p for p in out if not is_ephemeral_creator_fixture(p.display_label or p.tag)]
+
+
 def list_props(db: Session, project_id: str, *, approved_only: bool = False) -> list[PropEntity]:
-    props = list_prop_entities(db, project_id)
+    props = list_visible_props(db, project_id)
     if approved_only:
         props = [p for p in props if is_approved(p)]
     props.sort(key=lambda p: (p.display_label or p.tag or "").lower())
     return props
 
 
+def require_owned_prop(db: Session, project_id: str, prop_id: str) -> PropEntity:
+    """Resolve a prop for mutation.
+
+    ORDER 18 Owner law: Global props are editable (save / regenerate PRS) from ANY
+    project. Non-global props still require the home project. Delete stays
+    home-only via delete_prop(). Compare project ids normalized (strip) to avoid
+    false 403 when the current project IS home.
+    """
+    prop = get_prop(db, project_id, prop_id)
+    home = str(prop.project_id or "").strip()
+    current = str(project_id or "").strip()
+    if home == current:
+        return prop
+    if _prop_is_global(prop):
+        return prop
+    raise PropCreatorError(
+        "This prop can only be edited from the project that created it.",
+        403,
+        "OWNER_REQUIRED",
+    )
+
+
 def get_prop(db: Session, project_id: str, prop_id: str) -> PropEntity:
     prop = load_prop_entity_by_id(db, project_id, prop_id)
-    if prop is None or prop.project_id != project_id:
+    if prop is None:
+        prop = load_prop_entity_anywhere(db, prop_id)
+    if prop is None:
         raise PropCreatorError("Prop not found.", 404)
-    _sync_candidates(db, project_id, prop)
-    save_prop_entity(db, project_id, prop)
+    if prop.project_id != project_id and not _prop_is_global(prop):
+        raise PropCreatorError("Prop not found.", 404)
+    owner_id = prop.project_id
+    _sanitize_prop_human_fields(prop)
+    _sync_candidates(db, owner_id, prop)
+    save_prop_entity(db, owner_id, prop)
+    if getattr(prop, "mode", "standard") == "advanced":
+        from .advanced_service import sync_advanced_on_get
+
+        prop = sync_advanced_on_get(db, owner_id, prop)
     return prop
+
+
+def _detach_primary_reference(prop: PropEntity) -> None:
+    removed = str(prop.reference_asset_id or "").strip()
+    prop.reference_asset_id = None
+    if not removed:
+        return
+    if str(prop.library_asset_id or "").strip() == removed:
+        prop.library_asset_id = ""
+    if str(prop.approved_asset_id or "").strip() == removed:
+        prop.approved_asset_id = None
+    if str(getattr(prop, "primary_approved_asset_id", "") or "").strip() == removed:
+        prop.primary_approved_asset_id = None
+
+
+def _sanitize_prop_human_fields(prop: PropEntity) -> None:
+    prop.description = strip_machine_notes(prop.description)
+    notes = strip_machine_notes(prop.notes)
+    # Notes are not a second Description. Drop leftover machine-only strings.
+    if notes == prop.description:
+        prop.notes = ""
+    else:
+        prop.notes = notes
 
 
 def create_or_update_prop(
@@ -81,39 +253,103 @@ def create_or_update_prop(
     *,
     prop_id: str = "",
     name: str = "",
-    visual_style: str = "",
-    description: str = "",
+    visual_style: str | None = None,
+    description: str | None = None,
     reference_asset_id: str | None = None,
     clear_reference: bool = False,
     generator: dict[str, Any] | None = None,
     use_as_identity: bool = False,
     identity_asset_id: str = "",
+    mode: str | None = None,
+    advanced_type: str | None = None,
+    primary_prompt: str | None = None,
+    hero_optional: bool | None = None,
+    is_global: bool | None = None,
 ) -> PropEntity:
-    existing = load_prop_entity_by_id(db, project_id, prop_id) if prop_id else None
-    if prop_id and existing is None:
-        raise PropCreatorError("Prop not found.", 404)
-    if existing and existing.project_id != project_id:
-        raise PropCreatorError("Prop not found.", 404)
+    existing = None
+    if prop_id:
+        existing = load_prop_entity_by_id(db, project_id, prop_id) or load_prop_entity_anywhere(db, prop_id)
+        if existing is None:
+            raise PropCreatorError("Prop not found.", 404)
+        # ORDER 18: Global props may be edited from any project; persist on home.
+        home = str(existing.project_id or "").strip()
+        current = str(project_id or "").strip()
+        if home != current and not _prop_is_global(existing):
+            raise PropCreatorError(
+                "This prop can only be edited from the project that created it.",
+                403,
+                "OWNER_REQUIRED",
+            )
     label = (name or (existing.display_label if existing else "")).strip()
     if not label:
         raise PropCreatorError("Name is required to save a Prop.")
+    next_global = _prop_is_global(existing) if existing is not None and is_global is None else bool(is_global)
     prop = existing or PropEntity(project_id=project_id)
+    owner_id = prop.project_id or project_id
+    _check_prop_name_collision(
+        db,
+        project_id=owner_id,
+        name=label,
+        exclude_id=prop.id,
+        making_global=next_global,
+    )
+    renamed = bool(existing) and label != (existing.display_label or "").strip()
     prop.display_label = label
-    prop.tag = unique_tag(db, project_id, label, exclude_id=prop.id)
-    prop.visual_style = (visual_style or "").strip()
-    prop.description = (description or "").strip()
-    prop.notes = prop.description
+    from ..creator_scope.identity_tag import looks_like_collision_alias, prompt_canonical_tag
+
+    if existing is None:
+        if not str(prop.tag or "").strip():
+            prop.tag = unique_tag(db, owner_id, label, exclude_id=prop.id)
+        prop.canonical_tag = prompt_canonical_tag("prop", label)
+    elif renamed:
+        # Intentional identity rename: one canonical rewrite. Never mint a collision suffix.
+        prop.canonical_tag = prompt_canonical_tag("prop", label)
+        if not str(prop.tag or "").strip():
+            prop.tag = unique_tag(db, owner_id, label, exclude_id=prop.id)
+    else:
+        if not str(prop.tag or "").strip():
+            prop.tag = unique_tag(db, owner_id, label, exclude_id=prop.id)
+        stored = str(prop.canonical_tag or "").strip()
+        if not stored or looks_like_collision_alias(stored, label):
+            prop.canonical_tag = prompt_canonical_tag("prop", label, stored)
+    _check_prop_tag_collision(
+        db,
+        project_id=owner_id,
+        tag=prop.tag,
+        exclude_id=prop.id,
+        making_global=next_global,
+    )
+    prop.is_global = next_global
+    prop.isGlobal = next_global
+    if visual_style is not None:
+        prop.visual_style = (visual_style or "").strip()
+    if description is not None:
+        prop.description = strip_machine_notes(description)
+    else:
+        prop.description = strip_machine_notes(prop.description)
+    _sanitize_prop_human_fields(prop)
     if clear_reference:
-        prop.reference_asset_id = None
+        _detach_primary_reference(prop)
     elif reference_asset_id is not None:
         prop.reference_asset_id = (reference_asset_id or "").strip() or None
     if generator:
         prop.generator = GeneratorSourceSelection.model_validate(generator)
-    save_prop_entity(db, project_id, prop)
+    if mode is not None or advanced_type is not None or primary_prompt is not None or hero_optional is not None:
+        from .advanced_service import apply_advanced_fields
+
+        apply_advanced_fields(
+            prop,
+            mode=mode,
+            advanced_type=advanced_type,
+            primary_prompt=primary_prompt,
+            hero_optional=hero_optional,
+        )
+    save_prop_entity(db, owner_id, prop)
+    _sync_prop_scope(db, prop)
     if use_as_identity:
         return use_as_prop_identity(
             db,
-            project_id,
+            owner_id,
             prop.id,
             asset_id=identity_asset_id or (prop.reference_asset_id or ""),
             source_type="library",
@@ -133,7 +369,7 @@ def generate_candidates(
     candidate_count: int = 4,
     generator_sources: dict[str, Any] | None = None,
 ) -> PropEntity:
-    prop = get_prop(db, project_id, prop_id)
+    prop = require_owned_prop(db, project_id, prop_id)
     compiled = compile_prop_prompt(prop)
     has_reference = bool((prop.reference_asset_id or "").strip())
     plans = build_prop_candidate_plans(
@@ -160,7 +396,7 @@ def generate_candidates(
 
 
 def retry_candidate(db: Session, project_id: str, prop_id: str, candidate_id: str) -> PropEntity:
-    prop = get_prop(db, project_id, prop_id)
+    prop = require_owned_prop(db, project_id, prop_id)
     target = next((c for c in prop.candidates if c.id == candidate_id), None)
     if target is None:
         raise PropCreatorError("Candidate not found.")
@@ -212,6 +448,40 @@ def retry_candidate(db: Session, project_id: str, prop_id: str, candidate_id: st
 
 
 
+def _compose_prs_after_approval(db: Session, project_id: str, prop: PropEntity) -> None:
+    try:
+        from .prs_compose import compose_and_ingest_prs
+
+        sheet = compose_and_ingest_prs(db, project_id, prop)
+    except Exception:
+        logger.exception("PRS compose failed for prop %s", prop.id)
+        return
+    if sheet is None:
+        return
+    prop.prs_asset_id = sheet.id
+    save_prop_entity(db, project_id, prop)
+
+
+def compose_prop_reference_sheet_for_prop(
+    db: Session,
+    project_id: str,
+    prop_id: str,
+) -> tuple[PropEntity, str]:
+    """Explicit Basic PRS compose. Uses existing compose_and_ingest_prs; never overwrites approved still."""
+    prop = require_owned_prop(db, project_id, prop_id)
+    if not str(prop.approved_asset_id or "").strip():
+        raise PropCreatorError("Use This Prop first, then create a Prop Reference Sheet.", 400)
+    from .prs_compose import compose_and_ingest_prs
+
+    owner_id = prop.project_id
+    sheet = compose_and_ingest_prs(db, owner_id, prop)
+    if sheet is None:
+        raise PropCreatorError("Prop Reference Sheet could not be composed from the approved still.", 400)
+    prop.prs_asset_id = sheet.id
+    save_prop_entity(db, owner_id, prop)
+    return prop, sheet.id
+
+
 def use_as_prop_identity(
     db: Session,
     project_id: str,
@@ -225,33 +495,141 @@ def use_as_prop_identity(
     Sets approved_asset_id = asset_id and mirrors library_asset_id. PropEntity.id
     is unchanged. Does not enqueue generation.
     """
-    prop = get_prop(db, project_id, prop_id)
+    prop = require_owned_prop(db, project_id, prop_id)
+    owner_id = str(prop.project_id or project_id).strip()
     aid = (asset_id or prop.reference_asset_id or "").strip()
     if not aid:
         raise PropCreatorError("Attach a reference image before using it as Prop Identity.")
     asset = db.get(Asset, aid)
-    if asset is None or asset.project_id != project_id:
+    # Asset may live on the prop home project even when editing from another workspace.
+    if asset is None or str(asset.project_id or "").strip() not in {owner_id, str(project_id or "").strip()}:
         raise PropCreatorError("Reference asset not found.", 404)
     prev = prop.approved_asset_id
     if prev and prev != aid:
-        _set_asset_approval(db, project_id, prev, approved=False)
+        _set_asset_approval(db, owner_id, prev, approved=False)
     prop.approved_asset_id = aid
     prop.library_asset_id = aid
-    _set_asset_approval(db, project_id, aid, approved=True)
-    notes = (prop.notes or "").strip()
-    marker = f"identitySource={source_type or 'library'}"
-    if marker not in notes:
-        prop.notes = f"{notes} {marker}".strip() if notes else marker
+    _set_asset_approval(db, owner_id, aid, approved=True)
+    save_prop_entity(db, owner_id, prop)
+    # ORDER 16: PRS is optional / button-driven via compose_prop_reference_sheet_for_prop — do not auto-compose on approve.
+    return prop
+
+
+def upload_identity_from_bytes(
+    db: Session,
+    project_id: str,
+    prop_id: str,
+    *,
+    data: bytes,
+    filename: str = "",
+    content_type: str = "",
+) -> PropEntity:
+    """Basic Prop view upload: Library candidate, not auto-approved."""
+    import uuid as _uuid
+
+    from .view_upload import SOURCE_UPLOADED, stamp_prop_view_asset, write_prop_image_asset
+
+    prop = require_owned_prop(db, project_id, prop_id)
+    asset = write_prop_image_asset(
+        db,
+        project_id=project_id,
+        prop_id=prop.id,
+        prop_name=prop.display_label or prop.tag or "Prop",
+        view="primary",
+        data=data,
+        filename=filename,
+        content_type=content_type,
+        source=SOURCE_UPLOADED,
+    )
+    stamp_prop_view_asset(
+        db,
+        asset,
+        project_id=project_id,
+        prop_id=prop.id,
+        prop_name=prop.display_label or prop.tag or "Prop",
+        view="primary",
+        source=SOURCE_UPLOADED,
+    )
+    next_index = len(prop.candidates or [])
+    candidate = PropCandidate(
+        id=str(_uuid.uuid4()),
+        prop_id=prop.id,
+        index=next_index,
+        job_id="",
+        asset_id=asset.id,
+        status="complete",
+        source="local",
+        origin=SOURCE_UPLOADED,
+        family="upload",
+        model="uploaded",
+        provenance_label="Uploaded",
+        take_label=f"Uploaded look {next_index + 1}",
+        conditioning="description_guided",
+    )
+    prop.candidates = list(prop.candidates or []) + [candidate]
+    save_prop_entity(db, project_id, prop)
+    return prop
+
+
+def adopt_identity_from_asset(
+    db: Session,
+    project_id: str,
+    prop_id: str,
+    asset_id: str,
+    *,
+    source_type: str = "uploaded",
+) -> PropEntity:
+    """Bind an existing Library image as a Basic identity candidate. Not auto-approved."""
+    import uuid as _uuid
+
+    from .view_upload import SOURCE_UPLOADED, stamp_prop_view_asset
+
+    prop = require_owned_prop(db, project_id, prop_id)
+    aid = (asset_id or "").strip()
+    asset = db.get(Asset, aid) if aid else None
+    if asset is None:
+        from ..creator_scope.service import resolve_readable_asset
+
+        asset = resolve_readable_asset(db, project_id, aid)
+    if asset is None:
+        raise PropCreatorError("That picture is not in this project's Library.", 404)
+    source = SOURCE_UPLOADED if str(source_type or "").strip().lower() in {"upload", "uploaded", SOURCE_UPLOADED} else SOURCE_UPLOADED
+    stamp_prop_view_asset(
+        db,
+        asset,
+        project_id=str(asset.project_id or project_id),
+        prop_id=prop.id,
+        prop_name=prop.display_label or prop.tag or "Prop",
+        view="primary",
+        source=source,
+    )
+    next_index = len(prop.candidates or [])
+    candidate = PropCandidate(
+        id=str(_uuid.uuid4()),
+        prop_id=prop.id,
+        index=next_index,
+        job_id="",
+        asset_id=asset.id,
+        status="complete",
+        source="local",
+        origin=source,
+        family="upload",
+        model="uploaded",
+        provenance_label="Uploaded",
+        take_label=f"Uploaded look {next_index + 1}",
+        conditioning="description_guided",
+    )
+    prop.candidates = list(prop.candidates or []) + [candidate]
     save_prop_entity(db, project_id, prop)
     return prop
 
 
 def approve_candidate(db: Session, project_id: str, prop_id: str, candidate_id: str) -> PropEntity:
-    prop = get_prop(db, project_id, prop_id)
+    prop = require_owned_prop(db, project_id, prop_id)
     candidate = next((c for c in prop.candidates if c.id == candidate_id), None)
     if candidate is None:
         raise PropCreatorError("Candidate not found.")
-    if candidate.status != "complete" or not candidate.asset_id:
+    if not (candidate.asset_id or "").strip():
         raise PropCreatorError("That look is not ready yet.")
     prev = prop.approved_asset_id
     if prev and prev != candidate.asset_id:
@@ -260,22 +638,149 @@ def approve_candidate(db: Session, project_id: str, prop_id: str, candidate_id: 
     prop.library_asset_id = candidate.asset_id
     _set_asset_approval(db, project_id, candidate.asset_id, approved=True)
     save_prop_entity(db, project_id, prop)
+    # ORDER 16: PRS is optional / button-driven via compose_prop_reference_sheet_for_prop — do not auto-compose on approve.
     return prop
 
 
-def delete_prop(db: Session, project_id: str, prop_id: str) -> dict[str, Any]:
+def _repoint_scene_shots(db: Session, project_id: str, source_id: str, target_id: str) -> int:
+    if source_id == target_id:
+        return 0
+    try:
+        from ..spatial_map.ers_persistence import list_scene_shots, save_scene_shot
+    except Exception:
+        return 0
+    changed_n = 0
+    for shot in list_scene_shots(db, project_id):
+        changed = False
+        ids = list(shot.prop_entity_ids or [])
+        if source_id in ids:
+            shot.prop_entity_ids = [target_id if item == source_id else item for item in ids]
+            if target_id in shot.prop_entity_ids:
+                shot.prop_entity_ids = list(dict.fromkeys(shot.prop_entity_ids))
+            changed = True
+        blocking = getattr(getattr(shot, "take_memory", None), "blocking", None)
+        if isinstance(blocking, dict):
+            block_ids = list(blocking.get("prop_entity_ids") or [])
+            if source_id in block_ids:
+                blocking["prop_entity_ids"] = list(
+                    dict.fromkeys(target_id if item == source_id else item for item in block_ids)
+                )
+                changed = True
+        if changed:
+            save_scene_shot(db, project_id, shot)
+            changed_n += 1
+    return changed_n
+
+
+def _repoint_scene_bindings(db: Session, source_id: str, target_id: str) -> int:
+    if source_id == target_id:
+        return 0
+    try:
+        from ..scene_references.models import SceneReferenceBinding
+    except Exception:
+        return 0
+    n = 0
+    rows = (
+        db.query(SceneReferenceBinding)
+        .filter(SceneReferenceBinding.identity_id == source_id)
+        .all()
+    )
+    for row in rows:
+        row.identity_id = target_id
+        n += 1
+    if n:
+        db.commit()
+    return n
+
+
+def _unlink_scene_bindings(db: Session, project_id: str, prop_id: str, *, is_global: bool) -> int:
+    try:
+        from ..scene_references.models import SceneReferenceBinding
+    except Exception:
+        return 0
+    now_dt = datetime.now(timezone.utc)
+    query = db.query(SceneReferenceBinding).filter(SceneReferenceBinding.identity_id == prop_id)
+    if not is_global:
+        query = query.filter(SceneReferenceBinding.project_id == project_id)
+    n = 0
+    for row in query.all():
+        row.identity_id = None
+        row.enabled = False
+        if getattr(row, "deleted_at", None) is None:
+            row.deleted_at = now_dt
+        row.updated_by = "prop-delete"
+        n += 1
+    return n
+
+
+def merge_duplicate_prop(
+    db: Session,
+    project_id: str,
+    *,
+    survivor_id: str,
+    duplicate_id: str,
+) -> dict[str, Any]:
+    """Re-point references from a duplicate Prop onto the canonical survivor, then retire the duplicate."""
+    survivor = require_owned_prop(db, project_id, survivor_id)
+    duplicate = require_owned_prop(db, project_id, duplicate_id)
+    shots = _repoint_scene_shots(db, project_id, duplicate.id, survivor.id)
+    bindings = _repoint_scene_bindings(db, duplicate.id, survivor.id)
+    deleted = delete_prop(db, project_id, duplicate.id, confirm_cross_project=True)
+    return {
+        "ok": True,
+        "survivorId": survivor.id,
+        "removedId": duplicate.id,
+        "shotsRepointed": shots,
+        "bindingsRepointed": bindings,
+        "libraryAssetsKept": True,
+        "deleted": deleted,
+    }
+
+
+def delete_prop(
+    db: Session,
+    project_id: str,
+    prop_id: str,
+    *,
+    confirm_cross_project: bool = False,
+) -> dict[str, Any]:
     prop = get_prop(db, project_id, prop_id)
-    unlinked = _unlink_spatial_props(db, project_id, prop.id)
-    shots_unlinked = _unlink_scene_shots(db, project_id, prop.id)
+    if str(prop.project_id or "").strip() != str(project_id or "").strip():
+        raise PropCreatorError("Global props can only be deleted from the project that created them.", 403)
+    from ..creator_scope.contract import ENTITY_PROP, CreatorScopeError
+    from ..creator_scope.service import delete_scope, require_delete_safety
+
+    try:
+        require_delete_safety(
+            db,
+            entity_type=ENTITY_PROP,
+            entity_id=prop.id,
+            owning_project_id=project_id,
+            is_global=_prop_is_global(prop),
+            confirm_cross_project=confirm_cross_project,
+        )
+    except CreatorScopeError as exc:
+        raise PropCreatorError(exc.message, exc.status, exc.code) from exc
+    unlinked = _unlink_spatial_props(
+        db, project_id, prop.id, is_global=_prop_is_global(prop)
+    )
+    shots_unlinked = _unlink_scene_shots(
+        db, project_id, prop.id, is_global=_prop_is_global(prop)
+    )
+    bindings_unlinked = _unlink_scene_bindings(
+        db, project_id, prop.id, is_global=_prop_is_global(prop)
+    )
     deleted = delete_prop_entity(db, project_id, prop.id)
     if deleted is None:
         raise PropCreatorError("Prop not found.", 404)
+    delete_scope(db, entity_type=ENTITY_PROP, entity_id=prop.id)
     return {
         "ok": True,
         "prop_id": prop.id,
         "library_assets_kept": True,
         "spatial_unlinked": unlinked,
         "shots_unlinked": shots_unlinked,
+        "bindings_unlinked": bindings_unlinked,
     }
 
 
@@ -449,6 +954,13 @@ def _enqueue_plans(
 
 def _sync_candidates(db: Session, project_id: str, prop: PropEntity) -> None:
     for candidate in prop.candidates:
+        aid = str(candidate.asset_id or "").strip()
+        # Uploaded / adopted looks have an asset and no generation job. Never
+        # mark them failed just because job_id is empty.
+        if aid:
+            if candidate.status not in {"complete", "failed"}:
+                candidate.status = "complete"
+            continue
         if candidate.status in {"complete", "failed"} and candidate.asset_id:
             continue
         job_id = candidate.job_id
@@ -462,7 +974,16 @@ def _sync_candidates(db: Session, project_id: str, prop: PropEntity) -> None:
         if status in {"done", "completed", "complete", "success"}:
             asset_id = _job_asset_id(job)
             candidate.asset_id = asset_id or candidate.asset_id
-            candidate.status = "complete" if candidate.asset_id else "generating"
+            if candidate.asset_id:
+                candidate.status = "complete"
+                if isinstance(getattr(job, "progress", None), (int, float)):
+                    candidate.progress = float(job.progress)
+            else:
+                # Terminal job with no registered asset — fail honestly (never park generating).
+                candidate.status = "failed"
+                candidate.error = candidate.error or job.message or "Job finished without an output asset."
+                if isinstance(getattr(job, "progress", None), (int, float)):
+                    candidate.progress = float(job.progress)
         elif status in {"failed", "error", "cancelled"}:
             candidate.status = "failed"
             candidate.error = job.message or candidate.error
@@ -470,6 +991,15 @@ def _sync_candidates(db: Session, project_id: str, prop: PropEntity) -> None:
             candidate.status = "generating"
         else:
             candidate.status = "queued"
+        # Honest Job.progress / stage / message only - never invent.
+        if isinstance(getattr(job, "progress", None), (int, float)):
+            candidate.progress = float(job.progress)
+        stage = str(getattr(job, "stage", None) or "").strip()
+        message = str(getattr(job, "message", None) or "").strip()
+        if stage:
+            candidate.job_stage = stage
+        if message:
+            candidate.job_message = message
 
 
 def _job_asset_id(job: Job) -> str | None:
@@ -501,40 +1031,55 @@ def _set_asset_approval(db: Session, project_id: str, asset_id: str, *, approved
     db.commit()
 
 
-def _unlink_scene_shots(db: Session, project_id: str, prop_id: str) -> int:
+def _projects_for_unlink(db: Session, project_id: str, *, is_global: bool) -> list[str]:
+    if not is_global:
+        return [project_id]
+    from ..db import Project
+
+    return [str(row.id) for row in db.query(Project).all() if str(row.id or "").strip()]
+
+
+def _unlink_scene_shots(
+    db: Session, project_id: str, prop_id: str, *, is_global: bool = False
+) -> int:
     """Drop a deleted PropEntity id from saved SceneShot lists. Keep the shot."""
     try:
         from ..spatial_map.ers_persistence import list_scene_shots, save_scene_shot
     except Exception:
         return 0
     unlinked = 0
-    for shot in list_scene_shots(db, project_id):
-        changed = False
-        ids = list(shot.prop_entity_ids or [])
-        if prop_id in ids:
-            shot.prop_entity_ids = [item for item in ids if item != prop_id]
-            changed = True
-        blocking = getattr(getattr(shot, "take_memory", None), "blocking", None)
-        if isinstance(blocking, dict):
-            block_ids = list(blocking.get("prop_entity_ids") or [])
-            if prop_id in block_ids:
-                blocking["prop_entity_ids"] = [item for item in block_ids if item != prop_id]
+    for pid in _projects_for_unlink(db, project_id, is_global=is_global):
+        for shot in list_scene_shots(db, pid):
+            changed = False
+            ids = list(shot.prop_entity_ids or [])
+            if prop_id in ids:
+                shot.prop_entity_ids = [item for item in ids if item != prop_id]
                 changed = True
-        if changed:
-            save_scene_shot(db, project_id, shot)
-            unlinked += 1
+            blocking = getattr(getattr(shot, "take_memory", None), "blocking", None)
+            if isinstance(blocking, dict):
+                block_ids = list(blocking.get("prop_entity_ids") or [])
+                if prop_id in block_ids:
+                    blocking["prop_entity_ids"] = [item for item in block_ids if item != prop_id]
+                    changed = True
+            if changed:
+                save_scene_shot(db, pid, shot)
+                unlinked += 1
     return unlinked
 
 
-def _unlink_spatial_props(db: Session, project_id: str, prop_id: str) -> int:
+def _unlink_spatial_props(
+    db: Session, project_id: str, prop_id: str, *, is_global: bool = False
+) -> int:
     try:
         from ..spatial_map.models import SpatialMapDocumentRow
         from ..spatial_map.service import _parse_document, _save_document
     except Exception:
         return 0
-    rows = db.query(SpatialMapDocumentRow).filter(SpatialMapDocumentRow.project_id == project_id).all()
+    query = db.query(SpatialMapDocumentRow)
+    if not is_global:
+        query = query.filter(SpatialMapDocumentRow.project_id == project_id)
     unlinked = 0
-    for row in rows:
+    for row in query.all():
         doc = _parse_document(row)
         changed = False
         for item in doc.props or []:

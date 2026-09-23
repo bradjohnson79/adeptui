@@ -1,8 +1,10 @@
 /**
  * Adept UI LoRA Support — video runtime-load certification (live).
- * LTX 2.3 batch render through the W46 Timeline adapter with a registered
- * LTX LoRA; verifies the Comfy graph carries LoraLoaderModelOnly with the
+ * LTX 2.5 batch render through the W46 Timeline adapter with a registered
+ * LTX 2.5 LoRA; verifies the Comfy graph carries LoraLoaderModelOnly with the
  * registered file and that the render succeeds with lora provenance.
+ * Skips honestly when no LTX 2.5-family LoRA is registered (LTX 2.3 LoRAs are
+ * retired with their base model and are not compatible).
  */
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { deleteProject } from "../helpers/app";
@@ -47,8 +49,8 @@ test.describe("LoRA video runtime certification (live)", () => {
     await waitForComfy(request);
     projectId = await createProjectResilient(request, "LoRA Video Cert");
     const list = (await (await request.get(`${API}/api/loras`)).json()) as { loras: any[] };
-    const ltx = list.loras.find((l) => l.model_family === "ltx" && l.enabled);
-    expect(ltx, "an enabled LTX LoRA must be registered").toBeTruthy();
+    const ltx = list.loras.find((l) => l.model_family === "ltx-2.5" && l.enabled);
+    test.skip(!ltx, "no enabled LTX 2.5-family LoRA registered — register one to activate this cert");
     ltxLoraId = ltx.id;
     // Upload a start frame for the LTX I2V render.
     const up = await request.post(`${API}/api/projects/${projectId}/assets`, {
@@ -61,7 +63,7 @@ test.describe("LoRA video runtime certification (live)", () => {
     expect(up.ok(), `upload failed: ${await up.text()}`).toBeTruthy();
     const asset = (await up.json()) as { id: string };
     const scene = await request.post(`${API}/api/projects/${projectId}/scenes`, {
-      data: { name: "LTX LoRA Cert", prompt: "slow push-in on a harbor at dusk", engine: "ltx", duration_sec: 2 },
+      data: { name: "LTX LoRA Cert", prompt: "slow push-in on a harbor at dusk", engine: "ltx-2.5", duration_sec: 2 },
     });
     expect(scene.ok(), `scene create failed: ${await scene.text()}`).toBeTruthy();
     sceneId = ((await scene.json()) as any).id;
@@ -81,7 +83,7 @@ test.describe("LoRA video runtime certification (live)", () => {
     // the same payload through directorTimelinePatchBatch).
     const bp = await request.patch(
       `${API}/api/director-timeline/projects/${projectId}/scenes/${sceneId}/batches/${batchId}`,
-      { data: { generatorId: "ltx-local", lora: { loraId: ltxLoraId, name: "LTX Motion", strength: 0.6 } } },
+      { data: { generatorId: "ltx-2.5-distilled", lora: { loraId: ltxLoraId, name: "LTX Motion", strength: 0.6 } } },
     );
     expect(bp.ok(), `batch patch failed: ${await bp.text()}`).toBeTruthy();
   });

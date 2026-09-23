@@ -128,15 +128,14 @@ def _occupied_slots(document: Any, kind: str) -> set[int]:
 
 
 def _ensure_prop_entity(db: Session, project_id: str, label: str, tag: str) -> str:
-    from ...spatial_map.ers_contracts import PropEntity, normalize_prop_tag
-    from ...spatial_map.ers_persistence import list_prop_entities, save_prop_entity
+    from ...creator_scope.contract import ENTITY_PROP
+    from ...creator_scope.service import resolve_visible_profile
+    from ...prop_creator.service import create_or_update_prop
 
-    clean = normalize_prop_tag(tag or label)
-    for existing in list_prop_entities(db, project_id):
-        if existing.tag == clean or existing.display_label.lower() == label.lower():
-            return existing.id
-    prop = PropEntity(project_id=project_id, tag=clean, display_label=label or clean)
-    save_prop_entity(db, project_id, prop)
+    hit = resolve_visible_profile(db, entity_type=ENTITY_PROP, project_id=project_id, name=label)
+    if hit is not None:
+        return hit.entity_id
+    prop = create_or_update_prop(db, project_id, name=label or tag)
     return prop.id
 
 

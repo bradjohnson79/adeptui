@@ -159,6 +159,11 @@ class CapabilityOut(BaseModel):
     summary: str = ""
     details: dict[str, Any] = Field(default_factory=dict)
     lastCheckedAt: str
+    readinessClass: str = "optional"
+    v11Requirement: str = "optional"
+    workflowScope: str = ""
+    severity: str = "optional"
+    productionEffect: str = ""
 
 
 class CapabilityBlockerOut(BaseModel):
@@ -170,6 +175,11 @@ class CapabilityBlockerOut(BaseModel):
     message: str = ""
     recommendedAction: Optional[str] = None
     componentIds: list[str] = Field(default_factory=list)
+    readinessClass: str = "optional"
+    v11Requirement: str = "optional"
+    workflowScope: str = ""
+    severity: str = "optional"
+    productionEffect: str = ""
 
 
 class CapabilitySnapshotOut(BaseModel):
@@ -187,3 +197,8 @@ class CapabilitySnapshotOut(BaseModel):
     #: Deferred capability ids (roadmap only; not in readinessTotal).
     deferred: list[str] = Field(default_factory=list)
     probeWarnings: list[str] = Field(default_factory=list)
+    readinessPolicyVersion: str = "v1.1"
+    snapshotIncomplete: bool = False
+    productionBlockers: list[CapabilityBlockerOut] = Field(default_factory=list)
+    workflowBlockers: list[CapabilityBlockerOut] = Field(default_factory=list)
+    advisoryBlockers: list[CapabilityBlockerOut] = Field(default_factory=list)

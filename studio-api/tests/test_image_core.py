@@ -376,6 +376,21 @@ def test_fal_edit_args_and_capability_allow_nano_banana_edit() -> None:
     assert "image_size" not in args
     t2i = build_fal_image_arguments(model_id="fal-ai/flux/dev", prompt="x", width=1024, height=1024, seed=7)
     assert t2i["image_size"] == {"width": 1024, "height": 1024}
+    gpt = build_fal_image_arguments(
+        model_id="openai/gpt-image-2/edit",
+        prompt="closer to the attached corridor",
+        width=1920,
+        height=1080,
+        seed=0,
+        image_urls=["https://example.com/ref.png"],
+    )
+    assert gpt["image_size"] == "landscape_16_9"
+    assert gpt["image_urls"] == ["https://example.com/ref.png"]
+    assert "seed" not in gpt
+    from app.fal_catalog import fal_still_edit_model_id
+
+    assert fal_still_edit_model_id("openai/gpt-image-2") == "openai/gpt-image-2/edit"
+    assert fal_still_edit_model_id("fal-ai/nano-banana-2") == "fal-ai/nano-banana-2/edit"
     cap = resolve_image_capability(
         {
             "prompt": "add a red apple",

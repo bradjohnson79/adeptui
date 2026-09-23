@@ -160,9 +160,10 @@ export type VoiceEnvironmentErrorCode =
 export type VoiceStudioWorkspaceTab =
   | "identity"
   | "performance"
-  | "environment"
-  | "sceneDialogue"
-  | "takes";
+  | "environment";
+
+/** @deprecated Top-level Scene Dialogue / Takes stages removed (ORDER 5). Map to performance. */
+export type VoiceStudioLegacyWorkspaceTab = VoiceStudioWorkspaceTab | "sceneDialogue" | "takes";
 
 export const VOICE_STUDIO_STAGE_ORDER: readonly {
   id: VoiceStudioWorkspaceTab;
@@ -183,16 +184,6 @@ export const VOICE_STUDIO_STAGE_ORDER: readonly {
     id: "environment",
     label: "Voice Environment",
     tip: "Where and how the voice is heard in the scene.",
-  },
-  {
-    id: "sceneDialogue",
-    label: "Scene Dialogue",
-    tip: "What the character says.",
-  },
-  {
-    id: "takes",
-    label: "Takes",
-    tip: "Generated and approved results.",
   },
 ] as const;
 

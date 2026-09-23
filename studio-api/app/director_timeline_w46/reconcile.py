@@ -350,20 +350,6 @@ def reconcile_legacy_cameras(master: SceneTimelineMaster, legacy_camera_clips: l
     return changed
 
 
-def reconcile_legacy_to_master(master: SceneTimelineMaster, director_tl: Any) -> bool:
-    """FE_SYNC_ONLY — put_director Timed Prompt lane → Master.
-
-    NOT generation authority. Generate reads batch.promptSegments only.
-    """
-    """Reconcile the legacy NLE view into the master. Returns changed."""
-    if not master.batchBlocks:
-        return False
-    changed = reconcile_legacy_prompts(master, list(director_tl.prompt_segments or []))
-    changed = reconcile_legacy_image_anchors(master, list(director_tl.image_clips or [])) or changed
-    changed = reconcile_legacy_cameras(master, list(getattr(director_tl, "camera_clips", None) or [])) or changed
-    return changed
-
-
 def _scene_duration(master: SceneTimelineMaster) -> float:
     return sum(max(0.0, float(getattr(batch.duration, "plannedDuration", 0) or 0.0)) for batch in (master.batchBlocks or []))
 
@@ -423,96 +409,11 @@ def persist_prompt_projection_to_scene(
     scene_id: str,
     master: SceneTimelineMaster,
 ) -> None:
-    """Write the scene Timed Prompt projection (including spoken dialogue) to director_json."""
-    from ..director_timeline import (
-        PromptSegment as LegacyPromptSegment,
-        dumps_director_timeline_preserving_embedded,
-        parse_director_timeline,
-    )
-    from .store import get_scene
+    """Persist Master prompts only. Does not dump a live DirectorTimeline store."""
+    from .store import save_master
 
-    scene_row = get_scene(db, project_id, scene_id)
-    if scene_row is None:
-        return
-    tl = parse_director_timeline(
-        scene_row.director_json,
-        fallback_duration=float(scene_row.duration_sec or 5.0),
-        fallback_prompt=scene_row.prompt or "",
-    )
-    projected = project_prompts_to_legacy(master)
-    segment_type = type(tl.prompt_segments[0]) if tl.prompt_segments else LegacyPromptSegment
-    tl.prompt_segments = [segment_type(**seg) for seg in projected] if projected else []
-    scene_row.director_json = dumps_director_timeline_preserving_embedded(tl, scene_row.director_json)
-    db.add(scene_row)
+    save_master(db, project_id, scene_id, master, bump_revision=True)
 
-
-
-def project_prompts_to_legacy(master: SceneTimelineMaster) -> list[dict[str, Any]]:
-    """Flatten batch.promptSegments into legacy prompt_segments dicts.
-
-    The legacy prompt track is the derived NLE view of the canonical master.
-    Called when the master prompt side is edited (Batch Inspector) so the
-    visible lane and the generation input never diverge.
-
-    12B working-Timeline shape: EVERY batch's own segments project into the
-    visible Timed Prompt lane at their batch window (batch-local start +
-    window offset) — 12B shows 0-15 and 15-30 entries. Skipping later batches
-    here hid Batch 2's prompt and its dialogue cues from the lane, breaking
-    dialogue allocation (invented speech before the authorized line).
-    Batches with no own segment legitimately inherit the scene-level Timed
-    Prompt at runtime; the lane still shows the owning segment only.
-
-    REBUILD LAW (Timeline source rebuild): the former scene-level branch here
-    re-anchored a full-scene segment to 0 and re-stretched its length to the
-    scene duration — the "one scene / one prompt" projection. Under the 12B
-    law every compliant master is windowed, so plain window projection is the
-    only projection: no re-anchor, no stretch, no lane dedupe that could drop
-    a batch's own entry. A full-scene segment can only exist in pre-12B
-    migrated masters; start containment already assigns it to the root
-    window, and it projects verbatim instead of being silently rewritten.
-    """
-    out: list[dict[str, Any]] = []
-    for batch, w_start, _w_end in batch_time_windows(master):
-        for seg in batch.promptSegments:
-            if not str(getattr(seg, "text", "") or "").strip():
-                continue
-            abs_start = w_start + float(seg.start)
-            length = float(seg.length)
-            seg_id = seg.legacyPromptSegmentId or (
-                str(seg.id) if str(seg.id).startswith("ps_") else f"ps_{seg.id}"
-            )
-            spoken = str(getattr(seg, "dialogue", None) or "").strip()
-            if not spoken:
-                try:
-                    from .generation.speech_compile import spoken_line_from_segment
-
-                    spoken = spoken_line_from_segment(seg) or ""
-                except Exception:
-                    spoken = ""
-                if spoken:
-                    try:
-                        seg.dialogue = spoken
-                    except Exception:
-                        pass
-            out.append(
-                {
-                    "id": seg_id,
-                    "start": round(abs_start, 6),
-                    "length": round(float(length), 6),
-                    "text": seg.text or "",
-                    "weight": float(seg.strength or 1.0),
-                    "temperature": float(getattr(seg, "temperature", 1.0) or 1.0),
-                    "negative_prompt": seg.negativePrompt,
-                    "reference_binding_ids": list(seg.referenceBindingIds or []),
-                    "reference_name_bindings": dump_prompt_name_bindings(seg.referenceNameBindings),
-                    "user_direction": seg.userDirection,
-                    "production_prompt": seg.productionPrompt,
-                    "dialogue": spoken or seg.dialogue,
-                    "movement_segment_ref": seg.movementSegmentRef,
-                    "movement_segment_revision": seg.movementSegmentRevision,
-                }
-            )
-    return out
 
 
 def project_audio_sfx_to_legacy(master: SceneTimelineMaster) -> dict[str, list[dict[str, Any]]]:

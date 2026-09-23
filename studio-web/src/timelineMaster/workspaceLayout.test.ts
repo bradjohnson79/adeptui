@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   DEFAULT_LEFT_WIDTH,
@@ -10,11 +11,20 @@ import {
   MIN_MONITOR_HEIGHT,
   RIGHT_PANE_MAX,
   RIGHT_PANE_MIN,
+  MAGI_CENTER_SPLIT_KEY,
+  MAGI_DEFAULT_VIEWER_RATIO,
+  MAGI_REGION_MIN_PX,
+  MAGI_VIEWER_MIN_PX,
   TIMELINE_REGION_MIN_PX,
   TIMELINE_WORKSPACE_KEY,
   clampDrawerWidth,
+  clampMagiViewerHeight,
+  magiPreviewHeightStorageKey,
+  magiViewerHeightBounds,
+  resetMagiCenterSplit,
   clampSidebarWidths,
   clampViewerHeight,
+  timelineWorkspaceInsets,
   loadTimelineWorkspaceLayout,
   previewHeightStorageKey,
   resetTimelineWorkspaceLayout,
@@ -63,6 +73,36 @@ test("sidebar widths clamp to pane limits without rewriting the other side", () 
   assert.equal(tight.rightWidth, 500);
 });
 
+test("timelineWorkspaceInsets shrink the track canvas only while a drawer is open", () => {
+  assert.deepEqual(
+    timelineWorkspaceInsets({
+      leftDrawerOpen: false,
+      rightDrawerOpen: false,
+      leftWidth: 280,
+      rightWidth: 320,
+    }),
+    { left: 0, right: 0 },
+  );
+  assert.deepEqual(
+    timelineWorkspaceInsets({
+      leftDrawerOpen: true,
+      rightDrawerOpen: true,
+      leftWidth: 280,
+      rightWidth: 320,
+    }),
+    { left: 280, right: 320 },
+  );
+  assert.deepEqual(
+    timelineWorkspaceInsets({
+      leftDrawerOpen: false,
+      rightDrawerOpen: true,
+      leftWidth: 280,
+      rightWidth: 390,
+    }),
+    { left: 0, right: 390 },
+  );
+});
+
 test("clampDrawerWidth clamps only that side to pane min/max", () => {
   assert.equal(clampDrawerWidth("left", 10), LEFT_PANE_MIN);
   assert.equal(clampDrawerWidth("left", 900), LEFT_PANE_MAX);
@@ -108,6 +148,19 @@ test("explicit open drawer flags survive load", () => {
   assert.equal(loaded.rightWidth, 390);
 });
 
+test("MAGI split keys stay isolated from Timeline Large Viewer", () => {
+  fakeLayoutStorage();
+  assert.equal(magiPreviewHeightStorageKey("proj-1"), "adept-ui.magi.preview-height.proj-1");
+  assert.notEqual(magiPreviewHeightStorageKey("proj-1"), previewHeightStorageKey("proj-1"));
+  assert.notEqual(MAGI_CENTER_SPLIT_KEY, TIMELINE_WORKSPACE_KEY);
+  const bounds = magiViewerHeightBounds(800);
+  assert.equal(bounds.min, MAGI_VIEWER_MIN_PX);
+  assert.equal(bounds.max, 800 - MAGI_REGION_MIN_PX);
+  assert.equal(clampMagiViewerHeight(10, 800), MAGI_VIEWER_MIN_PX);
+  const reset = resetMagiCenterSplit("proj-1");
+  assert.equal(reset.viewerHeight, MAGI_DEFAULT_VIEWER_RATIO);
+});
+
 test("reset layout closes both drawers and restores default widths", () => {
   fakeLayoutStorage(JSON.stringify({ leftDrawerOpen: true, rightDrawerOpen: true, leftWidth: 400, rightWidth: 420 }));
   const reset = resetTimelineWorkspaceLayout();
@@ -115,4 +168,24 @@ test("reset layout closes both drawers and restores default widths", () => {
   assert.equal(reset.rightDrawerOpen, false);
   assert.equal(reset.leftWidth, DEFAULT_LEFT_WIDTH);
   assert.equal(reset.rightWidth, DEFAULT_RIGHT_WIDTH);
+});
+
+test("preview publish bar defaults visible and Reset Layout restores it", () => {
+  fakeLayoutStorage(JSON.stringify({ viewerPreset: "balanced" }));
+  const loaded = loadTimelineWorkspaceLayout();
+  assert.equal(loaded.previewPublishBarVisible, true);
+  assert.equal(DEFAULT_TIMELINE_WORKSPACE.previewPublishBarVisible, true);
+
+  fakeLayoutStorage(JSON.stringify({ previewPublishBarVisible: false }));
+  const hidden = loadTimelineWorkspaceLayout();
+  assert.equal(hidden.previewPublishBarVisible, false);
+
+  const reset = resetTimelineWorkspaceLayout();
+  assert.equal(reset.previewPublishBarVisible, true);
+});
+
+test("saveTimelineWorkspaceLayout defers layout events off the render turn", () => {
+  const src = readFileSync(new URL("./workspaceLayout.ts", import.meta.url), "utf8");
+  assert.match(src, /queueMicrotask\(\(\) => \{\s*window\.dispatchEvent\(new CustomEvent\(TIMELINE_LAYOUT_EVENT/);
+  assert.match(src, /queueMicrotask\(\(\) => \{\s*window\.dispatchEvent\(new CustomEvent\(MAGI_LAYOUT_EVENT/);
 });

@@ -7,6 +7,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { api, isAbortError } from "../../api";
 import { HelpTip } from "../HelpTip";
 import {
   buildProductionMenu,
@@ -16,7 +17,7 @@ import {
   type ProductionCategoryId,
 } from "../../core/productionMenu";
 import type { ProductionAvailability } from "../../core/productionAvailability";
-import { loadProductionRecent, type ProductionRecentItem } from "../../core/productionRecent";
+import { toRecentProjects, type RecentProject } from "../../core/productionRecentProjects";
 import type { EditorTab } from "../../core/workspaces";
 import "../ui/menu.css";
 import "./production-menu.css";
@@ -32,6 +33,8 @@ type Props = {
   onSelectWorkspace: (tab: EditorTab) => void;
   onOpenCoDirector: () => void;
   onChooseCharacterForAvatar?: () => void;
+  /** Recent Projects — canonical project switch flow (navigate /project/:id). */
+  onOpenProject?: (projectId: string, current: boolean) => void;
 };
 
 function focusableItems(root: HTMLElement | null): HTMLElement[] {
@@ -54,17 +57,12 @@ export function ProductionMenu({
   onSelectWorkspace,
   onOpenCoDirector,
   onChooseCharacterForAvatar,
+  onOpenProject,
 }: Props) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [recentTick, setRecentTick] = useState(0);
-
-  const recent = useMemo(
-    () => loadProductionRecent(projectId),
-    [projectId, recentTick, open],
-  );
 
   const menu = useMemo(
     () =>
@@ -72,9 +70,8 @@ export function ProductionMenu({
         availability,
         projectId,
         selectedCharacterId,
-        recent,
       }),
-    [availability, projectId, selectedCharacterId, recent],
+    [availability, projectId, selectedCharacterId],
   );
 
   const closeWithoutNavigate = useCallback(() => {
@@ -85,9 +82,34 @@ export function ProductionMenu({
     onOpenChange(false, { restoreFocus: false });
   }, [onOpenChange]);
 
+  // Recent Projects — fetched from the canonical project list every time the
+  // menu opens so recency updates live. Single-flight per open; aborted on
+  // close/unmount. Keyed on `open` ONLY — the close callback identity changes
+  // on every parent render (health polling) and must never abort this fetch.
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+
   useEffect(() => {
     if (!open) return;
-    setRecentTick((n) => n + 1);
+    let cancelled = false;
+    const ac = new AbortController();
+    api
+      .listProjects({ signal: ac.signal })
+      .then((projects) => {
+        if (!cancelled) setRecentProjects(toRecentProjects(projects));
+      })
+      .catch((error: unknown) => {
+        if (isAbortError(error) || cancelled) return;
+        console.error("[ProductionMenu] Recent Projects fetch failed", error);
+        setRecentProjects([]);
+      });
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) {
         closeWithoutNavigate();
@@ -142,8 +164,13 @@ export function ProductionMenu({
     }
   };
 
-  const activateRecent = (item: ProductionRecentItem) => {
-    onSelectWorkspace(item.tab);
+  const activateRecentProject = (item: RecentProject, current: boolean) => {
+    if (current) {
+      // Already the open project — do not reload/reset; just close the menu.
+      closeWithoutNavigate();
+      return;
+    }
+    onOpenProject?.(item.id, false);
     closeAfterNavigate();
   };
 
@@ -193,28 +220,29 @@ export function ProductionMenu({
         ? entry.availability?.reason || status
         : null;
     return (
-      <button
-        key={entry.id}
-        type="button"
-        role="menuitem"
-        className="production-menu__item"
-        data-testid={`production-item-${entry.id}`}
-        data-workspace={entry.workspace || ""}
-        onClick={() => activateEntry(entry)}
-      >
-        <span className="production-menu__item-main">
-          <span className="production-menu__item-label-row">
-            <span className="production-menu__item-label">{entry.label}</span>
-            <HelpTip label={entry.helpLabel} content={entry.helpContent} />
-          </span>
-          <span className="production-menu__item-desc">{entry.description}</span>
-          {badgeText ? (
-            <span className="production-menu__badge" data-testid={`production-badge-${entry.id}`}>
-              {badgeText}
+      <div key={entry.id} className="production-menu__item-row">
+        <button
+          type="button"
+          role="menuitem"
+          className="production-menu__item"
+          data-testid={`production-item-${entry.id}`}
+          data-workspace={entry.workspace || ""}
+          onClick={() => activateEntry(entry)}
+        >
+          <span className="production-menu__item-main">
+            <span className="production-menu__item-label-row">
+              <span className="production-menu__item-label">{entry.label}</span>
             </span>
-          ) : null}
-        </span>
-      </button>
+            <span className="production-menu__item-desc">{entry.description}</span>
+            {badgeText ? (
+              <span className="production-menu__badge" data-testid={`production-badge-${entry.id}`}>
+                {badgeText}
+              </span>
+            ) : null}
+          </span>
+        </button>
+        <HelpTip label={entry.helpLabel} content={entry.helpContent} />
+      </div>
     );
   };
 
@@ -327,35 +355,43 @@ export function ProductionMenu({
 
           <div className="production-menu__grid">
             {PRODUCTION_CATEGORY_ORDER.map(renderCategory)}
-          </div>
-
-          {menu.recent.length > 0 ? (
             <section
-              className="production-menu__recent"
+              className="production-menu__category production-menu__recent-projects"
               role="group"
-              aria-label="Recent"
-              data-testid="production-menu-recent"
+              aria-label="Recent Projects"
+              data-testid="production-menu-recent-projects"
+              data-category="recent-projects"
             >
-              <h3 className="production-menu__category-heading">Recent</h3>
-              <div className="production-menu__recent-items">
-                {menu.recent.map((item) => (
-                  <button
-                    key={`${item.tab}-${item.projectId || ""}-${item.at}`}
-                    type="button"
-                    role="menuitem"
-                    className="production-menu__recent-item"
-                    data-testid={`production-recent-${item.tab}`}
-                    onClick={() => activateRecent(item)}
-                  >
-                    <span className="production-menu__recent-label">{item.label}</span>
-                    {item.projectName && item.projectId !== projectId ? (
-                      <span className="production-menu__recent-meta">{item.projectName}</span>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
+              <h3 className="production-menu__category-heading">Recent Projects</h3>
+              {recentProjects.length === 0 ? (
+                <div className="production-menu__recent-empty" data-testid="production-recent-empty">
+                  No recent projects
+                </div>
+              ) : (
+                <div className="production-menu__recent-items">
+                  {recentProjects.map((item) => {
+                    const current = item.id === projectId;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="menuitem"
+                        className="production-menu__recent-item"
+                        data-testid={`production-recent-project-${item.id}`}
+                        data-current={current ? "true" : undefined}
+                        onClick={() => activateRecentProject(item, current)}
+                      >
+                        <span className="production-menu__recent-label">{item.name}</span>
+                        <span className="production-menu__recent-meta">
+                          {current ? "Current" : item.whenLabel}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </section>
-          ) : null}
+          </div>
         </div>
       ) : null}
     </div>

@@ -79,7 +79,7 @@ _RUNTIME_SPECS: tuple[AvatarRuntimeSpec, ...] = (
         ),
         code_repo="https://github.com/meituan-longcat/LongCat-Video",
         code_revision="6b3f4b8582a8bc3f20f795735f5383716c4ba794",
-        code_entrypoint="inference.py",
+        code_entrypoint="run_demo_avatar_single_audio_to_video.py",
         code_import_probe="torch",
         python_version="3.10",
         download_bytes=147 * GB,
@@ -505,12 +505,20 @@ def runtime_gate_line(provider_id: str) -> tuple[bool, str]:
     try:
         runtime = inspect_runtime(provider_id)
     except Exception:
-        runtime = {"displayName": provider_id, "healthState": "not_installed", "certifiedReady": False}
+        runtime = {
+            "displayName": provider_id,
+            "healthState": "not_installed",
+            "certifiedReady": False,
+            "runtimeReady": False,
+        }
     name = str(runtime.get("displayName") or provider_id)
     health = str(runtime.get("healthState") or "not_installed")
     if health == "not_installed":
         return False, f"{name} is not installed. Open Runtime Setup to install it."
-    if runtime.get("certifiedReady") is True:
+    # Honest product gate: Generate planning unlocks when the local runtime is actually
+    # executable (runtimeReady). certifiedReady mirrors the same probe truth in inspect_runtime
+    # and must never be a hardcoded False that permanently blocks a healthy install.
+    if runtime.get("runtimeReady") is True or runtime.get("certifiedReady") is True:
         return True, ""
     return False, f"{name} needs repair — Open Runtime Setup"
 
@@ -630,7 +638,9 @@ def inspect_runtime(component_id: str) -> dict[str, Any]:
         "supportsLoRA": spec.supports_lora,
         "supportedAspectRatios": list(spec.supported_aspect_ratios),
         "loraModelFamily": spec.lora_model_family,
-        "certifiedReady": False,
+        # Honest cert: True only when code/venv/launch/models/import probe all pass.
+        # Soft flash_attn/triton notes in spec.blockers must not force this False.
+        "certifiedReady": bool(runtime_ready),
     }
 
 
@@ -690,12 +700,58 @@ def _create_venv(component_id: str) -> Path:
 
 
 def _install_requirements(component_id: str, spec: AvatarRuntimeSpec, python: Path) -> None:
+    """Install runtime deps with Windows-safe ordering.
+
+    Official LongCat/InfiniteTalk requirements pin flash-attn alongside torch.
+    Pip resolves flash-attn early and tries to build it before torch exists, which
+    failed on 2026-08-14 with ModuleNotFoundError: No module named 'torch'.
+    Install torch family first, then requirements with flash-attn filtered out,
+    then attempt flash-attn / remaining extras without failing the whole install
+    on platforms where flash-attn wheels/source builds are unavailable.
+    """
     repo = code_dir(component_id)
+    extras = list(spec.extra_pip_packages or ())
+    torch_pkgs = [p for p in extras if p.split("==", 1)[0].split(">=", 1)[0] in {"torch", "torchvision", "torchaudio"}]
+    other_extras = [p for p in extras if p not in torch_pkgs]
+    flash_pkgs = [p for p in other_extras if p.split("==", 1)[0].replace("_", "-").startswith("flash-attn") or p.split("==", 1)[0].startswith("flash_attn")]
+    other_extras = [p for p in other_extras if p not in flash_pkgs]
+
+    if torch_pkgs:
+        # Prefer CUDA wheels when available; fall back to default index.
+        try:
+            _run(
+                [str(python), "-m", "pip", "install", *torch_pkgs, "--index-url", "https://download.pytorch.org/whl/cu128"],
+                cwd=repo,
+                component_id=component_id,
+            )
+        except Exception:
+            _run([str(python), "-m", "pip", "install", *torch_pkgs], cwd=repo, component_id=component_id)
+
     requirements = repo / "requirements.txt"
     if requirements.exists():
-        _run([str(python), "-m", "pip", "install", "-r", str(requirements)], cwd=repo, component_id=component_id)
-    if spec.extra_pip_packages:
-        _run([str(python), "-m", "pip", "install", *spec.extra_pip_packages], cwd=repo, component_id=component_id)
+        filtered_lines: list[str] = []
+        for line in requirements.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if not raw or raw.startswith("#"):
+                continue
+            name = raw.split("==", 1)[0].split(">=", 1)[0].split("[", 1)[0].strip().lower().replace("_", "-")
+            if name in {"torch", "torchvision", "torchaudio", "flash-attn"}:
+                continue
+            filtered_lines.append(raw)
+        if filtered_lines:
+            filtered = logs_dir(component_id) / "requirements.filtered.txt"
+            filtered.parent.mkdir(parents=True, exist_ok=True)
+            filtered.write_text("\n".join(filtered_lines) + "\n", encoding="utf-8")
+            _run([str(python), "-m", "pip", "install", "-r", str(filtered)], cwd=repo, component_id=component_id)
+
+    if other_extras:
+        _run([str(python), "-m", "pip", "install", *other_extras], cwd=repo, component_id=component_id)
+
+    for pkg in flash_pkgs:
+        try:
+            _run([str(python), "-m", "pip", "install", pkg], cwd=repo, component_id=component_id)
+        except Exception as exc:  # noqa: BLE001
+            _append_log(component_id, f"warning: optional {pkg} install skipped: {exc}")
 
 
 def _download_models(

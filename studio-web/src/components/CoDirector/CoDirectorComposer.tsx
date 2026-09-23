@@ -1,9 +1,33 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Button, IconButton } from "../ui";
 import { IconGallery, IconMic, IconPaperclip, IconSend, IconStop } from "./icons";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import { CoDirectorAttachmentTray } from "./CoDirectorAttachmentTray";
 import { useSpeechToText } from "./useSpeechToText";
+
+const COMPOSER_IMAGE_MIME = /^(image\/png|image\/jpeg|image\/jpg|image\/webp)$/i;
+const COMPOSER_IMAGE_EXT = /\.(png|jpe?g|webp)$/i;
+
+export function isComposerImageFile(file: File): boolean {
+  if (COMPOSER_IMAGE_MIME.test(file.type || "")) return true;
+  return COMPOSER_IMAGE_EXT.test(file.name || "");
+}
+
+export function filesFromClipboardItems(items: DataTransferItemList | undefined | null): File[] {
+  if (!items) return [];
+  const out: File[] = [];
+  for (const item of Array.from(items)) {
+    if (item.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (file && isComposerImageFile(file)) out.push(file);
+  }
+  return out;
+}
+
+export function filesFromDataTransfer(data: DataTransfer | null | undefined): File[] {
+  if (!data) return [];
+  return Array.from(data.files || []).filter(isComposerImageFile);
+}
 
 export function CoDirectorComposer() {
   const {
@@ -21,6 +45,7 @@ export function CoDirectorComposer() {
     uiContext,
   } = useCoDirectorSession();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [dropActive, setDropActive] = useState(false);
   const speech = useSpeechToText(appendTranscript);
 
   const canSend = Boolean(draft.trim() || attachments.length) && !busy;
@@ -62,7 +87,11 @@ export function CoDirectorComposer() {
       {chips.length > 0 && (
         <div className="codirector-context-chips" data-testid="codirector-context-chips">
           {chips.slice(0, 4).map((chip) => (
-            <span key={chip.id} className="codirector-context-chip">
+            <span
+              key={chip.id}
+              className="codirector-context-chip"
+              data-testid={chip.id === "scene" ? "codirector-context-chip-scene" : `codirector-context-chip-${chip.id}`}
+            >
               {chip.label}
             </span>
           ))}
@@ -86,7 +115,37 @@ export function CoDirectorComposer() {
           </Button>
         </div>
       )}
-      <div className={`codirector-composer-box ${listening ? "listening" : ""}`}>
+      <div
+        className={`codirector-composer-box ${listening ? "listening" : ""} ${dropActive ? "drop-active" : ""}`}
+        data-testid="codirector-composer-drop-target"
+        onDragEnter={(e) => {
+          if (!filesFromDataTransfer(e.dataTransfer).length && !Array.from(e.dataTransfer?.types || []).includes("Files")) {
+            return;
+          }
+          e.preventDefault();
+          setDropActive(true);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setDropActive(true);
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+          setDropActive(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDropActive(false);
+          const images = filesFromDataTransfer(e.dataTransfer);
+          if (images.length) addFiles(images);
+        }}
+      >
+        {dropActive ? (
+          <div className="codirector-composer-drop-hint" data-testid="codirector-composer-drop-hint">
+            Drop image for Co-Director
+          </div>
+        ) : null}
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -95,6 +154,16 @@ export function CoDirectorComposer() {
           disabled={busy}
           aria-label="Message Co-Director"
           data-testid="codirector-composer-input"
+          onPaste={(e) => {
+            const images = filesFromClipboardItems(e.clipboardData?.items);
+            if (!images.length) return;
+            e.preventDefault();
+            addFiles(images);
+            const text = e.clipboardData?.getData("text/plain") || "";
+            if (text.trim()) {
+              setDraft((prev) => (prev ? `${prev}${prev.endsWith("\n") || prev.endsWith(" ") ? "" : " "}${text}` : text));
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

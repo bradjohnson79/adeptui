@@ -1,4 +1,4 @@
-"""Dialogue policy — sole authority for creator-facing behavior."""
+"""Dialogue policy â€” sole authority for creator-facing behavior."""
 
 from __future__ import annotations
 
@@ -109,6 +109,60 @@ def build_dialogue_plan(
             mode=CoDirectorMode.LISTENING,
         )
 
+    if intent.primary_intent == IntentType.RECALL_SCENE:
+        # Final-closure mission 2026-09-19 (Blockers 1+2): exact scene-state
+        # recall/summary. The answer must be complete (every established
+        # active fact) and strictly faithful (nothing unstated).
+        return DialoguePlan(
+            posture=[InteractionPosture.REVIEW, InteractionPosture.ADVISE],
+            response_purpose="Recall the current scene exactly from established facts — complete and faithful.",
+            required_elements=[
+                "Use ONLY facts explicitly established in this conversation or in active scene/project state",
+                "Enumerate every established active fact: each character with their role/action, each stated position or blocking, each prop, the setting/background, any stated audio, and any stated camera/framing",
+                "Include the project/deliverable framing the creator stated (e.g. what the piece is — an ad, a short, a scene — and its format) exactly as established",
+                "Include established-but-unseen elements (e.g. an offscreen voice) when the question covers the scene",
+                "If a fact was corrected later, state only the corrected version",
+                "If something was never established, say so instead of filling the gap",
+            ],
+            prohibited_elements=list(_TITLE_PREMISE_PROHIBITIONS) + [
+                "Invent staging, positions, actions, or details that were never stated or approved",
+                "Omit an established active fact from the recall",
+                "Turn the recall into suggestions, next steps, or new creative material",
+            ],
+            question_budget=0,
+            tool_policy="NONE",
+            memory_policy="NONE",
+            workflow_advance_policy="SUGGEST",
+            tone_profile="production-clear",
+            mode=CoDirectorMode.REVIEW,
+        )
+
+    if intent.primary_intent == IntentType.PROMPT_AUTHORING:
+        # Intelligence mission 2026-09-19 (Phase 5): the creator asked FOR the
+        # prompt text (timed prompt / shot prompt / prompt draft). Co-Director
+        # writes the prompt itself — grounded in the current scene and
+        # production context — instead of dispatching a job or refusing.
+        return DialoguePlan(
+            posture=[InteractionPosture.CREATE, InteractionPosture.ADVISE],
+            response_purpose="Write the requested prompt text directly, grounded in the current scene and production context.",
+            required_elements=[
+                "Write the actual prompt text the creator asked for",
+                "Ground the prompt in the established scene state (characters, blocking, camera, audio, restrictions)",
+                "Honor any explicit restrictions from the conversation (e.g. do not generate yet)",
+            ],
+            prohibited_elements=list(_TITLE_PREMISE_PROHIBITIONS) + [
+                "Dispatch a generation job when the creator only asked for the text",
+                "Refuse or defer the prompt-writing task",
+                "List runner parameters (steps, guidance, CFG) as the fulfillment",
+            ],
+            question_budget=0,
+            tool_policy="NONE",
+            memory_policy="NONE",
+            workflow_advance_policy="SUGGEST",
+            tone_profile="production-clear",
+            mode=CoDirectorMode.PLANNING,
+        )
+
     if intent.primary_intent == IntentType.REQUEST_FEEDBACK:
         return DialoguePlan(
             posture=[InteractionPosture.REVIEW, InteractionPosture.ADVISE],
@@ -139,11 +193,18 @@ def build_dialogue_plan(
 
     if intent.primary_intent in {IntentType.REQUEST_ACTION, IntentType.REQUEST_GENERATION}:
         return DialoguePlan(
-            posture=[InteractionPosture.CLARIFY, InteractionPosture.EXECUTE],
-            response_purpose="Clarify inputs or proceed with authorized action.",
-            required_elements=["Confirm what will be done before consequential action"],
-            prohibited_elements=["Silent execution without authorization"],
-            question_budget=1,
+            posture=[InteractionPosture.EXECUTE],
+            response_purpose="Proceed with authorized action using inherited context.",
+            required_elements=["Acknowledge the action concisely before executing"],
+            prohibited_elements=[
+                "Silent execution without authorization",
+                "Ask unnecessary clarifying questions when the brief is sufficient",
+                "Give the creator a prompt to paste or run themselves",
+                "List runner parameters (steps, guidance, CFG) as the fulfillment",
+                "Tell the creator to run this locally or paste into Flux",
+                "Ask what consequence follows when a world rule is broken",
+            ],
+            question_budget=0,
             tool_policy="OPTIONAL",
             memory_policy="NONE",
             workflow_advance_policy="ADVANCE",

@@ -21,7 +21,7 @@ from app.director_timeline_w46.generation.adapters.ltx_local import LtxLocalAdap
 from app.director_timeline_w46.generation.contracts import TimelineGenerationRequest
 from app.director_timeline_w46.generation.request_builder import build_timeline_generation_request
 from app.director_timeline_w46.orchestrator import run_preflight
-from app.director_timeline_w46.reconcile import reconcile_legacy_to_master
+from app.director_timeline_w46.migration_reconcile import reconcile_legacy_to_master
 
 
 def _master_with_batch(**kwargs) -> SceneTimelineMaster:

@@ -1384,7 +1384,13 @@ test.describe.serial("Adept UI Graduation — Two-Character Dramatic Scene (phas
       await page.getByText(/Text.?to.?Video|Txt2Vid/i).first().click();
     }
     await expect(page.locator("#txt2vid-engine")).toBeVisible({ timeout: 45_000 });
-    await page.locator("#txt2vid-engine").selectOption("minimax-h3");
+    // TEXT-ONLY CONTRACT: MiniMax H3 is R2V/I2V and disabled on the text-only
+    // T2V surface. Only select it when enabled; otherwise skip (H3 belongs on
+    // 1 Frame / 3 Frame / Timeline, not T2V).
+    const h3Enabled = await page.locator("#txt2vid-engine option[value=minimax-h3]").isEnabled().catch(() => false);
+    if (h3Enabled) {
+      await page.locator("#txt2vid-engine").selectOption("minimax-h3");
+    }
     const prompt = page.locator("textarea").first();
     await prompt.fill(h3Prompt);
     await expect(page.getByTestId("minimax-h3-plan-panel")).toBeVisible();

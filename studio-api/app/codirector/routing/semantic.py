@@ -109,11 +109,19 @@ async def classify_semantic(
     available_targets: Optional[list[str]] = None,
     stage_evidence: Optional[list[dict]] = None,
     recent_actions: Optional[list[str]] = None,
+    recent_messages: Optional[list[dict]] = None,
 ) -> Optional[RouteDecision]:
     """Classify the message using the configured LLM provider.
 
     Returns a RouteDecision with classifierSource='semantic', or None
     if the provider is unavailable, times out, or returns invalid output.
+
+    Intelligence repair 2026-09-19 (RC5): the classifier now receives the
+    recent conversational window so contextual follow-ups ("Set that up.",
+    "Make that tighter.") can be classified against their referent instead of
+    collapsing to CLARIFY. The recent messages are bounded context — not a
+    dump — and are supplied by the caller from the server-side conversational
+    window.
     """
     try:
         provider = get_provider()
@@ -128,6 +136,21 @@ async def classify_semantic(
     if available_action_classes:
         actions_hint = f"\nAvailable action classes: {', '.join(available_action_classes)}"
 
+    recent_hint = ""
+    recent = [m for m in (recent_messages or []) if isinstance(m, dict) and str(m.get("content") or "").strip()]
+    if recent:
+        lines: list[str] = []
+        for m in recent[-8:]:
+            role = str(m.get("role") or "user")
+            content = str(m.get("content") or "").strip()
+            if len(content) > 400:
+                content = content[:397] + "..."
+            lines.append(f"- {role}: {content}")
+        recent_hint = (
+            "\n\nRecent conversation (bounded context for resolving follow-ups and referents):\n"
+            + "\n".join(lines)
+        )
+
     user_content = (
         f"Message: {message}\n"
         f"Derived stage: {derived_stage or 'unknown'}\n"
@@ -135,6 +158,7 @@ async def classify_semantic(
         f"Active workspace: {active_workspace or 'unknown'}"
         f"{targets_hint}"
         f"{actions_hint}"
+        f"{recent_hint}"
         "\n\nRespond with JSON only."
     )
 
@@ -191,6 +215,7 @@ async def route_with_semantic_fallback(
             available_targets=context.get("available_targets"),
             stage_evidence=context.get("stage_evidence"),
             recent_actions=context.get("recent_actions"),
+            recent_messages=context.get("recent_messages"),
         )
         if semantic is not None and semantic.confidence >= 0.85:
             return semantic
@@ -205,6 +230,7 @@ async def route_with_semantic_fallback(
         available_targets=context.get("available_targets"),
         stage_evidence=context.get("stage_evidence"),
         recent_actions=context.get("recent_actions"),
+        recent_messages=context.get("recent_messages"),
     )
 
     if semantic is None:

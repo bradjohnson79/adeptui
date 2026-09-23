@@ -20,6 +20,7 @@ _FAMILY_FALLBACK: dict[str, str] = {
     "flux-fal": "flux",
     "nano-banana-kie": "imagen",
     "gpt-image-2-kie": "imagen",
+    "gpt-image-2-fal": "gptimage2",
     "seedream-kie": "imagen",
     "krea2-turbo-fal": "krea2",
     "krea2-medium-fal": "krea2",
@@ -97,6 +98,12 @@ _HINTS: dict[str, dict[str, Any]] = {
         "nativeResolutions": ["1K", "2K"],
         "upscaleSupported": False,
         "licenseNote": "Hosted GPT Image 2 via Kie — provider terms apply",
+        "costHint": "Paid hosted API",
+    },
+    "gpt-image-2-fal": {
+        "nativeResolutions": ["1K", "2K"],
+        "upscaleSupported": False,
+        "licenseNote": "Hosted GPT Image 2 via fal.ai — provider terms apply",
         "costHint": "Paid hosted API",
     },
     "seedream-kie": {

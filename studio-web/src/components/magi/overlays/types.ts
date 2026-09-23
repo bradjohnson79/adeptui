@@ -62,7 +62,7 @@ export type MagiTextBackgroundStyle = {
 
 export type MagiOverlayElementBase = {
   id: string;
-  type: "text" | "vector" | "group";
+  type: "text" | "vector" | "group" | "image";
   name: string;
   visible: boolean;
   locked: boolean;
@@ -75,6 +75,8 @@ export type MagiOverlayElementBase = {
   anchorX: number;
   anchorY: number;
   zIndex: number;
+  /** 1 = Objects 1, 2 = Objects 2. Missing field migrates to 1. */
+  objectsTrack?: 1 | 2;
   startFrame: number | null;
   endFrame: number | null;
   createdAt: string;
@@ -102,9 +104,16 @@ export type MagiOverlayGroup = MagiOverlayElementBase & {
   type: "group";
   children: MagiOverlayElement[];
   groupKind?: "lower_third" | "generic";
+  animationPreset?: MagiTextAnimationPreset;
 };
 
-export type MagiOverlayElement = MagiTextElement | MagiVectorElement | MagiOverlayGroup;
+export type MagiImageElement = MagiOverlayElementBase & {
+  type: "image";
+  assetId: string;
+  fit: "contain" | "cover";
+};
+
+export type MagiOverlayElement = MagiTextElement | MagiVectorElement | MagiOverlayGroup | MagiImageElement;
 
 export type MagiOverlayComposition = {
   schemaVersion: 1;
@@ -218,6 +227,7 @@ export function createTextElement(partial?: Partial<MagiTextElement>): MagiTextE
     anchorX: 0,
     anchorY: 0,
     zIndex: 10,
+    objectsTrack: 1,
     startFrame: null,
     endFrame: null,
     createdAt: t,
@@ -247,6 +257,7 @@ export function createVectorElement(shape: MagiVectorShape = "rectangle"): MagiV
     anchorX: 0,
     anchorY: 0,
     zIndex: 5,
+    objectsTrack: 1,
     startFrame: null,
     endFrame: null,
     createdAt: t,
@@ -259,7 +270,66 @@ export function createVectorElement(shape: MagiVectorShape = "rectangle"): MagiV
   };
 }
 
-export function createLowerThirdGroup(primary = "ANADRIYA", secondary = "Captain, Venture Command"): MagiOverlayGroup {
+export function createImageElement(assetId: string, partial?: Partial<MagiImageElement>): MagiImageElement {
+  const t = now();
+  return {
+    id: nid("img"),
+    type: "image",
+    name: "Image",
+    visible: true,
+    locked: false,
+    opacity: 1,
+    x: 0.72,
+    y: 0.06,
+    width: 0.22,
+    height: 0.18,
+    rotation: 0,
+    anchorX: 0,
+    anchorY: 0,
+    zIndex: 30,
+    objectsTrack: 1,
+    startFrame: null,
+    endFrame: null,
+    createdAt: t,
+    updatedAt: t,
+    assetId,
+    fit: "contain",
+    ...partial,
+  };
+}
+
+export function overlayObjectsTrack(el: { objectsTrack?: 1 | 2 | null }): 1 | 2 {
+  return el.objectsTrack === 2 ? 2 : 1;
+}
+
+export function composeOverlayPaintZ(el: { objectsTrack?: 1 | 2 | null; zIndex: number }): number {
+  return overlayObjectsTrack(el) * 1000 + el.zIndex;
+}
+
+export function compareOverlayPaintOrder(
+  a: { objectsTrack?: 1 | 2 | null; zIndex: number },
+  b: { objectsTrack?: 1 | 2 | null; zIndex: number },
+): number {
+  const trackDelta = overlayObjectsTrack(a) - overlayObjectsTrack(b);
+  if (trackDelta !== 0) return trackDelta;
+  return a.zIndex - b.zIndex;
+}
+
+export function overlayVisibleAtFrame(el: MagiOverlayElement, frame: number): boolean {
+  if (!el.visible) return false;
+  if (el.startFrame != null && frame < el.startFrame) return false;
+  if (el.endFrame != null && frame >= el.endFrame) return false;
+  return true;
+}
+
+export function overlayDisplayName(el: MagiOverlayElement): string {
+  if (el.type === "text") return el.text?.trim() || el.name || "Text";
+  if (el.type === "group") return el.groupKind === "lower_third" ? el.name || "Lower Third" : el.name || "Group";
+  if (el.type === "image") return el.name || "Image";
+  return el.name || el.shape || "Shape";
+}
+
+export function createLowerThirdGroup(primary = "ANADRIYA", secondary = "Current Adept"): MagiOverlayGroup {
   const t = now();
   const bar = createVectorElement("accent_bar");
   bar.id = nid("vec");
@@ -317,11 +387,13 @@ export function createLowerThirdGroup(primary = "ANADRIYA", secondary = "Captain
     anchorX: 0,
     anchorY: 0,
     zIndex: 20,
+    objectsTrack: 1,
     startFrame: null,
     endFrame: null,
     createdAt: t,
     updatedAt: t,
     groupKind: "lower_third",
+    animationPreset: "fade",
     children: [bar, accent, p, s],
   };
 }

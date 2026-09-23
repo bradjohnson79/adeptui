@@ -36,7 +36,7 @@ def _json_ok(raw: Any) -> Optional[dict[str, Any]]:
 
 
 def _active_scene(db: Session, project_id: str, scene_id: Optional[str]) -> Optional[dict[str, Any]]:
-    """Resolve the active scene: explicit scene_id, else the first scene."""
+    """Resolve the active scene from the explicit scene_id only. Never invent scenes[0]."""
     from ...db import Scene
 
     scene = None
@@ -44,13 +44,6 @@ def _active_scene(db: Session, project_id: str, scene_id: Optional[str]) -> Opti
         scene = db.get(Scene, scene_id)
         if scene is not None and scene.project_id != project_id:
             scene = None
-    if scene is None:
-        scene = (
-            db.query(Scene)
-            .filter(Scene.project_id == project_id)
-            .order_by(Scene.index.asc())
-            .first()
-        )
     if scene is None:
         return None
     return {
@@ -61,52 +54,49 @@ def _active_scene(db: Session, project_id: str, scene_id: Optional[str]) -> Opti
 
 
 def _spatial_map_state(db: Session, project_id: str, scene_id: Optional[str]) -> dict[str, Any]:
-    """Saved/current version + dirty state + cameras from the authoritative spatial store."""
+    """Saved/current version + planning placements from the authoritative spatial store."""
     try:
-        from ...spatial_map.service import list_documents
+        from ...spatial_map.service import list_documents, planning_context
 
         docs = list_documents(db, project_id) or []
         if not docs:
             return {"hasMap": False}
-        payloads: list[dict[str, Any]] = []
-        for doc in docs:
-            if hasattr(doc, "model_dump"):
-                try:
-                    payloads.append(doc.model_dump())
-                except Exception:
-                    payloads.append(dict(doc))
-            elif isinstance(doc, dict):
-                payloads.append(doc)
-            else:
-                raw = _json_ok(getattr(doc, "document_json", None))
-                if raw is not None:
-                    payloads.append(raw)
-        if not payloads:
-            return {"hasMap": False}
         selected = None
-        for payload in payloads:
-            doc_scene = payload.get("sceneId")
-            if scene_id and doc_scene == scene_id:
-                selected = payload
+        for doc in docs:
+            if scene_id and str(getattr(doc, "sceneId", "") or "") == scene_id:
+                selected = doc
                 break
         if selected is None:
-            payloads.sort(key=lambda d: str(d.get("updatedAt") or ""), reverse=True)
-            selected = next((d for d in payloads if d.get("sceneId")), payloads[0])
-        version = str(selected.get("version") or "1")
-        saved_version = str(selected.get("savedVersion") or "") or None
-        cameras = selected.get("cameras") or []
+            docs = sorted(docs, key=lambda d: str(getattr(d, "updatedAt", "") or ""), reverse=True)
+            selected = next((d for d in docs if getattr(d, "sceneId", None)), docs[0])
+        plan = planning_context(selected)
+        version = str(getattr(selected, "version", "") or "1")
+        saved_version = str(getattr(selected, "savedVersion", "") or "") or None
+        cameras = list(getattr(selected, "cameras", None) or [])
         return {
             "hasMap": True,
-            "documentId": selected.get("id"),
+            "documentId": selected.id,
+            "title": selected.title,
             "savedVersion": saved_version,
             "currentVersion": version,
             "dirty": bool(saved_version and saved_version != version),
+            "geometrySource": plan.get("geometrySource") or "",
+            "backgroundAssetId": plan.get("backgroundAssetId"),
+            "pixelsUnchanged": bool(plan.get("pixelsUnchanged")),
+            "sourceLine": plan.get("sourceLine") or "",
+            "characters": plan.get("characters") or [],
+            "props": plan.get("props") or [],
             "cameraCount": len(cameras),
             "cameras": [
                 {
-                    "id": str(c.get("id") or ""),
-                    "label": str(c.get("label") or "Camera"),
-                    "hero": bool(c.get("hero")),
+                    "id": str(getattr(c, "id", "") or ""),
+                    "label": str(getattr(c, "label", "") or "Camera"),
+                    "hero": bool(getattr(c, "hero", False)),
+                    "orientation": str(getattr(c, "orientation", "") or ""),
+                    "facing": next(
+                        (item.get("facing") or "" for item in (plan.get("cameras") or []) if item.get("id") == str(getattr(c, "id", "") or "")),
+                        "",
+                    ),
                 }
                 for c in cameras[:10]
             ],
@@ -194,9 +184,8 @@ def _candidates(db: Session, project_id: str, scene_id: Optional[str]) -> list[d
 def _timeline_state(db: Session, project_id: str, scene_id: Optional[str]) -> dict[str, Any]:
     """Timeline master (w46) - batches, clips, prompt segments, revision.
 
-    Reads both representations: the w46 master batch blocks AND the legacy
-    Visual/Prompt tracks (directorTimeline) that the Co-Director timeline
-    tools edit, so CD can answer "what is on Timeline right now" (Part 43).
+    Reads SceneTimelineMaster batch blocks only so Co-Director can answer
+    "what is on Timeline right now" (Part 43).
     """
     if not scene_id:
         scene = _active_scene(db, project_id, None)
@@ -217,12 +206,14 @@ def _timeline_state(db: Session, project_id: str, scene_id: Optional[str]) -> di
         workspace = bundle.get("workspace") or {}
         if hasattr(workspace, "model_dump"):
             workspace = workspace.model_dump()
-        dtl = bundle.get("directorTimeline")
-        if hasattr(dtl, "model_dump"):
-            dtl = dtl.model_dump()
-        dtl = dtl or {}
-        clips = dtl.get("image_clips") or []
-        segments = dtl.get("prompt_segments") or []
+        # SINGLE-STORE: clips + prompt segments come from Master batch arrays only.
+        clips: list[dict[str, Any]] = []
+        segments: list[dict[str, Any]] = []
+        for b in batches:
+            for c in b.get("visualClips") or []:
+                clips.append(c)
+            for seg in b.get("promptSegments") or []:
+                segments.append(seg)
         return {
             "hasTimeline": True,
             "revision": int(workspace.get("timelineRevision") or 1),
@@ -248,7 +239,7 @@ def _timeline_state(db: Session, project_id: str, scene_id: Optional[str]) -> di
                     "start": float(c.get("start") or 0.0),
                     "length": float(c.get("length") or 0.0),
                     "label": str(c.get("label") or "Image clip"),
-                    "assetId": c.get("asset_id"),
+                    "assetId": c.get("assetId") or c.get("asset_id"),
                 }
                 for c in clips[:20]
             ],
@@ -258,8 +249,8 @@ def _timeline_state(db: Session, project_id: str, scene_id: Optional[str]) -> di
                     "start": float(seg.get("start") or 0.0),
                     "length": float(seg.get("length") or 0.0),
                     "textPreview": str(seg.get("text") or "")[:160],
-                    "userDirection": seg.get("user_direction"),
-                    "productionPrompt": seg.get("production_prompt"),
+                    "userDirection": seg.get("userDirection"),
+                    "productionPrompt": seg.get("productionPrompt"),
                     "dialogue": seg.get("dialogue"),
                 }
                 for seg in segments[:20]
@@ -353,8 +344,29 @@ def render_production_snapshot_block(
     sm = snap.get("spatialMap") or {}
     if sm.get("hasMap"):
         dirty = " (unsaved changes)" if sm.get("dirty") else ""
+        title = _fmt(sm.get("title")) or "Spatial Map"
+        out.append(f"- Spatial Map: {title}")
+        if sm.get("sourceLine"):
+            out.append(f"- {sm.get('sourceLine')}")
         out.append("- Spatial Map v{cur}, saved v{saved}{dirty}".format(cur=_fmt(sm.get("currentVersion")), saved=_fmt(sm.get("savedVersion")), dirty=dirty))
-        cam_labels = ", ".join(f"{c['label']} ({c['id'][:8]})" for c in (sm.get("cameras") or [])[:6])
+        char_labels = ", ".join(
+            f"{c.get('label')} ({c.get('summary')})" for c in (sm.get("characters") or [])[:8] if c.get("label")
+        )
+        if char_labels:
+            out.append(f"- Characters on map: {char_labels}")
+        prop_labels = ", ".join(
+            f"{p.get('label')} ({p.get('summary')})" for p in (sm.get("props") or [])[:8] if p.get("label")
+        )
+        if prop_labels:
+            out.append(f"- Props on map: {prop_labels}")
+        cam_labels = ", ".join(
+            (
+                f"{c['label']} facing {c['facing']}"
+                if c.get("facing")
+                else f"{c['label']} ({str(c.get('id') or '')[:8]})"
+            )
+            for c in (sm.get("cameras") or [])[:6]
+        )
         out.append(f"- Cameras: {sm.get('cameraCount', 0)} - {cam_labels}")
     ers = snap.get("ers")
     if ers:

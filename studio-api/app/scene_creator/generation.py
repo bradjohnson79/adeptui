@@ -105,25 +105,32 @@ def build_candidate_plans(
     ]
 
     selected_local = (local_family or "").strip()
-    if selected_local and local_enabled:
-        preferred = [m for m in local_families if m.get("id") == selected_local]
-        rest = [m for m in local_families if m.get("id") != selected_local]
-        local_families = preferred + rest
 
+    # Pin the creator-selected generator across all candidates. Vary seed only.
+    # Do not rotate families — that would silently change the generator mid-batch.
     sources: list[CandidatePlan] = []
     if local_enabled:
         if not local_families:
             raise ValueError("No local image generator is ready. Open Source Manager to install a Certified generator.")
-        for fam in local_families:
-            sources.append(
-                {
-                    "source": "local",
-                    "family": fam["id"],
-                    "model": fam["id"],
-                    "label": fam.get("label") or fam["id"],
-                }
-            )
-    if api_enabled and api_ok:
+        if selected_local:
+            pinned = next((m for m in local_families if m.get("id") == selected_local), None)
+            if pinned is None:
+                raise ValueError(
+                    "Unavailable for current reference package. "
+                    f"Local generator '{selected_local}' is not ready."
+                )
+            fam = pinned
+        else:
+            fam = local_families[0]
+        sources.append(
+            {
+                "source": "local",
+                "family": fam["id"],
+                "model": fam["id"],
+                "label": fam.get("label") or fam["id"],
+            }
+        )
+    elif api_enabled and api_ok:
         sources.append(
             {
                 "source": "api",
@@ -136,18 +143,19 @@ def build_candidate_plans(
     if not sources:
         raise ValueError("Enable a Local or Cloud generator to create scene shots.")
 
+    pinned_src = sources[0]
     rng = random.Random(seed if seed is not None else random.randint(1, 2_147_483_647))
     plans: list[CandidatePlan] = []
-    distinct = sources
     for i in range(count):
-        src = distinct[i % len(distinct)]
         plans.append(
             {
-                **src,
+                **pinned_src,
                 "index": i,
                 "seed": rng.randint(1, 2_147_483_647),
                 "provenance_label": (
-                    f"LOCAL — {src['label']}" if src["source"] == "local" else f"API — {src['label']}"
+                    f"LOCAL — {pinned_src['label']}"
+                    if pinned_src["source"] == "local"
+                    else f"API — {pinned_src['label']}"
                 ),
             }
         )

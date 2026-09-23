@@ -34,8 +34,21 @@ export const TINY_MP4 = Buffer.from(
   "base64",
 );
 
-export async function openCoDirectorFullScreen(page: Page, projectId: string) {
-  await page.goto(`/co-director?projectId=${encodeURIComponent(projectId)}`);
+export async function openCoDirectorContentTab(page: Page, tab: string) {
+  await page.evaluate((id) => {
+    window.dispatchEvent(new CustomEvent("adept:open-codirector-content-tab", { detail: id }));
+  }, tab);
+}
+
+export async function openCoDirectorFullScreen(
+  page: Page,
+  projectId: string,
+  opts?: { sceneId?: string; workspace?: string },
+) {
+  const params = new URLSearchParams({ projectId });
+  if (opts?.workspace) params.set("workspace", opts.workspace);
+  if (opts?.sceneId) params.set("sceneId", opts.sceneId);
+  await page.goto(`/co-director?${params.toString()}`);
   await expect(
     page.getByTestId("codirector-fullscreen-shell").or(page.getByTestId("codirector-workspace")).first(),
   ).toBeVisible({ timeout: 45_000 });

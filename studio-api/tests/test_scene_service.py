@@ -7,6 +7,8 @@ the capability registry. Mock-only coverage would not qualify.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 
@@ -236,3 +238,72 @@ def test_missing_project_returns_structured_404(client) -> None:
     res = client.get("/api/projects/does-not-exist/scenes")
     assert res.status_code == 404
     assert res.json()["detail"]["code"] == "PROJECT_NOT_FOUND"
+
+
+def test_update_trims_name_and_rejects_blank(client) -> None:
+    from app.capabilities.errors import VALIDATION_ERROR, CapabilityError
+    from app.services.scene_service import SceneService
+
+    project_id = _create_project(client)
+    db = _session()
+    try:
+        scene = SceneService.create(db, project_id, {"name": "Before"})
+        SceneService.update(db, project_id, scene.id, {"name": "  Venture Walk  "})
+        assert SceneService.get(db, project_id, scene.id).name == "Venture Walk"
+        with pytest.raises(CapabilityError) as err:
+            SceneService.update(db, project_id, scene.id, {"name": "   "})
+        assert err.value.code == VALIDATION_ERROR
+    finally:
+        db.close()
+
+
+def test_delete_last_scene_leaves_empty_project(client) -> None:
+    from app.services.scene_service import SceneService
+
+    project_id = _create_project(client)
+    db = _session()
+    try:
+        for scene in list(SceneService.list_for_project(db, project_id)):
+            SceneService.delete(db, project_id, scene.id)
+        assert SceneService.list_for_project(db, project_id) == []
+    finally:
+        db.close()
+
+
+def test_delete_does_not_remove_project_assets(client) -> None:
+    from app.db import Asset
+    from app.services.scene_service import SceneService
+
+    project_id = _create_project(client)
+    db = _session()
+    try:
+        scene = SceneService.create(db, project_id, {"name": "Temp Bind"})
+        asset = Asset(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            tag="korri-crs",
+            kind="image",
+            filename="keep.png",
+            path="keep.png",
+        )
+        db.add(asset)
+        scene.start_asset_id = asset.id
+        db.commit()
+        SceneService.delete(db, project_id, scene.id)
+        kept = db.get(Asset, asset.id)
+        assert kept is not None
+        assert kept.project_id == project_id
+        assert kept.filename == "keep.png"
+    finally:
+        db.close()
+
+
+def test_second_delete_returns_scene_not_found(client) -> None:
+    project_id = _create_project(client)
+    created = client.post(f"/api/projects/{project_id}/scenes", json={"name": "Disposable"})
+    scene_id = created.json()["id"]
+    first = client.delete(f"/api/projects/{project_id}/scenes/{scene_id}")
+    assert first.status_code == 200
+    second = client.delete(f"/api/projects/{project_id}/scenes/{scene_id}")
+    assert second.status_code == 404
+    assert second.json()["detail"]["code"] == "SCENE_NOT_FOUND"

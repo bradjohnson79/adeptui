@@ -79,7 +79,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         handler_kind=HandlerKind.TOOL,
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project",),
-        tool_ids=("project_context.read",),
+        tool_ids=("project.read_context",),
         surface_type="",
     ),
     CapabilityDefinition(
@@ -89,7 +89,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         handler_kind=HandlerKind.TOOL,
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project",),
-        tool_ids=("story.read",),
+        tool_ids=("project.read_context",),
         surface_type="",
     ),
     CapabilityDefinition(
@@ -99,7 +99,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         handler_kind=HandlerKind.TOOL,
         approval_policy=ApprovalPolicy.NEEDS_CHOICE,
         required_context=("project", "story"),
-        tool_ids=("story.propose_edit",),
+        tool_ids=("propose_canon_record",),
         surface_type="script_operation",
     ),
     CapabilityDefinition(
@@ -119,7 +119,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         handler_kind=HandlerKind.TOOL,
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project", "script"),
-        tool_ids=("script.timing",),
+        tool_ids=("script.estimate_timing",),
         surface_type="",
     ),
     CapabilityDefinition(
@@ -139,7 +139,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         handler_kind=HandlerKind.TOOL,
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project", "character"),
-        tool_ids=("character.list_profiles", "character.inspect_profile"),
+        tool_ids=("character.list", "list_character_profiles"),
         surface_type="",
     ),
     CapabilityDefinition(
@@ -153,6 +153,17 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         surface_type="casting_candidates",
     ),
     CapabilityDefinition(
+        id="character.generate_visual_sheet",
+        title="Generate Character Reference Sheet",
+        description="Generate a Character Reference Sheet via Character Creator (AUTO, extras off).",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project", "character"),
+        optional_context=("visual_style", "visual_description"),
+        tool_ids=("character_creator.propose_visual_sheet",),
+        surface_type="character_sheet",
+    ),
+    CapabilityDefinition(
         id="character.assign_reference",
         title="Assign Character Reference",
         description="Approve a candidate as the canonical casting image.",
@@ -164,8 +175,11 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     ),
     CapabilityDefinition(
         id="image.generate",
-        title="Generate Image",
-        description="Generate a single image from a prompt with optional character references.",
+        title="Generate Production Still",
+        description=(
+            "Generate a production still via the Image Generator engine "
+            "(prompt / refs / ERS / character-prop context). Not Scene Creator Standard UI."
+        ),
         handler_kind=HandlerKind.CAPABILITY_HANDLER,
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project",),
@@ -212,6 +226,66 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         surface_type="storyboard_generation",
     ),
     CapabilityDefinition(
+        id="voice.creator",
+        title="Open Voice Creator",
+        description="Open Voice Creator to create or assign a character's default voice.",
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project", "character"),
+        tool_ids=("character_creator.open_voice_creator",),
+        surface_type="",
+    ),
+    CapabilityDefinition(
+        id="voice.inspect",
+        title="Inspect Voice",
+        description="Read a character's active approved default voice without inventing one.",
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project", "character"),
+        tool_ids=("character_creator.get_voice_status", "character_creator.get_voice_profile"),
+        surface_type="",
+    ),
+    CapabilityDefinition(
+        id="audio.open",
+        title="Open Audio Studio",
+        description="Open Audio Studio for music, sound effects, ambience, or project audio.",
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        tool_ids=("audio.open_studio",),
+        surface_type="",
+    ),
+    CapabilityDefinition(
+        id="audio.music",
+        title="Create Music",
+        description="Open Audio Studio Music or generate a score cue for the current project.",
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        tool_ids=("audio.generate_music", "audio.preview_music", "audio.open_studio"),
+        surface_type="",
+    ),
+    CapabilityDefinition(
+        id="audio.sfx",
+        title="Create Sound Effects",
+        description="Open Audio Studio Sound Effects or generate a one-shot effect.",
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        tool_ids=("audio.generate_sfx", "audio.preview_sfx", "audio.place", "audio.open_studio"),
+        surface_type="",
+    ),
+    CapabilityDefinition(
+        id="audio.ambience",
+        title="Create Ambience",
+        description="Open Audio Studio Ambience or generate a scene bed.",
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        tool_ids=("audio.generate_ambience", "audio.preview_ambience", "audio.open_studio"),
+        surface_type="",
+    ),
+    CapabilityDefinition(
         id="voice.generate",
         title="Generate Voice",
         description="Generate voice audio for a character.",
@@ -219,7 +293,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project", "character"),
         optional_context=("script_scene",),
-        tool_ids=("voice.generate_segments",),
+        tool_ids=("voice_performance.generate_segments",),
         surface_type="voice_generation",
     ),
     CapabilityDefinition(
@@ -229,57 +303,68 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         handler_kind=HandlerKind.TOOL,
         approval_policy=ApprovalPolicy.NEEDS_CHOICE,
         required_context=("project", "character", "voice_profile"),
-        tool_ids=("voice.approve",),
+        tool_ids=("voice.approve_take",),
         surface_type="",
     ),
     CapabilityDefinition(
         id="library.save",
         title="Save to Library",
-        description="Save an asset to the project Library.",
+        description="Classify or move an asset into the project Library folder map.",
         handler_kind=HandlerKind.TOOL,
-        approval_policy=ApprovalPolicy.DIRECT,
+        approval_policy=ApprovalPolicy.NEEDS_CHOICE,
         required_context=("project", "asset"),
-        tool_ids=("library.save_asset",),
-        surface_type="",
-    ),
-    CapabilityDefinition(
-        id="library.group",
-        title="Create Library Collection",
-        description="Create a named collection grouping of assets.",
-        handler_kind=HandlerKind.TOOL,
-        approval_policy=ApprovalPolicy.DIRECT,
-        required_context=("project", "assets"),
-        tool_ids=("library.create_collection",),
-        surface_type="",
-    ),
-    CapabilityDefinition(
-        id="library.assign",
-        title="Assign to Collection",
-        description="Add assets to an existing collection.",
-        handler_kind=HandlerKind.TOOL,
-        approval_policy=ApprovalPolicy.DIRECT,
-        required_context=("project", "collection", "assets"),
-        tool_ids=("library.add_to_collection",),
+        tool_ids=("propose_asset_library_assignment",),
         surface_type="",
     ),
     CapabilityDefinition(
         id="timeline.add_asset",
         title="Add Asset to Timeline",
-        description="Place a visual asset on the timeline.",
+        description="Place a visual asset on the timeline (image/video clip). Audio uses timeline.add_audio.",
         handler_kind=HandlerKind.TOOL,
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project", "asset"),
-        tool_ids=("editor.place_asset",),
+        # ORDER19: prefer propose_add_image_clip; editor.place_asset secondary (visual branch in _place_asset).
+        tool_ids=("timeline.propose_add_image_clip", "editor.place_asset"),
+        surface_type="",
+    ),
+    CapabilityDefinition(
+        # Intelligence mission 2026-09-19 (Phase 5): timed-prompt PLACEMENT is a
+        # distinct operation from ADD ASSET and from prompt AUTHORING. This
+        # capability maps to the EXISTING registered tool
+        # `timeline.propose_add_prompt_segment` ("Add a Timed Instruction
+        # (prompt segment) after approval", tools/definitions.py) — no
+        # destination system is rewritten. Prompt AUTHORING (writing the text)
+        # never routes here; it stays with the LLM.
+        id="timeline.add_prompt_segment",
+        title="Add Timed Prompt to Timeline",
+        description="Place the timed prompt text on the timeline as an approved prompt segment (timed instruction).",
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("scene",),
+        tool_ids=("timeline.propose_add_prompt_segment",),
+        surface_type="",
+    ),
+    CapabilityDefinition(
+        id="timeline.attach_optional_reference",
+        title="Attach Timeline Reference",
+        description="Attach an optional visual/background reference to a timeline batch (approval-gated).",
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.NEEDS_CHOICE,
+        required_context=("project", "asset"),
+        optional_context=("scene",),
+        tool_ids=("timeline.attach_optional_reference",),
         surface_type="",
     ),
     CapabilityDefinition(
         id="timeline.add_audio",
         title="Add Audio to Timeline",
-        description="Place an audio asset on the timeline.",
-        handler_kind=HandlerKind.TOOL,
+        description="Place approved audio or timed SFX onto the scene Timeline.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
         approval_policy=ApprovalPolicy.DIRECT,
-        required_context=("project", "asset"),
-        tool_ids=("audio.place_on_timeline",),
+        required_context=("project",),
+        optional_context=("scene", "asset"),
+        tool_ids=("audio.place",),
         surface_type="",
     ),
     CapabilityDefinition(
@@ -289,14 +374,21 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         handler_kind=HandlerKind.TOOL,
         approval_policy=ApprovalPolicy.NEEDS_CHOICE,
         required_context=("project", "storyboard"),
-        tool_ids=("storyboard.prepare_timeline",),
+        tool_ids=("script.prepare_timeline",),
         surface_type="",
     ),
     # --- Spatial Map + ERS + Scene Creator (frozen contracts) ---
+    # Adept UI v1.1: Spatial Map creator flows are SHELVED (dormant, not deleted).
+    # Do not advertise atlas.generate / atlas.assign as active creator recommendations.
+    # Compatibility handlers remain registered; Co-Director routing gates execution.
     CapabilityDefinition(
         id="atlas.generate",
-        title="Generate Atlas Shot",
-        description="Generate a roofless top-down environment reference for Spatial Map.",
+        title="Generate Atlas Shot (shelved v1.1)",
+        description=(
+            "DORMANT in Adept UI v1.1 — Spatial Map is not an active creator flow. "
+            "Do not recommend or open Spatial Map. For environments/ERS use Environment Creator Express. "
+            "Tool retained for compatibility only."
+        ),
         handler_kind=HandlerKind.CAPABILITY_HANDLER,
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project",),
@@ -304,34 +396,176 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         surface_type="atlas_shot_generation",
     ),
     CapabilityDefinition(
-        id="ers.generate",
-        title="Generate Environment Reference Sheet",
-        description="Generate directional N/E/S/W views from a spatial map, then assemble the ERS sheet programmatically.",
+        id="atlas.assign",
+        title="Use Existing Spatial Map (shelved v1.1)",
+        description=(
+            "DORMANT in Adept UI v1.1 — Spatial Map is not an active creator flow. "
+            "Do not recommend opening Spatial Map. Existing Spatial Map project data is preserved. "
+            "Retained for compatibility only."
+        ),
         handler_kind=HandlerKind.CAPABILITY_HANDLER,
         approval_policy=ApprovalPolicy.DIRECT,
-        required_context=("project", "spatial_map"),
+        required_context=("project",),
+        optional_context=("asset", "scene_context"),
+        surface_type="atlas_assign",
+    ),
+    CapabilityDefinition(
+        id="environment.creator",
+        title="Open Environment Creator Express",
+        description=(
+            "Open Environment Creator Express (contentTab scene_creator) for create-environment / ERS intents. "
+            "Not Scene Creator Standard. Not Spatial Map."
+        ),
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        tool_ids=("workspace.open_scene_creator",),
+        surface_type="environment_creator",
+    ),
+    CapabilityDefinition(
+        id="ers.generate",
+        title="Generate Environment Reference Sheet",
+        description=(
+            "Generate an Environment Reference Sheet using GPT Image 2 API only. "
+            "Spatial Map is optional enrichment (shelved in Adept UI v1.1); ERS is the environment authority. "
+            "Do not fail-closed when spatialMapId is missing. Qwen local is not used for ERS."
+        ),
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("spatial_map", "reference_image", "source_asset", "visual_style", "name", "description"),
         surface_type="ers_generation",
     ),
     CapabilityDefinition(
+        id="ers.repair",
+        title="Repair Environment Reference Sheet",
+        description=(
+            "Repair or regenerate an existing Environment Reference Sheet. "
+            "Spatial Map is not required. Preserves approved views unless the creator asks for a wider rebuild."
+        ),
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("spatial_map", "reference_image", "source_asset", "visual_style", "name", "description"),
+        surface_type="ers_generation",
+    ),
+    CapabilityDefinition(
+        id="ers.edit",
+        title="Edit Environment Reference Sheet",
+        description=(
+            "Edit an existing Environment Reference Sheet (masked inpaint / region edit). "
+            "Creates a NEW draft ERS version from the derivative. Does NOT auto-approve; "
+            "creator Approve is required before the version becomes downstream canonical."
+        ),
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.NEEDS_APPROVAL,
+        required_context=("project",),
+        optional_context=("reference_image", "source_asset", "mask", "visual_style", "name", "description"),
+        surface_type="ers_edit",
+    ),
+    CapabilityDefinition(
+        id="image.generator",
+        title="Open Image Generator",
+        description=(
+            "Open the Cinematic Image Generator (workspace imagegen) for production stills. "
+            "Not Scene Creator Standard. Not Environment Creator Express."
+        ),
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        tool_ids=("workspace.open_image_generator",),
+        surface_type="image_generator",
+    ),
+    CapabilityDefinition(
         id="scene.generate",
-        title="Generate Scene Images",
-        description="Generate N scene images from shot requests + ERS + character/prop references.",
+        title="Generate Production Stills",
+        description=(
+            "Generate production stills via the Image Generator engine path "
+            "(prompt / refs / ERS / character-prop context). Not Scene Creator Standard UI. "
+            "Prefer image.generate / image.generator for creator still intents in v1.1."
+        ),
         handler_kind=HandlerKind.CAPABILITY_HANDLER,
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project",),
         optional_context=("ers_package", "character", "reference_image", "visual_style"),
         surface_type="scene_generation",
     ),
+
+    CapabilityDefinition(
+        id="video.generate",
+        title="Generate Video",
+        description="Standalone Co-Director video. Timeline R2V stays on Timeline.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("reference_image", "visual_style", "script_scene"),
+        surface_type="video_generation",
+    ),
+    CapabilityDefinition(
+        id="timeline.deposit_video",
+        title="Deposit Completed Video to Timeline Visual",
+        description="Deposit a completed 1F/3F Library video onto Timeline Visual (mediaType=video). No regenerate.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("scene", "asset"),
+        tool_ids=("omni.deposit_video_to_timeline",),
+        surface_type="timeline_deposit",
+    ),
+    CapabilityDefinition(
+        id="timeline.prepare_scene",
+        title="Prepare Timeline Scene",
+        description="Parse a natural-language scene request, bind references, compile a generator prompt, and create a Timeline shot. Does not start generation.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("script_scene",),
+        surface_type="timeline_production",
+    ),
+    CapabilityDefinition(
+        id="timeline.generate_shot",
+        title="Generate Timeline Shot",
+        description="Generate an existing Timeline shot through the shared Timeline generate service.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("script_scene",),
+        surface_type="timeline_production",
+    ),
+    CapabilityDefinition(
+        id="analyze.video",
+        title="Review Timeline Video",
+        description="Watch and hear a Timeline clip through Media Intelligence. Returns a timestamped packet — does not place audio.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("scene", "asset"),
+        surface_type="media_intelligence",
+    ),
+    CapabilityDefinition(
+        id="timeline.extend",
+        title="Review & Extend",
+        description="Review the current Timeline scene and continue it with the next legal H3 segment.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project", "scene"),
+        surface_type="timeline_extend",
+    ),
 )
 
 
 # Index for fast lookup.
 _BY_ID: dict[str, CapabilityDefinition] = {c.id: c for c in CAPABILITY_REGISTRY}
+_ALIASES = {
+    "create_character_reference_sheet": "character.generate_visual_sheet",
+}
 
 
 def get_capability(capability_id: str) -> Optional[CapabilityDefinition]:
     """Resolve a capability by its ID."""
-    return _BY_ID.get(capability_id)
+    if not capability_id:
+        return None
+    return _BY_ID.get(capability_id) or _BY_ID.get(_ALIASES.get(capability_id, ""))
 
 
 def all_capabilities() -> tuple[CapabilityDefinition, ...]:
@@ -353,3 +587,17 @@ def surface_type_for(capability_id: str) -> str:
     if cap is None:
         return ""
     return cap.surface_type
+
+
+def capability_live_destination(cap: CapabilityDefinition) -> str:
+    """Return the reachable handler module or tool id for an advertised capability.
+
+    Empty string means the capability is advertised but cannot execute.
+    """
+    if cap.handler_kind == HandlerKind.CAPABILITY_HANDLER:
+        return f"app.codirector.capabilities.handlers.{cap.id.replace('.', '_')}"
+    if cap.handler_kind == HandlerKind.TOOL:
+        return cap.tool_ids[0] if cap.tool_ids else ""
+    if cap.handler_kind == HandlerKind.PRODUCTION_INTENT:
+        return cap.id
+    return ""

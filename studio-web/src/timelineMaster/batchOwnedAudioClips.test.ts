@@ -3,6 +3,7 @@ import type { BatchBlock, SceneTimelineMaster } from "./contracts";
 import {
   findBatchOwnedAudioClip,
   masterHasBatchOwnedAudio,
+  readSceneAudioClip,
   resolveDisplayAudioClips,
   sceneAbsoluteBatchAudioClips,
 } from "./batchOwnedAudioClips";
@@ -144,6 +145,65 @@ describe("batchOwnedAudioClips", () => {
     const display = resolveDisplayAudioClips(legacy, master, "audio");
     expect(display).toHaveLength(1);
     expect(display[0].id).toBe("ba");
+    expect((display[0] as { start: number }).start).toBe(0);
+  });
+
+  it("keeps title and description from the Master clip", () => {
+    const master = {
+      batchBlocks: [
+        batch({
+          id: "bb1",
+          audioClips: [
+            {
+              id: "named",
+              kind: "audio",
+              assetId: "asset-1",
+              start: 0,
+              length: 7.38,
+              label: "Room",
+              volume: 0.8,
+              trimStart: 0,
+              fade_in: 0,
+              fade_out: 0,
+              metadata: { title: "Cafe room", description: "Soft murmur" },
+            },
+          ],
+        }),
+      ],
+    } as SceneTimelineMaster;
+    const display = sceneAbsoluteBatchAudioClips(master, "audio");
+    expect(display[0].title).toBe("Cafe room");
+    expect(display[0].description).toBe("Soft murmur");
+    expect(display[0].length).toBe(7.38);
+    expect(readSceneAudioClip(master, "audio", "named")?.title).toBe("Cafe room");
+  });
+
+  it("paints a Music or SFX clip that has no sound file yet", () => {
+    const master = {
+      batchBlocks: [
+        batch({
+          id: "bb1",
+          audioClips: [
+            {
+              id: "empty-audio",
+              kind: "audio",
+              assetId: "",
+              start: 0,
+              length: 2,
+              label: "Audio",
+              volume: 1,
+              trimStart: 0,
+              fade_in: 0,
+              fade_out: 0,
+            },
+          ],
+        }),
+      ],
+    } as SceneTimelineMaster;
+    const display = resolveDisplayAudioClips([], master, "audio");
+    expect(display).toHaveLength(1);
+    expect(display[0].id).toBe("empty-audio");
+    expect(display[0].asset_id).toBeNull();
     expect((display[0] as { start: number }).start).toBe(0);
   });
 

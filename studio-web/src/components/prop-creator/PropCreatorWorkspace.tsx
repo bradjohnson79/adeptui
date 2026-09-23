@@ -1,4 +1,4 @@
-import type { Project } from "../../types";
+﻿import type { Project } from "../../types";
 import { PropCreatorCore } from "../CoDirector/PropCreator/PropCreatorCore";
 
 export function PropCreatorWorkspace({
@@ -11,7 +11,7 @@ export function PropCreatorWorkspace({
   return (
     <PropCreatorCore
       projectId={project.id}
-      variant="standard"
+      variant="express"
       onGoTab={(tab) => onGo?.(tab === "spatial_map" ? "spatial" : tab)}
     />
   );

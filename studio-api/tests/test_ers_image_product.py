@@ -75,6 +75,12 @@ def _patch_handler(monkeypatch, sheet, document, captured_bodies):
         "app.environment_reference_sheet.store.save_sheet",
         lambda current: None,
     )
+    monkeypatch.setattr(ers_generate, "_public_asset_url", lambda aid: f"https://assets.example/{aid}")
+    monkeypatch.setattr(
+        "app.hosted_providers.adapters.kie_adapter.kie_image_supports_i2i",
+        lambda dock: True,
+        raising=False,
+    )
 
 
 def test_ers_generate_source_has_no_hardcoded_zimage_txt2img() -> None:
@@ -113,9 +119,9 @@ def test_ers_generate_pins_environment_reference_sheet_purpose(monkeypatch) -> N
         assert body.get("sourceAssetId") == "atlas-ref-1"
         assert body.get("source_asset_id") == "atlas-ref-1"
         assert body.get("referenceImage") == "atlas-ref-1"
-        assert body["creativeContext"]["operationIntent"] == "image_to_image_reference"
-        assert body.get("forceWorkflowKey") == "qwen2512.ref"
-        assert body.get("allow_force_workflow_key") is True
+        assert body.get("hostedModelId") == "gpt-image-2-kie"
+        assert body.get("kieImageModelId") == "gpt-image-2-image-to-image"
+        assert body.get("forceWorkflowKey") != "qwen2512.ref"
         assert body["creativeContext"]["referenceGrounding"]["mode"] == "pixel"
         assert "zimage.txt2img" not in str(body)
     assert result["purpose"] == "environment_reference_sheet"
@@ -338,7 +344,9 @@ def test_persist_ers_composite_sets_has_reference(monkeypatch) -> None:
     assert summary["ers_composite_asset_id"] == "asset-ers-1"
     assert saved["package"].ers_composite_asset_id == "asset-ers-1"
 
-def test_ers_qwen2512_with_atlas_enqueues_i2i_ref(monkeypatch) -> None:
+def test_ers_qwen2512_with_atlas_is_refused(monkeypatch) -> None:
+    import pytest
+
     project_id = f"proj-{uuid.uuid4()}"
     spatial_map_id = f"map-{uuid.uuid4()}"
     sheet = _sheet(project_id, spatial_map_id)
@@ -351,62 +359,18 @@ def test_ers_qwen2512_with_atlas_enqueues_i2i_ref(monkeypatch) -> None:
     )
     _patch_handler(monkeypatch, sheet, document, captured)
 
-    ers_generate.handle(
-        db=None,
-        project_id=project_id,
-        execution_id="420b8388-1c09-4909-aeb6-122bc901f15b",
-        spatial_map_id=spatial_map_id,
-        source="local",
-        model="qwen2512",
-        model_family_preference="qwen2512",
-    )
+    with pytest.raises(RuntimeError, match="GPT Image 2 API only"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id="420b8388-1c09-4909-aeb6-122bc901f15b",
+            spatial_map_id=spatial_map_id,
+            source="local",
+            model="qwen2512",
+            model_family_preference="qwen2512",
+        )
+    assert not captured
 
-    assert len(captured) == 1
-    body = captured[0]
-    assert body["purpose"] == "environment_reference_sheet"
-    assert body["operation"] == "image.generate"
-    assert body["creativeContext"]["operationIntent"] == "image_to_image_reference"
-    assert body.get("edit") in (None, False)
-    # The authoritative source image rides the job as real pixel conditioning.
-    assert body.get("source_asset_id") == atlas_id
-    assert body.get("sourceAssetId") == atlas_id
-    assert body.get("referenceImage") == atlas_id
-    assert body.get("forceWorkflowKey") == "qwen2512.ref"
-    assert body.get("allow_force_workflow_key") is True
-    assert body["creativeContext"]["resolvedProvider"] == "local"
-    assert body["creativeContext"]["resolvedWorkflowKey"] == "qwen2512.ref"
-    assert body["creativeContext"]["referenceGrounding"]["mode"] == "pixel"
-    assert "zimage.ref_edit" not in str(body)
-    assert "zimage" not in str(body["creativeContext"].get("resolvedWorkflowKey") or "")
-    cap = resolve_image_capability(body)
-    assert cap["canExecute"] is True
-    assert cap["workflowKey"] == "qwen2512.ref"
-
-    from app.image_product.compile import compile_image_request
-
-    # Source pixels + a stray edit flag must not flip ERS into an edit request
-    # or zimage.ref_edit; the ref workflow stays pinned.
-    compiled = compile_image_request(
-        project_id,
-        {
-            **body,
-            "source_asset_id": atlas_id,
-            "sourceAssetId": atlas_id,
-            "edit": True,
-            "operation": "image.edit",
-            "lockModelFamily": True,
-        },
-    )
-    intent = compiled["imageIntent"]
-    runtime = compiled["imageRuntime"]
-    assert intent["operation"] == "image.generate"
-    assert intent.get("sourceAssetId") == atlas_id
-    assert runtime.get("canExecute") is True
-    assert "zimage" not in str(runtime.get("workflowKey") or "")
-    selected = str(runtime.get("workflowKey") or compiled.get("contract", {}).get("workflow_key") or "")
-    assert selected == "qwen2512.ref"
-    assert selected != "zimage.ref_edit"
-    assert "zimage" not in selected
 
 def test_compile_ers_qwen2512_source_stays_i2i_not_edit() -> None:
     """Phase 2: ERS + Qwen + source pixels is qwen2512.ref, not T2I and not edit."""
@@ -478,4 +442,159 @@ def test_compile_ers_gpt_image2_uses_i2i_not_t2i() -> None:
         or cap["officialModelId"]
     )
     assert official == "gpt-image-2-image-to-image"
+
+def test_ers_generate_prompt_only_uses_gpt_t2i(monkeypatch) -> None:
+    """Env Creator Express: no source_pixels + environmentPrompt → GPT T2I full_sheet."""
+    project_id = f"proj-{uuid.uuid4()}"
+    sheet = orchestrator.create_sheet(
+        project_id=project_id,
+        name="Prompt Only Plaza",
+        description="Unused when environmentPrompt is provided.",
+        scene_id="scene-1",
+    )
+    captured: list[dict] = []
+    _patch_handler(monkeypatch, sheet, None, captured)
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.store.list_sheets",
+        lambda pid: [],
+    )
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.orchestrator.create_sheet",
+        lambda **kwargs: sheet,
+    )
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.store.check_environment_tag_collision",
+        lambda *args, **kwargs: None,
+    )
+
+    ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
+        spatial_map_id="",
+        environmentPrompt="rain-slick neo-noir alley with neon reflections",
+        aspectRatio="16:9",
+        storyTheme="neo-noir",
+        hosted_model_id="gpt-image-2-kie",
+        source="api",
+    )
+
+    assert captured
+    body = captured[0]
+    assert body.get("kieImageModelId") == "gpt-image-2-text-to-image"
+    assert body.get("hostedModelId") == "gpt-image-2-kie"
+    assert not body.get("input_urls")
+    assert not body.get("sourceAssetId")
+    assert body["aspectRatio"] == "16:9"
+    assert "rain-slick neo-noir alley" in str(body.get("prompt") or "")
+    assert body["creativeContext"].get("environmentPrompt") == "rain-slick neo-noir alley with neon reflections"
+    assert body["creativeContext"].get("referenceGrounding", {}).get("mode") == "text"
+    assert body["creativeContext"].get("ers_pipeline") == "full_sheet"
+
+
+def test_ers_generate_prompt_only_includes_creator_plan_subjects(monkeypatch) -> None:
+    """Environment Creator characters/props enter the prompt without a Spatial Map."""
+    project_id = f"proj-{uuid.uuid4()}"
+    sheet = orchestrator.create_sheet(
+        project_id=project_id,
+        name="Schnick Coffee House",
+        description="Unused when environmentPrompt is provided.",
+        scene_id="scene-1",
+    )
+    captured: list[dict] = []
+    _patch_handler(monkeypatch, sheet, None, captured)
+    monkeypatch.setattr("app.environment_reference_sheet.store.list_sheets", lambda pid: [])
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.orchestrator.create_sheet",
+        lambda **kwargs: sheet,
+    )
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.store.check_environment_tag_collision",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        ers_generate,
+        "_character_identity_text",
+        lambda db, pid, cid: {
+            "characterId": cid,
+            "name": "Korri",
+            "facts": ["appearance: red coat"],
+            "approvedAssetId": "korri-hero",
+        },
+    )
+    monkeypatch.setattr(
+        ers_generate,
+        "_prop_identity_text",
+        lambda db, pid, prop_id: {
+            "propId": prop_id,
+            "name": "Schnick Coffee Thermos",
+            "facts": ["description: travel thermos"],
+            "approvedAssetId": None,
+        },
+    )
+
+    ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
+        spatial_map_id="",
+        environmentPrompt="Schnick coffee house, bar stools, wooden floor",
+        aspectRatio="9:16",
+        hosted_model_id="gpt-image-2-kie",
+        source="api",
+        characters=[{"characterId": "char-korri"}],
+        props=[{"propId": "prop-thermos", "assignment": "environment_object"}],
+    )
+
+    assert captured
+    body = captured[0]
+    prompt = str(body.get("prompt") or "")
+    assert "Korri" in prompt
+    assert "red coat" in prompt
+    assert "Schnick Coffee Thermos" in prompt
+    assert not body.get("input_urls")
+    assert body.get("kieImageModelId") == "gpt-image-2-text-to-image"
+    ctx = body["creativeContext"]
+    assert ctx.get("characterIds") == ["char-korri"]
+    assert ctx.get("propIds") == ["prop-thermos"]
+    assert "korri-hero" in (ctx.get("approvedCharacterAssetIds") or [])
+
+
+def test_image_generate_edit_op_is_not_forced_to_edit() -> None:
+    from app.image_product.service import _edit_op_for_intent
+
+    assert _edit_op_for_intent({"operation": "image.generate", "metadata": {}}) == "generate"
+    assert _edit_op_for_intent({"operation": "image.edit", "metadata": {}}) == "edit"
+    assert _edit_op_for_intent({"operation": "image.generate", "metadata": {"edit_op": "inpaint"}}) == "inpaint"
+
+
+def test_ers_generate_source_path_still_uses_gpt_i2i(monkeypatch) -> None:
+    """With source pixels, ERS stays on GPT I2I (not T2I)."""
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    sheet = _sheet(project_id, spatial_map_id)
+    captured: list[dict] = []
+    document = SpatialMapDocument(
+        projectId=project_id,
+        id=spatial_map_id,
+        backgroundAssetId="atlas-ref-1",
+    )
+    _patch_handler(monkeypatch, sheet, document, captured)
+
+    ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
+        spatial_map_id=spatial_map_id,
+        environmentPrompt="optional refinement",
+        hosted_model_id="gpt-image-2-kie",
+        source="api",
+    )
+
+    assert captured
+    body = captured[0]
+    assert body.get("kieImageModelId") == "gpt-image-2-image-to-image"
+    assert "text-to-image" not in str(body.get("kieImageModelId") or "")
+    assert body.get("sourceAssetId") == "atlas-ref-1"
+    assert body.get("input_urls")
 

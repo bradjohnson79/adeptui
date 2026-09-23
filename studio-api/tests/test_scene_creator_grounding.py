@@ -47,21 +47,24 @@ def _body(**kwargs):
     }
 
 
-def test_zimage_consumes_character_only():
-    body = apply_reference_packet(_body(), family="zimage", profile_grounded=True, production_loaded=True)
+def test_zimage_over_capacity_is_unavailable():
+    """CRS+PRS+ERS exceeds Z-Image single pixel slot — honest Unavailable, no silent drop."""
+    with pytest.raises(GroundingBlocked, match="Unavailable for current reference package"):
+        apply_reference_packet(_body(), family="zimage", profile_grounded=True, production_loaded=True)
+
+
+def test_zimage_single_ref_consumes():
+    body = apply_reference_packet(
+        _body(ctx={"prop_entities": [], "ers_composite_asset_id": ""}),
+        family="zimage",
+        profile_grounded=False,
+        production_loaded=False,
+    )
     pkt = body["creativeContext"]["referencePacket"]
     assert pkt["consumedAssetIds"] == ["b6ab91dd-9d0a-4e4b-98b4-b26d268950dc"]
-    assert body["sourceAssetId"] == "b6ab91dd-9d0a-4e4b-98b4-b26d268950dc"
-    assert body["referenceImage"] == "b6ab91dd-9d0a-4e4b-98b4-b26d268950dc"
-    assert body["referenceIds"] == ["b6ab91dd-9d0a-4e4b-98b4-b26d268950dc"]
-    assert body["creativeContext"]["reference_image_ids"] == ["b6ab91dd-9d0a-4e4b-98b4-b26d268950dc"]
     assert pkt["characters"][0]["consumption"] == "consumed"
-    assert pkt["props"][0]["consumption"] == "semantic_only"
-    assert pkt["environment"]["consumption"] == "semantic_only"
     ticks = packet_ticks(pkt)
     assert ticks["character"] == "ok"
-    assert ticks["prop"] == "warn"
-    assert ticks["environment"] == "warn"
 
 
 def test_qwen_profile_grounded_does_not_silent_t2i():
@@ -69,15 +72,15 @@ def test_qwen_profile_grounded_does_not_silent_t2i():
         apply_reference_packet(_body(), family="qwen2512", profile_grounded=True, production_loaded=True)
 
 
-def test_qwen_allowed_when_no_profile_selected():
-    body = apply_reference_packet(
-        _body(),
-        family="qwen2512",
-        profile_grounded=False,
-        production_loaded=False,
-    )
-    assert body["referenceIds"] == []
-    assert body["creativeContext"]["referencePacket"]["characters"][0]["consumption"] == "unsupported"
+def test_qwen_with_refs_unavailable_even_without_profile():
+    """Zero-slot generators must not silent-T2I when CRS/PRS/ERS pictures are attached."""
+    with pytest.raises(GroundingBlocked, match="cannot use the character"):
+        apply_reference_packet(
+            _body(),
+            family="qwen2512",
+            profile_grounded=False,
+            production_loaded=False,
+        )
 
 
 def test_qwen_prompt_only_diagnostic_does_not_load_pixels():
@@ -117,14 +120,11 @@ def test_abcd_consumption_not_prettiness():
     c = apply_reference_packet(
         _body(), family="zimage", profile_grounded=False, diagnostic_mode="character"
     )
-    d = apply_reference_packet(_body(), family="zimage", profile_grounded=True, production_loaded=True)
+    with pytest.raises(GroundingBlocked, match="Unavailable for current reference package"):
+        apply_reference_packet(_body(), family="zimage", profile_grounded=True, production_loaded=True)
     assert a["referenceIds"] == []
     assert b["sourceAssetId"] == "79a55177-10be-438b-9ae7-477c1781abe7"
     assert c["sourceAssetId"] == "b6ab91dd-9d0a-4e4b-98b4-b26d268950dc"
-    assert d["sourceAssetId"] == "b6ab91dd-9d0a-4e4b-98b4-b26d268950dc"
-    assert d["referenceIds"] == ["b6ab91dd-9d0a-4e4b-98b4-b26d268950dc"]
-    assert d["creativeContext"]["referencePacket"]["props"][0]["consumption"] == "semantic_only"
-    assert d["creativeContext"]["referencePacket"]["environment"]["consumption"] == "semantic_only"
 
 
 def test_llm_down_falls_back_to_connections(monkeypatch):
@@ -171,7 +171,7 @@ def test_compile_shot_prompt_does_not_force_zimage(monkeypatch):
     monkeypatch.setattr(
         er,
         "_character_metadata",
-        lambda db, pid, ids: [
+        lambda db, pid, ids, **kwargs: [
             {
                 "character_id": "korri",
                 "name": "Korri",
@@ -264,3 +264,53 @@ def test_family_slots():
     assert family_pixel_slots("qwen2512") == 0
     assert family_pixel_slots("zimage") >= 1
     assert GROUNDING_BLOCKED_QWEN
+
+
+def test_compile_packet_first_class_fields():
+    packet = compile_reference_packet(
+        char_meta=[{"character_id": "c1", "name": "Korri", "approved_casting_asset_id": "cast-1"}],
+        prs_meta=[{"id": "prs-1", "name": "Cup", "approved_asset_id": "prs-asset-1"}],
+        ers_composite_asset_id="ers-1",
+        ers_view="N",
+        posecraft_asset_id="pose-1",
+        story_theme="noir",
+        style="cinematic",
+    )
+    assert packet["environment"]["ersView"] == "north"
+    assert packet["prs"][0]["entityId"] == "prs-1"
+    assert packet["posecraft"]["assetId"] == "pose-1"
+    assert packet["storyTheme"] == "noir"
+    assert packet["style"] == "cinematic"
+
+
+def test_readiness_spatial_idle_without_map_not_blocking():
+    """Spatial Map is shelved — missing map must not be a readiness hard-fail."""
+    packet = {
+        "characters": [{"role": "character_reference", "entityId": "c1", "assetId": "cast-1", "consumption": "consumed"}],
+        "props": [],
+        "environment": {"role": "environment_reference", "assetId": "ers-1", "consumption": "consumed", "spatialMapId": None},
+        "roles": [
+            {"role": "character_reference", "entityId": "c1", "assetId": "cast-1", "consumption": "consumed"},
+        ],
+        "consumedAssetIds": ["cast-1"],
+        "shot": {"prompt": "x"},
+        "cinematography": {"cameraStateHash": "abc"},
+        "spatialConsumed": False,
+        "cameraConsumed": True,
+    }
+    ready = build_scene_creator_readiness(
+        production_context={
+            "loaded": True,
+            "handoffId": "h1",
+            "ersLibraryAssetId": "ers-1",
+            "fingerprint": "fp",
+        },
+        packet=packet,
+        family="zimage",
+        camera_hash="abc",
+        scene_id="s1",
+    )
+    assert ready["checks"]["spatial"] == "idle"
+    assert not any(i.get("code") == "spatial" for i in ready.get("issues") or [])
+    assert ready["checks"]["environment"] == "pass"
+

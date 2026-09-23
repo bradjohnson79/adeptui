@@ -6,6 +6,8 @@ import {
   resolveCreateType,
   type PrimaryProjectType,
 } from "../../projectTypes";
+import { legalCanvasSize, type VideoTier } from "../../video/legalCanvas";
+import { VideoResolutionSelect } from "../generation/VideoResolutionSelect";
 // Load video generators dynamically to avoid type issues with the large api module
 async function loadVideoGenerators(): Promise<Array<{ id: string; label: string; available: boolean }>> {
   try {
@@ -75,7 +77,7 @@ export function NewProductionCard({
   const [optionalOpen, setOptionalOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [aspect, setAspect] = useState("16:9");
-  const [resolution, setResolution] = useState("1080p");
+  const [resolution, setResolution] = useState<VideoTier>("1080p");
   const [fps, setFps] = useState<string>("auto");
   const [style, setStyle] = useState("pencil");
   const [videoGens, setVideoGens] = useState<VideoGeneratorOption[]>([]);
@@ -98,7 +100,9 @@ export function NewProductionCard({
   }, [primary, subtype]);
   const trimmedName = name.trim();
   const nameError = trimmedName ? null : "Give your project a name before creating it.";
-  const canSubmit = !busy && !nameError;
+  const createEngine = preferredGen === "automatic" ? "ltx-2.5" : preferredGen;
+  const createCanvas = legalCanvasSize(createEngine, resolution, aspect);
+  const canSubmit = !busy && !nameError && createCanvas.available;
   const resolvedFps = fps === "auto" ? 24 : Number(fps);
 
   const toggleTrait = (trait: string) => {
@@ -219,7 +223,7 @@ export function NewProductionCard({
             <p className="new-production-card__summary-copy">
               <strong>{previewLabel}</strong>
               {traits.length ? ` · traits: ${traits.map((trait) => trait.replace(/_/g, " ")).join(", ")}` : ""}
-              {` · ${aspect} · ${resolution} · ${resolvedFps} fps`}
+              {` · ${aspect} · ${resolution}${createCanvas.available ? ` (${createCanvas.width}×${createCanvas.height})` : ""} · ${resolvedFps} fps`}
             </p>
           </div>
           <div className="new-production-card__optional">
@@ -299,17 +303,13 @@ export function NewProductionCard({
                   </div>
                   <div className="field">
                     <label htmlFor="np-resolution">Resolution</label>
-                    <select
+                    <VideoResolutionSelect
                       id="np-resolution"
+                      engine={preferredGen === "automatic" ? "ltx-2.5" : preferredGen}
+                      aspect={aspect}
                       value={resolution}
-                      onChange={(e) => setResolution(e.target.value)}
-                    >
-                      {["720p", "1080p", "1440p", "4K"].map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(tier) => setResolution(tier)}
+                    />
                   </div>
                   <div className="field">
                     <label htmlFor="np-fps">FPS</label>

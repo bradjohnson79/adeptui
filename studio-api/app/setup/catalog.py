@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
@@ -39,18 +39,14 @@ DEPENDENCY_TYPE_WORKFLOW = "WORKFLOW"
 DEPENDENCY_TYPE_UNKNOWN = "UNKNOWN"
 
 _VERIFIER_TO_DEP_TYPE: dict[str, str] = {
-    "ltx_file": DEPENDENCY_TYPE_MODEL,
     "ltx_2_5_file": DEPENDENCY_TYPE_MODEL,
     "text_encoder_file": DEPENDENCY_TYPE_TEXT_ENCODER,
     "vae_file": DEPENDENCY_TYPE_VAE,
     "latent_upscale_model_file": DEPENDENCY_TYPE_UPSCALE_MODEL,
-    "wan_files": DEPENDENCY_TYPE_MODEL,
-    "hunyuan_files": DEPENDENCY_TYPE_MODEL,
     "zimage_files": DEPENDENCY_TYPE_MODEL,
     "qwen_image_2512_files": DEPENDENCY_TYPE_MODEL,
     "krea2_files": DEPENDENCY_TYPE_MODEL,
     "linked_files": DEPENDENCY_TYPE_MODEL,
-    "ic_lora_file": DEPENDENCY_TYPE_MODEL,
     "comfy_extension_nodes": DEPENDENCY_TYPE_CUSTOM_NODE,
     "comfy_service": DEPENDENCY_TYPE_RUNTIME,
     "ollama_service": DEPENDENCY_TYPE_RUNTIME,
@@ -58,6 +54,7 @@ _VERIFIER_TO_DEP_TYPE: dict[str, str] = {
     "kie_key": DEPENDENCY_TYPE_CREDENTIAL,
     "wavespeed_key": DEPENDENCY_TYPE_CREDENTIAL,
     "video_understanding_files": DEPENDENCY_TYPE_MODEL,
+    "qwen_omni_files": DEPENDENCY_TYPE_MODEL,
     "stills_perception_files": DEPENDENCY_TYPE_MODEL,
     "world_intelligence_files": DEPENDENCY_TYPE_MODEL,
     "realesrgan_ncnn": DEPENDENCY_TYPE_RUNTIME,
@@ -87,11 +84,6 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
     ComponentDefinition(
         "comfyui", "ComfyUI", "Local node graph runtime for local video generation.", True,
         0, 500 * MB, ("python",), "comfy_service", "manual",
-    ),
-    ComponentDefinition(
-        "ltx_checkpoint", "LTX Video Checkpoint",
-        "Primary local image-to-video model weights.", True,
-        12000 * MB, 12000 * MB, ("comfyui",), "ltx_file", "path_link",
     ),
     ComponentDefinition(
         "ltx_2_5_checkpoint", "LTX 2.5 Video Checkpoint",
@@ -128,13 +120,21 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         0, 4000 * MB, (), "ollama_service", "manual",
     ),
     ComponentDefinition(
-        "wan_models", "WAN 2.2 Models", "High/low noise WAN diffusion pair and VAE.", False,
+        "ltx_checkpoint", "LTX Video Checkpoint (retired)",
+        "RETIRED — LTX 2.3 is not a production video generator. Current local video is MiniMax H3 + LTX 2.5. Leftover callers may still resolve this id.",
+        False,
+        12000 * MB, 12000 * MB, ("comfyui",), "ltx_file", "path_link",
+    ),
+    ComponentDefinition(
+        "wan_models", "WAN 2.2 Models (retired)",
+        "RETIRED — WAN is not a production video generator. InfiniteTalk avatar WAN 2.1 I2V weights are a separate avatar runtime. Leftover callers may still resolve this id.",
+        False,
         20000 * MB, 20000 * MB, ("comfyui",), "wan_files", "path_link",
     ),
     ComponentDefinition(
         "hunyuan_video_15",
-        "HunyuanVideo 1.5",
-        "Official Tencent HunyuanVideo 1.5 weights (HF tencent/HunyuanVideo-1.5). Recommended Hunyuan provider. Isolated install; does not overwrite 13B.",
+        "HunyuanVideo 1.5 (retired)",
+        "RETIRED — Hunyuan Video is not a production video generator. Hunyuan Image remains a still-image catalog entry. Leftover callers may still resolve this id.",
         False,
         45000 * MB,
         45000 * MB,
@@ -145,8 +145,8 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
     ),
     ComponentDefinition(
         "hunyuan_video_13b",
-        "HunyuanVideo 13B",
-        "Official Tencent HunyuanVideo 13B weights (HF tencent/HunyuanVideo) including official FP8 where present. Advanced / high-resource. Isolated install; does not overwrite 1.5.",
+        "HunyuanVideo 13B (retired)",
+        "RETIRED — Hunyuan Video is not a production video generator. Leftover callers may still resolve this id.",
         False,
         80000 * MB,
         80000 * MB,
@@ -428,13 +428,6 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         category="Creative Packs",
     ),
     ComponentDefinition(
-        "ltx23_ic_lora_ingredients", "LTX 2.3 Ingredients IC-LoRA",
-        "Gated Ingredients IC-LoRA for Director reference-sheet conditioning (not a style LoRA).",
-        False,
-        2000 * MB, 2000 * MB, ("comfyui", "ltx_checkpoint"), "ic_lora_file", "path_link",
-        category="Reference & Identity Models",
-    ),
-    ComponentDefinition(
         "index_tts2",
         "IndexTTS2",
         "Official IndexTTS2 local character voice runtime with pinned upstream repo, isolated venv, and reference-based expressive voice cloning. ~15GB full install.",
@@ -471,9 +464,16 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         category="Character Voice Models",
     ),
     ComponentDefinition(
+        "ltx23_ic_lora_ingredients", "LTX 2.3 Ingredients IC-LoRA (retired)",
+        "RETIRED — LTX 2.3 Ingredients IC-LoRA is not a production video generator. Leftover callers may still resolve this id.",
+        False,
+        2000 * MB, 2000 * MB, ("comfyui", "ltx_checkpoint"), "ic_lora_file", "path_link",
+        category="Reference & Identity Models",
+    ),
+    ComponentDefinition(
         "comfyui_hunyuan_nodes",
-        "Hunyuan ComfyUI Extension",
-        "ComfyUI custom nodes that register the HyVideo wrapper nodes used for HunyuanVideo loading, prompting, sampling, and image-to-video flows. Ready only after ComfyUI restart and live node detection.",
+        "Hunyuan ComfyUI Extension (retired)",
+        "RETIRED — Hunyuan Video Comfy nodes are not a production video dependency. Leftover callers may still resolve this id.",
         False,
         50 * MB,
         80 * MB,
@@ -484,51 +484,51 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
     ),
     ComponentDefinition(
         "longcat-video-avatar-1-5-local",
-        "LongCat Avatar 1.5",
-        "Experimental flagship full-body avatar runtime with isolated source, environment, and model storage.",
+        "LongCat Avatar 1.5 (RETIRED)",
+        "RETIRED — Avatar Studio shelved from current Adept UI. Not part of production readiness. Do not install/probe from current flows.",
         False,
         147000 * MB,
         150000 * MB,
         ("python", "ffmpeg"),
         "avatar_runtime",
         "avatar_runtime",
-        category="Avatar Runtimes",
+        category="Avatar Runtimes (RETIRED)",
     ),
     ComponentDefinition(
         "infinitetalk-local",
-        "InfiniteTalk",
-        "Experimental secondary long-form avatar runtime with isolated source, environment, and model storage.",
+        "InfiniteTalk (RETIRED)",
+        "RETIRED — Avatar Studio / InfiniteTalk / Wan shelved from current Adept UI. Not part of production readiness.",
         False,
         34000 * MB,
         38000 * MB,
         ("python", "ffmpeg"),
         "avatar_runtime",
         "avatar_runtime",
-        category="Avatar Runtimes",
+        category="Avatar Runtimes (RETIRED)",
     ),
     ComponentDefinition(
         "musetalk-1-5-local",
         "MuseTalk 1.5",
-        "Experimental repair and dubbing avatar runtime with isolated source, environment, and model storage.",
+        "RETIRED — Avatar Studio shelved. MuseTalk not part of current production readiness.",
         False,
         10000 * MB,
         12000 * MB,
         ("python", "ffmpeg"),
         "avatar_runtime",
         "avatar_runtime",
-        category="Avatar Runtimes",
+        category="Avatar Runtimes (RETIRED)",
     ),
     ComponentDefinition(
         "echomimic-v2-local",
         "EchoMimicV2",
-        "Experimental half-body avatar runtime with isolated source, environment, and model storage.",
+        "RETIRED — Avatar Studio shelved. EchoMimic not part of current production readiness.",
         False,
         17000 * MB,
         19000 * MB,
         ("python", "ffmpeg"),
         "avatar_runtime",
         "avatar_runtime",
-        category="Avatar Runtimes",
+        category="Avatar Runtimes (RETIRED)",
     ),
     ComponentDefinition(
         "videochat3_4b",
@@ -553,6 +553,20 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         "video_understanding_files",
         "huggingface_snapshot",
         category="Video Understanding",
+    ),
+    ComponentDefinition(
+        "qwen2_5_omni_7b",
+        "Qwen2.5-Omni 7B",
+        "Recommended Media Intelligence for Co-Director: end-to-end multimodal "
+        "(text/image/audio/video in, text+speech out) via the Adept Media Intelligence "
+        "Service. Optional — core Adept stays usable if absent (not a boot blocker).",
+        False,
+        26000 * MB,
+        28000 * MB,
+        ("python", "ffmpeg"),
+        "qwen_omni_files",
+        "huggingface_snapshot",
+        category="Media Intelligence",
     ),
     ComponentDefinition(
         "grounding_dino_tiny",
@@ -602,9 +616,93 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         "huggingface_snapshot",
         category="Co-Director World Intelligence",
     ),
+    ComponentDefinition(
+        "character_multiview_engine",
+        "Character Angles",
+        "Detect-only readiness for Qwen Image Edit 2509 Character Angles.",
+        False,
+        0,
+        0,
+        (),
+        "character_multiview_engine",
+        "detect_only",
+        category="Character Creator",
+    ),
+    ComponentDefinition(
+        "wonder3d_multiview",
+        "Wonder3D (not used)",
+        "AGPL-3.0. Never installed. Character Angles use Qwen Image Edit 2509.",
+        False,
+        0,
+        0,
+        (),
+        "wonder3d_multiview",
+        "detect_only",
+        category="Character Creator",
+    ),
 )
 
 BY_ID = {component.id: component for component in COMPONENTS}
+
+#: Retired local video generators. Kept in COMPONENTS so leftover get_component()
+#: callers still resolve, but public Setup/health/install lists must filter these.
+RETIRED_VIDEO_SETUP_COMPONENT_IDS: frozenset[str] = frozenset(
+    {
+        "wan_models",
+        "hunyuan_video_15",
+        "hunyuan_video_13b",
+        "ltx_checkpoint",
+        "ltx23_ic_lora_ingredients",
+        "comfyui_hunyuan_nodes",
+    }
+)
+
+#: Avatar Studio runtimes temporarily retired from current Adept UI production.
+#: Excluded from public Setup catalog / readiness; source kept on disk.
+RETIRED_AVATAR_SETUP_COMPONENT_IDS: frozenset[str] = frozenset(
+    {
+        "longcat-video-avatar-1-5-local",
+        "infinitetalk-local",
+        "musetalk-1-5-local",
+        "echomimic-v2-local",
+    }
+)
+
+#: Obsolete Character Creator leftovers. Kept in COMPONENTS so leftover
+#: get_component() callers still resolve; public Setup must not list them.
+RETIRED_OBSOLETE_SETUP_COMPONENT_IDS: frozenset[str] = frozenset(
+    {
+        "wonder3d_multiview",
+    }
+)
+
+
+def is_retired_video_setup_component(component_id: str) -> bool:
+    return str(component_id or "") in RETIRED_VIDEO_SETUP_COMPONENT_IDS
+
+
+def is_retired_avatar_setup_component(component_id: str) -> bool:
+    return str(component_id or "") in RETIRED_AVATAR_SETUP_COMPONENT_IDS
+
+
+def is_retired_obsolete_setup_component(component_id: str) -> bool:
+    return str(component_id or "") in RETIRED_OBSOLETE_SETUP_COMPONENT_IDS
+
+
+def public_components() -> tuple[ComponentDefinition, ...]:
+    """Current production Setup catalog (MiniMax H3 + LTX 2.5 video, image, voice).
+
+    Avatar Studio runtimes remain on disk but are excluded from public Setup —
+    they are not current Adept UI production destinations. Obsolete leftovers
+    such as Wonder3D are also excluded so they cannot count as Not Installed.
+    """
+    return tuple(
+        component
+        for component in COMPONENTS
+        if component.id not in RETIRED_VIDEO_SETUP_COMPONENT_IDS
+        and component.id not in RETIRED_AVATAR_SETUP_COMPONENT_IDS
+        and component.id not in RETIRED_OBSOLETE_SETUP_COMPONENT_IDS
+    )
 
 
 def get_component(component_id: str) -> ComponentDefinition:

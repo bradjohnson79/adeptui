@@ -27,7 +27,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # Amendment #4 — scene-relative orientation. `atlas-north-up` means the top
@@ -103,6 +103,53 @@ class SceneGenerationBatch(BaseModel):
     updated_at: str = ""
 
 
+
+
+# ---------------------------------------------------------------------------
+# Prop Creator Advanced (multi-angle) — optional fields; Standard path ignores.
+# Angles are views under one PropEntity / one %PropName — never new props.
+# ---------------------------------------------------------------------------
+
+PropCreatorMode = Literal["standard", "advanced"]
+PropAdvancedType = Literal["spacecraft", "vehicle", "aircraft", "mech", "other"]
+PropPrimaryPhase = Literal["draft", "generating", "review", "approved"]
+PropAngleKey = Literal["front", "back", "left", "right", "top", "bottom", "hero"]
+PROP_ADVANCED_ANGLE_KEYS: tuple[str, ...] = (
+    "front",
+    "back",
+    "left",
+    "right",
+    "top",
+    "bottom",
+    "hero",
+)
+PropAngleStatus = Literal[
+    "idle",
+    "queued",
+    "generating",
+    "complete",
+    "failed",
+    "approved",
+]
+
+
+class PropAngleSlot(BaseModel):
+    """One orthographic / hero view under a PropEntity. Not a separate prop."""
+
+    key: str = ""
+    status: PropAngleStatus = "idle"
+    asset_id: Optional[str] = None
+    approved: bool = False
+    job_id: Optional[str] = None
+    seed: Optional[int] = None
+    error: str = ""
+    source_primary_asset_id: Optional[str] = None
+    engine: str = ""
+    workflow_key: str = ""
+    progress: Optional[float] = None
+    source: Optional[str] = None  # generated | uploaded — not a separate prop identity
+
+
 class PropEntity(BaseModel):
     """A project-scoped prop backing a #prop tag.
 
@@ -117,7 +164,8 @@ class PropEntity(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     project_id: str
-    tag: str = ""  # normalized friendly reference, e.g. "coffee-cup"
+    tag: str = ""  # internal db slug only, e.g. "venture-spaceship-4"
+    canonical_tag: str = ""  # prompt-facing identity, e.g. "%VentureSpaceship"
     display_label: str = ""
     library_asset_id: str = ""  # mirror of approved_asset_id after approval; empty on draft
     notes: str = ""
@@ -125,10 +173,39 @@ class PropEntity(BaseModel):
     description: str = ""
     reference_asset_id: Optional[str] = None
     approved_asset_id: Optional[str] = None
+    # Basic Prop Reference Sheet (composed still+meta). Never replaces approved_asset_id.
+    prs_asset_id: Optional[str] = None
+    # --- Advanced (defaults preserve Standard single-still path) ---
+    mode: PropCreatorMode = "standard"
+    advanced_type: Optional[PropAdvancedType] = None
+    primary_prompt: str = ""  # creator-owned; CD must not silently rewrite
+    primary_phase: PropPrimaryPhase = "draft"
+    primary_approved_asset_id: Optional[str] = None
+    angles: dict[str, PropAngleSlot] = Field(default_factory=dict)
+    hero_optional: bool = True
+    # Advanced multi-angle reference sheet (PRS). Separate from approved still identity.
+    advanced_sheet_asset_id: Optional[str] = None
+    advanced_sheet_status: str = "idle"  # idle|generating|complete|failed|cancelled
+    advanced_sheet_progress: Optional[float] = None
+    advanced_sheet_error: str = ""
+    advanced_sheet_cancel_requested: bool = False
     candidates: list["PropCandidate"] = Field(default_factory=list)
     generator: "GeneratorSourceSelection" = Field(default_factory=lambda: GeneratorSourceSelection())
+    is_global: bool = False
+    isGlobal: bool = False
     created_at: str = ""
     updated_at: str = ""
+
+    @model_validator(mode="after")
+    def _sync_is_global(self):
+        flag = bool(self.is_global or self.isGlobal)
+        self.is_global = flag
+        self.isGlobal = flag
+        if not str(self.canonical_tag or "").strip() and str(self.display_label or "").strip():
+            from ..creator_scope.identity_tag import prompt_canonical_tag
+
+            self.canonical_tag = prompt_canonical_tag("prop", self.display_label)
+        return self
 
 
 # Character slot colors (V1). Amendment: accessible labels in addition to color.
@@ -277,6 +354,12 @@ class PropCandidate(BaseModel):
     take_label: str = ""
     error: str = ""
     created_at: str = ""
+    # Live Job.progress (0-1) copied by GET hydration. Absent when no job reported one.
+    progress: Optional[float] = None
+    # Honest Job.stage / Job.message from queue worker (loading_models / sampling / …).
+    job_stage: Optional[str] = None
+    job_message: Optional[str] = None
+    origin: Optional[str] = None  # generated | uploaded (source stays local|api)
 
 
 class SceneShot(BaseModel):
@@ -292,6 +375,11 @@ class SceneShot(BaseModel):
     prompt: str = ""
     character_ids: list[str] = Field(default_factory=list)
     prop_entity_ids: list[str] = Field(default_factory=list)
+    prs_ids: list[str] = Field(default_factory=list)
+    ers_view: str = "auto"
+    posecraft_asset_id: str = ""
+    story_theme: str = ""
+    style: str = ""
     camera: SceneCreatorCamera = Field(default_factory=SceneCreatorCamera)
     generator: GeneratorSourceSelection = Field(default_factory=GeneratorSourceSelection)
     # Shared LoRA registry selection ({loraId, name, strength}); None = baseline.
@@ -322,4 +410,5 @@ def normalize_prop_tag(label: str) -> str:
     return s or "prop"
 
 
+PropAngleSlot.model_rebuild()
 PropEntity.model_rebuild()

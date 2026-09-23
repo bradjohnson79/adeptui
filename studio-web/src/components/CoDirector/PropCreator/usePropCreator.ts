@@ -3,6 +3,9 @@
  * Express (and Standard) are views over this hook.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ApiError } from "../../../api";
+import { PROFILE_NAME_ALREADY_EXISTS, isStalePropHomeOnlyEditMessage, findVisibleNameCollision } from "../../../creatorScope";
+import type { CreatorDeletePreview } from "../../creators/creatorProfileDelete";
 import { shouldSuspendDependentPolling } from "../../../runtime/studioApiConnection";
 import { DEFAULT_GENERATOR_PLAN, type CharacterGeneratorPlan } from "../../generators/generatorPlan";
 import { persistGeneratorPayload, propGenerateRequest, sourcesFromPropGenerator } from "./propGenerator";
@@ -16,10 +19,11 @@ export const PROP_SAVE_NOTICE_MS = 4500;
 
 export function persistSaveFeedback(ok: boolean, failure?: unknown): { notice: string | null; error: string | null } {
   if (ok) return { notice: PROP_PROFILE_SAVED_NOTICE, error: null };
-  return {
-    notice: null,
-    error: failure instanceof Error ? failure.message : failure != null ? String(failure) : "Could not save the Prop profile.",
-  };
+  const raw =
+    failure instanceof Error ? failure.message : failure != null ? String(failure) : "Could not save the Prop profile.";
+  // ORDER 18: BE allows Global edit from any project — drop stale home-only edit lock copy.
+  if (isStalePropHomeOnlyEditMessage(raw)) return { notice: null, error: null };
+  return { notice: null, error: raw };
 }
 
 function emptyPlan(): CharacterGeneratorPlan {
@@ -39,11 +43,14 @@ export function usePropCreator(projectId: string) {
   const [description, setDescription] = useState("");
   const [plan, setPlan] = useState<CharacterGeneratorPlan>(emptyPlan);
   const [useAsIdentity, setUseAsIdentity] = useState(false);
+  const [isGlobal, setIsGlobal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [nameCollision, setNameCollision] = useState<{ id: string; name: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const genStartedAtRef = useRef<number | null>(null);
@@ -72,11 +79,12 @@ export function usePropCreator(projectId: string) {
     if (!next) return;
     setName(next.display_label || "");
     setVisualStyle(next.visual_style || "live_action");
-    setDescription(next.description || next.notes || "");
+    setDescription(next.description || "");
     setPlan(sourcesFromPropGenerator(next.generator));
     const refId = (next.reference_asset_id || "").trim();
     const approved = (next.approved_asset_id || "").trim();
     setUseAsIdentity(Boolean(refId && approved && refId === approved));
+    setIsGlobal(Boolean(next.isGlobal || next.is_global));
   }, []);
 
   const startPoll = useCallback(
@@ -135,7 +143,10 @@ export function usePropCreator(projectId: string) {
     const timeoutId = window.setTimeout(() => setLoadTimedOut(true), 10_000);
     void refresh()
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(isStalePropHomeOnlyEditMessage(message) ? null : message);
+      }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -155,6 +166,15 @@ export function usePropCreator(projectId: string) {
   const persist = useCallback(
     async (opts?: { useAsIdentity?: boolean }) => {
       setError(null);
+      setNameCollision(null);
+      const localHit = findVisibleNameCollision(workspace?.props || [], name, prop?.id || "");
+      if (localHit) {
+        const existingName = localHit.display_label || localHit.tag || name;
+        setNameCollision({ id: localHit.id, name: existingName });
+        const message = `${existingName} already exists in this project.`;
+        setError(message);
+        throw new Error(message);
+      }
       try {
         const refId = (prop?.reference_asset_id || "").trim();
         const identity = Boolean(opts?.useAsIdentity && refId);
@@ -163,6 +183,8 @@ export function usePropCreator(projectId: string) {
           name,
           visual_style: visualStyle,
           description,
+          is_global: isGlobal,
+          isGlobal,
           generator: persistGeneratorPayload(plan),
           ...(identity
             ? {
@@ -183,13 +205,18 @@ export function usePropCreator(projectId: string) {
           clearTimeout(noticeTimerRef.current);
           noticeTimerRef.current = null;
         }
+        if (err instanceof ApiError && err.code === PROFILE_NAME_ALREADY_EXISTS) {
+          const existingId = String(err.details?.existingId || "");
+          const existingName = String(err.details?.existingName || name);
+          if (existingId) setNameCollision({ id: existingId, name: existingName });
+        }
         const fb = persistSaveFeedback(false, err);
         setNotice(fb.notice);
         setError(fb.error);
         throw err;
       }
     },
-    [applyProp, description, name, plan, projectId, prop?.id, prop?.reference_asset_id, refresh, visualStyle],
+    [applyProp, description, isGlobal, name, plan, projectId, prop?.id, prop?.reference_asset_id, refresh, visualStyle, workspace?.props],
   );
 
   const save = useCallback(async () => {
@@ -207,8 +234,11 @@ export function usePropCreator(projectId: string) {
     setDescription("");
     setPlan(emptyPlan());
     setUseAsIdentity(false);
+    setIsGlobal(false);
     setNotice("New Prop. Name it, then Save.");
     setError(null);
+    setUploadError(null);
+    setNameCollision(null);
   }, [stopPoll]);
 
   const selectProp = useCallback(
@@ -234,7 +264,10 @@ export function usePropCreator(projectId: string) {
       startPoll(res.prop.id);
       setNotice("Generating prop looks.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(isStalePropHomeOnlyEditMessage(message) ? null : message);
+      }
     } finally {
       setBusy(false);
     }
@@ -251,12 +284,40 @@ export function usePropCreator(projectId: string) {
         setNotice("This look is now the Prop identity.");
         await refresh(res.prop.id);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(isStalePropHomeOnlyEditMessage(message) ? null : message);
+      }
       } finally {
         setBusy(false);
       }
     },
     [applyProp, projectId, prop, refresh],
+  );
+
+  const uploadLook = useCallback(
+    async (file: File) => {
+      setBusy(true);
+      setUploadError(null);
+      setError(null);
+      try {
+        const current = name.trim() ? await persist() : prop;
+        if (!current) {
+          setUploadError("Name the Prop first, then upload a view.");
+          return;
+        }
+        const res = await propCreatorApi.uploadView(projectId, current.id, file);
+        applyProp(res.prop);
+        setNotice("Uploaded look saved to Library. Approve it to make it the current Prop view.");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Upload failed.";
+        setUploadError(message);
+        setError(message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyProp, name, persist, projectId, prop],
   );
 
   const retry = useCallback(
@@ -268,7 +329,10 @@ export function usePropCreator(projectId: string) {
         applyProp(res.prop);
         startPoll(res.prop.id);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(isStalePropHomeOnlyEditMessage(message) ? null : message);
+      }
       } finally {
         setBusy(false);
       }
@@ -288,33 +352,41 @@ export function usePropCreator(projectId: string) {
         name: current.display_label,
         visual_style: visualStyle,
         description,
+        is_global: isGlobal,
+        isGlobal,
         reference_asset_id: assetId,
         clear_reference: !assetId,
       });
       applyProp(res.prop);
       if (!assetId) setUseAsIdentity(false);
     },
-    [applyProp, description, name, persist, projectId, prop, visualStyle],
+    [applyProp, description, isGlobal, name, persist, projectId, prop, visualStyle],
   );
 
-  const remove = useCallback(async (confirmMessage?: string) => {
-    if (!prop) return;
-    const message =
-      confirmMessage ||
-      "Remove this Prop profile? If it is on the Spatial Map, those placements will be unlinked. Library images stay in the project.";
-    if (!window.confirm(message)) return;
+  const remove = useCallback(async (opts?: { confirmCrossProject?: boolean }): Promise<boolean> => {
+    if (!prop) return false;
     setBusy(true);
+    setNotice(null);
+    setError(null);
     try {
-      await propCreatorApi.delete(projectId, prop.id);
-      setNotice("Prop profile removed. Library images were kept.");
+      await propCreatorApi.delete(projectId, prop.id, opts?.confirmCrossProject ?? false);
+      setNotice(prop.isGlobal || prop.is_global ? "Global Prop deleted" : "Prop deleted");
       newProp();
       await refresh();
+      return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      return false;
     } finally {
       setBusy(false);
     }
   }, [newProp, projectId, prop, refresh]);
+
+  const getDeletePreview = useCallback(async (): Promise<CreatorDeletePreview | null> => {
+    if (!prop) return null;
+    return propCreatorApi.deletePreview(projectId, prop.id);
+  }, [projectId, prop]);
 
   const reset = useCallback(() => {
     if (prop) applyProp(prop);
@@ -325,7 +397,34 @@ export function usePropCreator(projectId: string) {
 
   const generating = (prop?.candidates || []).some((c) => !candidateIsFinished(c));
 
+
+  const composeReferenceSheet = useCallback(async () => {
+    if (!prop?.id) return null;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await propCreatorApi.composeReferenceSheet(projectId, prop.id);
+      if (res?.prop) {
+        applyProp(res.prop);
+        await refresh(res.prop.id);
+      } else {
+        await refresh();
+      }
+      setNotice("Prop Reference Sheet ready. Original still unchanged.");
+      return res;
+    } catch (err) {
+      {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(isStalePropHomeOnlyEditMessage(message) ? null : message);
+      }
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, [applyProp, projectId, prop?.id, refresh]);
+
   return {
+    projectId,
     workspace,
     prop,
     name,
@@ -338,6 +437,8 @@ export function usePropCreator(projectId: string) {
     setPlan,
     useAsIdentity,
     setUseAsIdentity,
+    isGlobal,
+    setIsGlobal,
     loading,
     loadTimedOut,
     busy,
@@ -349,12 +450,17 @@ export function usePropCreator(projectId: string) {
     persist,
     save,
     generate,
+    uploadLook,
+    uploadError,
+    nameCollision,
     approve,
+    composeReferenceSheet,
     retry,
     setReference,
     selectProp,
     newProp,
     remove,
+    getDeletePreview,
     reset,
   };
 }

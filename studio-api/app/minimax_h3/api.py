@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..db import Project, get_db
 from .capability import capability_matrix
 from .contracts import AdeptMiniMaxH3Request
+from .prewarm import cancel_prewarm, prewarm_status, start_prewarm
 from .service import (
     access_snapshot,
     cancel,
@@ -23,7 +24,7 @@ from .service import (
     request_fallback_ltx,
     retry,
 )
-from .three_frame import build_segmented_plan
+from .three_frame import build_add_guide_plan
 
 router = APIRouter(prefix="/minimax-h3", tags=["minimax-h3"])
 
@@ -79,6 +80,33 @@ def get_readiness() -> dict[str, Any]:
     return readiness()
 
 
+class H3PrewarmRequest(BaseModel):
+    surface: str = "one-frame"
+
+
+@router.get("/prewarm")
+def get_prewarm_status() -> dict[str, Any]:
+    """Current H3 prewarm state (idle/loading/warm/cancelled)."""
+    return {"ok": True, "prewarm": prewarm_status()}
+
+
+@router.post("/prewarm")
+def post_prewarm(body: H3PrewarmRequest | None = None) -> dict[str, Any]:
+    """Opportunistically load canonical H3 models after explicit generator selection.
+
+    Admission-gated and non-contending: quietly refuses while :8188 renders or an
+    H3 job is active. Never started by page-open — the UI calls this only on an
+    explicit MiniMax H3 selection.
+    """
+    return start_prewarm(surface=(body.surface if body else "one-frame"))
+
+
+@router.post("/prewarm/cancel")
+def post_prewarm_cancel() -> dict[str, Any]:
+    """Cancel an in-flight prewarm (creator switched generator)."""
+    return cancel_prewarm()
+
+
 @router.get("/access")
 def get_access() -> dict[str, Any]:
     """Public-safety flags snapshot for the MiniMax H3 surface."""
@@ -110,7 +138,7 @@ def three_frame_plan_route(request: AdeptMiniMaxH3Request, db: Session = Depends
     _require_project(db, request.projectId)
     if request.mode != "three-frame":
         raise HTTPException(status_code=400, detail="Use mode=three-frame for this endpoint.")
-    return {"ok": True, "threeFramePlan": build_segmented_plan(request).model_dump(mode="json")}
+    return {"ok": True, "threeFramePlan": build_add_guide_plan(request).model_dump(mode="json")}
 
 
 @router.post("/jobs")

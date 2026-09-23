@@ -7,7 +7,7 @@ Covers the persistence half of the Universal Scene Intelligence mission:
 - canonical tags survive reload (no suffix drift)
 - reference bindings persist; retry does NOT duplicate them
 - scene addressing ("For Scene 3") targets the right scene
-- multi-batch scenes create per-batch Timeline blocks with windowed prompts
+- multi-batch scenes create N batch blocks and one scene-level Timed Prompt
 - missing references fail closed (no fabricated bindings, no fake success)
 """
 
@@ -331,16 +331,30 @@ def test_multi_batch_scene_creates_windowed_batch_blocks(client, db_session) -> 
     assert len(batches) == 2
     # No leftover fresh-scene seed block alongside the two production batches.
     assert len(master.batchBlocks) == 2
-    assert batches[0].duration.plannedDuration == pytest.approx(10.0)
-    assert batches[1].duration.plannedDuration == pytest.approx(10.0)
-    text0 = batches[0].promptSegments[0].text
-    text1 = batches[1].promptSegments[0].text
-    assert text0 != text1, "each batch carries its own windowed prompt"
-    assert "story seconds 0–10" in text0
-    assert "story seconds 10–20" in text1
-    assert "wades" in text0.lower()
-    assert "exits" in text1.lower() or "exit" in text1.lower()
-    assert "@JunPark" in text0 and "@JunPark" in text1
+    # Capability-driven windows (full windows, partial final): MiniMax H3
+    # certified single-pass window is 15s, so a 20s scene plans 0-15 + 15-20.
+    assert batches[0].duration.plannedDuration == pytest.approx(15.0)
+    assert batches[1].duration.plannedDuration == pytest.approx(5.0)
+    from app.director_timeline_w46.migration_reconcile import project_prompts_to_legacy
+
+    # 12B working-Timeline shape: EVERY batch owns a window-scoped segment and
+    # projects its own Timed Prompt entry (0-15 and 15-20 visible entries).
+    timed = project_prompts_to_legacy(master)
+    assert len(timed) == 2, "each batch must project its own window prompt"
+    timed_sorted = sorted(timed, key=lambda t: t["start"])
+    assert timed_sorted[0]["start"] == pytest.approx(0.0)
+    assert timed_sorted[0]["length"] == pytest.approx(15.0)
+    assert timed_sorted[1]["start"] == pytest.approx(15.0)
+    assert timed_sorted[1]["length"] == pytest.approx(5.0)
+    scene_prompt = " ".join(t["text"] for t in timed_sorted)
+    assert "wades" in scene_prompt.lower()
+    assert "exits" in scene_prompt.lower() or "exit" in scene_prompt.lower()
+    assert "@JunPark" in scene_prompt
+    # Both batches own prompt text — later batches are NOT empty render windows.
+    assert any((seg.text or "").strip() for seg in batches[0].promptSegments)
+    assert any((seg.text or "").strip() for seg in batches[1].promptSegments)
+    # Batch segments are batch-local (start 0.0) — the 12B convention.
+    assert all(seg.start == pytest.approx(0.0) for b in batches for seg in b.promptSegments)
 
 
 def _production_batches(master, request_id: str = ""):
@@ -400,8 +414,12 @@ def test_retry_followup_multibatch_reuses_all_batches(client, db_session) -> Non
     assert ids_after == ids_before, "retry must reuse both batch blocks, not duplicate them"
     assert len(master_after.batchBlocks) == 2
     # Prompt was re-synthesized with the revision.
-    text0 = master_after.batchBlocks[0].promptSegments[0].text
-    assert "flickering" in text0.lower() or "flickering" in master_after.batchBlocks[1].promptSegments[0].text.lower()
+    scene_text = " ".join(
+        (seg.text or "")
+        for batch in master_after.batchBlocks
+        for seg in (batch.promptSegments or [])
+    )
+    assert "flickering" in scene_text.lower() or "flickering" in (follow.compiled_prompt or "").lower()
 
 
 def test_retry_followup_structural_change_adopts_prior_batches(client, db_session) -> None:

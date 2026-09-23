@@ -16,6 +16,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ..production_lifecycle.contracts import ReadinessDepartment
+
 TimelineGateLevel = Literal["EXPLORATION", "PRODUCTION_WARNING", "PRODUCTION_LOCK"]
 
 
@@ -76,6 +78,8 @@ class TimelineSceneReadiness(BaseModel):
     imageReferencesReady: bool = False
     voiceReady: bool = False
     generationPlanReady: bool = False
+    liveComputed: bool = False
+    departments: list[ReadinessDepartment] = Field(default_factory=list)
 
 
 class TimelineContextPackage(BaseModel):

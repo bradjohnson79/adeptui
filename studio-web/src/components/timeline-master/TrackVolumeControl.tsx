@@ -22,7 +22,7 @@ export function stepVolumePercent(
   return Math.max(0, Math.min(100, next));
 }
 
-function SpeakerIcon({ state }: { state: "normal" | "reduced" | "muted" }) {
+function SpeakerIcon({ state, label }: { state: "normal" | "reduced" | "muted"; label: string }) {
   const common = {
     width: 14,
     height: 14,
@@ -30,10 +30,12 @@ function SpeakerIcon({ state }: { state: "normal" | "reduced" | "muted" }) {
     fill: "none",
     stroke: "currentColor",
     strokeWidth: 1.4,
-    "aria-hidden": true,
+    role: "img",
+    "aria-label": label,
   } as const;
   return (
     <svg {...common}>
+      <title>{label}</title>
       <path d="M3 6.5h2.2L9 3.5v9L5.2 9.5H3z" />
       {state === "normal" ? (
         <>
@@ -139,9 +141,7 @@ export function TrackVolumeControl({
 
   const iconState: "normal" | "reduced" | "muted" = muted ? "muted" : volumePercent < 50 ? "reduced" : "normal";
 
-  const muteLabel = muted
-    ? t("unmuteTrack", { track: trackLabel, defaultValue: `Unmute ${trackLabel}` })
-    : t("muteTrack", { track: trackLabel, defaultValue: `Mute ${trackLabel}` });
+  const muteLabel = muted ? "Unmute" : "Mute";
 
   const volumeLabel = t("trackVolumeLabel", {
     track: trackLabel,
@@ -169,6 +169,7 @@ export function TrackVolumeControl({
         aria-haspopup="dialog"
         aria-label={volumeLabel}
         disabled={disabled}
+        onPointerDown={(event) => event.stopPropagation()}
         onClick={() => {
           if (disabled) return;
           setOpen((prev) => !prev);
@@ -231,14 +232,17 @@ export function TrackVolumeControl({
         className="timeline-v2__track-volume-btn timeline-v2__track-volume-btn--mute"
         aria-pressed={muted}
         aria-label={muteLabel}
+        title={muteLabel}
+        alt={muteLabel}
         disabled={disabled}
+        onPointerDown={(event) => event.stopPropagation()}
         onClick={() => {
           if (disabled) return;
           setOpen(false);
           onToggleMute();
         }}
       >
-        <SpeakerIcon state={muted ? "muted" : iconState} />
+        <SpeakerIcon state={muted ? "muted" : iconState} label={muteLabel} />
       </button>
     </div>
   );

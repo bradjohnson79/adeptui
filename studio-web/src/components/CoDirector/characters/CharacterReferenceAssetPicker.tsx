@@ -131,6 +131,7 @@ export function CharacterReferenceAssetPicker({
             <button
               type="button"
               className="character-compact__actions-button"
+              data-testid="character-compact-picker-cancel"
               onClick={onCancel}
               disabled={busy}
             >

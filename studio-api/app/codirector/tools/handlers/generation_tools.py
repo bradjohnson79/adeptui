@@ -149,35 +149,3 @@ def apply_propose_video_extend(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         prompt=str(args.get("prompt") or ""),
         duration_sec=float(args.get("durationSec") or 2),
     )
-
-
-def preview_propose_brand_generate(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
-    return _preview(
-        "Brand Studio locked generate",
-        str(args.get("prompt") or ""),
-        f"type={args.get('campaignType') or 'launch'} · format={args.get('format') or 'Square 1:1'}",
-    )
-
-
-def apply_propose_brand_generate(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    brand_colors = [item.strip() for item in str(args.get("brandColors") or "").split(",") if item.strip()]
-    return ops.run_brand_generate(
-        ctx.db,
-        project_id=ctx.project_id,
-        prompt=str(args.get("prompt") or "promo"),
-        logo_asset_ids=[str(args.get("logoAssetId"))] if args.get("logoAssetId") else [],
-        product_asset_ids=[str(args.get("productAssetId"))] if args.get("productAssetId") else [],
-        brand_colors=brand_colors,
-        required_wording=str(args.get("requiredWording") or ""),
-        campaign_name=str(args.get("campaignName") or ""),
-        campaign_type=str(args.get("campaignType") or ""),
-        visual_direction=str(args.get("visualDirection") or ""),
-        composition=str(args.get("composition") or ""),
-        background=str(args.get("background") or ""),
-        format_name=str(args.get("format") or ""),
-        typography_template=str(args.get("typographyTemplate") or ""),
-        product_name=str(args.get("productName") or ""),
-        style_notes=str(args.get("styleNotes") or ""),
-        bible_summary=str(args.get("bibleSummary") or ""),
-        result_lane=str(args.get("resultLane") or "concepts"),
-    )

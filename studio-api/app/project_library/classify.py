@@ -55,20 +55,25 @@ def classify_asset(payload: ClassifyInput, *, classified_by: str = "auto") -> Cl
             needs_clarification=False,
         )
 
-    # Native 3D mesh formats are deferred to Version 1.2 (not a technical failure).
-    if ext in UNSUPPORTED_3D_EXTENSIONS or ext in SUPPORTED_3D_EXTENSIONS or kind in (
-        "model",
-        "mesh",
-        "3d",
-    ):
+    if kind in ("posecraft_snapshot", "posecraft-previz") or "posecraft" in tag and kind == "image":
+        return _result("scenes", "sets", "scenes.sets", "PoseCraft previz capture", 0.93, classified_by)
+
+    if kind in ("mesh-3d", "mesh3d", "glb", "gltf") or ext in SUPPORTED_3D_EXTENSIONS:
+        if "reconstruct" in tag or "fire3d" in tag or role in ("reconstructed", "environment"):
+            if role == "environment" or "environment" in tag:
+                return _result("three_d", "environments", "three_d.environments", "Fire3D reconstructed environment", 0.92, classified_by)
+            return _result("three_d", "props", "three_d.props", "Fire3D reconstructed object", 0.92, classified_by)
+        if "figure" in tag or role in ("figure", "character"):
+            return _result("three_d", "characters", "three_d.characters", "PoseCraft figure mesh", 0.92, classified_by)
+        return _result("three_d", "props", "three_d.props", "PoseCraft 3D object", 0.9, classified_by)
+
+    # Unsupported native 3D formats remain deferred.
+    if ext in UNSUPPORTED_3D_EXTENSIONS or kind in ("model", "mesh", "3d"):
         return Classification(
             category="three_d",
             subtype="DEFERRED_VERSION_1_2",
             target_folder="miscellaneous",
-            reason=(
-                "Native 3D importing and animation are planned for Adept UI Version 1.2. "
-                "Version 1.1 uses 360 panoramic environments and Spatial Map production."
-            ),
+            reason="This 3D format is not imported into PoseCraft yet.",
             confidence=0.99,
             classified_by=classified_by,
             needs_clarification=True,
@@ -112,7 +117,15 @@ def classify_asset(payload: ClassifyInput, *, classified_by: str = "auto") -> Cl
     if kind == "video":
         if role in ("lipsync", "lip_sync", "lip-sync") or "lipsync" in tag:
             return _result("video", "lipsync", "video.lipsync", "Video with lip-sync role/tag", 0.9, classified_by)
-        if role in ("render", "final", "master") or engine in ("ltx", "wan"):
+        if role in ("render", "final", "master") or engine in (
+            "minimax-h3",
+            "ltx-2.5",
+            "ltx-2.5-distilled",
+            "ltx-2.5-full",
+            "ltx-2.5-comfy",
+            "ltx",
+            "wan",
+        ):
             if "import" in tag or hints.get("source") == "import":
                 return _result("video", "imported", "video.imported", "Imported video asset", 0.88, classified_by)
             return _result("video", "generated", "video.generated", "Generated video (engine/provider)", 0.85, classified_by)

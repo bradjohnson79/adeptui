@@ -24,12 +24,19 @@ CANONICAL_MODELS: dict[str, dict[str, Any]] = {
         },
     },
     "Seedance": {
-        "displayName": "Seedance",
+        "displayName": "Seedance 2.0",
         "modality": "video",
         "mappings": {
             "kie": {"providerModelId": "bytedance/seedance-2", "status": "Testing"},
             "wavespeed": {"providerModelId": "bytedance/seedance-2.0/text-to-video", "status": "Testing"},
-            "fal": {"providerModelId": "fal-ai/bytedance/seedance/v1/pro/text-to-video", "status": "Certified", "engine": "fal_seedance"},
+            "fal": {"providerModelId": "bytedance/seedance-2.0/text-to-video", "status": "Testing", "engine": "seedance-2.0"},
+        },
+    },
+    "Seedance 2.5": {
+        "displayName": "Seedance 2.5",
+        "modality": "video",
+        "mappings": {
+            "fal": {"providerModelId": "bytedance/seedance-2.5/text-to-video", "status": "Testing", "engine": "seedance-2.5"},
         },
     },
     "Kling": {
@@ -63,6 +70,17 @@ CANONICAL_MODELS: dict[str, dict[str, Any]] = {
             "kie": {"providerModelId": "gemini-3-pro", "status": "Testing"},
             "wavespeed": {"providerModelId": "deepseek/deepseek-v4-flash", "status": "Testing"},
             "fal": {"providerModelId": "fal-ai/any-llm", "status": "Testing"},
+        },
+    },
+    "Co-Director Vision": {
+        "displayName": "Co-Director Vision",
+        "modality": "vision",
+        "mappings": {
+            "fal": {
+                "providerModelId": "fal-ai/any-llm/vision",
+                "nestedModelId": "google/gemini-2.5-flash-lite",
+                "status": "Testing",
+            },
         },
     },
 }

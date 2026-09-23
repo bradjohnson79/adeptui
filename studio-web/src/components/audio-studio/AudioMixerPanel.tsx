@@ -377,9 +377,9 @@ export function AudioMixerPanel({
       <div className="audio-studio-panel__hero">
         <div>
           <p className="audio-studio-panel__eyebrow">Audio Mixer</p>
-          <h3>Balance your project audio before final delivery.</h3>
+          <h3>Balance Audio Studio / Timeline mix (adjacent to MAGI).</h3>
           <p className="muted">
-            Shape loudness, placement, fades, and stem behavior for the clips already on your timeline.
+            Shape loudness, placement, fades, and stem behavior for Audio Studio / Timeline clips. This mix is not MAGI Final Render authority — MAGI uses sequence finishing.audio.
           </p>
         </div>
         <div className="audio-studio-panel__hero-actions">

@@ -1,4 +1,9 @@
-"""Adept UI V1.1 Beta runtime supervisor / watchdog."""
+"""RETIRED as a production lifecycle owner.
+
+Adept Background Services (`python -m runtime_supervisor serve`) owns Studio API
+and Comfy. This module is diagnostic/historical only. Do not start, stop, or
+adopt :8758 / :8188 from here.
+"""
 
 from __future__ import annotations
 
@@ -307,7 +312,7 @@ class Supervisor:
         self.api_host = os.environ.get("STUDIO_API_HOST", "127.0.0.1")
         self.api_port = int(os.environ.get("STUDIO_API_PORT", "8758"))
         self.web_host = os.environ.get("STUDIO_WEB_HOST", "127.0.0.1")
-        self.web_port = int(os.environ.get("STUDIO_WEB_PORT", "8760"))
+        self.web_port = int(os.environ.get("STUDIO_WEB_PORT", "5173"))
         self.comfy_url = os.environ.get("STUDIO_COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
         self._api_health_fail_streak = 0
         self._api_started_mono = 0.0
@@ -582,47 +587,15 @@ class Supervisor:
             log.write(text)
 
     def start_api(self) -> None:
-        log = RotatingLog(self.dirs["logs"] / "api.log")
-        # Mirror worker log (in-process)
-        RotatingLog(self.dirs["logs"] / "worker.log").write(
-            f"[{_now()}] Worker runs in-process with Studio API (JobQueue + Production Executive).\n"
+        raise RuntimeError(
+            "RETIRED: Adept Background Services Manager owns :8758. "
+            "Do not spawn uvicorn from beta_runtime.supervisor."
         )
-        py = str(self.dirs["venv_python"])
-        cmd = [
-            py,
-            "-m",
-            "uvicorn",
-            "app.main:app",
-            "--host",
-            self.api_host,
-            "--port",
-            str(self.api_port),
-            "--workers",
-            "1" if os.name == "nt" else "2",
-        ]
-        leftover = _port_pids(self.api_port)
-        if leftover:
-            self.log(f"clearing leftover API listeners before spawn: {leftover}")
-            _recycle_api_listeners(leftover)
-        self._api_started_mono = time.monotonic()
-        self._api_health_fail_streak = 0
-        self.log(f"starting API: {' '.join(cmd)}")
-        popen = subprocess.Popen(
-            cmd,
-            cwd=str(self.dirs["api_dir"]),
-            env=self._child_env(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        threading.Thread(target=self._pump, args=(popen, log), daemon=True).start()
-        self.services["api"] = ServiceProc("api", popen, log)
-        self._write_pid("api", popen.pid)
-        # --workers 2 spawns child processes; popen.pid is the parent uvicorn.
-        self._write_pid("supervisor", os.getpid())
 
     def start_web(self) -> None:
+        if int(self.web_port) == 8760:
+            self.log("REFUSED: retired :8760 is not a creator UI (Law 15). Use Vite :5173.")
+            return
         log = RotatingLog(self.dirs["logs"] / "web.log")
         py = str(self.dirs["venv_python"])
         script = str(self.root / "scripts" / "beta_runtime" / "web_server.py")
@@ -989,7 +962,7 @@ def main() -> int:
     if args.action == "stop":
         dirs["shutdown"].write_text(_now(), encoding="utf-8")
         api_port = int(os.environ.get("STUDIO_API_PORT", "8758"))
-        web_port = int(os.environ.get("STUDIO_WEB_PORT", "8760"))
+        web_port = int(os.environ.get("STUDIO_WEB_PORT", "5173"))
         root = repo_root()
         graceful_deadline = time.time() + 15
         while time.time() < graceful_deadline:
@@ -1019,7 +992,12 @@ def main() -> int:
         print("STOPPED")
         return 0 if not _live_beta_pids(root, api_port=api_port, web_port=web_port) else 1
 
-    return Supervisor().run()
+    print(
+        "RETIRED: Adept Background Services Manager owns Studio API and Comfy. "
+        "Use python -m runtime_supervisor serve.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":

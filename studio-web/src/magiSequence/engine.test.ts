@@ -39,6 +39,11 @@ function findClip(doc: MagiSequenceDocument, id: string): MagiClip {
 }
 
 describe("engine command lineage + id integrity (m4/m1 A6)", () => {
+  it("empty MAGI sequences ship VIDEO AUDIO MUSIC SFX", () => {
+    const doc = createEmptySequence("proj-a", 24);
+    expect(doc.tracks.map((track) => track.label)).toEqual(["OBJECTS 1", "VIDEO", "AUDIO", "MUSIC", "SFX"]);
+  });
+
   it("preserves W46 lineage fields and id on Move", () => {
     const doc = seededSequence();
     const { doc: next } = applyEditCommand(doc, { kind: "Move", payload: { clipId: "clip_000001", startFrame: 48 } }, []);

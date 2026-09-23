@@ -1,4 +1,9 @@
-"""Ollama Co-Director provider — backend-only HTTP to local Ollama."""
+"""Ollama Co-Director provider — backend-only HTTP to the Local AI Runtime.
+
+Lifecycle (start/stop/watch/recover) belongs to the Adept Runtime Supervisor
+logical service `runtime.local_llm`. This provider consumes inference only.
+It must not spawn `ollama serve`, start a watchdog, or own health authority.
+"""
 
 from __future__ import annotations
 

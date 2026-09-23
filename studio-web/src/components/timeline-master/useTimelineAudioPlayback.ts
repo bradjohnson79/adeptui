@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { api } from "../../api";
-import type { DirectorTimeline } from "../DirectorTracks";
+import type { TimelineBoardView } from "../DirectorTracks";
 import type { SceneTimelineMaster } from "../../timelineMaster/contracts";
 import { collectTimelineAudioAtTime } from "./collectTimelineAudioAtTime";
 
@@ -10,7 +10,7 @@ export function useTimelineAudioPlayback(args: {
   projectId: string;
   playing: boolean;
   playheadSec: number;
-  timeline: DirectorTimeline | null;
+  timeline: TimelineBoardView | null;
   master: SceneTimelineMaster | null;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);

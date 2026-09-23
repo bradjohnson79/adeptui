@@ -79,6 +79,9 @@ def run_creative_decision_loop(
         "PREPARE_NEXT_OPENING",
     ]
 
+    from app.codirector.conversation.foundation.visual_generation import is_executable_image_turn
+
+    image_act = is_executable_image_turn(user_message)
     user_need = interpret_user_need(user_message)
     creative_stage = map_creative_stage(discovery_stage, len((user_message or "").split()), user_need)
     project_format = detect_project_format(
@@ -90,13 +93,13 @@ def run_creative_decision_loop(
     bundle.projectFormat = project_format
     bundle.creativeStage = creative_stage
 
-    is_listening = listening_only(
+    is_listening = False if image_act else listening_only(
         user_need=user_need, initiative=bundle.initiativeLevel, user_message=user_message
     )
     mark_answered_from_message(bundle, user_message)
 
     insights = extract_insight_seeds(user_message)
-    open_qs = extract_open_questions(user_message)
+    open_qs = [] if image_act else extract_open_questions(user_message)
     knowledge = assert_not_promoted_to_canon(
         [
             build_knowledge(
@@ -131,10 +134,14 @@ def run_creative_decision_loop(
     user_requested_help = bool(
         re.search(r"\b(help me|develop|what should|workshop|discover)\b", user_message or "", re.I)
     )
-    budget = question_budget(
-        bundle.initiativeLevel, listening_only=is_listening, user_requested_help=user_requested_help
-    )
-    surfaced = select_surface_question(bundle, budget=budget, user_message=user_message)
+    if image_act:
+        budget = 0
+        surfaced = None
+    else:
+        budget = question_budget(
+            bundle.initiativeLevel, listening_only=is_listening, user_requested_help=user_requested_help
+        )
+        surfaced = select_surface_question(bundle, budget=budget, user_message=user_message)
 
     # Episode progression only when format uses episodes
     if uses_episodes(project_format):
@@ -144,18 +151,22 @@ def run_creative_decision_loop(
     else:
         bundle.episodeProgression = None
 
-    openings = detect_creative_openings(
-        user_message=user_message,
-        open_questions=open_qs,
-        has_episode_gap=bool(
-            bundle.episodeProgression
-            and bundle.episodeProgression.latestConfirmedEpisode > 0
-            and bundle.episodeProgression.nextMissingEpisode
-            > bundle.episodeProgression.latestConfirmedEpisode
-        ),
-        format_label=project_format,
-    )
-    opening = strongest_opening(openings)
+    if image_act:
+        openings = []
+        opening = None
+    else:
+        openings = detect_creative_openings(
+            user_message=user_message,
+            open_questions=open_qs,
+            has_episode_gap=bool(
+                bundle.episodeProgression
+                and bundle.episodeProgression.latestConfirmedEpisode > 0
+                and bundle.episodeProgression.nextMissingEpisode
+                > bundle.episodeProgression.latestConfirmedEpisode
+            ),
+            format_label=project_format,
+        )
+        opening = strongest_opening(openings)
 
     foundation = [k.statement for k in knowledge if k.kind == "CONFIRMED_FACT"][:4] or insights[:3]
     unresolved = open_qs[:3]

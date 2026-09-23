@@ -43,6 +43,15 @@ from .models import CharacterProfileRow, CharacterReferenceAssetRow, CharacterTr
 CRS_CANON_TRAIT_KEY = "crs_canon"
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -76,10 +85,10 @@ def persist_crs_in_session(
     existing = load_persisted_crs(db, profile.id)
     if (
         str(existing.get("approved_sheet_asset_id") or "") == str(asset_id)
-        and int(existing.get("crs_revision") or 0) > 0
+        and _safe_int(existing.get("crs_revision"), 0) > 0
     ):
         return existing
-    revision = int(existing.get("crs_revision") or 0) + 1
+    revision = _safe_int(existing.get("crs_revision"), 0) + 1
     payload = {
         "schema_version": 1,
         "character_id": profile.id,
@@ -165,8 +174,11 @@ def get_crs_summary(
     
     Law 19: Compact summary for Co-Director, not the entire canon.
     """
-    profile = db.get(CharacterProfileRow, character_id)
-    if not profile or profile.project_id != project_id:
+    try:
+        from .service import get_profile
+
+        profile = get_profile(db, project_id, character_id)
+    except Exception:
         return None
 
     persisted = load_persisted_crs(db, character_id)
@@ -188,7 +200,7 @@ def get_crs_summary(
     else:
         coverage = "multi_view"
     
-    revision = int(persisted.get("crs_revision") or 0)
+    revision = _safe_int(persisted.get("crs_revision"), 0)
     approved_asset = persisted.get("approved_sheet_asset_id") or (
         approved_refs[0].asset_id if approved_refs else None
     )
@@ -233,6 +245,7 @@ def get_crs_summary(
 CHARACTER_JSON_VIEW_ROLES: tuple[tuple[str, str, str], ...] = (
     ("front", "full_body_front", "Front"),
     ("side", "full_body_side_left", "Side"),
+    ("three_quarter", "full_body_three_quarter_front", "3/4"),
     ("back", "full_body_back", "Back"),
     ("closeup", "closeup_front", "Head/Neck Close-Up"),
 )
@@ -247,8 +260,11 @@ def get_character_json(
 
     Fills only from the owner profile and approved sheet. Does not invent traits.
     """
-    profile = db.get(CharacterProfileRow, character_id)
-    if not profile or profile.project_id != project_id:
+    try:
+        from .service import get_profile
+
+        profile = get_profile(db, project_id, character_id)
+    except Exception:
         return None
     persisted = load_persisted_crs(db, character_id)
     summary = get_crs_summary(db, project_id, character_id)
@@ -285,13 +301,43 @@ def get_character_json(
             character_name=profile.name or "",
         )
         packet = dump_identity_packet(identity)
+    cc_state: dict[str, Any] = {}
+    mv_flat: dict[str, Any] = {}
+    try:
+        from .cc_v2 import load_state
+        from .cc_v3_multiview import merge_multiview
+
+        cc_state = load_state(db, character_id)
+        mv = merge_multiview(cc_state.get("multiView"))
+        views_cc = cc_state.get("views") if isinstance(cc_state.get("views"), dict) else {}
+        angle_map = {
+            "front": views_cc.get("front") if isinstance(views_cc.get("front"), dict) else {},
+            "side": mv["angles"]["side"],
+            "three_quarter": mv["angles"]["three_quarter"],
+            "back": mv["angles"]["back"],
+            "closeup": views_cc.get("closeup") if isinstance(views_cc.get("closeup"), dict) else {},
+        }
+        for key, slot in angle_map.items():
+            aid = str(slot.get("assetId") or "").strip()
+            if aid and key in views:
+                views[key]["assetId"] = aid
+            mv_flat[key] = slot
+        sheet_blob = cc_state.get("sheet") if isinstance(cc_state.get("sheet"), dict) else {}
+        sheet_from_cc = str(cc_state.get("sheetAssetId") or sheet_blob.get("assetId") or "").strip()
+        if sheet_from_cc:
+            sheet_id = sheet_from_cc
+    except Exception:
+        cc_state = {}
     return {
         "characterId": character_id,
         "name": profile.name,
         "tag": f"@{profile.name}" if profile.name else None,
-        "crsRevision": int(persisted.get("crs_revision") or 0),
+        "crsRevision": _safe_int(persisted.get("crs_revision"), 0),
         "approvedSheetAssetId": sheet_id,
         "views": views,
+        "multiView": mv_flat,
+        "jsonRevision": _safe_int(cc_state.get("jsonRevision"), 1),
+        "multiviewEnrichment": cc_state.get("multiviewEnrichment") if isinstance(cc_state.get("multiviewEnrichment"), dict) else {},
         "canon": canon.model_dump() if canon else None,
         "identityPacket": packet,
         "summary": summary.model_dump() if summary else None,

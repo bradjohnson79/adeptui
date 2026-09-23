@@ -57,6 +57,7 @@ _LIVE_VIDEO_ROW_IDS = frozenset(
         "fal:bytedance/seedance-2.0/text-to-video",
         "fal:bytedance/seedance-2.0/image-to-video",
         "fal:bytedance/seedance-2.0/reference-to-video",
+        "fal:bytedance/seedance-2.0/mini/reference-to-video",
         "fal:bytedance/seedance-2.5/text-to-video",
         "fal:bytedance/seedance-2.5/image-to-video",
         "fal:bytedance/seedance-2.5/reference-to-video",

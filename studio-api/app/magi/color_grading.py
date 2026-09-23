@@ -330,6 +330,14 @@ def compile_filter_string(params: ColorPresetParams) -> str:
 # ── Color Grade Application ────────────────────────────────────────────────
 
 
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+
+
+def is_still_image_path(path: str | Path) -> bool:
+    """True when path suffix indicates a still image (not a video container)."""
+    return Path(path).suffix.lower() in _IMAGE_EXTENSIONS
+
+
 def apply_color_grade(
     input_path: str,
     output_path: str,
@@ -344,6 +352,7 @@ def apply_color_grade(
         output_path: Destination file path.
         params: Color parameter map.
         preview_seconds: If set, only grade the first N seconds (preview mode).
+            Ignored for still images (the whole frame is the preview).
 
     Returns:
         The output file path.
@@ -351,33 +360,54 @@ def apply_color_grade(
     filter_str = compile_filter_string(params)
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    still = is_still_image_path(input_path)
 
-    cmd_parts: list[str] = []
-    if preview_seconds and preview_seconds > 0:
-        cmd_parts.extend(["-t", f"{preview_seconds:.1f}"])
+    if still:
+        # Root-cause: libx264 into a .png path produced raw H.264 bytes labeled as
+        # kind=image ? HTTP could return 200 while PIL/UI could not open the file
+        # (and some FFmpeg builds fail the mux ? empty 500). Encode a real still.
+        if out.suffix.lower() not in _IMAGE_EXTENSIONS:
+            out = out.with_suffix(".png")
+        cmd_parts: list[str] = ["-i", str(input_path)]
+        if filter_str:
+            cmd_parts.extend(["-vf", filter_str])
+        cmd_parts.extend(["-frames:v", "1"])
+        ext = out.suffix.lower()
+        if ext in {".jpg", ".jpeg"}:
+            cmd_parts.extend(["-q:v", "2"])
+        elif ext == ".webp":
+            cmd_parts.extend(["-c:v", "libwebp", "-quality", "90"])
+        else:
+            if ext != ".png":
+                out = out.with_suffix(".png")
+            cmd_parts.extend(["-c:v", "png"])
+        cmd_parts.extend(["-y", str(out)])
+    else:
+        cmd_parts = []
+        if preview_seconds and preview_seconds > 0:
+            cmd_parts.extend(["-t", f"{preview_seconds:.1f}"])
+        cmd_parts.extend(["-i", str(input_path)])
+        if filter_str:
+            cmd_parts.extend(["-vf", filter_str])
+        from .media import probe_media
 
-    cmd_parts.extend(["-i", str(input_path)])
-
-    if filter_str:
-        cmd_parts.extend(["-vf", filter_str])
-
-    from .media import probe_media
-
-    has_audio = False
-    try:
-        has_audio = bool(probe_media(input_path).get("hasAudio")) and not preview_seconds
-    except Exception:
         has_audio = False
-    cmd_parts.extend([
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
-        "-c:a" if has_audio else "-an",
-        *(["aac"] if has_audio else []),
-        "-y",
-        str(out),
-    ])
+        try:
+            has_audio = bool(probe_media(input_path).get("hasAudio")) and not preview_seconds
+        except Exception:
+            has_audio = False
+        if out.suffix.lower() in _IMAGE_EXTENSIONS:
+            out = out.with_suffix(".mp4")
+        cmd_parts.extend([
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-c:a" if has_audio else "-an",
+            *(["aac"] if has_audio else []),
+            "-y",
+            str(out),
+        ])
 
     cmd = ["ffmpeg", *cmd_parts]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -426,10 +456,15 @@ def apply_color_grade_to_asset(
     if not source_path or not Path(source_path).is_file():
         raise ValueError(f"Asset {asset_id} has no valid file path")
 
-    # Preview: grade first 3 seconds; Full: grade entire asset
-    duration = 3.0 if preview else None
+    still = is_still_image_path(source_path)
+    # Preview: grade first 3 seconds for video; stills grade the whole frame.
+    duration = None if still else (3.0 if preview else None)
 
-    dest_name = f"graded_{uuid.uuid4().hex[:12]}_{Path(source_path).name}"
+    if still:
+        dest_name = f"graded_{uuid.uuid4().hex[:12]}.png"
+    else:
+        stem = Path(source_path).stem
+        dest_name = f"graded_{uuid.uuid4().hex[:12]}_{stem}.mp4"
     from .media import cleanup_dir, new_temp_dir
 
     work = new_temp_dir("color")
@@ -437,7 +472,8 @@ def apply_color_grade_to_asset(
 
     filter_str = compile_filter_string(resolved)
     try:
-        apply_color_grade(source_path, str(dest_path), resolved, preview_seconds=duration)
+        graded_path = apply_color_grade(source_path, str(dest_path), resolved, preview_seconds=duration)
+        dest_path = Path(graded_path)
     except Exception:
         cleanup_dir(work)
         raise
@@ -449,7 +485,7 @@ def apply_color_grade_to_asset(
             db,
             project_id=project_id,
             source_path=dest_path,
-            kind="image" if Path(source_path).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") else "video",
+            kind="image" if still else "video",
             tag="magi_color",
             parent_asset_id=source.id,
             op="color_grade",

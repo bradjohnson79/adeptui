@@ -96,7 +96,8 @@ ANALYZE_QUESTION = (
     "Rules: report only what you genuinely see or hear; if the clip has audible sound, audioEvents or speechSegments "
     "must reflect it; if the clip is silent, say so in the summary and leave audioEvents empty; report contacts only "
     "when a foot or hand visibly meets a surface or the contact is clearly audible; leave any list empty when nothing "
-    "qualifies; do not invent facts; times are seconds from clip start."
+    "qualifies; do not invent facts; times are seconds from clip start. "
+    "Write every string value in English only. Do not answer in Chinese or any other language."
 )
 
 _LITERAL_DEFAULTS: dict[type, dict[str, Any]] = {

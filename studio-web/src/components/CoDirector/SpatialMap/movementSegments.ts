@@ -52,13 +52,17 @@ function coordKey(item: SpatialCharacterPlacement): string {
 export function computeClientArrows(
   document: SpatialMapDocument | null | undefined,
   selectedCharacterId?: string | null,
+  options?: { fullSequence?: boolean },
 ): MovementArrow[] {
   const rows = listMovements(document);
   if (rows.length < 2) return [];
   const active = activeMovement(document);
   const focus = (selectedCharacterId || "").trim();
+  const fullSequence = options?.fullSequence === true;
   let pairs = rows.slice(0, -1).map((start, index) => [start, rows[index + 1]] as const);
-  if (!focus && active) {
+  // Overlay / multi-movement sequencing draws every consecutive leg.
+  // Legacy active-leg mode (API parity) collapses to prior→active when unfocused.
+  if (!fullSequence && !focus && active) {
     const prior = rows.filter((row) => row.segmentNumber < active.segmentNumber).at(-1);
     if (prior) pairs = [[prior, active]];
   }

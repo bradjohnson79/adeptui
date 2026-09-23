@@ -32,15 +32,16 @@ def assemble_listening_context(
         lines.append("Preference: explain story before production planning.")
     if snapshot.confirmedFacts:
         lines.append("Confirmed facts (top): " + "; ".join(snapshot.confirmedFacts[:4]))
-    # Recent turns — last 6, truncated
+    # Recent turns — conversational window (raised from 6x220: ranked context
+    # must not be silently starved; token budget governs the total upstream).
     msgs = recent_messages or snapshot.recentMessages or []
     if msgs:
         lines.append("Recent messages:")
-        for m in msgs[-6:]:
+        for m in msgs[-12:]:
             role = str(m.get("role") or "user")
             content = str(m.get("content") or "").strip()
-            if len(content) > 220:
-                content = content[:217] + "..."
+            if len(content) > 600:
+                content = content[:597] + "..."
             lines.append(f"- {role}: {content}")
     lines.append(
         "Do NOT inject unrelated production jobs, full wiki dumps, or title/premise questionnaires."

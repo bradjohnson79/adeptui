@@ -6,6 +6,7 @@ import { CoDirectorChangeReview } from "./CoDirectorChangeReview";
 import { CoDirectorMessage } from "./CoDirectorMessage";
 import { CoDirectorWelcome } from "./CoDirectorWelcome";
 import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
+import { PendingPlanBriefCard } from "./PendingPlanBriefCard";
 import { CoDirectorRelationshipCard } from "./CoDirectorRelationshipCard";
 import { CoDirectorProjectPulse } from "./CoDirectorProjectPulse";
 import { CoDirectorProcessingStatus } from "./CoDirectorProcessingStatus";
@@ -34,6 +35,8 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     dismissSuggestedPrompt,
     proposals,
     proposalActingId,
+    pendingPlanBrief,
+    clearPendingPlanBrief,
     activity,
     approveProposal,
     rejectProposal,
@@ -41,6 +44,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     cancelProposal,
     productionCapable,
     send,
+    setDraft,
     busy,
     sendError,
     dismissSendError,
@@ -60,7 +64,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, plan, setup, suggestedPrompt, proposals, activity]);
+  }, [messages, plan, setup, suggestedPrompt, proposals, pendingPlanBrief, activity]);
 
   return (
     <div className="codirector-conversation" aria-live="polite" data-testid="codirector-conversation">
@@ -122,7 +126,12 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
                     ? () => {
                         if (!busy) void send(message.content, "chat");
                       }
-                    : undefined
+                    : message.messageType === "error"
+                      ? () => {
+                          // ORDER 19: PRIMARY Retry on CD fail cards (incl. timeline.add_asset).
+                          if (!busy) retryLastSend();
+                        }
+                      : undefined
                 }
               />
               {isLatestAssistant && !agentWorkPresent ? <CoDirectorNextStepChips /> : null}
@@ -168,6 +177,28 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
       )}
 
 
+      {!executionActive && pendingPlanBrief ? (
+        <PendingPlanBriefCard
+          brief={pendingPlanBrief}
+          busy={busy}
+          onSayGo={() => {
+            if (busy) return;
+            void send("Go ahead", "chat");
+          }}
+          onEdit={() => {
+            const hint =
+              pendingPlanBrief.summary ||
+              pendingPlanBrief.productionPlan?.goal ||
+              "";
+            clearPendingPlanBrief();
+            setDraft(hint ? `Please revise this plan: ${hint}` : "Please revise the plan.");
+          }}
+          onCancel={() => {
+            clearPendingPlanBrief();
+            if (!busy) void send("cancel", "chat");
+          }}
+        />
+      ) : null}
       {!executionActive &&
         proposals.map((proposal) => (
           <CoDirectorProposalCard

@@ -202,9 +202,9 @@ test.describe("LoRA certification (live)", () => {
     expect(nodes.some((n) => (n.class_type || "").includes("LoraLoader"))).toBeFalsy();
   });
 
-  test("Timeline right drawer Advanced exposes the video LoRA selector (LTX)", async ({ page, request }) => {
+  test("Timeline right drawer Advanced exposes the video LoRA selector (LTX 2.5)", async ({ page, request }) => {
     const scene = await request.post(`${API}/api/projects/${projectId}/scenes`, {
-      data: { name: "LoRA Cert Scene", prompt: "test", engine: "ltx", duration_sec: 4 },
+      data: { name: "LoRA Cert Scene", prompt: "test", engine: "ltx-2.5", duration_sec: 4 },
     });
     expect(scene.ok(), `scene create failed: ${await scene.text()}`).toBeTruthy();
     await page.goto(`${WEB}/project/${projectId}?workspace=timeline`, { waitUntil: "domcontentloaded", timeout: 90000 });
@@ -215,7 +215,10 @@ test.describe("LoRA certification (live)", () => {
       const select = page.getByTestId("lora-select");
       if (await select.count()) {
         const options = await select.locator("option").allTextContents();
-        expect(options.join("|")).toContain("ltx-2.3-22b-distilled-lora-dynamic");
+        // LTX 2.3 LoRAs are retired with their base model and must not leak
+        // into an LTX 2.5 scene. With no LTX 2.5-family LoRA registered the
+        // selector hides honestly (renders nothing when none are compatible).
+        expect(options.join("|")).not.toContain("ltx-2.3");
       }
     }
   });

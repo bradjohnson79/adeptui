@@ -23,7 +23,12 @@ enabled: true
 # Prepare Image Generation
 
 ## Purpose
-Image generation package and proposal.
+Proposal/plan playbook only. Use this when the creator is **planning** an image
+package or asking for a proposal — not when they have already given a complete
+visual brief and said generate/create the image now.
+
+COMMAND + READY stills are dispatched by the execution path. Do not hand the
+creator a prompt to run themselves. Optimized prompts are internal to the job.
 
 ## Step Sequence
 1. Resolve active project and scope (scene/shot).
@@ -33,5 +38,6 @@ Image generation package and proposal.
 5. Synthesize one recommendation.
 6. Build production plan mapped to registered tools.
 7. Create M2.2 proposals for mutating/generation steps.
-8. Await user approval before execution.
+8. Await user approval before execution — unless the turn is already a
+   COMMAND + READY still (then the dispatcher submits the job).
 9. Record receipts and mark visual validation pending where applicable.

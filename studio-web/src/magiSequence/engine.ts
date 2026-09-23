@@ -1,10 +1,10 @@
 import {
-  DEFAULT_TRACK_BLUEPRINT,
   type MagiClip,
   type MagiEditCommand,
   type MagiSequenceDocument,
   type MagiTrack,
 } from "./types";
+import { createCanonicalTracks } from "./tracks";
 
 function uid(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -21,12 +21,7 @@ function nowIso(): string {
 }
 
 export function createEmptySequence(projectId: string, frameRate = 24): MagiSequenceDocument {
-  const tracks: MagiTrack[] = DEFAULT_TRACK_BLUEPRINT.map((item, index) => ({
-    id: uid(`trk_${item.label.toLowerCase()}`),
-    kind: item.kind,
-    label: item.label,
-    order: index,
-  }));
+  const tracks: MagiTrack[] = createCanonicalTracks();
   return {
     id: uid("seq"),
     projectId,
@@ -67,8 +62,17 @@ export function clipUnderPlayhead(
 ): MagiClip | null {
   for (const clip of doc.clips) {
     if (clip.startFrame > frame || clipEnd(clip) <= frame) continue;
-    if (!trackKind) return clip;
     const track = doc.tracks.find((t) => t.id === clip.trackId);
+    if (
+      clip.ingestRole === "graphic" ||
+      clip.overlayId ||
+      track?.kind === "graphics" ||
+      track?.kind === "objects"
+    ) {
+      if (trackKind === "graphics" || trackKind === "objects") return clip;
+      continue;
+    }
+    if (!trackKind) return clip;
     if (track?.kind === trackKind) return clip;
   }
   return null;

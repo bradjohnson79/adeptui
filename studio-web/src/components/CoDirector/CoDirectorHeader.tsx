@@ -1,6 +1,6 @@
 import { forwardRef, type ReactNode } from "react";
 import { IconButton } from "../ui";
-import { IconClose, IconCollapse, IconExpand, IconMenu, IconOverflow } from "./icons";
+import { IconClose, IconCollapse, IconExpand, IconOverflow } from "./icons";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import {
   LAYOUT_PRESET_LABELS,
@@ -15,7 +15,6 @@ export const CoDirectorHeader = forwardRef<
   {
     mode: CoDirectorDisplayMode;
     onClose: () => void;
-    onOpenNav: () => void;
     ready?: boolean;
     runtimeChip?: string;
     runtimeState?: CoDirectorRuntimeState;
@@ -27,7 +26,6 @@ export const CoDirectorHeader = forwardRef<
   {
     mode,
     onClose,
-    onOpenNav,
     ready = false,
     runtimeChip,
     runtimeState,
@@ -35,7 +33,7 @@ export const CoDirectorHeader = forwardRef<
     onLayoutPreset,
     fullscreenControls,
   },
-  menuBtnRef,
+  overflowBtnRef,
 ) {
   const {
     overflowPanel,
@@ -56,25 +54,20 @@ export const CoDirectorHeader = forwardRef<
   const statusIndicator = statusChecking
     ? "Checking"
     : statusLatestRun?.summary.statusIndicator || "Not Checked";
+  const statusBand = statusChecking ? "Checking" : statusLatestRun?.summary.band || "";
+  const statusLabel = statusChecking
+    ? "Checking"
+    : statusBand || statusIndicator || "Not Checked";
   const statusTone =
-    statusIndicator === "Operational"
+    statusLabel === "Operational"
       ? ""
-      : statusIndicator === "Blocked"
+      : statusLabel === "Blocked"
         ? " is-degraded"
         : " is-degraded";
 
   return (
     <header className="codirector-header" data-testid="codirector-header">
       <div className="codirector-header-identity">
-        <IconButton
-          ref={menuBtnRef}
-          aria-label="Open Co-Director menu"
-          title="Menu"
-          data-testid="codirector-menu-button"
-          onClick={onOpenNav}
-        >
-          <IconMenu />
-        </IconButton>
         <div className="codirector-header-titles">
           <h2>Co-Director</h2>
           <p className="codirector-header-project" data-testid="codirector-header-project" title={projectLabel}>
@@ -105,12 +98,14 @@ export const CoDirectorHeader = forwardRef<
           data-testid="codirector-status-chip"
           onClick={openStatusPanel}
           title={
-            statusIndicator === "Not Checked"
+            statusLabel === "Not Checked"
               ? "Production Assurance cross-check not run yet (not an intelligence failure). Open status."
-              : "Open Co-Director status"
+              : statusBand
+                ? `Production Assurance ${statusIndicator} · ${statusBand}`
+                : "Open Co-Director status"
           }
         >
-          {statusIndicator}
+          {statusLabel}
         </button>
         {mode === "fullscreen" && onLayoutPreset ? (
           <div
@@ -146,6 +141,7 @@ export const CoDirectorHeader = forwardRef<
           </IconButton>
         )}
         <IconButton
+          ref={overflowBtnRef}
           aria-expanded={overflowPanel !== "none"}
           aria-haspopup="menu"
           aria-label="Co-Director more options"

@@ -21,7 +21,7 @@ from app.video_runtime.fingerprints import (
 from app.video_runtime.graph_validation import validate_comfy_graph
 from app.video_runtime.job_model import FailureClass
 from app.video_runtime.workflow_resolver import resolve_from_scene_params, resolve_workflow
-from app.workflows.wan_builder import build_wan_three_frame_workflow
+from app.workflows.ltx_25_builder import build_ltx_25_i2v, build_ltx_25_t2v
 
 
 @pytest.fixture(autouse=True)
@@ -36,11 +36,8 @@ def _reload():
 def test_certified_registry_has_production_pipeline_ids():
     keys = {w.workflow_key for w in list_workflows()}
     for required in {
-        "ltx.simple_i2v",
-        "ltx.scene",
-        "ltx.ingredients_ic_lora",
-        "wan.first_last_frame",
-        "wan.three_frame",
+        "ltx_25.t2v",
+        "ltx_25.i2v",
         "director.shot_render",
         "director.scene_render",
         "director.timeline_render",
@@ -51,11 +48,16 @@ def test_certified_registry_has_production_pipeline_ids():
         "video.upscale",
         "video.motion_transfer",
     }:
-        assert required in keys
-    wan3 = get_workflow("wan.three_frame")
-    assert wan3 is not None
-    assert wan3.workflow_id == "WF-WAN-002"
-    assert wan3.status in {"Built", "Blocked", "SmokeTested", "Certified"}
+        assert required in keys, f"missing {required}"
+    # Retired local video leaves were removed from the certified registry entirely.
+    for removed in (
+        "ltx.simple_i2v",
+        "ltx.scene",
+        "ltx.ingredients_ic_lora",
+        "wan.first_last_frame",
+        "wan.three_frame",
+    ):
+        assert get_workflow(removed) is None, removed
 
 
 def test_no_false_production_ready_without_cert_record():
@@ -76,32 +78,29 @@ def test_compatibility_projection_defers_upscale():
     assert entry.capability_state == "deferred"
 
 
-def test_wan_flf_still_rejects_middle_input():
+def test_wan_flf_is_absent_from_compatibility_catalog():
     wan = get_entry("wan.first_last_frame")
-    assert wan is not None
-    bad = validate_inputs(wan, ["first_frame", "middle_frame", "prompt"])
-    assert "middle_frame" in bad
+    assert wan is None
 
 
 def test_resolver_wan_three_frame_when_middle_present():
-    c = resolve_from_scene_params(
-        engine="wan",
-        start_asset_id="a",
-        middle_asset_id="b",
-        end_asset_id="c",
-        intent="scene_render",
-    )
-    assert c.leaf_workflow_key == "wan.three_frame"
-    assert c.workflow_id in {"WF-SCENE-001", "WF-WAN-002"}
+    with pytest.raises(RuntimeError, match="RETIRED_LOCAL_GENERATOR|workflow_retired"):
+        resolve_from_scene_params(
+            engine="wan",
+            start_asset_id="a",
+            middle_asset_id="b",
+            end_asset_id="c",
+            intent="scene_render",
+        )
 
 
 def test_resolver_ltx_simple_i2v():
-    c = resolve_from_scene_params(
-        engine="ltx",
-        start_asset_id="a",
-        intent="scene_render",
-    )
-    assert c.leaf_workflow_key == "ltx.simple_i2v"
+    with pytest.raises(RuntimeError, match="RETIRED_LOCAL_GENERATOR|workflow_retired"):
+        resolve_from_scene_params(
+            engine="ltx",
+            start_asset_id="a",
+            intent="scene_render",
+        )
 
 
 def test_resolver_ltx_25_distilled_selects_ltx_25_i2v():
@@ -112,6 +111,20 @@ def test_resolver_ltx_25_distilled_selects_ltx_25_i2v():
         generator_id="ltx-2.5-distilled",
     )
     assert c.leaf_workflow_key == "ltx_25.i2v"
+
+
+def test_resolver_ltx_25_never_swaps_to_ingredients():
+    c = resolve_from_scene_params(
+        engine="ltx",
+        start_asset_id="a",
+        intent="scene_render",
+        generator_id="ltx-2.5-distilled",
+        wants_ingredients=True,
+    )
+    assert c.leaf_workflow_key == "ltx_25.i2v"
+    disclosure_text = " ".join(c.disclosures)
+    assert "Ingredients IC-LoRA (LTX 2.3) is retired" in disclosure_text
+    assert "LTX 2.5 keeps character and place references" in disclosure_text
 
 
 def test_resolver_ltx_25_without_start_selects_t2v():
@@ -137,7 +150,6 @@ def test_local_video_identity_never_uses_minimax_for_ltx():
     ident = local_video_identity(
         requested_model="ltx-2.5-distilled",
         leaf_workflow_key="ltx_25.i2v",
-        ltx_23_checkpoint="ltx-2.3-22b-distilled-fp8.safetensors",
         ltx_25_checkpoint="ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
     )
     assert ident["requestedModel"] == "ltx-2.5-distilled"
@@ -145,10 +157,10 @@ def test_local_video_identity_never_uses_minimax_for_ltx():
     assert "minimax" not in ident["videoModel"].lower()
 
 
-def test_resolver_extend_local_i2v():
-    c = resolve_workflow("extend", engine="ltx", present_inputs={"start_frame": True})
-    assert c.workflow_key == "video.extend"
-    assert c.leaf_workflow_key == "ltx.simple_i2v"
+def test_resolver_extend_uses_ltx_25_i2v():
+    contract = resolve_workflow("extend", engine="ltx", present_inputs={"start_frame": True}, generator_id="ltx-2.5-distilled")
+    assert contract.leaf_workflow_key == "ltx_25.i2v"
+    assert contract.intent == "extend"
 
 
 def test_resolver_deferred_upscale_raises():
@@ -163,12 +175,15 @@ def test_resolver_blocked_fal_raises():
 
 def test_resolver_contract_exposes_wave6_consumer_fields():
     c = resolve_from_scene_params(
-        engine="ltx", start_asset_id="a", intent="scene_render"
+        engine="ltx",
+        start_asset_id="a",
+        intent="scene_render",
+        generator_id="ltx-2.5-distilled",
     )
     d = c.to_dict()
     assert d["workflowId"]
     assert d["workflowVersion"]
-    assert d["leafWorkflowKey"] == "ltx.simple_i2v"
+    assert d["leafWorkflowKey"] == "ltx_25.i2v"
     assert d["leafWorkflowVersion"]
     assert d.get("provider") or d.get("provider_kind")
     assert isinstance(d["requiredInputs"], list)
@@ -189,56 +204,60 @@ def test_fingerprint_drift_detected():
         assert_no_graph_drift(
             built_graph=g2,
             expected_graph_hash=h1,
-            workflow_key="ltx.simple_i2v",
+            workflow_key="ltx_25.i2v",
             workflow_version="1.0.0",
         )
     assert classify_exception(WorkflowGraphDriftError("WORKFLOW_GRAPH_DRIFT")) == FailureClass.WORKFLOW_GRAPH_DRIFT
 
 
-def test_wan_three_frame_builder_requires_all_frames():
-    with pytest.raises(ValueError):
-        build_wan_three_frame_workflow(
-            high_noise="h.safetensors",
-            low_noise="l.safetensors",
-            vae_name="v.safetensors",
-            text_encoder="t.safetensors",
-            positive="p",
-            negative="n",
-            width=832,
-            height=480,
-            length=33,
-            fps=16,
-            seed=1,
-            start_image="a.png",
-            middle_image="",
-            end_image="c.png",
-        )
+def test_ltx_25_t2v_builder_graph_valid():
+    from types import SimpleNamespace
 
-
-def test_wan_three_frame_builder_graph_valid():
-    wf = build_wan_three_frame_workflow(
-        high_noise="h.safetensors",
-        low_noise="l.safetensors",
-        vae_name="v.safetensors",
-        text_encoder="umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-        positive="p",
-        negative="n",
-        width=832,
-        height=480,
-        length=33,
-        fps=16,
+    settings = SimpleNamespace(
+        ltx_2_5_checkpoint="c.safetensors",
+        ltx_2_5_video_vae="v.safetensors",
+        ltx_2_5_text_encoder="t.safetensors",
+        ltx_2_5_audio_vae="a.safetensors",
+    )
+    wf = build_ltx_25_t2v(
+        settings=settings,
+        execution_id="e1",
+        prompt="a cinematic shot",
+        negative_prompt="",
+        width=1280,
+        height=704,
+        length_seconds=121 / 24,
+        fps=24,
         seed=1,
-        start_image="a.png",
-        middle_image="b.png",
-        end_image="c.png",
-        segment="start_mid",
     )
-    result = validate_comfy_graph(wf, workflow_key="wan.three_frame")
-    assert result.valid, result.issues
-    fp = compute_fingerprints(
-        graph=wf,
-        builder_path="app.workflows.wan_builder:build_wan_three_frame_workflow",
-        required_nodes=["WanFirstLastFrameToVideo", "LoadImage", "VHS_VideoCombine"],
-        required_models=["wan_models"],
+    classes = {n["class_type"] for n in wf.values()}
+    assert "UNETLoader" in classes
+    assert "CLIPTextEncode" in classes
+    assert "SaveVideo" in classes
+
+
+def test_ltx_25_i2v_builder_requires_start_image():
+    from types import SimpleNamespace
+
+    settings = SimpleNamespace(
+        ltx_2_5_checkpoint="c.safetensors",
+        ltx_2_5_video_vae="v.safetensors",
+        ltx_2_5_text_encoder="t.safetensors",
+        ltx_2_5_audio_vae="a.safetensors",
     )
-    assert fp["graphHash"] and fp["graphHash"].startswith("sha256:")
+    wf = build_ltx_25_i2v(
+        settings=settings,
+        execution_id="e1",
+        prompt="a cinematic shot",
+        negative_prompt="",
+        start_image_path="start.png",
+        width=1280,
+        height=704,
+        length_seconds=121 / 24,
+        fps=24,
+        seed=1,
+    )
+    classes = {n["class_type"] for n in wf.values()}
+    assert "LoadImage" in classes
+    assert "LTXVImgToVideo" in classes
+    assert "SaveVideo" in classes

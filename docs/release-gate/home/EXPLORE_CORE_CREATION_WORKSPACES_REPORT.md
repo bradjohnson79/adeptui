@@ -1,5 +1,7 @@
 # Explore Core Creation Workspaces — Completion Report
 
+> **SUPERSEDED (2026-09-15).** Historical Explore expansion report. Current Explore Adept UI authority is `docs/release-gate/home/EXPLORE_ADEPT_UI_4X3_GRID_CERTIFICATION.md`.
+
 **Milestone:** Home Discovery Addendum — Expand Explore Adept UI  
 **Branch:** `feature/ai-guided-setup` · **Working SHA:** `fa09c99` (uncommitted local changes)  
 **Beta UI:** http://127.0.0.1:8760/ · **API:** http://127.0.0.1:8758/  

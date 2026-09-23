@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class ApproveAsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str = Field(..., min_length=1)
+    kind: Literal["character", "environment", "prop", "scene_frame"]
+    scene_id: Optional[str] = None
+    character_id: Optional[str] = None
 
 
 class SceneReferenceBindingCreate(BaseModel):
@@ -74,6 +83,7 @@ class SceneReferenceBindingOut(BaseModel):
     asset_name: Optional[str] = None
     thumbnail_url: Optional[str] = None
     approval_status: Optional[str] = None
+    approved_sheet_asset_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

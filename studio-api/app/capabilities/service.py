@@ -35,6 +35,13 @@ from .models import (
 )
 from .probes import ProbeSnapshot, build_snapshot
 from .registry import CAPABILITIES, get_definition
+from ..readiness.v11_policy import (
+    POLICY_VERSION,
+    class_affects_production,
+    classify_capability,
+    class_is_advisory,
+    ReadinessClass,
+)
 
 S = CapabilityStatus
 
@@ -325,6 +332,34 @@ def _model_component_eval(
         )
     missing = [cid for cid in required if snapshot.component_ready(cid) is not True]
     if missing:
+        in_flight = [
+            cid
+            for cid in missing
+            if str((snapshot.component(cid) or {}).get("status"))
+            in ("checking", "installing", "verifying")
+        ]
+        if in_flight and len(in_flight) == len(missing):
+            detail_names = ", ".join(
+                str((snapshot.component(cid) or {}).get("name") or cid) for cid in missing
+            )
+            return CapabilityEvaluation(
+                status=S.DEGRADED,
+                available=True,
+                healthy=False,
+                reason_code=errors.DEPENDENCY_DEGRADED,
+                message=f"Verification still running: {detail_names}.",
+                recommended_action="run_diagnostics",
+                component_ids=tuple(missing),
+                configured=True,
+                details={
+                    "missingComponentIds": missing,
+                    "componentStatuses": {
+                        cid: str((snapshot.component(cid) or {}).get("status") or "unknown")
+                        for cid in required + optional
+                    },
+                    "verificationInProgress": True,
+                },
+            )
         pending = [
             cid
             for cid in missing
@@ -382,7 +417,61 @@ def _eval_models_image(definition: CapabilityDefinition, snapshot: ProbeSnapshot
 
 
 def _eval_video_intelligence(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
-    return _model_component_eval(definition, snapshot, required=("videochat3_4b",), optional=("internvideo3_8b",))
+    """Temporal Continuity health is VideoChat3, not InternVideo3.
+
+    InternVideo3 8B is optional deep-review. Missing those weights must not
+    degrade ``codirector.video_intelligence.ready``. Registry health still
+    requires a live-inference certify receipt — disk markers alone are not
+    ``locally_verified``.
+    """
+    vc_status = str((snapshot.component("videochat3_4b") or {}).get("status") or "")
+    from ..codirector.video_intelligence.certify import load_receipt, receipt_is_ready
+
+    early_receipt = load_receipt()
+    if vc_status in {"checking", "installing", "verifying"} and receipt_is_ready(early_receipt):
+        # Setup verify is still running after an API recycle. A live-infer
+        # certify receipt is proof VideoChat3 is installed — not MODEL_MISSING.
+        evaluation = _model_component_eval(definition, snapshot, required=(), optional=())
+        evaluation.details = dict(evaluation.details or {})
+        evaluation.details["setupStatusDuringCertify"] = vc_status
+    else:
+        evaluation = _model_component_eval(definition, snapshot, required=("videochat3_4b",), optional=())
+    intern_ready = snapshot.component_ready("internvideo3_8b") is True
+    details = dict(evaluation.details or {})
+    details["optionalDeepReviewComponentId"] = "internvideo3_8b"
+    details["optionalDeepReviewInstalled"] = intern_ready
+    if not intern_ready:
+        details["missingOptionalComponentIds"] = ["internvideo3_8b"]
+    evaluation.details = details
+    if evaluation.status != S.LOCALLY_VERIFIED:
+        return evaluation
+
+    receipt = early_receipt if vc_status in {"checking", "installing", "verifying"} else load_receipt()
+    details["certifyReceiptReady"] = receipt_is_ready(receipt)
+    details["certifyLiveInfer"] = bool(receipt and receipt.get("liveInfer"))
+    if receipt:
+        details["certifyModelId"] = receipt.get("modelId")
+        details["certifyRevision"] = receipt.get("revision")
+    if not receipt_is_ready(receipt):
+        return CapabilityEvaluation(
+            status=S.DEGRADED,
+            available=True,
+            healthy=False,
+            reason_code=errors.MODEL_UNVERIFIED,
+            message=(
+                "VideoChat3 is installed, but live Temporal Continuity inference "
+                "is not certified."
+            ),
+            recommended_action="run_diagnostics",
+            component_ids=("videochat3_4b",),
+            details=details,
+        )
+    return _ok(
+        S.LOCALLY_VERIFIED,
+        "VideoChat3 Temporal Continuity is certified. InternVideo3 8B deep-review is optional and not required.",
+        details=details,
+        component_ids=("videochat3_4b",),
+    )
 
 
 def _eval_models_image_krea2(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
@@ -391,30 +480,21 @@ def _eval_models_image_krea2(definition: CapabilityDefinition, snapshot: ProbeSn
 
 
 def _eval_models_video(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
+    # Production local video is LTX 2.5 (Comfy catalog) and MiniMax H3.
+    # Retired local video families must never satisfy or block this gate.
     # An LTX variant counts as "ready" only when ALL of its required components are
     # present. Previously, a present LTX 2.5 checkpoint alone satisfied `models.video.ready`
     # even when the Gemma 4 text encoder and video VAE were missing — which then masked
     # the LTX 2.5 generator as ready when it was actually incomplete.
-    ltx_23_required = ("ltx_checkpoint",)
     ltx_25_required = ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae")
-    ltx_variants = (ltx_23_required, ltx_25_required)
     if snapshot.setup_components:
-        any_ltx_ready = any(
-            all(snapshot.component_ready(cid) is True for cid in variant)
-            for variant in ltx_variants
-        )
-        if any_ltx_ready:
+        ltx_25_ready = all(snapshot.component_ready(cid) is True for cid in ltx_25_required)
+        if ltx_25_ready:
             return _model_component_eval(
-                definition, snapshot, required=(), optional=("wan_models",)
+                definition, snapshot, required=(), optional=()
             )
-    # Flatten required ids for the blocked path (deduped, order-preserving).
-    flat_required: list[str] = []
-    for variant in ltx_variants:
-        for cid in variant:
-            if cid not in flat_required:
-                flat_required.append(cid)
     return _model_component_eval(
-        definition, snapshot, required=tuple(flat_required), optional=("wan_models",)
+        definition, snapshot, required=ltx_25_required, optional=()
     )
 
 
@@ -557,6 +637,30 @@ def _eval_codirector_chat(definition: CapabilityDefinition, snapshot: ProbeSnaps
     return provider
 
 
+def _eval_codirector_tools(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
+    """Evaluate Co-Director tool orchestration against the live tool registry.
+
+    The M2.2-era ``not_implemented`` baseline was stale: the registry, execution
+    service, and handlers exist under ``app.codirector.tools``. Truth comes from
+    the live catalog — never from a hardcoded count.
+    """
+    from ..codirector.tools import registry as tool_registry
+
+    catalog = tool_registry.catalog()
+    if not catalog:
+        return _blocked(
+            errors.TOOL_REGISTRY_EMPTY,
+            "The Co-Director tool registry returned no tools.",
+            recommended_action="run_diagnostics",
+            configured=False,
+        )
+    return _ok(
+        S.LOCALLY_VERIFIED,
+        f"{len(catalog)} Co-Director tools are registered for dispatch.",
+        details={"toolCount": len(catalog)},
+    )
+
+
 def _eval_source_manager_read(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
     if snapshot.source_manager_ok is None:
         return _blocked(
@@ -638,33 +742,27 @@ def _eval_references_project_scoped(
 
 
 def _eval_references_ic_lora(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
-    caps = snapshot.project_reference_capabilities
-    if caps is None:
-        if snapshot.project_id is None:
-            return _blocked(
-                errors.CAPABILITY_UNVERIFIED,
-                "Ingredients IC-LoRA readiness is project-scoped; request it with a project id.",
-                recommended_action="request_project_scope",
-                status=S.UNKNOWN,
-            )
-        return _blocked(
-            errors.CAPABILITY_PROBE_FAILED,
-            "Ingredients IC-LoRA readiness could not be probed.",
-            recommended_action="run_diagnostics",
-            status=S.UNKNOWN,
-        )
-    if caps.get("ic_lora_option_enabled"):
-        return _ok(S.LOCALLY_VERIFIED, "Ingredients IC-LoRA model and ComfyUI nodes are present.")
-    blockers = [str(item) for item in caps.get("blockers") or []]
-    model_ready = bool(caps.get("model_ready"))
-    return _blocked(
-        errors.MODEL_MISSING if not model_ready else errors.EXTENSION_MISSING,
-        " ".join(blockers) or "Ingredients IC-LoRA is not ready.",
-        recommended_action="open_source_manager" if not model_ready else "install_comfyui_extensions",
-        component_ids=("ltx23_ic_lora_ingredients",) if not model_ready else ("comfyui",),
-        configured=model_ready,
-        status=S.NOT_CONFIGURED if not model_ready else S.BLOCKED,
-        details={"nodesAvailable": bool(caps.get("nodes_available"))},
+    # Retired LTX 2.3 Ingredients path. Not MiniMax H3 / LTX 2.5 production.
+    # Leftover files must never count as a live capability blocker.
+    caps = snapshot.project_reference_capabilities or {}
+    return CapabilityEvaluation(
+        status=S.DEFERRED_VERSION_1_2,
+        available=False,
+        configured=True,
+        healthy=True,
+        reason_code=errors.CAPABILITY_DEFERRED_VERSION_1_2,
+        message=(
+            "Ingredients IC-LoRA is a retired LTX 2.3 path and is not a v1.1 "
+            "production video requirement."
+        ),
+        recommended_action="none",
+        component_ids=(),
+        details={
+            "label": "Retired LTX 2.3 path",
+            "roadmapVersion": "retired",
+            "legacyFilesPresent": bool(caps.get("ic_lora_option_enabled")),
+            "nodesAvailable": bool(caps.get("nodes_available")),
+        },
     )
 
 
@@ -725,7 +823,11 @@ def _eval_generation_queue(definition: CapabilityDefinition, snapshot: ProbeSnap
             component_ids=workflows.component_ids or definition.component_ids,
             details=workflows.details,
         )
-    model_ids = ("zimage_models",) if modality == "image" else ("ltx_checkpoint", "ltx_2_5_checkpoint")
+    model_ids = (
+        ("zimage_models",)
+        if modality == "image"
+        else ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae")
+    )
     models = _model_component_eval(definition, snapshot, required=model_ids)
     if models.status not in (S.LOCALLY_VERIFIED, S.DEGRADED):
         return CapabilityEvaluation(
@@ -808,6 +910,7 @@ EVALUATORS: dict[str, Evaluator] = {
     "references.ic_lora.ready": _eval_references_ic_lora,
     "codirector.provider": _eval_codirector_provider,
     "codirector.chat": _eval_codirector_chat,
+    "codirector.tools": _eval_codirector_tools,
     "comfyui.health": _eval_comfy_health,
     "comfyui.queue": _eval_comfy_dependent,
     "comfyui.cancel": _eval_comfy_dependent,
@@ -932,11 +1035,20 @@ def _apply_project_scope(
         )
 
 
+def _readiness_public(definition: CapabilityDefinition) -> dict[str, str]:
+    return classify_capability(
+        definition.id,
+        subsystem=definition.subsystem,
+        component_ids=definition.component_ids,
+    ).as_public()
+
+
 def _to_out(
     definition: CapabilityDefinition,
     evaluation: CapabilityEvaluation,
     snapshot: ProbeSnapshot,
 ) -> CapabilityOut:
+    readiness = _readiness_public(definition)
     return CapabilityOut(
         id=definition.id,
         displayName=definition.display_name,
@@ -958,6 +1070,7 @@ def _to_out(
         summary=definition.summary,
         details=errors.public_details(evaluation.details),
         lastCheckedAt=snapshot.checked_at,
+        **readiness,
     )
 
 
@@ -971,7 +1084,7 @@ def _snapshot_out(snapshot: ProbeSnapshot) -> CapabilitySnapshotOut:
     counts: dict[str, int] = {}
     for item in capabilities:
         counts[item.status.value] = counts.get(item.status.value, 0) + 1
-    blockers = [
+    all_blocking = [
         CapabilityBlockerOut(
             capabilityId=item.id,
             displayName=item.displayName,
@@ -981,16 +1094,28 @@ def _snapshot_out(snapshot: ProbeSnapshot) -> CapabilitySnapshotOut:
             message=item.message,
             recommendedAction=item.recommendedAction,
             componentIds=item.componentIds,
+            readinessClass=item.readinessClass,
+            v11Requirement=item.v11Requirement,
+            workflowScope=item.workflowScope,
+            severity=item.severity,
+            productionEffect=item.productionEffect,
         )
         for item in capabilities
         if item.status in BLOCKING_STATUSES
     ]
+    blockers = [item for item in all_blocking if not class_is_advisory(item.readinessClass)]
+    production_blockers = [item for item in all_blocking if class_affects_production(item.readinessClass)]
+    workflow_blockers = [
+        item for item in all_blocking if item.readinessClass == ReadinessClass.WORKFLOW_DEGRADED.value
+    ]
+    advisory_blockers = [item for item in all_blocking if class_is_advisory(item.readinessClass)]
     deferred_ids = [
         item.id for item in capabilities if item.status in DEFERRED_FROM_READINESS_STATUSES
     ]
     readiness_total = sum(
         1 for item in capabilities if item.status not in DEFERRED_FROM_READINESS_STATUSES
     )
+    incomplete = "setup_status_probe_failed" in set(snapshot.warnings)
     return CapabilitySnapshotOut(
         projectId=snapshot.project_id,
         generatedAt=snapshot.checked_at,
@@ -1002,6 +1127,11 @@ def _snapshot_out(snapshot: ProbeSnapshot) -> CapabilitySnapshotOut:
         readinessTotal=readiness_total,
         deferred=deferred_ids,
         probeWarnings=sorted(set(snapshot.warnings)),
+        readinessPolicyVersion=POLICY_VERSION,
+        snapshotIncomplete=incomplete,
+        productionBlockers=production_blockers,
+        workflowBlockers=workflow_blockers,
+        advisoryBlockers=advisory_blockers,
     )
 
 

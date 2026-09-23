@@ -83,14 +83,6 @@ def probe_tool(tool_id: str) -> dict[str, Any]:
             "provider": tool.get("providerHint"),
             "disclosure": "Local LLM when configured; otherwise structured template persist.",
         }
-    if tool_id == "brand.studio":
-        return {
-            "id": tool_id,
-            "available": True,
-            "status": "PARTIAL",
-            "label": tool["label"],
-            "disclosure": "Reference-locked local ImageGen. Logos/wording constraints enforced in metadata.",
-        }
     # Comfy-backed tools
     comfy_ok = _comfy_reachable()
     return {
@@ -329,6 +321,9 @@ def run_audio_generate(
     prompt: str,
     duration_sec: float = 4.0,
     seed: int | None = None,
+    negative_prompt: str | None = None,
+    cfg_strength: float | None = None,
+    event_count: int | None = None,
 ) -> dict[str, Any]:
     from ..codirector.m29.audio.service import AudioService
 
@@ -357,6 +352,12 @@ def run_audio_generate(
     }
     if seed is not None:
         gen_kwargs["seed"] = int(seed)
+    if negative_prompt:
+        gen_kwargs["negativePrompt"] = str(negative_prompt)
+    if cfg_strength is not None:
+        gen_kwargs["cfgStrength"] = float(cfg_strength)
+    if event_count is not None:
+        gen_kwargs["eventCount"] = int(event_count)
 
     result = AudioService.generate(db, **gen_kwargs)
     studio_asset_id = None
@@ -489,124 +490,6 @@ def _compose_script_body(document_type: str, brief: str) -> str:
         "social_video": f"SOCIAL VIDEO SCRIPT (15–30s)\n\nHook in 1s: {brief}\nValue in 10s\nCTA end card\n",
     }
     return templates.get(document_type, f"{document_type.upper()}\n\n{brief}\n")
-
-
-def run_brand_generate(
-    db: Session,
-    *,
-    project_id: str,
-    prompt: str,
-    logo_asset_ids: list[str] | None = None,
-    product_asset_ids: list[str] | None = None,
-    brand_colors: list[str] | None = None,
-    required_wording: str | None = None,
-    campaign_name: str | None = None,
-    campaign_type: str | None = None,
-    visual_direction: str | None = None,
-    composition: str | None = None,
-    background: str | None = None,
-    format_name: str | None = None,
-    campaign_formats: list[str] | None = None,
-    typography_template: str | None = None,
-    product_name: str | None = None,
-    style_notes: str | None = None,
-    bible_summary: str | None = None,
-    result_lane: str | None = None,
-) -> dict[str, Any]:
-    logos = logo_asset_ids or []
-    products = product_asset_ids or []
-    for aid in logos + products:
-        require_source_asset(db, project_id, aid)
-    brand_studio = {
-        "campaignId": f"brand-campaign-{project_id}",
-        "campaignName": campaign_name or "Brand Studio Campaign",
-        "campaignType": campaign_type or "launch",
-        "visualDirection": visual_direction or "hero",
-        "composition": composition or "Centered hero",
-        "background": background or "Studio sweep",
-        "heroFormat": format_name or "Square 1:1",
-        "campaignFormats": campaign_formats or ([format_name] if format_name else []),
-        "typographyTemplate": typography_template or "Hero headline",
-        "productName": product_name or "",
-        "styleNotes": style_notes or "",
-        "bibleSummary": bible_summary or "",
-        "resultLane": result_lane or "concepts",
-        "title": f"{campaign_name or 'Brand Studio'} · {format_name or 'Square 1:1'}",
-    }
-    locked = {
-        "lockedLogos": logos,
-        "lockedProducts": products,
-        "brandColors": brand_colors or [],
-        "requiredWording": required_wording or "",
-        "preserveProductShape": True,
-        "preserveLabels": True,
-    }
-    brand_check = {
-        "logoLocked": bool(logos),
-        "productLocked": bool(products),
-        "hasPalette": bool(brand_colors),
-        "hasRequiredWording": bool(required_wording),
-        "hasCanonGuidance": bool(bible_summary),
-    }
-    # Prefer enqueue imagegen with reference locks in metadata
-    ref = products[0] if products else (logos[0] if logos else None)
-    if ref:
-        return {
-            **enqueue_imagegen_specialized(
-                db,
-                project_id=project_id,
-                source_asset_id=ref,
-                edit_op="brand_locked",
-                prompt=(
-                    f"{prompt}\n\nLOCKED: preserve logos, labels, packaging, product shape, "
-                    f"brand colors {brand_colors}, required wording: {required_wording}, "
-                    f"campaign type: {campaign_type}, visual direction: {visual_direction}, format: {format_name}, "
-                    f"composition: {composition}, background: {background}, typography: {typography_template}, "
-                    f"product name: {product_name}, style notes: {style_notes}, canon guidance: {bible_summary}"
-                ),
-                extra={"brandLock": locked, "brandStudio": brand_studio, "brandCheck": brand_check, "m32aBrand": True},
-            ),
-            "toolId": "brand.studio",
-            "brandLock": locked,
-            "brandStudio": brand_studio,
-            "brandCheck": brand_check,
-        }
-    if _e2e():
-        dest = _tmp_out(".png")
-        from PIL import Image, ImageDraw
-
-        im = Image.new("RGB", (768, 768), color=(brand_colors and _parse_color(brand_colors[0])) or (20, 24, 28))
-        dr = ImageDraw.Draw(im)
-        dr.text((40, 40), required_wording or "BRAND", fill=(240, 240, 240))
-        im.save(dest)
-        asset = register_derived_asset(
-            db,
-            project_id=project_id,
-            source_path=dest,
-            kind="image",
-            tag=(campaign_name or "brand_studio")[:64],
-            parent_asset_id=None,
-            op="brand_generate",
-            model="e2e-brand",
-            prompt_meta={"prompt": prompt, **locked, "brandStudio": brand_studio, "brandCheck": brand_check},
-            library_key="props.generated",
-        )
-        return {
-            "ok": True,
-            "toolId": "brand.studio",
-            "assetId": asset.id,
-            "brandLock": locked,
-            "brandStudio": brand_studio,
-            "brandCheck": brand_check,
-        }
-    raise RuntimeError("Brand Studio requires at least one locked logo or product reference asset.")
-
-
-def _parse_color(value: str) -> tuple[int, int, int]:
-    v = value.strip().lstrip("#")
-    if len(v) == 6:
-        return int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16)
-    return (20, 24, 28)
 
 
 def run_video_extend(

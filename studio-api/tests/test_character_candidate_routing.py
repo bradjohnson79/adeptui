@@ -571,6 +571,7 @@ def test_fal_krea_dock_ids_resolve_to_fal_endpoints():
     from app.fal_client import extract_image_url
 
     assert fal_image_model_id_for_dock("krea2-turbo-fal") == "fal-ai/krea-2/turbo"
+    assert fal_image_model_id_for_dock("gpt-image-2-fal") == "openai/gpt-image-2"
     assert fal_image_model_id_for_dock("krea2-medium-fal") == "krea/v2/medium/text-to-image"
     assert fal_image_model_id_for_dock("krea2-large-fal") == "krea/v2/large/text-to-image"
     assert _fal_image_model_id("krea2-turbo-fal") == "fal-ai/krea-2/turbo"

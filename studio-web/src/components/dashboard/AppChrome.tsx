@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api";
 import { WORKSPACES, workspacesForMenu, type EditorTab } from "../../core/workspaces";
 import { resolveProductionAvailability } from "../../core/productionAvailability";
-import { pushProductionRecent } from "../../core/productionRecent";
 import { browseAllProjects, goHome } from "../../navigation/projectLibrary";
 import { buildHomeCreateProjectPath } from "../../projectEntry";
 import { loadRecentProjects } from "../../workspacePrefs";
@@ -13,6 +12,7 @@ import { Button } from "../ui/Button";
 import { SystemStatusStrip } from "./SystemStatusStrip";
 import { ProductionMenu, focusProductionTrigger } from "./ProductionMenu";
 import { useStudioHealth } from "../../hooks/useStudioHealth";
+import { buildCoDirectorSearch, parseSceneIdFromSearch, persistWorkspaceKey } from "../../sceneSelection";
 
 const SELECTED_CHARACTER_KEY = "adept_selected_character";
 
@@ -91,12 +91,6 @@ export function AppChrome({
   const goWorkspace = useCallback(
     (tab: EditorTab) => {
       setOpenMenu(null);
-      pushProductionRecent({
-        tab,
-        projectId,
-        projectName,
-        label: WORKSPACES[tab]?.label,
-      });
       if (onNavigateWorkspace && projectId) {
         onNavigateWorkspace(tab);
         return;
@@ -122,8 +116,19 @@ export function AppChrome({
       onOpenCoDirector();
       return;
     }
-    navigate(projectId ? `/co-director?projectId=${projectId}` : "/co-director");
-  }, [navigate, onOpenCoDirector, projectId]);
+    if (!projectId) {
+      navigate("/co-director");
+      return;
+    }
+    const params = new URLSearchParams(location.search);
+    navigate(
+      `/co-director${buildCoDirectorSearch({
+        projectId,
+        sceneId: parseSceneIdFromSearch(location.search),
+        workspace: persistWorkspaceKey(params.get("workspace") || undefined) || undefined,
+      })}`,
+    );
+  }, [location.search, navigate, onOpenCoDirector, projectId]);
 
   const createProject = useCallback(async () => {
     setBusy(true);
@@ -402,6 +407,11 @@ export function AppChrome({
           onSelectWorkspace={goWorkspace}
           onOpenCoDirector={openCoDirectorFull}
           onChooseCharacterForAvatar={() => goWorkspace("characters")}
+          onOpenProject={(targetId) => {
+            // Canonical project switch flow — same authority as Project menu /
+            // Home project cards. No project-loading logic in the menu.
+            navigate(`/project/${encodeURIComponent(targetId)}`);
+          }}
         />
         <div className="ds-menu-root app-chrome__status-root">
           <button

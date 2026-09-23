@@ -71,10 +71,15 @@ def dispatch(
         if not bundle.get("ok"):
             return bundle
         master = bundle["master"]
-        director_timeline = bundle["directorTimeline"]
         return {
             "ok": True,
-            "findings": orchestrator.run_preflight(master, director_timeline=director_timeline),
+            "findings": orchestrator.run_preflight(
+                master,
+                lipsync_tracks=bundle.get("lipsyncTracks"),
+                db=db,
+                project_id=project_id,
+                scene_id=scene_id,
+            ),
             "mock": False,
         }
 
@@ -142,7 +147,24 @@ def dispatch(
         ).model_dump()
     if tool_id == "timeline.propose_retake":
         batch_id = args["batchBlockId"]
-        # Directed retake = new generation job + new snapshot (does not mutate old snapshots)
+        start = args.get("start")
+        length = args.get("length")
+        prompt = str(args.get("prompt") or args.get("delta") or "").strip()
+        if start is not None and length is not None and prompt:
+            return orchestrator.retake_range(
+                db,
+                project_id,
+                scene_id,
+                batch_id,
+                start=float(start),
+                length=float(length),
+                prompt=prompt,
+                mask_png_base64=args.get("maskPngBase64"),
+                reference_frame_time=args.get("referenceFrameTime"),
+                frame_asset_id=args.get("frameAssetId"),
+                remove_background=bool(args.get("removeBackground")),
+            )
+        # Directed full-shot retake = new generation job + new snapshot
         return orchestrator.submit_batch_generation(db, project_id, scene_id, batch_id)
 
     return {"ok": False, "error": "UNKNOWN_TOOL", "toolId": tool_id, "mock": False}

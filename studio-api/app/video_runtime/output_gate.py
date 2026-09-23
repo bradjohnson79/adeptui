@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +73,34 @@ def wait_file_stable(path: Path, *, settle_sec: float = 0.6, rounds: int = 3) ->
     return path.is_file() and path.stat().st_size > 0
 
 
+def comfy_output_predates_job(
+    path: Path | str,
+    job_created_at: datetime | None,
+    *,
+    slack_sec: float = 2.0,
+) -> bool:
+    """True when media is older than the job — leftover / cached Comfy output.
+
+    shutil.copy2 preserves source mtime, so a dest copied from a prior take
+    still fails this check. A file written for this job does not.
+    """
+    if job_created_at is None:
+        return False
+    p = Path(path)
+    if not p.is_file():
+        return False
+    try:
+        mtime = p.stat().st_mtime
+        created = (
+            job_created_at.replace(tzinfo=timezone.utc).timestamp()
+            if job_created_at.tzinfo is None
+            else job_created_at.timestamp()
+        )
+    except (OSError, OverflowError, ValueError):
+        return False
+    return mtime < created - max(0.0, slack_sec)
+
+
 def validate_video_output(
     path: Path | str,
     *,
@@ -86,6 +115,7 @@ def validate_video_output(
         "NONZERO_SIZE": False,
         "CONTAINER_VALID": False,
         "VIDEO_STREAM_PRESENT": False,
+        "AUDIO_STREAM_PRESENT": False,  # WARNING only — not required for gate pass
         "DURATION_VALID": False,
         "DIMENSIONS_VALID": False,
         "FRAME_COUNT_VALID": True,  # optional when ffprobe omits nb_frames
@@ -131,11 +161,28 @@ def validate_video_output(
         fmt = probe.get("format") or {}
         streams = probe.get("streams") or []
         video_streams = [s for s in streams if s.get("codec_type") == "video"]
+        audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
         checks["CONTAINER_VALID"] = True
         checks["VIDEO_STREAM_PRESENT"] = bool(video_streams)
+        checks["AUDIO_STREAM_PRESENT"] = bool(audio_streams)
         duration = float(fmt.get("duration") or 0) if fmt.get("duration") else 0.0
         meta["durationSec"] = duration
         checks["DURATION_VALID"] = duration >= expect_min_duration
+        if audio_streams:
+            aus = audio_streams[0]
+            meta["audioCodec"] = aus.get("codec_name")
+            meta["audioChannels"] = aus.get("channels")
+            meta["audioSampleRate"] = aus.get("sample_rate")
+            if aus.get("nb_frames") not in (None, "N/A"):
+                try:
+                    meta["audioFrameCount"] = int(aus.get("nb_frames"))
+                except (TypeError, ValueError):
+                    pass
+        else:
+            # No audio stream — warn so silent outputs are visible. This is
+            # NOT a gate failure: generators without native audio may
+            # legitimately produce video-only output.
+            warnings.append("No audio stream present in the output file.")
         if video_streams:
             vs = video_streams[0]
             w = int(vs.get("width") or 0)

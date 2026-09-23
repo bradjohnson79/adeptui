@@ -1,4 +1,4 @@
-"""Isolated install roots — never overwrite LTX / WAN / Hunyuan."""
+"""Isolated install roots — never overwrite local video or image model trees."""
 
 from __future__ import annotations
 
@@ -15,8 +15,16 @@ VIDEOCHAT3_REVISION = "37fa901ec5913f84bc31108ebc1e60ad1903634c"
 INTERNVIDEO3_HF_ID = "yanziang/InternVideo3-8B-Instruct"
 INTERNVIDEO3_REVISION = "c4602918b65225650d152db2850fe34e01d21fcd"
 
+# Qwen2.5-Omni 7B — Adept Media Intelligence Service (extended video_intelligence).
+# Canonical HF repo: Qwen/Qwen2.5-Omni-7B (Thinker-Talker omni model).
+# NOTE: revision is intentionally "main" (unpinned) — the repo does not publish a
+# pinned-SHA manifest. Pin to a specific commit SHA before production certification.
+QWEN_OMNI_HF_ID = "Qwen/Qwen2.5-Omni-7B"
+QWEN_OMNI_REVISION = "ae9e1690543ffd5c0221dc27f79834d0294cba00"  # main @ 2025-04-30, HF API verified 2026-09-07
+
 VIDEOCHAT3_MARKERS = ("config.json", "model.safetensors.index.json")
 INTERNVIDEO3_MARKERS = ("config.json", "model.safetensors.index.json")
+QWEN_OMNI_MARKERS = ("config.json", "model.safetensors.index.json")
 
 # Live HF tree at VIDEOCHAT3_REVISION (2026-08-20 reconfirm). LFS oid = SHA-256.
 VIDEOCHAT3_POLL_SHA256 = {
@@ -108,10 +116,20 @@ def internvideo3_dir() -> Path:
     return understanding_root() / "internvideo3-8b"
 
 
+def qwen_omni_dir() -> Path:
+    """Isolated install root for Qwen2.5-Omni 7B (Media Intelligence). Never overwrites videochat3/internvideo3."""
+    return understanding_root() / "qwen2-5-omni-7b"
+
+
 def model_present(root: Path, markers: tuple[str, ...]) -> bool:
     if not root.is_dir():
         return False
     return all((root / name).is_file() for name in markers) and any(root.glob("*.safetensors"))
+
+
+def qwen_omni_model_present(root: Path | None = None) -> bool:
+    """Marker check for Qwen2.5-Omni 7B install (mirrors the shared model_present pattern)."""
+    return model_present(root or qwen_omni_dir(), QWEN_OMNI_MARKERS)
 
 
 def _sha256_file(path: Path, *, max_bytes: int | None = None) -> str:

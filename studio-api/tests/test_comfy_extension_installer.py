@@ -217,25 +217,22 @@ def test_preflight_uses_live_wrapper_node_inventory(
         installer,
         "resolve_extension_source",
         lambda component_id, source_url=None: {
-            "url": "https://github.com/example/ComfyUI-HunyuanVideoWrapper",
+            "url": "https://github.com/example/ComfyUI-SenseNova",
             "revision": None,
-            "packageName": "ComfyUI-HunyuanVideoWrapper",
+            "packageName": "ComfyUI-SenseNova",
             "provider": "git",
             "officialDefault": True,
             "executesCode": True,
         },
     )
 
-    preflight = installer.preflight_extension("comfyui_hunyuan_nodes")
+    preflight = installer.preflight_extension("comfyui_sensenova_nodes")
 
     assert preflight["ok"] is True
     assert preflight["requiredNodes"] == [
-        "DownloadAndLoadHyVideoTextEncoder",
-        "HyVideoI2VEncode",
-        "HyVideoModelLoader",
-        "HyVideoSampler",
-        "HyVideoTextEncode",
-        "HyVideoVAELoader",
+        "SenseNovaU1LocalLoader",
+        "SenseNovaU1LocalTextToImage",
+        "SenseNovaU1LocalImageEdit",
     ]
 
 

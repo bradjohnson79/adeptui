@@ -15,6 +15,7 @@ from ..codirector.video_intelligence.contracts import (
     CoDirectorContinuityPolicy,
     TemporalContinuityPacket,
 )
+from ..director_timeline_bindings import PromptNameBinding
 
 
 def _nid(prefix: str = "") -> str:
@@ -36,6 +37,10 @@ BatchStatus = Literal[
     "Failed",
     "Cancelled",
     "CandidateReady",
+    "NeedsDialogueRetake",
+    # P6 hygiene: Omni infra miss — keep asset; retry QC only (never retake).
+    "QC_Pending",
+    "QC_RetryRequired",
     "Approved",
     "ApprovedConfigurationChanged",
     "RegenerationRecommended",
@@ -125,6 +130,7 @@ class TimelinePromptSegment(BaseModel):
     versionId: str = Field(default_factory=lambda: _nid("psv_"))
     legacyPromptSegmentId: Optional[str] = None
     referenceBindingIds: list[str] = Field(default_factory=list)
+    referenceNameBindings: list[PromptNameBinding] = Field(default_factory=list)
     # Production-orchestrator provenance: creator original direction and exact
     # dialogue preserved beside the refined production prompt (mission Part 14).
     userDirection: Optional[str] = None
@@ -132,6 +138,7 @@ class TimelinePromptSegment(BaseModel):
     dialogue: Optional[str] = None
     movementSegmentRef: Optional[dict[str, Any]] = None
     movementSegmentRevision: Optional[int] = None
+    temperature: float = 1.0
 
 
 class ExecutionSnapshot(BaseModel):
@@ -168,8 +175,20 @@ class GenerationJobRef(BaseModel):
     hostedCancelSupport: HostedCancelSupport = "unknown"
     apiUsed: Optional[bool] = None
     progress: float = 0.0
+    progressGrounded: bool = False
+    phase: Optional[str] = None
+    phaseLabel: Optional[str] = None
+    lastProgressAt: Optional[str] = None
+    lastRuntimeEventAt: Optional[str] = None
+    elapsedActiveTime: Optional[float] = None
+    stalled: bool = False
+    currentNode: Optional[str] = None
     error: Optional[str] = None
     createdAt: str = Field(default_factory=_now)
+    sceneTakeId: Optional[str] = None
+    candidateId: Optional[str] = None
+    sceneTakeId: Optional[str] = None
+    candidateId: Optional[str] = None
 
 
 class CandidateVersion(BaseModel):
@@ -237,10 +256,35 @@ class BatchClip(BaseModel):
     fade_out: float = 0.0
     # Camera-specific fields (ignored for non-camera kinds)
     motion_type: Optional[str] = None
+    motion_id: Optional[str] = None
     rig: Optional[str] = None
+    shot_id: Optional[str] = None
+    lens_id: Optional[str] = None
+    focus_id: Optional[str] = None
+    focus_name: Optional[str] = None
+    lighting_id: Optional[str] = None
+    text: str = ""
+    speed: Optional[float] = None
+    distance: Optional[float] = None
+    ease: Optional[str] = None
+    shake: Optional[float] = None
+    intensity: Optional[float] = None
+    subject_lock: Optional[float] = None
+    # Camera parity with legacy CameraClip: reference bindings + custom labels
+    # read by reference_compile (camera leg) and camera_catalog
+    # (describe_camera_clip / detect_camera_contradictions) via getattr.
+    reference_binding_ids: list[str] = Field(default_factory=list)
+    custom_motion_label: Optional[str] = None
+    custom_rig_label: Optional[str] = None
+    execution_strategy: Optional[str] = None
     # Migration metadata: when this clip was migrated from a legacy scene-global
     # clip, the original legacy clip ID is preserved here for audit/reversibility.
     legacyClipId: Optional[str] = None
+    # Generation retake / range metadata (A|Middle|B role, markIn/markOut,
+    # priorTrimStart, retakeId, replacementAssetId, referenceImageAssetId,
+    # sourceBatchId/sourceAssetId). Mirrors the FE BatchClip contract, which
+    # already declares this pass-through field.
+    metadata: Optional[dict[str, Any]] = None
 
 
 class BatchBlock(BaseModel):
@@ -273,6 +317,8 @@ class BatchBlock(BaseModel):
     repairRanges: list[RepairRange] = Field(default_factory=list)
     references: list[dict[str, Any]] = Field(default_factory=list)
     speechWindows: list[dict[str, Any]] = Field(default_factory=list)
+    # Co-Director Dialogue Authority: sole dialogue authority for generate/QC/retake.
+    dialogueManifest: Optional[dict[str, Any]] = None
     # Shared LoRA registry selection applied to this batch's generations
     # ({loraId, name, strength}). None = no LoRA (baseline behavior).
     lora: Optional[dict[str, Any]] = None
@@ -290,11 +336,18 @@ class BatchBlock(BaseModel):
     # Continuity-aware take lineage (BatchBlock remains the stable container).
     activeTakeId: Optional[str] = None
     incomingBridgeId: Optional[str] = None
+    # Latest generated take (may be unapproved). Retake/range use this, not approvedClip.
+    currentTakeId: Optional[str] = None
+    currentTakeAssetId: Optional[str] = None
     continuityAwareRetake: bool = False
     # MiniMax H3 megapixel resolution control. None/absent = Auto (back-compat).
     # Shape: {"mode": "auto" | "manual", "megapixels": float}.
     # Width/height are never stored; always derived from the canonical grid.
     h3Resolution: Optional[dict[str, Any]] = None
+    # LTX 2.5 Timeline QUALITY tier. None/absent = 720p (adapter finalResolution).
+    # Canonical values: "720p" | "1080p" | "2K" | "4K". Independent of h3Resolution.
+    # Native 4K is UNAVAILABLE - request_builder must fail honestly, never fake.
+    ltxQuality: Optional[str] = None
     downstreamStale: bool = False
     staleFromTakeId: Optional[str] = None
 
@@ -339,10 +392,221 @@ class ContinuityBridge(BaseModel):
     error: Optional[str] = None
 
 
+class LongFormCharacterState(BaseModel):
+    characterId: Optional[str] = None
+    crsAssetId: Optional[str] = None
+    label: str = ""
+    appearanceState: str = ""
+    wardrobeState: str = ""
+    position: str = ""
+    poseAction: str = ""
+
+
+class LongFormPropState(BaseModel):
+    prsAssetId: Optional[str] = None
+    label: str = ""
+    holder: str = ""
+    location: str = ""
+    state: str = ""
+
+
+class LongFormContinuityState(BaseModel):
+    """Compiled long-form continuation state. Not a second Media Intelligence authority.
+
+    Distilled from MediaIntelligencePacket + TemporalContinuityPacket + CRS/ERS/PRS.
+    Schema name is long-form-continuity-v1 (creator report: Continuity Packet).
+    """
+
+    schemaVersion: str = "long-form-continuity-v1"
+    revision: int = 1
+    projectId: str = ""
+    sceneId: str = ""
+    mediaIntelligencePacketId: Optional[str] = None
+    temporalPacketId: Optional[str] = None
+    characters: list[LongFormCharacterState] = Field(default_factory=list)
+    environment: dict[str, Any] = Field(default_factory=dict)
+    props: list[LongFormPropState] = Field(default_factory=list)
+    camera: dict[str, Any] = Field(default_factory=dict)
+    motion: dict[str, Any] = Field(default_factory=dict)
+    dialogue: dict[str, Any] = Field(default_factory=dict)
+    audio: dict[str, Any] = Field(default_factory=dict)
+    endingAnchors: list[dict[str, Any]] = Field(default_factory=list)
+    storyState: str = ""
+    nextIntent: str = ""
+    scores: dict[str, Any] = Field(default_factory=dict)
+    stale: bool = False
+    staleFromSegmentId: Optional[str] = None
+    createdAt: str = Field(default_factory=_now)
+    updatedAt: str = Field(default_factory=_now)
+
+
+class ExtendSegment(BaseModel):
+    """One H3 continuation segment. The creator still sees one Timeline scene."""
+
+    segmentId: str = Field(default_factory=lambda: _nid("ext_"))
+    batchBlockId: Optional[str] = None
+    prompt: str = ""
+    compiledPrompt: str = ""
+    continuityRevision: int = 0
+    inputAnchors: list[str] = Field(default_factory=list)
+    referenceAssetIds: list[str] = Field(default_factory=list)
+    h3Mode: Literal["i2v", "r2v"] = "r2v"
+    durationSec: float = 5.0
+    executionId: Optional[str] = None
+    outputAssetId: Optional[str] = None
+    takeAAssetId: Optional[str] = None
+    takeBAssetId: Optional[str] = None
+    approvedTake: Optional[Literal["A", "B"]] = None
+    status: Literal["planned", "generating", "draft", "approved", "failed", "cancelled"] = "planned"
+    createdAt: str = Field(default_factory=_now)
+
+
+
+
+class FinalCheckFinding(BaseModel):
+    """One Final Check finding. Dialogue Authority owns dialogue/language/speaker classifiers."""
+
+    category: str
+    taxonomy: Optional[Literal["Hard", "Soft", "Creative"]] = None
+    code: Optional[str] = None
+    severity: Optional[str] = None
+    retakeEligible: bool = False
+    autoDestroy: bool = False
+    acceptanceEligible: bool = False
+    creativeTaste: bool = False
+    authoritySource: Optional[str] = None
+    confidence: Optional[Literal["high", "low"]] = None
+    message: Optional[str] = None
+    source: Optional[str] = None
+    finalCheck: Optional[dict[str, Any]] = None
+
+
+class FinalCheckCategoryResult(BaseModel):
+    category: str
+    status: Literal["pass", "fail", "not_run", "uncertain"] = "not_run"
+    taxonomy: Optional[Literal["Hard", "Soft", "Creative"]] = None
+    findings: list[FinalCheckFinding] = Field(default_factory=list)
+    source: Optional[str] = None
+    note: Optional[str] = None
+
+
+class SceneFinalCheckRepairGate(BaseModel):
+    runtimeKind: Literal["local", "api"] = "local"
+    permission: Literal["not_required", "required", "granted", "declined", "keep_current"] = "not_required"
+    apiCallCount: int = 0
+    requiresApproval: bool = False
+    actions: list[str] = Field(default_factory=list)
+    oneApprovalPerCycle: bool = False
+    decision: Optional[str] = None
+    apiCallsDelta: int = 0
+    lifecycleStatus: Optional[str] = None
+    creatorVerdict: Optional[str] = None
+    note: Optional[str] = None
+    reuse: Optional[str] = None
+
+
+class SceneFinalCheck(BaseModel):
+    """Persisted Final Check state on the scene master (reload keeps truth)."""
+
+    lifecycleStatus: str = "FINAL_CHECK"
+    creatorVerdict: Optional[str] = None
+    openedAt: Optional[str] = None
+    closedAt: Optional[str] = None
+    categories: list[FinalCheckCategoryResult] = Field(default_factory=list)
+    repairGate: Optional[SceneFinalCheckRepairGate] = None
+    stitchAssetId: Optional[str] = None
+    retakeLoopCount: int = 0
+    maxRetakeLoops: int = 3
+    unresolvedBlocking: bool = False
+    autoRepairEligibleCount: int = 0
+    retakePack: Optional[dict[str, Any]] = None
+    policy: Optional[str] = "RETAKE_QUALIFICATION_POLICY"
+
+class SceneStitch(BaseModel):
+    """One previewable join of approved batch takes. Source batches stay editable."""
+
+    assetId: str
+    sourceBatchIds: list[str] = Field(default_factory=list)
+    sourceAssetIds: list[str] = Field(default_factory=list)
+    incremental: bool = False
+    durationSec: Optional[float] = None
+    createdAt: str = Field(default_factory=_now)
+
+
+
+class ScenePublishState(BaseModel):
+    """Library Video Published Master provenance on the scene master (additive)."""
+
+    publishedAssetId: str = ""
+    publishedAt: str = ""
+    sourceSceneStitchAssetId: str = ""
+    lifecycleStatusSnapshot: str = ""
+    creatorVerdictSnapshot: Optional[str] = None
+    acceptedIssues: bool = False
+    contentFingerprint: str = ""
+    version: int = 0
+    upscaledAssetId: Optional[str] = None
+    publishSource: str = "stitch"
+    upscalePendingPublish: bool = False
+    # Whole-scene Take lineage (Publish the CURRENT take only).
+    takeId: Optional[str] = None
+    takeLabel: Optional[str] = None
+    batchIds: list[str] = Field(default_factory=list)
+
+
+SceneTakeStatus = Literal["ready", "rendering", "cancelled", "incomplete"]
+
+
+class SceneTakeBatchMember(BaseModel):
+    """One batch's rendered membership inside a whole-scene Take."""
+
+    batchId: str
+    order: int = 0
+    assetId: Optional[str] = None
+    candidateId: Optional[str] = None
+    batchTakeId: Optional[str] = None
+    durationSec: Optional[float] = None
+    status: str = "pending"
+
+
+class SceneTakeQuality(BaseModel):
+    """Frozen quality of the Take at launch — never overwritten by later scene settings."""
+
+    generatorId: Optional[str] = None
+    h3Mode: Optional[str] = None
+    h3Megapixels: Optional[float] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    ltxQuality: Optional[str] = None
+    durationSec: Optional[float] = None
+    batchCount: int = 0
+
+
+class SceneTake(BaseModel):
+    """Whole-scene Take: one complete multi-batch render of the scene."""
+
+    id: str = Field(default_factory=lambda: _nid("stk_"))
+    label: str = "A"
+    letterIndex: int = 1
+    status: SceneTakeStatus = "ready"
+    createdAt: str = Field(default_factory=_now)
+    completedAt: Optional[str] = None
+    generationSnapshot: dict[str, Any] = Field(default_factory=dict)
+    quality: SceneTakeQuality = Field(default_factory=SceneTakeQuality)
+    batches: list[SceneTakeBatchMember] = Field(default_factory=list)
+    resultAssetId: Optional[str] = None
+    publishedAssetId: Optional[str] = None
+    retakeIds: list[str] = Field(default_factory=list)
+
+
 class SceneTimelineMaster(BaseModel):
     version: int = 1
+    # Spoken-language authority for this scene (never UI locale).
+    sceneLanguage: Optional[str] = None
+    spokenLanguage: Optional[dict[str, Any]] = None
     mode: ModalityMode = "image_planning"
     sceneGeneratorId: Optional[str] = None
+    turboLora: bool = False
     orchestratorMode: OrchestratorMode = "sequential_continuity"
     repairOverlapPolicy: RepairOverlapPolicy = "block"
     preflightMode: Literal["off", "warnings_only", "strict"] = "warnings_only"
@@ -356,8 +620,31 @@ class SceneTimelineMaster(BaseModel):
     continuityBridges: list[ContinuityBridge] = Field(default_factory=list)
     coDirectorContinuityPolicy: CoDirectorContinuityPolicy = Field(default_factory=CoDirectorContinuityPolicy)
     temporalPackets: list[TemporalContinuityPacket] = Field(default_factory=list)
+    # Accumulated Co-Director scene digest across approved shots (not a second authority).
+    coDirectorRollingSceneDigest: Optional[dict[str, Any]] = None
     migratedFromDirectorJson: bool = False
     migrationNote: Optional[str] = None
+    # Migration-Completion Marker Law: one-shot legacy→Master migrate is
+    # idempotent and one-way. Once set, loads must never re-import legacy
+    # prompt_segments / clip arrays even if those keys remain on disk.
+    migration: Optional[dict[str, Any]] = None
+    # Additive scene-level join of approved batch takes. Never deletes batches.
+    sceneStitch: Optional[SceneStitch] = None
+    # Co-Director Final Check (lifecycle + category shell). Additive; reload-safe.
+    sceneFinalCheck: Optional[SceneFinalCheck] = None
+    # Explicit Video Published Master (never auto-set from stitch/pass).
+    scenePublish: Optional[ScenePublishState] = None
+    # Long-form Review & Extend (compiled Continuity Packet + segment ledger).
+    longFormContinuity: Optional[LongFormContinuityState] = None
+    extendSegments: list[ExtendSegment] = Field(default_factory=list)
+    lastMediaIntelligencePacketId: Optional[str] = None
+    # Process that explicitly started the current render chain.
+    # A different Studio API session must not continue it.
+    renderSessionId: Optional[str] = None
+    # Whole-scene Takes (scene render history). Not per-batch candidates.
+    sceneTakes: list[SceneTake] = Field(default_factory=list)
+    currentSceneTakeId: Optional[str] = None
+    activeSceneTakeId: Optional[str] = None
 
 
 class CancelRequest(BaseModel):
@@ -372,6 +659,8 @@ class CancelResult(BaseModel):
     affectedBatchIds: list[str] = Field(default_factory=list)
     preservedCompletedBatchIds: list[str] = Field(default_factory=list)
     hostedCancelSupport: HostedCancelSupport = "unknown"
+    cancelledJobIds: list[str] = Field(default_factory=list)
+    cancelledTakeId: Optional[str] = None
     message: str = ""
     mock: bool = False
 
@@ -397,13 +686,23 @@ class GeneratorCapability(BaseModel):
     supportsContinuation: bool = False
     inPaintStrategies: list[InPaintStrategy] = Field(default_factory=list)
     supportsAudio: bool = False
+    qualityControl: Optional[str] = None
     executable: bool = False
     notes: str = ""
     # PROVIDER_CAPABILITY_GATING: Timeline UI enables/disables operations based
-    # on these flags rather than hardcoding provider names. WAN/Hunyuan report
-    # supportsTimelineGeneration=False until a Timeline adapter is registered.
+    # on these flags rather than hardcoding provider names. Retired local
+    # generators are not products and must not appear as Timeline rows.
     supportsTimelineGeneration: bool = True
     supportsImageToVideo: bool = True
+    # R2V (MiniMax H3 Timeline etc.): Visual image-frame / CRS refs are valid
+    # without classic start-frame I2V. Predicates must check this flag — do not
+    # treat supportsImageToVideo=False as "text-to-video only".
+    supportsReferenceToVideo: bool = False
+    # HONESTY: True T2V (no start frame). Local MiniMax H3 Timeline and LTX 2.5
+    # are R2V/I2V → False. Surfaced to UI dropdowns so the Txt2Vid surface does not
+    # offer R2V/I2V engines as true Text-to-Video production paths.
+    supportsTextToVideo: bool = False
+    requiresLastFrame: bool = False
     supportsBatchOrchestration: bool = True
     supportsInterrupt: bool = False
     supportsRetake: bool = True
@@ -411,6 +710,10 @@ class GeneratorCapability(BaseModel):
     draftPathway: str = "none"
     supportsQueuedCancel: bool = False
     supportsRunningCancel: bool = False
+    supportsLivePreview: bool = False
+    supportsHonestProgress: bool = False
+    supportsIntermediateFrames: bool = False
+    remoteCancelCostNote: Optional[str] = None
     finalRequiresNewGeneration: bool = True
     draftResolution: Optional[str] = None
     finalResolution: Optional[str] = None
@@ -418,6 +721,13 @@ class GeneratorCapability(BaseModel):
     supportsImageAndVideoTogether: bool = False
     maximumReferenceVideos: int = 0
     supportedAspectRatios: list[str] = Field(default_factory=list)
+    readiness: str = ""
+    disabledReason: str = ""
+    timelineAdapterId: Optional[str] = None
+    supportsTurboLora: bool = False
+    usesFastQuality: bool = False
+    # Per-surface CREATE truth. Timeline adapter flags must not strip this.
+    workflowCapabilities: Optional[dict[str, dict[str, Any]]] = None
 
 
 class PreflightFinding(BaseModel):

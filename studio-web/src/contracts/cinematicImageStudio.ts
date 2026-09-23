@@ -25,6 +25,55 @@ export type ImageCategory =
   | "general";
 export type ResolutionLabel = "1K" | "2K" | "4K" | "8K";
 export type ResolutionOrigin = "native" | "upscaled" | "requested";
+
+/**
+ * Resolution product label — mirrors studio-api image_studio `_resolution_product_label`.
+ * 1K → 1080p, 2K → 2K, 4K → 4K, 8K caps at 4K. This is the runtime contract
+ * (aspect-independent); the actual pixel size is derived from aspect below.
+ */
+export function resolutionProductLabel(label: ResolutionLabel): string {
+  switch (label) {
+    case "1K":
+      return "1080p";
+    case "2K":
+      return "2K";
+    case "4K":
+      return "4K";
+    case "8K":
+      return "4K"; // 8K caps at 4K
+    default:
+      return "1080p";
+  }
+}
+
+/**
+ * Pixel size for a (resolution, aspect) pair — mirrors studio-api
+ * image_product/compile.py `_ASPECT` + `_RES_SCALE` + `_size` (snap to 8px).
+ * Used to make the CIS UI and runtime agree transparently: the dropdown shows
+ * the exact pixels that will be generated for the chosen aspect.
+ */
+const ASPECT_BASE: Record<string, [number, number]> = {
+  "1:1": [1024, 1024],
+  "16:9": [1920, 1080],
+  "9:16": [1080, 1920],
+  "2:3": [1024, 1536],
+  "3:2": [1536, 1024],
+  "21:9": [1920, 820],
+  "4:3": [1440, 1080],
+};
+const RES_SCALE: Record<string, number> = {
+  "720p": 0.67,
+  "1080p": 1.0,
+  "2K": 1.25,
+  "4K": 2.0,
+};
+
+export function resolutionPixels(label: ResolutionLabel, aspect: string): [number, number] {
+  const base = ASPECT_BASE[aspect] ?? [1024, 1024];
+  const scale = RES_SCALE[resolutionProductLabel(label)] ?? 1.0;
+  const snap = (n: number) => Math.max(64, Math.round((n * scale) / 8) * 8);
+  return [snap(base[0]), snap(base[1])];
+}
 export type ProviderReadiness =
   | "ready"
   | "not_installed"
@@ -41,6 +90,8 @@ export type CinematicControls = {
   colorGradePreset?: string;
   visualEra?: string;
   productionStyle?: string;
+  /** STYLE_REGISTRY / CHARACTER_STYLE_OPTIONS key — locked creator constraint. */
+  visualStyle?: string;
   aspectRatio: string;
   shotIntent: ShotIntent;
   /** Artist description when shotIntent is custom — Prompt Intelligence input. */
@@ -100,6 +151,13 @@ export type CinematicGenerateRequest = {
   controls: CinematicControls;
   advanced?: AdvancedDiffusionControls;
   referenceAssetIds: string[];
+  authorityReferences?: Array<{
+    key: string;
+    kind: "character" | "prop" | "environment" | "posecraft" | "other";
+    assetId: string;
+    name: string;
+    chip: string;
+  }>;
   sceneId?: string;
   continuitySessionId?: string;
   inheritContinuityFromScene?: boolean;

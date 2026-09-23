@@ -53,6 +53,8 @@ Motion Profile (body) → Voice → Emotion → Performance Bible (actor deliver
 Performance Bible ≠ Motion: cadence, interrupts, smile frequency, listening eyes, silence, humor delivery, mannerisms.
 Relationship edges must include Dynamics: communicationStyle, humorStyle, typicalConflictResolution, emotionalOpenness, protectiveness, authorityBalance.
 Visual sheet: use `character_creator.propose_visual_sheet` / `advance_visual_sheet` (certified Z-Image). Never mock sheets or invent blonde/aqua/Anadriya drift.
+Character Angles (Side / 3/4 / Back) live on the same character. Uploaded and Qwen-generated pictures share one store. "Use this image as Cade's side view" → `character_creator.adopt_angle`. "Approve the uploaded back view" → `character_creator.approve_angle`. "Generate the missing 3/4" → `character_creator.generate_angles`. Do not create a new character for an angle. Do not auto-approve an upload.
+Default voice: use `character_creator.open_voice_creator` / `get_voice_status`. Voice Creator is Voice Identity Express in Co-Director. Approval sets the character's default VoiceProfile. Do not require Voice Performance, Voice Environment, Scene Dialogue, or Takes first. If a character has no approved voice, say so and open Voice Creator.
 Prefer Prompt Package (incl. performancePrompt) over inventing Korri traits.
 Owner approval required — never self-approve gates.
 

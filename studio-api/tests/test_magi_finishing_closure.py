@@ -176,7 +176,13 @@ def test_codirector_magi_mutation_tools_bound():
     from app.codirector.tools.definitions import TOOL_IDS
     from app.codirector.tools.registry import mutation_handler
 
-    for tool_id in ("magi.color.apply", "magi.upscale", "magi.audio.generate", "magi.render"):
+    for tool_id in (
+        "magi.color.apply",
+        "magi.upscale",
+        "magi.audio.generate",
+        "magi.render",
+        "magi.propose_finish",
+    ):
         assert tool_id in TOOL_IDS
         handler = mutation_handler(tool_id)
         assert handler.preview is not None
@@ -278,16 +284,37 @@ def test_color_apply_registers_derived_asset(client, tmp_path):
     assert reloaded["finishing"]["clipGrades"]["clip_grade_1"]["presetId"] == "noir"
 
 
-def test_gpu_apply_endpoint_fails_honestly(client, monkeypatch):
+@pytest.mark.skipif(not _ffmpeg_available(), reason="ffmpeg not on PATH")
+def test_gpu_apply_endpoint_fails_honestly(client, monkeypatch, tmp_path):
+    from app.db import Asset, SessionLocal, init_db
     from app.magi import realesrgan_runtime
 
     monkeypatch.setattr(realesrgan_runtime, "readiness", lambda: {"realesrganReady": False})
+    init_db()
     created = client.post("/api/projects", json={"name": "MAGI GPU Fail", "global_prompt": "Test."})
+    assert created.status_code == 200, created.text
     project_id = created.json()["id"]
+    clip = _make_clip(tmp_path / "gpu_fail_src.mp4", seconds=1.0, audio=False, size="320x180")
+    asset_id = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        db.add(
+            Asset(
+                id=asset_id,
+                project_id=project_id,
+                tag="source",
+                kind="video",
+                filename=clip.name,
+                path=str(clip),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
     res = client.post(
         f"/api/magi/projects/{project_id}/upscale/apply",
         json={
-            "assetId": str(uuid.uuid4()),
+            "assetId": asset_id,
             "engine": ENGINE_GPU,
             "model": "realesrgan-x4plus",
             "target_resolution": "1920x1080",

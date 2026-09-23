@@ -263,29 +263,27 @@ class ContextCompiler:
             try:
                 from ....feature_flags import feature_flags
                 from ....director_references.service import TimelineReferenceService
-                from ....director_references.tags import ensure_tags
-                from ....director_timeline import parse_director_timeline
+                from ....director_timeline_w46.master_lookup import (
+                    iter_master_visual_clips,
+                    load_scene_master,
+                    visual_clip_public,
+                )
                 from ....db import Scene as _Scene
 
                 if feature_flags.timeline_references_v1:
                     scene_row = db.get(_Scene, scene_id)
                     if scene_row and scene_row.project_id == project_id:
-                        tl = ensure_tags(
-                            parse_director_timeline(
-                                scene_row.director_json,
-                                fallback_duration=scene_row.duration_sec or 5.0,
-                                fallback_prompt=scene_row.prompt or "",
-                            )
-                        )
+                        master = load_scene_master(db, project_id, scene_id)
                         svc = TimelineReferenceService(db)
                         images = []
-                        for clip in tl.image_clips:
+                        for _batch, clip in iter_master_visual_clips(master):
                             ref = svc.store.load_active_set(project_id, scene_id, clip.id)
+                            pub = visual_clip_public(clip)
                             images.append(
                                 {
                                     "timelineItemId": clip.id,
-                                    "displayTag": clip.display_tag,
-                                    "assetId": clip.asset_id,
+                                    "displayTag": pub["displayTag"],
+                                    "assetId": pub["assetId"],
                                     "referenceCount": len(ref.version.bindings) if ref and ref.version else 0,
                                     "activeVersion": ref.active_version if ref else 0,
                                 }

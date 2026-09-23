@@ -216,37 +216,44 @@ def set_character_cast_status(
 def upsert_scene_readiness(db: Session, project_id: str, scene: dict[str, Any]) -> dict[str, Any]:
     snapshot, life = _load_life(db, project_id)
     readiness = SceneProductionReadiness.model_validate(scene)
-    # Derive status
-    flags = [
-        readiness.scriptLocked,
-        readiness.castReady,
-        readiness.locationReady,
-        readiness.propsReady,
-    ]
-    if not can_formal_production(life) and FORMAT_PROFILES.get(life.formatProfile, {}).get(
-        "requiresCastForProduction", True
-    ):
-        readiness.status = "BLOCKED"
-        readiness.blockerSummary = "Production is blocked until required cast is locked."
-    elif all(flags) and readiness.imageReferencesReady:
-        readiness.status = "READY"
-        readiness.blockerSummary = ""
-        readiness.generationPlanReady = True
-    elif any(flags):
-        readiness.status = "PARTIAL"
-        missing = []
-        if not readiness.locationReady:
-            missing.append("location reference")
-        if not readiness.castReady:
-            missing.append("cast")
-        if not readiness.imageReferencesReady:
-            missing.append("image references")
-        readiness.blockerSummary = (
-            f"Almost ready — still needs {', '.join(missing)}." if missing else "Partially ready."
-        )
+    if readiness.liveComputed:
+        # Live scene compute already set status / departments. Do not re-impose
+        # project-format cast locks on establishing shots that do not need cast.
+        pass
     else:
-        readiness.status = "BLOCKED"
-        readiness.blockerSummary = readiness.blockerSummary or "Scene is not ready for generation."
+        # Derive status
+        flags = [
+            readiness.scriptLocked,
+            readiness.castReady,
+            readiness.locationReady,
+            readiness.propsReady,
+        ]
+        if (
+            readiness.castRequired
+            and not can_formal_production(life)
+            and FORMAT_PROFILES.get(life.formatProfile, {}).get("requiresCastForProduction", True)
+        ):
+            readiness.status = "BLOCKED"
+            readiness.blockerSummary = "Production is blocked until required cast is locked."
+        elif all(flags) and readiness.imageReferencesReady:
+            readiness.status = "READY"
+            readiness.blockerSummary = ""
+            readiness.generationPlanReady = True
+        elif any(flags):
+            readiness.status = "PARTIAL"
+            missing = []
+            if not readiness.locationReady:
+                missing.append("location reference")
+            if not readiness.castReady:
+                missing.append("cast")
+            if not readiness.imageReferencesReady:
+                missing.append("image references")
+            readiness.blockerSummary = (
+                f"Almost ready — still needs {', '.join(missing)}." if missing else "Partially ready."
+            )
+        else:
+            readiness.status = "BLOCKED"
+            readiness.blockerSummary = readiness.blockerSummary or "Scene is not ready for generation."
 
     life.scenes = [s for s in life.scenes if s.sceneId != readiness.sceneId]
     life.scenes.insert(0, readiness)
@@ -257,23 +264,73 @@ def upsert_scene_readiness(db: Session, project_id: str, scene: dict[str, Any]) 
     return {"ok": True, "scene": readiness.model_dump(mode="json"), "lifecycle": life.model_dump(mode="json")}
 
 
+def assess_scene_readiness_from_project(db: Session, project_id: str, scene_id: str) -> dict[str, Any]:
+    """Persist a snapshot of live scene readiness. The scene remains the truth.
+
+    Computes from current Timeline bindings via ``compute_live_scene_readiness``
+    (SceneReferenceBinding + resolve_binding_id + PromptNameBinding) and writes
+    through ``upsert_scene_readiness``. Inspector must read the live compute,
+    not this snapshot.
+    """
+    from .live_scene_readiness import compute_live_scene_readiness
+
+    _, life = _load_life(db, project_id)
+    computed = compute_live_scene_readiness(db, project_id, scene_id)
+    payload = {
+        "sceneId": scene_id,
+        "scriptLocked": life.scriptStatus in {"APPROVED", "LOCKED"},
+        "requiredCharacters": computed.get("requiredCharacters") or [],
+        "castReady": bool(computed.get("castReady")),
+        "locationReady": bool(computed.get("locationReady")),
+        "wardrobeReady": bool(computed.get("wardrobeReady")),
+        "propsReady": bool(computed.get("propsReady")),
+        "imageReferencesReady": bool(computed.get("imageReferencesReady")),
+        "voiceReady": bool(computed.get("voiceReady")),
+        "audioPlanReady": bool(computed.get("audioPlanReady")),
+        "generationPlanReady": bool(computed.get("generationPlanReady")),
+        "status": computed.get("status") or "BLOCKED",
+        "blockerSummary": computed.get("blockerSummary") or "",
+        "liveComputed": True,
+        "castRequired": bool(computed.get("castRequired")),
+        "voiceRequired": bool(computed.get("voiceRequired")),
+        "locationRequired": bool(computed.get("locationRequired")),
+        "referencesRequired": bool(computed.get("referencesRequired")),
+        "departments": computed.get("departments") or [],
+    }
+    result = upsert_scene_readiness(db, project_id, payload)
+    result["live"] = computed
+    return result
+
+
 def scene_production_package(db: Session, project_id: str, scene_id: str) -> dict[str, Any]:
     _, life = _load_life(db, project_id)
     scene = next((s for s in life.scenes if s.sceneId == scene_id), None)
     if not scene:
         return {"ok": False, "error": "Scene not found"}
-    if scene.status not in {"READY", "IN_PRODUCTION", "COMPLETE"}:
-        return {
-            "ok": False,
-            "error": "NO_FINAL_GENERATION_WITHOUT_SCENE_READINESS",
-            "blockerSummary": scene.blockerSummary,
-            "scene": scene.model_dump(mode="json"),
-        }
     cast_refs = [
         c.model_dump(mode="json")
         for c in life.characterCasting
         if c.characterName in scene.requiredCharacters or c.characterId in scene.requiredCharacters
     ]
+    # Always emit the full readiness row so Timeline context / Inspector can
+    # reflect real flags for PARTIAL/BLOCKED assessed scenes. Generation gate
+    # still requires READY|IN_PRODUCTION|COMPLETE (ok=True package).
+    scene_dump = scene.model_dump(mode="json")
+    if scene.status not in {"READY", "IN_PRODUCTION", "COMPLETE"}:
+        return {
+            "ok": False,
+            "error": "NO_FINAL_GENERATION_WITHOUT_SCENE_READINESS",
+            "blockerSummary": scene.blockerSummary,
+            "scene": scene_dump,
+            "imageReferencesReady": scene.imageReferencesReady,
+            "castReady": scene.castReady,
+            "locationReady": scene.locationReady,
+            "wardrobeReady": scene.wardrobeReady,
+            "propsReady": scene.propsReady,
+            "voiceReady": scene.voiceReady,
+            "generationPlanReady": scene.generationPlanReady,
+            "status": scene.status,
+        }
     return {
         "ok": True,
         "package": {
@@ -281,13 +338,19 @@ def scene_production_package(db: Session, project_id: str, scene_id: str) -> dic
             "scriptLocked": scene.scriptLocked,
             "characters": scene.requiredCharacters,
             "approvedCastReferences": cast_refs,
+            "castReady": scene.castReady,
             "locationReady": scene.locationReady,
             "wardrobeReady": scene.wardrobeReady,
             "propsReady": scene.propsReady,
+            "imageReferencesReady": scene.imageReferencesReady,
             "voiceReady": scene.voiceReady,
+            "audioPlanReady": scene.audioPlanReady,
             "generationPlanReady": scene.generationPlanReady,
             "status": scene.status,
+            "blockerSummary": scene.blockerSummary,
+            "requiredCharacters": scene.requiredCharacters,
         },
+        "scene": scene_dump,
     }
 
 

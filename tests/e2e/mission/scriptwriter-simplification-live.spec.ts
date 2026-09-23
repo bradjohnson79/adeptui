@@ -150,11 +150,20 @@ test.describe("@mission @scriptwriter Script Writer simplification — live crea
       const bundle = await (await request.get(`${API}/api/projects/${project.id}/scriptwriter`)).json();
       expect(bundle.document.title).toBe("The Adept Chronicles");
 
-      // ── Story tab routes to the existing Story workspace (no duplicate) ──
+      // ── Story tab stays in Script Writer (canonical story document) ──
       await page.getByTestId("scriptwriter-story").click();
-      await expect(page).toHaveURL(/\/co-director\?.*contentTab=story/, { timeout: 15_000 });
-      await page.goBack();
-      await expect(page.getByTestId("scriptwriter-studio")).toBeVisible({ timeout: 45_000 });
+      await expect(page).toHaveURL(/workspace=scriptwriter/);
+      await expect(page).not.toHaveURL(/\/co-director/);
+      await expect(page.getByTestId("scriptwriter-story-document")).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId("scriptwriter-navigator")).toBeHidden();
+      await page.locator('[data-testid="scriptwriter-story-editor"] .ProseMirror').click();
+      await page.keyboard.type("Native story document lives here.");
+      await expect(page.getByTestId("scriptwriter-save-state")).toContainText(/^saved/i, { timeout: 20_000 });
+      const entries = await (await request.get(`${API}/api/projects/${project.id}/story-entries`)).json();
+      expect(JSON.stringify(entries)).toMatch(/Native story document lives here/i);
+      await page.getByTestId("scriptwriter-view-script").click();
+      await expect(page.getByTestId("scriptwriter-navigator")).toBeVisible();
+      await expect(page.getByTestId("scriptwriter-story-document")).toHaveCount(0);
 
       // ── Scene management: add after active, edit, remove ──
       const navRows = page.locator("[data-testid^='scriptwriter-nav-']:not([data-testid*='-up-']):not([data-testid*='-down-'])");

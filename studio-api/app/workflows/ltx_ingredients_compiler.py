@@ -16,6 +16,7 @@ from ..references.models import (
     WORKFLOW_VERSION,
     resolve_strength,
 )
+from ..video_runtime.seed_resolve import comfy_noise_seed
 
 PREFERRED_LOADER = "LTXICLoRALoaderModelOnly"
 PREFERRED_GUIDE = "LTXAddVideoICLoRAGuide"
@@ -299,7 +300,9 @@ def compile_ingredients_workflow(
                 "force_rate": float(fps),
                 "custom_width": width,
                 "custom_height": height,
-                "frame_load_cap": 0,
+                # Cap the sheet loop to the latent length. A 121-frame still
+                # loop will otherwise fail 5s Timeline batches (length 113).
+                "frame_load_cap": max(9, int(length)),
                 "skip_first_frames": 0,
                 "select_every_nth": 1,
             },
@@ -362,7 +365,7 @@ def compile_ingredients_workflow(
         }
         model_out = [n_lora, 0]
 
-    wf[n_noise] = {"class_type": "RandomNoise", "inputs": {"noise_seed": seed if seed >= 0 else 0}}
+    wf[n_noise] = {"class_type": "RandomNoise", "inputs": {"noise_seed": comfy_noise_seed(seed)}}
     wf[n_samp] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}}
     wf[n_sched] = {
         "class_type": "BasicScheduler",

@@ -74,21 +74,26 @@ def cancel_execution(db: Session, project_id: str, execution_id: str) -> Executi
             child.status = ChildJobStatus.CANCELLED
             any_cancelled = True
 
-    if any_cancelled:
+    previous = plan.status
+    plan.recompute_progress()
+    if any_cancelled or any(child.status == ChildJobStatus.CANCELLED for child in plan.child_jobs):
+        # Explicit Cancel wins over a failed sibling. Do not leave a parent
+        # queued over already-cancelled children.
         plan.status = ExecutionStatus.CANCELLED
-        plan.recompute_progress()
-        save_pack(db, project_id, plan)
 
-        _publish_event(ExecutionEvent(
-            event_type=ExecutionEventType.EXECUTION_FAILED,
-            project_id=project_id,
-            execution_id=execution_id,
-            status="cancelled",
-            completed=plan.completed_children,
-            total=plan.total_children,
-            surface_type=plan.surface_type,
-            timestamp=_now(),
-        ))
+    if any_cancelled or plan.status != previous:
+        save_pack(db, project_id, plan)
+        if plan.status == ExecutionStatus.CANCELLED:
+            _publish_event(ExecutionEvent(
+                event_type=ExecutionEventType.EXECUTION_FAILED,
+                project_id=project_id,
+                execution_id=execution_id,
+                status="cancelled",
+                completed=plan.completed_children,
+                total=plan.total_children,
+                surface_type=plan.surface_type,
+                timestamp=_now(),
+            ))
 
     return plan
 

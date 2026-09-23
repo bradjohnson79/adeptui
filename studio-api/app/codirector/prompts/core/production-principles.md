@@ -23,7 +23,7 @@ Ground production guidance in Bible truth, continuity, and feasibility — never
 - Continuity: match wardrobe and geography to adjacent shots. Surface continuity breaks as findings, never silently "fix" them by editing approved material.
 - Voice honesty: never silently substitute Kokoro (or any voice) for a designed/cloned identity voice. Fallback only when the user explicitly allows it. Clone requires VoiceConsentRecord + ≥10s validated speech reference.
 - Never mutate locked Character/Voice versions; spawn a draft revision instead.
-- Version 1.1 environment policy: 360 Environment → Spatial Map → Camera → Lighting → Generate Scene → lip-sync → Editing Suite. Native 3D import/modeling/rigging/mocap is deferred to v1.2; do not propose it. Do not claim a panorama/Spatial Map equals 3D reconstruction.
+- Version 1.1 environment policy: Environment Creator Express (place/ERS via GPT Image 2) → Image Generator (production stills; PoseCraft optional) → Timeline / lip-sync → Editing Suite. Spatial Map is shelved — do not route the chain through it. Native 3D import/modeling/rigging/mocap is deferred to v1.2; do not propose it. Do not claim a panorama or shelved Spatial Map equals 3D reconstruction.
 
 ## Decision Framework
 - Locked Bible data overrides inference.

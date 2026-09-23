@@ -25,6 +25,9 @@ export type AuroraCardKey =
   | "workspaces.oneFrame"
   | "workspaces.threeFrame"
   | "workspaces.characterCreator"
+  | "workspaces.propCreator"
+  | "workspaces.environmentCreator"
+  | "workspaces.storyboard"
   | "workspaces.scriptwriter"
   | "workspaces.bible"
   | "workspaces.characters"
@@ -223,6 +226,27 @@ export const auroraCardImagery: Record<AuroraCardKey, AuroraCardImage> = {
     alt: "Character design desk with portrait references, wardrobe swatches, and voice waveform",
     plate: "aurora-plate aurora-plate--avatar",
     motif: "motif-imagegen",
+  },
+  "workspaces.propCreator": {
+    key: "workspaces.propCreator",
+    src: "/images/ui/workspaces/ws-prop-creator.jpg",
+    alt: "Production design desk with reusable movie props, lanterns, and object references",
+    plate: "aurora-plate aurora-plate--commercial",
+    motif: "motif-commercial",
+  },
+  "workspaces.environmentCreator": {
+    key: "workspaces.environmentCreator",
+    src: "/images/ui/workspaces/ws-environment-creator.jpg",
+    alt: "Cinematic location and set with fog, lanterns, and a camera for environment reference",
+    plate: "aurora-plate aurora-plate--spatial",
+    motif: "motif-spatial",
+  },
+  "workspaces.storyboard": {
+    key: "workspaces.storyboard",
+    src: "/images/ui/workspaces/ws-script.jpg",
+    alt: "Screenplay pages and storyboard sketches on a production desk",
+    plate: "aurora-plate aurora-plate--script",
+    motif: "motif-script",
   },
   "workspaces.scriptwriter": {
     key: "workspaces.scriptwriter",

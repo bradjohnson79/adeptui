@@ -1,10 +1,16 @@
 /** Frozen Magi sequence contracts — M4.12 NLE rebuild. */
 
+export type MagiObjectsSlot = 1 | 2;
+
 export type MagiTrackKind =
   | "video"
   | "image"
   | "audio"
+  | "music"
+  | "sfx"
   | "text"
+  | "objects"
+  | "graphics"
   | "fx"
   | "mask"
   | "adjustment";
@@ -26,6 +32,8 @@ export type MagiTrack = {
   locked?: boolean;
   muted?: boolean;
   solo?: boolean;
+  /** 1 = OBJECTS 1, 2 = OBJECTS 2. Required when kind is objects; graphics aliases slot 1. */
+  objectsSlot?: MagiObjectsSlot;
 };
 
 export type MagiClip = {
@@ -48,6 +56,15 @@ export type MagiClip = {
   takeId?: string;
   sourceClipId?: string;
   sceneId?: string;
+    ingestRole?:
+    | "published_master"
+    | "published_master_audio"
+    | "music"
+    | "sfx"
+    | "finishing_output"
+    | "graphic";
+  /** Canonical MAGI overlay id when this clip is an Objects projection (`gfx_*`). */
+  overlayId?: string;
 };
 
 export type MagiMarker = {
@@ -101,6 +118,8 @@ export type MagiFinishingState = {
     lastJobId?: string;
     profile?: "preview" | "final";
   };
+  /** Latest applied MAGI visual derivative (color / upscale / final render). */
+  visualResultAssetId?: string | null;
 };
 
 export type MagiTimelineExportClip = {
@@ -151,17 +170,16 @@ export type MagiEditCommand = {
   payload?: Record<string, unknown>;
 };
 
-export const DEFAULT_TRACK_BLUEPRINT: Array<{ kind: MagiTrackKind; label: string }> = [
-  { kind: "video", label: "V1" },
-  { kind: "video", label: "V2" },
-  { kind: "video", label: "V3" },
-  { kind: "image", label: "I1" },
-  { kind: "image", label: "I2" },
-  { kind: "audio", label: "A1" },
-  { kind: "audio", label: "A2" },
-  { kind: "audio", label: "A3" },
-  { kind: "text", label: "T1" },
-  { kind: "fx", label: "FX" },
-  { kind: "mask", label: "M" },
-  { kind: "adjustment", label: "ADJ" },
+export const PRIMARY_MAGI_TRACK_KINDS = ["objects", "video", "audio", "music", "sfx"] as const;
+
+export const DEFAULT_TRACK_BLUEPRINT: Array<{
+  kind: MagiTrackKind;
+  label: string;
+  objectsSlot?: MagiObjectsSlot;
+}> = [
+  { kind: "objects", label: "OBJECTS 1", objectsSlot: 1 },
+  { kind: "video", label: "VIDEO" },
+  { kind: "audio", label: "AUDIO" },
+  { kind: "music", label: "MUSIC" },
+  { kind: "sfx", label: "SFX" },
 ];

@@ -3342,6 +3342,184 @@
       },
       "fingerprints": {},
       "certificationRecordId": null
+    },
+    {
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Draft",
+      "modelFamily": "qwen_edit_2509",
+      "modelVariant": "image_edit_2509",
+      "engine": "qwen_edit_2509",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_qwen_edit_2509_i2i_workflow",
+      "builderPath": "app.workflows.qwen_image_edit_2509:build_qwen_edit_2509_i2i_workflow",
+      "operation": "image.edit",
+      "supportedOperations": [
+        "image.edit",
+        "image.generate",
+        "image.reference_edit"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "LoadImage",
+        "TextEncodeQwenImageEditPlus",
+        "EmptyLatentImage",
+        "KSampler",
+        "VAEDecode",
+        "SaveImage",
+        "ModelSamplingAuraFlow"
+      ],
+      "requiredModels": [
+        "qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+        "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "qwen_image_vae.safetensors"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image"
+      ],
+      "optionalInputs": [
+        "denoise",
+        "seed",
+        "steps",
+        "cfg"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": true,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.edit",
+          "image.generate",
+          "image.reference_edit"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Draft local I2I. Files on disk never imply Certified."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null,
+      "workflowId": "IMG-QWEN-EDIT-2509-001",
+      "workflowKey": "qwen_edit_2509.edit"
+    },
+    {
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Draft",
+      "modelFamily": "qwen_edit_2509",
+      "modelVariant": "image_edit_2509",
+      "engine": "qwen_edit_2509",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_qwen_edit_2509_i2i_workflow",
+      "builderPath": "app.workflows.qwen_image_edit_2509:build_qwen_edit_2509_i2i_workflow",
+      "operation": "image.edit",
+      "supportedOperations": [
+        "image.edit",
+        "image.generate",
+        "image.reference_edit"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "LoadImage",
+        "TextEncodeQwenImageEditPlus",
+        "EmptyLatentImage",
+        "KSampler",
+        "VAEDecode",
+        "SaveImage",
+        "ModelSamplingAuraFlow"
+      ],
+      "requiredModels": [
+        "qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+        "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "qwen_image_vae.safetensors"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image"
+      ],
+      "optionalInputs": [
+        "denoise",
+        "seed",
+        "steps",
+        "cfg"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": true,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.edit",
+          "image.generate",
+          "image.reference_edit"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Draft local I2I. Files on disk never imply Certified."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null,
+      "workflowId": "IMG-QWEN-EDIT-2509-CRS-001",
+      "workflowKey": "qwen_edit_2509.crs_single_view"
     }
   ]
 }

@@ -1,7 +1,8 @@
 /**
- * Sequential Continue helper: persist handoff, then navigate to Standard
- * Scene Creator using the server-resolved destination. Never navigate on
- * persist failure. Never fire persist and navigation concurrently.
+ * Sequential Continue helper: persist handoff, then navigate to the Image
+ * Generator (production-still successor of Scene Creator Standard) using the
+ * server-resolved destination. Never navigate on persist failure. Never fire
+ * persist and navigation concurrently.
  */
 import { api } from "../../../api";
 
@@ -33,7 +34,7 @@ export async function persistThenOpenSceneCreator(
 ): Promise<ProductionHandoffPayload> {
   const projectId = (options.projectId || "").trim();
   if (!projectId) {
-    throw new Error("Open a project before continuing to Scene Creator.");
+    throw new Error("Open a project before continuing to the Image Generator.");
   }
   const payload = await api.sceneCreator.productionHandoff(projectId, {
     scene_id: options.sceneId || "",
@@ -46,7 +47,10 @@ export async function persistThenOpenSceneCreator(
     spatialProfileId: payload.handoffId,
     handoffId: payload.handoffId,
   };
-  options.onGoTab?.("scenecreator", extra);
+  // Scene Creator Standard is retired — the Image Generator owns production
+  // still generation (Image Generator v1.1 triad). The ERS handoff payload
+  // still persists server-side; creators continue in the Image Generator.
+  options.onGoTab?.("imagegen", extra);
   options.onClose?.();
   return payload;
 }

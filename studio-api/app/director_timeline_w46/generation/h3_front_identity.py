@@ -1,14 +1,9 @@
-"""MiniMax H3 Front-form identity helpers (Timeline Ref2V).
+"""MiniMax H3 reference-sheet helpers (Timeline Ref2V).
 
-FM3 (2026-09-10 Brad GO): when Character Creator Front / hero_identity exists,
-Timeline H3 packs that Front into ref_image_N (Front-only transport first).
-Plain Front library bytes only — never crop CRS into a fake Front.
-
-prefer_front / h3PreferFront remain the explicit remap levers. Default H3
-request path uses front_transport=True (policy h3_front_transport), which packs
-Front when available without inventing place/multi-ref companions and without
-rewriting Timed Prompt. Opt out with providerOptions.h3FrontTransport=False or
-h3CreatorCrsAuthority=True.
+A reference sheet goes to Comfy Load Image as the whole sheet file. Adept does
+not crop a panel out of it and does not swap the sheet for a single Front still.
+A bound front or side still is replaced by that character's approved sheet when
+one exists. The staged bytes are the Library file, unchanged.
 """
 
 from __future__ import annotations
@@ -31,6 +26,59 @@ def _asset_is_image(db: Session, asset_id: str | None) -> bool:
         return False
     kind = str(getattr(asset, "kind", "") or "").lower().strip()
     return kind == "image"
+
+
+def _is_angle_still(db: Session, asset_id: str) -> bool:
+    """True for a side/angle adopt. That picture is not the character reference."""
+    aid = str(asset_id or "").strip()
+    if not aid:
+        return False
+    asset = db.get(Asset, aid)
+    if asset is None:
+        return False
+    blob = " ".join(
+        [
+            str(getattr(asset, "tag", "") or ""),
+            str(getattr(asset, "filename", "") or ""),
+            str(getattr(asset, "labels_json", "") or ""),
+        ]
+    ).lower()
+    return "character_angle" in blob or "cd-adopt" in blob or '"side"' in blob
+
+
+def _approved_reference_sheet_id(db: Session, character_id: str) -> str:
+    """Approved Character Reference Sheet for this character, when one exists."""
+    token = str(character_id or "").strip()
+    if not token:
+        return ""
+    try:
+        from ...character_identity.crs_service import load_persisted_crs
+
+        sheet_id = str((load_persisted_crs(db, token) or {}).get("approved_sheet_asset_id") or "").strip()
+    except Exception:
+        return ""
+    if sheet_id and _asset_is_image(db, sheet_id):
+        return sheet_id
+    return ""
+
+
+def _profile_id_for_asset(db: Session, asset_id: str) -> str:
+    """Character who already owns this picture, including a review angle adopt."""
+    aid = str(asset_id or "").strip()
+    query = getattr(db, "query", None)
+    if not aid or not callable(query):
+        return ""
+    try:
+        from ...character_identity.models import CharacterReferenceAssetRow
+
+        rows = db.query(CharacterReferenceAssetRow).filter(CharacterReferenceAssetRow.asset_id == aid).all()
+    except Exception:
+        return ""
+    for row in rows:
+        profile_id = str(getattr(row, "character_profile_id", "") or "").strip()
+        if profile_id:
+            return profile_id
+    return ""
 
 
 def _is_front_still_asset(db: Session, project_id: str, asset_id: str) -> bool:
@@ -119,6 +167,8 @@ def resolve_h3_front_character_asset(
         seen.add(aid)
         if not _asset_is_image(db, aid):
             continue
+        if _is_angle_still(db, aid):
+            continue
         if is_multi_panel_crs_asset(db, project_id, aid):
             continue
         return aid, "front"
@@ -133,12 +183,11 @@ def apply_h3_front_identity_to_r2v_slots(
     prefer_front: bool = False,
     front_transport: bool = False,
 ) -> dict[str, Any]:
-    """Annotate / pack H3 character slots for Front vs CRS.
+    """Send each character's reference sheet whole.
 
-    front_transport=True (FM3 default on H3 request path): when Front exists,
-    pack Front assetId into the character slot (plain Front bytes; no CRS crop).
-    prefer_front=True: same packing (legacy J10 opt-in name).
-    Both False: creator CRS authority — warn only, no swap.
+    A multi-panel sheet already on the slot stays. A front or side still is
+    replaced by the approved sheet when that sheet exists. A sheet is never
+    replaced by a cropped Front.
     """
     replaced: list[dict[str, Any]] = []
     crs_only: list[str] = []
@@ -158,7 +207,34 @@ def apply_h3_front_identity_to_r2v_slots(
             continue
         asset_id = str(slot.get("assetId") or "").strip()
         identity_id = str(slot.get("identityId") or slot.get("characterId") or "").strip()
+        if not identity_id:
+            identity_id = _profile_id_for_asset(db, asset_id)
+            if identity_id:
+                slot["identityId"] = identity_id
         label = str(slot.get("label") or identity_id or asset_id or "Character").strip() or "Character"
+        is_crs = bool(asset_id and is_multi_panel_crs_asset(db, project_id, asset_id))
+        if is_crs:
+            slot["identityForm"] = "reference_sheet"
+            continue
+        sheet_id = _approved_reference_sheet_id(db, identity_id)
+        if (
+            sheet_id
+            and sheet_id != asset_id
+            and is_multi_panel_crs_asset(db, project_id, sheet_id)
+        ):
+            slot["replacedCropAssetId"] = asset_id or None
+            slot["assetId"] = sheet_id
+            slot["identityForm"] = "reference_sheet"
+            replaced.append(
+                {
+                    "label": label,
+                    "identityId": identity_id or None,
+                    "fromAssetId": asset_id or None,
+                    "toAssetId": sheet_id,
+                    "form": "reference_sheet",
+                }
+            )
+            continue
         hit = {
             "character_id": identity_id,
             "name": label,
@@ -168,9 +244,8 @@ def apply_h3_front_identity_to_r2v_slots(
         front_id, form = resolve_h3_front_character_asset(
             db, project_id, hit, bound_assets=None
         )
-        is_crs = bool(asset_id and is_multi_panel_crs_asset(db, project_id, asset_id))
 
-        if pack_front and front_id and form == "front":
+        if pack_front and front_id and form == "front" and not is_crs:
             if front_id != asset_id:
                 slot["replacedCrsAssetId"] = asset_id or None
                 slot["assetId"] = front_id

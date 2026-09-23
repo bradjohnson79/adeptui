@@ -37,7 +37,14 @@ class SceneReferenceBinding(Base):
             "reference_type",
             name="uq_srb_scope_asset_type",
         ),
-        Index("uq_srb_project_alias", "project_id", "alias", unique=True),
+        Index(
+            "uq_srb_scope_alias",
+            "project_id",
+            "scope_type",
+            "scope_id",
+            "alias",
+            unique=True,
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

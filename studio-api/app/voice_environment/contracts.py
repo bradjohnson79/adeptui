@@ -143,6 +143,7 @@ class PreviewRenderRequest(BaseModel):
 
 class ApproveRenderRequest(BaseModel):
     approved: bool = True
+    isGlobal: bool = False
 
 
 class ApplyToSceneRequest(BaseModel):

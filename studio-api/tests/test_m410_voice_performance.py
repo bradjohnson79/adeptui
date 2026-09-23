@@ -153,6 +153,64 @@ def test_voice_identity_required(db):
     assert exc.value.detail["code"] == "VOICE_IDENTITY_REQUIRED"
 
 
+def test_global_character_voice_can_create_record_in_open_project(db):
+    db.add(Project(id="proj-open", name="Open Project", settings_json="{}"))
+    db.add(
+        CharacterProfileRow(
+            id="char-global",
+            project_id="proj-m410",
+            name="Anadriya",
+            status="APPROVED",
+            approval_status="approved",
+            is_global=True,
+            active_voice_profile_id="voice-home",
+        )
+    )
+    db.add(
+        VoiceProfileRow(
+            id="voice-home",
+            project_id="proj-m410",
+            character_profile_id="char-global",
+            version_number=1,
+            name="Anadriya Clone",
+            provider="qwen3-tts",
+            source_mode="CLONE",
+            status="APPROVED",
+            approval_status="approved",
+            language="en",
+        )
+    )
+    db.commit()
+    record = svc.create_record(
+        db,
+        VoicePerformanceRecordCreate(
+            projectId="proj-open",
+            characterId="char-global",
+            voiceIdentityId="voice-home",
+            dialogueText="Hello. My name is Anadriya.",
+        ),
+    )
+    assert record.projectId == "proj-open"
+    assert record.voiceIdentityId == "voice-home"
+    assert record.dialogueText == "Hello. My name is Anadriya."
+
+
+def test_foreign_project_voice_stays_isolated(db):
+    db.add(Project(id="proj-other", name="Other Project", settings_json="{}"))
+    character_id, voice_id = seed_character_and_voice(db, voice_id="voice-local")
+    with pytest.raises(HTTPException) as exc:
+        svc.create_record(
+            db,
+            VoicePerformanceRecordCreate(
+                projectId="proj-other",
+                characterId=character_id,
+                voiceIdentityId=voice_id,
+                dialogueText="This character is not visible here.",
+            ),
+        )
+    assert exc.value.detail["code"] == "VOICE_IDENTITY_REQUIRED"
+
+
 def test_take_approval_exclusivity(db):
     record = make_record(db)
     first_asset = seed_audio_asset(db, "asset-audio-1")
@@ -254,10 +312,144 @@ def test_capability_metadata_honesty(monkeypatch):
             "mock": False,
         },
     )
+    monkeypatch.setattr(
+        "app.character_identity.voice.provider_readiness",
+        lambda: {
+            "qwenVoiceClone": {"ready": False},
+            "qwenVoiceDesign": {"ready": False},
+        },
+    )
     caps = svc.get_capabilities()
     assert caps["status"] == "requires_setup"
     assert caps["supportsLiveGeneration"] is False
+    assert caps["qwenReady"] is False
+    assert caps["sharedWarmWorker"] is False
     assert "contempt" in caps["supportedEmotionVectors"]
+
+
+def test_capabilities_ready_when_qwen_warm_worker_is_ready(monkeypatch):
+    monkeypatch.setattr(
+        "app.voice_performance.m410_service.index_tts2.runtime_status",
+        lambda: {
+            "ok": True,
+            "providerId": "index-tts2-local",
+            "providerVersion": "m410-contract-1",
+            "installed": False,
+            "ready": False,
+            "availableOnDisk": False,
+            "modelRevision": None,
+            "runtimeRoot": "x",
+            "manifestPath": "y",
+            "message": "IndexTTS2 is not ready.",
+            "mock": False,
+        },
+    )
+    monkeypatch.setattr(
+        "app.character_identity.voice.provider_readiness",
+        lambda: {
+            "qwenVoiceClone": {"ready": True},
+            "qwenVoiceDesign": {"ready": False},
+        },
+    )
+    caps = svc.get_capabilities()
+    assert caps["ready"] is True
+    assert caps["qwenReady"] is True
+    assert caps["sharedWarmWorker"] is True
+    assert caps["providerId"] == "qwen3-tts"
+    assert "warm" in caps["message"].lower()
+
+
+def test_create_takes_uses_warm_qwen_for_approved_qwen_voice(db, tmp_path, monkeypatch):
+    from app.voice_performance.m410_schemas import GenerateTakesBody
+
+    wav = tmp_path / "take.wav"
+    wav.write_bytes(b"RIFF0000WAVEfmt ")
+    character_id, voice_id = seed_character_and_voice(db, voice_id="voice-qwen")
+    voice = db.get(VoiceProfileRow, voice_id)
+    voice.provider = "qwen3-tts"
+    voice.source_mode = "CLONE"
+    profile = db.get(CharacterProfileRow, character_id)
+    profile.active_voice_profile_id = voice_id
+    db.commit()
+    record = svc.create_record(
+        db,
+        VoicePerformanceRecordCreate(
+            projectId="proj-m410",
+            characterId=character_id,
+            voiceIdentityId=voice_id,
+            dialogueText="Light circuitry, not tattoos, doofus.",
+        ),
+    )
+    assert record.providerId == "qwen3-tts"
+
+    monkeypatch.setattr(
+        svc,
+        "generate_approved_voice_speech",
+        lambda *args, **kwargs: {
+            "path": str(wav),
+            "complete_ms": 6400,
+            "engine": "qwen3-tts",
+            "warm_worker": True,
+        },
+    )
+    monkeypatch.setattr(svc, "_wav_duration_ms", lambda path: 3200)
+    out = svc.create_takes(db, record.id, GenerateTakesBody(count=2, labels=["Take 1", "Take 2"]))
+    assert out["ok"] is True
+    assert out["providerId"] == "qwen3-tts"
+    assert len(out["takes"]) == 2
+    assert out["takes"][0]["status"] == "completed"
+    assert out["takes"][0]["audioAssetId"]
+
+
+def test_create_takes_keeps_first_qwen_take_if_later_take_fails(db, tmp_path, monkeypatch):
+    from app.voice_performance.m410_schemas import GenerateTakesBody
+
+    wav = tmp_path / "take.wav"
+    wav.write_bytes(b"RIFF0000WAVEfmt ")
+    character_id, voice_id = seed_character_and_voice(db, voice_id="voice-qwen-partial")
+    voice = db.get(VoiceProfileRow, voice_id)
+    voice.provider = "qwen3-tts"
+    voice.source_mode = "CLONE"
+    profile = db.get(CharacterProfileRow, character_id)
+    profile.active_voice_profile_id = voice_id
+    db.commit()
+    record = svc.create_record(
+        db,
+        VoicePerformanceRecordCreate(
+            projectId="proj-m410",
+            characterId=character_id,
+            voiceIdentityId=voice_id,
+            dialogueText="Hello. My name is Anadriya. I'm the Adept.",
+        ),
+    )
+    calls = {"n": 0}
+
+    def _speech(*_args, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise RuntimeError("second take failed")
+        return {
+            "path": str(wav),
+            "complete_ms": 6400,
+            "engine": "qwen3-tts",
+            "warm_worker": True,
+        }
+
+    monkeypatch.setattr(svc, "generate_approved_voice_speech", _speech)
+    monkeypatch.setattr(svc, "_wav_duration_ms", lambda path: 3200)
+    out = svc.create_takes(db, record.id, GenerateTakesBody(count=2, labels=["Take 1", "Take 2"]))
+    assert out["ok"] is True
+    assert [take["status"] for take in out["takes"]] == ["completed", "failed"]
+    assert out["takes"][0]["audioAssetId"]
+    assert out["takes"][1]["errorMessage"] == "second take failed"
+    rows = (
+        db.query(VoicePerformanceTakeRow)
+        .filter(VoicePerformanceTakeRow.record_id == record.id)
+        .order_by(VoicePerformanceTakeRow.take_number.asc())
+        .all()
+    )
+    assert [row.status for row in rows] == ["completed", "failed"]
+    assert rows[0].audio_asset_id
 
 
 def test_runtime_install_body_defaults_model_download_false():
@@ -295,3 +487,12 @@ def test_install_runtime_propagates_confirm_download_models(monkeypatch):
     out = svc.install_runtime(confirm=True, confirm_download_models=True)
     assert out["ok"] is True
     assert seen == {"confirm": True, "confirm_download_models": True}
+
+
+def test_m410_records_collection_requires_project_id():
+    from app.voice_performance.router import m410_list_records_query
+
+    with pytest.raises(HTTPException) as exc:
+        m410_list_records_query(project_id=None, db=None)
+    assert exc.value.status_code == 400
+    assert (exc.value.detail or {}).get("code") == "PROJECT_ID_REQUIRED"

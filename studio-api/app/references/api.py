@@ -212,7 +212,7 @@ def build_sheet(project_id: str, body: BuildSheetBody, db: Session = Depends(get
         "height": body.height,
         "fps": body.fps,
         "frames": max(121, body.frames),
-        "preview_url": f"/api/assets/{png_asset.id}/file",
+        "preview_url": f"/api/projects/{project_id}/assets/{png_asset.id}/file",
     }
     return store.save_sheet(project_id, sheet)
 

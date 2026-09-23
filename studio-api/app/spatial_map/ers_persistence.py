@@ -232,15 +232,21 @@ def save_prop_entity(db: Session, project_id: str, prop: PropEntity) -> None:
     prop.updated_at = _now()
     if not prop.created_at:
         prop.created_at = _now()
+    owner = str(getattr(prop, "project_id", "") or project_id or "").strip()
+    if not owner:
+        owner = str(project_id or "").strip()
+    # Never fork a Global prop under the viewing project.
+    if str(getattr(prop, "project_id", "") or "").strip():
+        owner = str(prop.project_id).strip()
     # Prefer stable id key. Drop a leftover tag-keyed row if this prop was saved
     # under the old scheme.
     if prop.tag and prop.tag != prop.id:
-        existing_tag = load_prop_entity(db, project_id, prop.tag)
+        existing_tag = load_prop_entity(db, owner, prop.tag)
         if existing_tag and existing_tag.id == prop.id:
-            _delete_trait(db, project_id=project_id, category=PROP_CATEGORY, key=prop.tag)
+            _delete_trait(db, project_id=owner, category=PROP_CATEGORY, key=prop.tag)
     _upsert_trait(
         db,
-        project_id=project_id,
+        project_id=owner,
         category=PROP_CATEGORY,
         key=prop.id,
         value=_model_dump_json(prop),
@@ -335,6 +341,42 @@ def list_prop_entities(db: Session, project_id: str) -> list[PropEntity]:
         except Exception:
             continue
     return props
+
+
+def load_prop_entities_by_ids(db: Session, prop_ids: list[str]) -> list[PropEntity]:
+    """One query for canonical prop ids — no per-project fan-out."""
+    from ..db import ProjectTraitRow
+
+    ids = [str(i).strip() for i in prop_ids if str(i).strip()]
+    if not ids:
+        return []
+    rows = (
+        db.query(ProjectTraitRow)
+        .filter(
+            ProjectTraitRow.category == PROP_CATEGORY,
+            ProjectTraitRow.key.in_(ids),
+        )
+        .all()
+    )
+    out: list[PropEntity] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not row.value:
+            continue
+        try:
+            prop = PropEntity.model_validate_json(row.value)
+        except Exception:
+            continue
+        if prop.id in seen:
+            continue
+        seen.add(prop.id)
+        out.append(prop)
+    return out
+
+
+def load_prop_entity_anywhere(db: Session, prop_id: str) -> PropEntity | None:
+    found = load_prop_entities_by_ids(db, [prop_id])
+    return found[0] if found else None
 
 
 def persist_ers_composite_asset(

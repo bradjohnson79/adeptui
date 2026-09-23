@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-POSECRAFT_SCHEMA_VERSION = 2
+POSECRAFT_SCHEMA_VERSION = 3
 
 JointName = Literal[
     "pelvis", "spine", "chest", "neck", "head",
@@ -49,7 +49,8 @@ class FigureInstance(BaseModel):
     name: str
     archetypeId: str
     colorId: str
-    position: dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "z": 0.0})
+    position: dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    rotation: dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
     rotationY: float = 0.0
     scale: float = 1.0
     pose: PoseMap = Field(default_factory=dict)
@@ -72,18 +73,42 @@ class FigureInstance(BaseModel):
 
 
 class BlockingPrimitive(BaseModel):
-    """id = permanent machine identity; name = creator-editable scene label."""
+    """Legacy procedural furniture. Migrated into PoseCraftObject; retained for snapshots."""
 
     id: str
     name: str
     kind: str = "apple-box"
-    position: dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "z": 0.0})
+    position: dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
     rotationY: float = 0.0
     scale: float = 1.0
     size: dict[str, float] = Field(default_factory=lambda: {"x": 0.6, "y": 0.5, "z": 0.4})
     color: str = "#94a3b8"
     visible: bool = True
     locked: bool = False
+
+
+class PoseCraftObject(BaseModel):
+    """First-class stage object. Never a humanoid figure."""
+
+    id: str
+    name: str
+    source: Literal["procedural", "imported", "reconstructed"] = "procedural"
+    primitiveKind: str | None = None
+    assetId: str | None = None
+    meshAssetId: str | None = None
+    format: str | None = None
+    reconstructionId: str | None = None
+    sourceInstanceId: str | None = None
+    detectedLabel: str | None = None
+    detectedHuman: bool = False
+    position: dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    rotation: dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    scale: dict[str, float] = Field(default_factory=lambda: {"x": 1.0, "y": 1.0, "z": 1.0})
+    size: dict[str, float] | None = None
+    color: str = "#94a3b8"
+    visible: bool = True
+    locked: bool = False
+    nameConfirmed: bool = False
 
 
 class CameraState(BaseModel):
@@ -94,6 +119,40 @@ class CameraState(BaseModel):
     beta: float = 1.12
     radius: float = 7.5
     target: dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 1.2, "z": 0.0})
+    minZ: float = 0.05
+    focusId: str | None = None
+    focusKind: str | None = None
+
+
+class PoseCraftEnvironment(BaseModel):
+    """Spatial environment. Fire3D owns geometry; ERS owns visual identity."""
+
+    id: str = "environment"
+    name: str = "Stage"
+    visible: bool = True
+    locked: bool = False
+    meshAssetId: str | None = None
+    reconstructionId: str | None = None
+    ersEnvironmentName: str | None = None
+    source: Literal["none", "reconstructed", "imported"] = "none"
+
+
+class PoseCraftCamera(BaseModel):
+    id: str
+    name: str
+    state: CameraState = Field(default_factory=CameraState)
+
+
+class PoseCraftShot(BaseModel):
+    """Named camera framing plus optional frozen figure/object transforms."""
+
+    shotId: str
+    name: str
+    camera: CameraState = Field(default_factory=CameraState)
+    cameraId: str | None = None
+    figureTransforms: dict[str, dict[str, object]] = Field(default_factory=dict)
+    objectTransforms: dict[str, dict[str, object]] = Field(default_factory=dict)
+    createdAt: str = ""
 
 
 class PoseCraftProvenance(BaseModel):
@@ -112,10 +171,17 @@ class PoseCraftScene(BaseModel):
     notes: str = ""
     stage: dict[str, object] = Field(default_factory=dict)
     camera: CameraState = Field(default_factory=CameraState)
+    environment: PoseCraftEnvironment = Field(default_factory=PoseCraftEnvironment)
     figures: list[FigureInstance] = Field(default_factory=list)
+    objects: list[PoseCraftObject] = Field(default_factory=list)
     primitives: list[BlockingPrimitive] = Field(default_factory=list)
+    cameras: list[PoseCraftCamera] = Field(default_factory=list)
+    shots: list[PoseCraftShot] = Field(default_factory=list)
     selectedFigureId: str | None = None
+    selectedObjectId: str | None = None
     selectedJoint: str = "head"
+    selectedCameraId: str | None = None
+    selectedShotId: str | None = None
     # True once a creator has manually edited the scene; Co-Director must not
     # silently overwrite a creator-modified scene (approval-gated mutations).
     creatorModified: bool = False
@@ -162,8 +228,13 @@ class PoseCraftSnapshot(BaseModel):
     imageAssetId: str
     camera: CameraState = Field(default_factory=CameraState)
     figures: list["FigureInstance"] = Field(default_factory=list)
+    objects: list["PoseCraftObject"] = Field(default_factory=list)
     primitives: list["BlockingPrimitive"] = Field(default_factory=list)
     customFigures: list["FigureInstance"] = Field(default_factory=list)
+    shotId: str | None = None
+    cameraId: str | None = None
+    figureIds: list[str] = Field(default_factory=list)
+    objectIds: list[str] = Field(default_factory=list)
     semanticSummary: str = ""
     createdAt: str = ""
     updatedAt: str = ""
@@ -179,9 +250,13 @@ class PoseCraftDocument(BaseModel):
     snapshots: list[PoseCraftSnapshot] = Field(default_factory=list)
     selectedSnapshotId: str | None = None
     layoutPrefs: PoseCraftLayoutPrefs | None = None
+    # empty = new project; ok = hydrated; corrupt = stored bytes failed — never PUT an empty overwrite.
+    loadState: Literal["ok", "empty", "corrupt"] = "ok"
+    igHandoffSnapshotId: str | None = None
 
 
 PoseCraftSnapshot.model_rebuild()
+PoseCraftScene.model_rebuild()
 
 
 class PoseCraftRevisionRecord(BaseModel):

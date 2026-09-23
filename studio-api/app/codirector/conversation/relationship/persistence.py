@@ -46,6 +46,7 @@ def load_relationship_profile(db: Session, project_id: str) -> CoDirectorRelatio
             g = CoDirectorRelationshipProfile.model_validate(global_payload)
             g.relationship_scope = "PROJECT"
             g.onboarding_completed = False
+            g.onboarding_skipped = False
             return g
         except Exception:
             pass

@@ -125,6 +125,7 @@ async def run_fal_model(
     *,
     on_progress: ProgressCb = None,
     on_request_id: RequestIdCb = None,
+    on_submit_meta: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
     poll_interval: float = 2.0,
     timeout_sec: float = 900.0,
 ) -> dict[str, Any]:
@@ -153,6 +154,8 @@ async def run_fal_model(
         status_url = meta.get("status_url")
         response_url = meta.get("response_url")
         request_id = meta.get("request_id") or meta.get("requestId")
+        if on_submit_meta:
+            await on_submit_meta(meta)
         if request_id and on_request_id:
             await on_request_id(str(request_id))
         if not status_url:
@@ -247,6 +250,45 @@ def extract_image_url(result: dict[str, Any]) -> str:
     if isinstance(data, dict):
         return extract_image_url(data)
     raise FalApiError(f"No image URL in fal result keys={list(result.keys())}")
+
+
+def cancel_fal_request(
+    model_id: str,
+    request_id: str,
+    api_key: str,
+    *,
+    cancel_url: str | None = None,
+    timeout_sec: float = 30.0,
+) -> dict[str, Any]:
+    """Cancel a queued or in-progress fal request.
+
+    Docs: https://docs.fal.ai/model-apis/model-endpoints/queue
+    URL shape: https://queue.fal.run/{model_id}/requests/{request_id}/cancel
+
+    The queue returns 202 Accepted with ``{"status": "CANCELLATION_REQUESTED"}``
+    when the cancel is accepted. A 400/404/409 means the request already finished
+    or does not exist and is surfaced as a :class:`FalApiError` so callers can
+    record ``CANCEL_REJECTED`` instead of pretending the job stopped.
+    """
+    if not model_id or not request_id:
+        raise FalApiError("Cannot cancel fal request without model_id and request_id.")
+    url = cancel_url or f"https://queue.fal.run/{model_id}/requests/{request_id}/cancel"
+    headers = _headers(api_key)
+    with httpx.Client(timeout=timeout_sec) as client:
+        response = client.put(url, headers=headers)
+        if response.status_code in (401, 403):
+            raise FalAuthError(
+                f"fal.ai rejected the API key ({response.status_code}). "
+                "Re-save a valid key in Project Settings → Integrations."
+            )
+        if response.status_code >= 400:
+            raise FalApiError(
+                f"fal cancel failed ({response.status_code}): {response.text[:500]}"
+            )
+        try:
+            return response.json()
+        except Exception:  # noqa: BLE001 - malformed JSON, treat as accepted
+            return {"status": "CANCELLATION_REQUESTED", "request_id": request_id}
 
 
 def _headers(api_key: str) -> dict[str, str]:

@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from ..character_identity import service as ci
+from ..character_identity.spoken_pronunciation import merge_spoken_pronunciations
 from .parser import parse_markup
 from .schemas import ParseResultOut, PerformanceSegmentOut, PlanOut, ValidationIssue
 
@@ -104,7 +105,7 @@ def apply_pronunciations(
     segments: list[PerformanceSegmentOut], voice: dict[str, Any] | None
 ) -> tuple[list[PerformanceSegmentOut], list[ValidationIssue]]:
     issues: list[ValidationIssue] = []
-    entries = (voice or {}).get("pronunciations") or []
+    entries = merge_spoken_pronunciations((voice or {}).get("pronunciations") or [])
     words = {str(e.get("word") or "").lower(): e for e in entries if isinstance(e, dict) and e.get("word")}
     out = []
     for seg in segments:

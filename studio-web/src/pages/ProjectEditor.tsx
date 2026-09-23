@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, isAbortError, isNavigationFetchFailure } from "../api";
+import { api, ApiError, bindAssetUrlProject, isAbortError, isNavigationFetchFailure } from "../api";
 import type { Asset, Project } from "../types";
 import { UnlockProjectModal } from "../components/ProjectPasswordModals";
 import { goHome } from "../navigation/projectLibrary";
+import { buildProjectWorkspaceLocation } from "../navigation/projectWorkspaceNavigation";
 import { CoDirectorProvider } from "../core/CoDirectorContext";
 import { useTranslation } from "react-i18next";
 import { ProjectLanguageSync } from "../i18n";
-import { WORKSPACES, coDirectorProjectPath, isStandaloneBibleWorkspace } from "../core/workspaces";
+import { isPoseCraftEnabled, isSpatialMapEnabled } from "../core/featureFlags";
+import { WORKSPACES, coDirectorProjectPath, isRetiredWorkspace, isStandaloneBibleWorkspace, resolveShelvedCreatorWorkspace } from "../core/workspaces";
 // WORKSPACES.labelKey used for i18n nav labels
 import { Timeline } from "../components/Timeline";
 import { AssetTray, PromptComposer } from "../components/AssetTray";
@@ -19,16 +21,13 @@ import { StoryboardStudio } from "../components/storyboard-studio/StoryboardStud
 import { useBindCoDirectorWorkspace, useOpenCoDirector } from "../components/CoDirector";
 import { ImageToolsPanel } from "../components/ImageTools";
 import { DirectorTracks } from "../components/DirectorTracks";
-import { TimelineMasterPanel } from "../components/timeline-master/TimelineMasterPanel";
 import { TimelineWorkspaceStack } from "../components/timeline-master/TimelineWorkspaceStack";
 import { TimelineEditorShell } from "../components/timeline-master/TimelineEditorShell";
 import { OneFramePanel, ThreeFramePanel } from "../components/FrameModes";
 import { DirectorSelectionProvider, useDirectorSelection } from "../components/DirectorSelectionContext";
 import { ContextInspector } from "../components/ContextInspector";
 import { GenerateTimelinePanel } from "../components/GenerateTimelinePanel";
-import { LipSyncTracksPanel } from "../components/LipSyncTracks";
 import { SetupWizardPanel } from "../components/SetupWizard";
-import { ProfilesWorkspace } from "../components/ProfilesWorkspace";
 import { LivePreviewMonitor } from "../components/LivePreviewMonitor";
 import { ProjectHome } from "../components/ProjectHome";
 import { ProjectSettings } from "../components/ProjectSettings";
@@ -36,16 +35,14 @@ import { Txt2VidPanel } from "../components/Txt2VidPanel";
 import { CinematicImageStudio } from "../components/image-studio/CinematicImageStudio";
 import { LibraryPanel } from "../components/LibraryPanel";
 import { MarketplacePanel } from "../components/MarketplacePanel";
-import { SceneCreatorWorkspace } from "../components/scene-creator/SceneCreatorWorkspace";
 import { PropCreatorWorkspace } from "../components/prop-creator/PropCreatorWorkspace";
-import { AvatarStudioWorkspace } from "../components/AvatarStudioWorkspace";
+import { EnvironmentCreatorWorkspace } from "../components/environment-creator/EnvironmentCreatorWorkspace";
 import { VoiceStudioShell } from "../components/VoiceStudioShell";
 import { CharacterProfileWorkspace } from "../components/CharacterProfileWorkspace";
 import { readEditorialContext } from "../components/EditorWorkspace";
 import { MagiEditorWorkspace } from "../components/magi/MagiEditorWorkspace";
 import { AudioStudioWorkspace } from "../components/AudioStudioWorkspace";
 import { GenerationToolsHub } from "../components/GenerationTools/GenerationToolsHub";
-import { BrandStudioWorkspace } from "../components/GenerationTools/BrandStudioWorkspace";
 import { PoseCraftWorkspace } from "../components/GenerationTools/PoseCraftWorkspace";
 import { ScriptwriterStudio } from "../components/scriptwriter/ScriptwriterStudio";
 import { ContinuityWorkspace } from "../components/continuity/ContinuityWorkspace";
@@ -60,6 +57,18 @@ import {
   resolveWorkspace,
   saveLastWorkspace,
 } from "../workspacePrefs";
+import { formatDurationSeconds } from "../lib/formatDuration";
+import {
+  buildTimelineSearch,
+  clearLastSelectedScene,
+  isTimelineShellWorkspace,
+  loadLastSelectedScene,
+  parseSceneIdFromSearch,
+  persistWorkspaceKey,
+  resolveSelectedScene,
+  saveLastSelectedScene,
+  shouldPersistSelectedScene,
+} from "../sceneSelection";
 
 function DirectorWorkspaceShell({
   project,
@@ -111,63 +120,46 @@ function DirectorWorkspaceShell({
       const scene = selected;
       if (!scene) return;
       try {
-        const tl = await api.getDirector(project.id, scene.id);
-        const duration = tl.duration_sec || scene.duration_sec || 5;
+        const duration = scene.duration_sec || 5;
         const id = Math.random().toString(36).slice(2, 10);
-        let next = { ...tl };
         if (asset.kind === "image") {
-          const imageClips = tl.image_clips || [];
-          const start = (imageClips as Array<{ start: number; length: number }>).reduce(
-            (m: number, c: { start: number; length: number }) => Math.max(m, c.start + c.length),
-            0,
-          );
-          next = {
-            ...next,
-            media_mode: "image" as const,
-            image_clips: [
-              ...imageClips,
-              {
-                id,
-                start: Math.min(start, Math.max(0, duration - 1)),
-                length: Math.min(2, duration),
-                label: `Image ${imageClips.length + 1}`,
-                role: "guide" as const,
-                asset_id: asset.id,
-              },
-            ],
-          };
-        } else if (asset.kind === "video") {
-          next = {
-            ...next,
-            media_mode: "video" as const,
-            video_clips: [
-              {
-                id,
-                start: 0,
-                length: duration,
-                label: "Video",
-                asset_id: asset.id,
-                trim_start: 0,
-              },
-            ],
-          };
-        } else if (asset.kind === "audio") {
-          next = {
-            ...next,
-            audio_clips: [
-              ...(tl.audio_clips || []),
-              {
-                id,
-                start: 0,
-                length: duration,
-                label: asset.tag || "Audio",
-                asset_id: asset.id,
-                volume: 1,
-              },
-            ],
-          };
+          // Omni Wave 3A Law 2: Library image → References only (mediaType=image).
+          // Do NOT write Visual image_clips guide takes. No silent generation.
+          await api.sceneReferences.attach(project.id, {
+            asset_id: asset.id,
+            scope_type: "scene",
+            scope_id: scene.id,
+            reference_type: "image",
+            media_kind: "image",
+            usage_modes: ["appearance"],
+            reference_roles: ["image"],
+          });
+          await refresh();
+          return;
+        } else if (asset.kind === "video" || asset.kind === "audio") {
+          const masterResp = await api.directorTimelineMaster(project.id, scene.id);
+          const master = masterResp?.master;
+          if (master) {
+            const { patchMasterClips } = await import("../timelineMaster/masterTimelineMutate");
+            if (asset.kind === "video") {
+              await patchMasterClips(
+                project.id,
+                scene.id,
+                master,
+                [{ id, kind: "video", start: 0, length: duration, label: "Video", assetId: asset.id }],
+                "visualClips",
+              );
+            } else {
+              await patchMasterClips(
+                project.id,
+                scene.id,
+                master,
+                [{ id, kind: "audio", start: 0, length: duration, label: asset.tag || "Audio", assetId: asset.id }],
+                "audioClips",
+              );
+            }
+          }
         }
-        await api.putDirector(project.id, scene.id, next);
         await refresh();
       } catch (e) {
         console.error(e);
@@ -271,12 +263,13 @@ function DirectorWorkspaceShell({
         onClearLibraryAsset={() => setLibraryPreviewId(null)}
         playheadSec={stackedTimeline ? playheadSec : undefined}
         onPlayheadChange={stackedTimeline ? setPlayheadSec : undefined}
+        onApproved={refresh}
       />
       {isTimelineMode && selected && (
         <div className="timeline-header-badges">
           <span className="pill">{selected.name}</span>
           <span className="pill">{selected.engine === "auto" ? "Auto" : selected.engine}</span>
-          <span className="pill">{selected.duration_sec}s</span>
+          <span className="pill">{formatDurationSeconds(selected.duration_sec)}</span>
           <span className="pill">{selected.aspect_ratio || "16:9"}</span>
           <span className="pill">
             {sceneW}×{sceneH}
@@ -300,7 +293,6 @@ function DirectorWorkspaceShell({
           [
             ["timeline", "Timeline"],
             ["prompt", "Prompt"],
-            ["lipsync", "Lip Sync"],
             ["settings", "Scene Settings"],
           ] as const
         ).map(([id, label]) => (
@@ -329,13 +321,7 @@ function DirectorWorkspaceShell({
             externalPlayhead={stackedTimeline ? playheadSec : undefined}
             onPlayheadChange={stackedTimeline ? setPlayheadSec : undefined}
           />
-          {workspaceTab === "timeline" && selected && (
-            <TimelineMasterPanel projectId={project.id} sceneId={selected.id} />
-          )}
         </>
-      )}
-      {workspaceTab === "lipsync" && selected && (
-        <LipSyncTracksPanel project={project} scene={selected} onChange={onChangeSafe(refresh)} />
       )}
       {workspaceTab === "settings" && (
         <PromptComposer project={project} sceneId={selectedScene} onChange={refresh} showContinuity />
@@ -422,9 +408,8 @@ function DirectorWorkspaceShell({
                   scene={selected}
                   libraryAsset={libraryPreviewAsset}
                   onClearLibraryAsset={() => setLibraryPreviewId(null)}
+                  onApproved={refresh}
                 />
-                {tab === "one" && <OneFramePanel project={project} scene={selected} onChange={refresh} />}
-                {tab === "three" && <ThreeFramePanel project={project} scene={selected} onChange={refresh} />}
                 <PromptComposer project={project} sceneId={selectedScene} onChange={refresh} />
               </div>
             )}
@@ -447,12 +432,6 @@ function DirectorWorkspaceShell({
   );
 }
 
-function onChangeSafe(refresh: () => Promise<void>) {
-  return () => {
-    void refresh();
-  };
-}
-
 export default function ProjectEditor() {
   const { id } = useParams();
   const { search: locationSearch } = useLocation();
@@ -469,6 +448,14 @@ export default function ProjectEditor() {
 
   const mountedRef = useRef(true);
   const refreshAcRef = useRef<AbortController | null>(null);
+  const locationSearchRef = useRef(locationSearch);
+  const tabRef = useRef(tab);
+  // Co-Director is an overlay, not a routed workspace. ?workspace=codirector
+  // is a deep-link that should open the overlay once on arrival, not re-open
+  // on every effect re-run while the param stays in the URL.
+  const codirectorDeepLinkOpenedRef = useRef(false);
+  locationSearchRef.current = locationSearch;
+  tabRef.current = tab;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -477,6 +464,11 @@ export default function ProjectEditor() {
       refreshAcRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    bindAssetUrlProject(id || null);
+    return () => bindAssetUrlProject(null);
+  }, [id]);
 
   const refresh = useCallback(async () => {
     if (!id) return;
@@ -493,11 +485,34 @@ export default function ProjectEditor() {
       if (!mountedRef.current || ac.signal.aborted) return;
       setLockedGate(false);
       setProject(p);
-      // Scene selection is only valid within its own project — a foreign
-      // scene id from a previous project must not leak into this one.
-      setSelectedScene((prev) =>
-        prev && p.scenes.some((s) => s.id === prev) ? prev : p.scenes[0]?.id,
+      // Selection precedence: URL → persisted project/workspace → session → first scene.
+      const search = locationSearchRef.current || (typeof window !== "undefined" ? window.location.search : "");
+      const requestedWorkspace = resolveWorkspace(
+        new URLSearchParams(search).get("workspace") ?? new URLSearchParams(search).get("tab"),
       );
+      const persistKey = persistWorkspaceKey(requestedWorkspace || "timeline");
+      setSelectedScene((prev) => {
+        // Re-read at commit time. A refresh started before the creator clicked
+        // another scene must not clobber that later persist/URL with a stale snapshot.
+        const liveSearch =
+          (typeof window !== "undefined" ? window.location.search : "") || search;
+        const livePersisted = loadLastSelectedScene(p.id, persistKey);
+        const liveValid =
+          livePersisted && p.scenes.some((scene) => scene.id === livePersisted) ? livePersisted : null;
+        if (livePersisted && !liveValid) {
+          clearLastSelectedScene(p.id, persistKey);
+        }
+        const next = resolveSelectedScene({
+          sceneIds: p.scenes.map((scene) => scene.id),
+          urlSceneId: parseSceneIdFromSearch(liveSearch),
+          persistedSceneId: liveValid,
+          sessionSceneId: prev,
+        });
+        if (next && requestedWorkspace && shouldPersistSelectedScene(requestedWorkspace)) {
+          saveLastSelectedScene(p.id, persistWorkspaceKey(requestedWorkspace), next);
+        }
+        return next;
+      });
       pushRecentProject(p.id, p.name);
     } catch (error) {
       if (isAbortError(error) || ac.signal.aborted || !mountedRef.current) return;
@@ -541,9 +556,55 @@ export default function ProjectEditor() {
     const query = new URLSearchParams(locationSearch);
     const raw = query.get("workspace") ?? query.get("tab");
     const requested = resolveWorkspace(raw);
+    if (isRetiredWorkspace(raw)) {
+      const search = new URLSearchParams(locationSearch);
+      search.delete("workspace");
+      search.delete("tab");
+      const qs = search.toString();
+      navigate({ pathname: `/project/${id}`, search: qs ? `?${qs}` : "" }, { replace: true });
+      setTab("home");
+      setWorkspaceProjectId(id);
+      return;
+    }
+    // v1.1 shelf — stale Spatial Map / PoseCraft bookmarks land on active destinations.
+    if (requested === "spatial" || requested === "posecraft") {
+      const dest = resolveShelvedCreatorWorkspace(requested);
+      if (dest !== requested) {
+        const search = new URLSearchParams(locationSearch);
+        search.set("workspace", dest);
+        search.delete("tab");
+        navigate({ pathname: `/project/${id}`, search: `?${search.toString()}` }, { replace: true });
+        setTab(dest);
+        setWorkspaceProjectId(id);
+        return;
+      }
+    }
     if (isStandaloneBibleWorkspace(requested)) {
       navigate(coDirectorProjectPath(id), { replace: true });
       return;
+    }
+    // Co-Director is an overlay, not a routed workspace tab. A
+    // ?workspace=codirector deep-link should open the Co-Director popup over
+    // the project (keeping sceneId context via the existing binding) instead
+    // of falling through to project home. Open once per deep-link arrival.
+    const rawNormalized = raw ? raw.trim().toLowerCase() : "";
+    const isCoDirectorDeepLink = rawNormalized === "codirector" || rawNormalized === "co-director";
+    if (isCoDirectorDeepLink) {
+      if (!codirectorDeepLinkOpenedRef.current) {
+        codirectorDeepLinkOpenedRef.current = true;
+        // Underlying tab stays on the project landing so a workspace stays
+        // mounted under the overlay (matches the c5 popup-over-workspace model).
+        setTab("home");
+        setWorkspaceProjectId(id);
+        openCoDirector();
+      } else {
+        // Already opened for this deep-link; just keep the project bound.
+        setTab("home");
+        setWorkspaceProjectId(id);
+      }
+      return;
+    } else {
+      codirectorDeepLinkOpenedRef.current = false;
     }
     // ROUTING CONTRACT: Open Project (no ?workspace= param) ALWAYS lands on
     // the project landing page. Workspace memory never silently reroutes a
@@ -560,20 +621,106 @@ export default function ProjectEditor() {
       search.delete("tab");
       navigate({ pathname: `/project/${id}`, search: `?${search.toString()}` }, { replace: true });
     }
-  }, [id, locationSearch, navigate]);
+  }, [id, locationSearch, navigate, openCoDirector]);
 
   useEffect(() => {
     if (!id || workspaceProjectId !== id) return;
-    saveLastWorkspace(id, tab);
+    saveLastWorkspace(id, resolveShelvedCreatorWorkspace(tab));
   }, [id, tab, workspaceProjectId]);
+
+  const commitSelectedScene = useCallback(
+    (sceneId: string) => {
+      setSelectedScene(sceneId);
+      if (!id || !shouldPersistSelectedScene(tabRef.current)) return;
+      const sid = String(sceneId || "").trim();
+      if (!sid) {
+        clearLastSelectedScene(id, persistWorkspaceKey(tabRef.current));
+        return;
+      }
+      saveLastSelectedScene(id, persistWorkspaceKey(tabRef.current), sid);
+    },
+    [id],
+  );
+
+  useEffect(() => {
+    if (!id || !shouldPersistSelectedScene(tab)) return;
+    if (!selectedScene) {
+      clearLastSelectedScene(id, persistWorkspaceKey(tab));
+      return;
+    }
+    saveLastSelectedScene(id, persistWorkspaceKey(tab), selectedScene);
+  }, [id, selectedScene, tab]);
+
+  useEffect(() => {
+    if (!id || !project || !isTimelineShellWorkspace(tab)) return;
+    // Stale-tab guard: Production dropdown (and any explicit workspace nav) can
+    // update the URL to a non-timeline workspace one render before `tab` catches
+    // up. Never rewrite that destination back to workspace=timeline.
+    const urlWorkspace = resolveWorkspace(
+      new URLSearchParams(locationSearch).get("workspace") ??
+        new URLSearchParams(locationSearch).get("tab"),
+    );
+    if (urlWorkspace && !isTimelineShellWorkspace(urlWorkspace)) return;
+    const validScene =
+      selectedScene && project.scenes.some((scene) => scene.id === selectedScene) ? selectedScene : "";
+    const next = buildTimelineSearch({
+      workspace: tab,
+      sceneId: validScene,
+      currentSearch: validScene ? locationSearch : "",
+    });
+    if (!next || locationSearch === next) return;
+    const current = new URLSearchParams(locationSearch);
+    const nextParams = new URLSearchParams(next);
+    const workspaceUnchanged =
+      (current.get("workspace") || current.get("tab") || "") === (nextParams.get("workspace") || "");
+    navigate({ pathname: `/project/${id}`, search: next }, { replace: workspaceUnchanged });
+  }, [id, selectedScene, tab, locationSearch, navigate, project]);
+
+  useEffect(() => {
+    if (!project) return;
+    const urlSceneId = parseSceneIdFromSearch(locationSearch);
+    if (!urlSceneId) return;
+    // URL → selection only when the URL itself changed. A creator click must
+    // be allowed to rewrite the previous first-scene canonicalize; do not let
+    // the stale sceneId in the address bar win over that click.
+    const next = resolveSelectedScene({
+      sceneIds: project.scenes.map((scene) => scene.id),
+      urlSceneId,
+      persistedSceneId: loadLastSelectedScene(project.id, persistWorkspaceKey(tab)),
+      sessionSceneId: selectedScene,
+    });
+    if (next && next !== selectedScene) commitSelectedScene(next);
+    // selectedScene is read for the no-op guard only — do not re-run on click.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commitSelectedScene, locationSearch, project, tab]);
 
   const go = useCallback(
     (next: string, extra?: Record<string, string>) => {
       if (!id) return;
-      const resolved = resolveWorkspace(next);
-      if (!resolved) return;
+      const resolvedRaw = resolveWorkspace(next);
+      if (!resolvedRaw) return;
+      const resolved = resolveShelvedCreatorWorkspace(resolvedRaw);
+      // QUERY-PARAM LAW: leaving Timeline must not carry workspace=timeline.
+      // sceneId is Timeline restore state — attach it only for timeline-shell
+      // destinations (or when the caller explicitly passes sceneId/scene).
+      // Other workspaces keep projectId only; return-to-Timeline reloads scene
+      // from persisted last-selected storage.
+      const explicitScene = String(extra?.sceneId || extra?.scene || "").trim() || undefined;
+      const rememberedScene =
+        explicitScene ||
+        loadLastSelectedScene(id, persistWorkspaceKey(resolved)) ||
+        selectedScene ||
+        undefined;
+      const sceneIdForUrl = isTimelineShellWorkspace(resolved) ? rememberedScene : explicitScene;
+      const location = buildProjectWorkspaceLocation({
+        projectId: id,
+        tab: resolved,
+        sceneId: sceneIdForUrl,
+        extra,
+      });
+      if (!location) return;
       if (isStandaloneBibleWorkspace(resolved)) {
-        navigate(coDirectorProjectPath(id), { replace: true });
+        navigate(`${location.pathname}${location.search}`, { replace: true });
         return;
       }
       setTab(resolved);
@@ -582,18 +729,10 @@ export default function ProjectEditor() {
       // User-initiated switches PUSH history so Back/Forward stays coherent
       // (View Timeline → Back returns to the landing). Only the legacy-alias
       // canonicalization above uses replace.
-      const params = new URLSearchParams();
-      if (resolved !== "home") params.set("workspace", resolved);
-      if (extra) {
-        for (const [k, v] of Object.entries(extra)) {
-          if (v) params.set(k, v);
-        }
-      }
-      const search = params.toString() ? `?${params.toString()}` : "";
-      if (locationSearch === search) return;
-      navigate({ pathname: `/project/${id}`, search });
+      if (locationSearch === location.search) return;
+      navigate({ pathname: location.pathname, search: location.search });
     },
-    [id, locationSearch, navigate],
+    [id, locationSearch, navigate, selectedScene],
   );
 
   const applyPrompt = useCallback(
@@ -607,10 +746,28 @@ export default function ProjectEditor() {
     [project, refresh, selectedScene],
   );
 
+  const routeSceneId = selectedScene || parseSceneIdFromSearch(locationSearch) || undefined;
+  const bindNode = id ? (
+    <ProjectCoDirectorBridge
+      projectId={id}
+      projectName={project?.name || "Project"}
+      primaryProjectType={project?.primary_project_type || "custom"}
+      sceneId={routeSceneId}
+      sceneName={project?.scenes.find((scene) => scene.id === routeSceneId)?.name}
+      workspaceTab={persistWorkspaceKey(resolveShelvedCreatorWorkspace(tab)) === "timeline" ? "timeline" : resolveShelvedCreatorWorkspace(tab)}
+      activeDocumentId={project && tab === "scriptwriter" ? activeDocumentId : undefined}
+      scriptwriterSceneId={project && tab === "scriptwriter" ? activeScriptSceneId : undefined}
+      onGoTab={go}
+      onApplyPrompt={applyPrompt}
+      onAppliedSetup={refresh}
+    />
+  ) : null;
+
   if (!project) {
     if (lockedGate && id) {
       return (
         <div className="app-shell" data-testid="project-locked-gate">
+          {bindNode}
           <header className="topbar">
             <div className="brand">
               Adept <span>UI Studio</span>
@@ -631,6 +788,7 @@ export default function ProjectEditor() {
     }
     return (
       <div className="app-shell">
+        {bindNode}
         <header className="topbar">
           <div className="brand">
             Adept <span>UI Studio</span>
@@ -641,11 +799,13 @@ export default function ProjectEditor() {
     );
   }
 
-  const showTimelineShell = tab === "one" || tab === "three" || tab === "timeline" || tab === "director";
+  // 1 Frame / 3 Frame are standalone CREATE surfaces — no Timeline shell.
+  const viewTab = resolveShelvedCreatorWorkspace(tab);
+  const showTimelineShell = viewTab === "timeline" || viewTab === "director";
   // Viewport-locked shell only for multi-pane app layouts; document pages use native window scroll.
-  const lockViewportShell = showTimelineShell || tab === "spatial" || tab === "magi" || tab === "editor";
+  const lockViewportShell = showTimelineShell || viewTab === "spatial" || viewTab === "magi" || viewTab === "editor";
 
-  const tabLabel = t(WORKSPACES[tab].labelKey);
+  const tabLabel = t(WORKSPACES[viewTab].labelKey);
   const selectedSceneObj = project.scenes.find((s) => s.id === selectedScene) || project.scenes[0];
 
   return (
@@ -653,30 +813,20 @@ export default function ProjectEditor() {
       value={{
         projectId: project.id,
         projectName: project.name,
-        sceneId: selectedScene,
+        sceneId: selectedSceneObj?.id,
         sceneName: selectedSceneObj?.name,
-        activeWorkspace: tab,
+        activeWorkspace: persistWorkspaceKey(tab) === "timeline" ? "timeline" : tab,
       }}
     >
       <ProjectLanguageSync project={project} />
-      <ProjectCoDirectorBridge
-        project={project}
-        sceneId={selectedScene}
-        sceneName={selectedSceneObj?.name}
-        workspaceTab={tab}
-        activeDocumentId={tab === "scriptwriter" ? activeDocumentId : undefined}
-        scriptwriterSceneId={tab === "scriptwriter" ? activeScriptSceneId : undefined}
-        onGoTab={go}
-        onApplyPrompt={applyPrompt}
-        onAppliedSetup={refresh}
-      />
+      {bindNode}
       <div className={`app-shell atmosphere${lockViewportShell ? " app-shell-fixed" : ""}`}>
       <AppStudioChrome
         variant="project"
         projectName={project.name}
         workspaceLabel={tabLabel}
         projectId={project.id}
-        activeWorkspace={tab}
+        activeWorkspace={viewTab}
         onNavigateWorkspace={(next) => go(next)}
         // c5: open Co-Director as a popup over the project workspace so the underlying
         // Timeline/Scene workspace stays mounted and receives mutation events.
@@ -692,36 +842,33 @@ export default function ProjectEditor() {
         ]}
       />
 
-      {tab === "home" ? (
+      {viewTab === "home" ? (
         <ProjectHome
           project={project}
           onGo={go}
           onRefresh={refresh}
           onAskCoDirector={(p) => openCoDirector(p)}
         />
-      ) : tab === "scenecreator" || tab === "mastersheet" ? (
-        <SceneCreatorWorkspace
-          project={project}
-          onGo={(next) => go((next === "spatial_map" ? "spatial" : next) as typeof tab)}
-        />
-      ) : tab === "propcreator" ? (
+      ) : viewTab === "environmentcreator" ? (
+        <EnvironmentCreatorWorkspace project={project} onGo={go} />
+      ) : viewTab === "propcreator" ? (
         <PropCreatorWorkspace project={project} onGo={go} />
-      ) : tab === "avatar" ? (
-        <AvatarStudioWorkspace project={project} onChange={refresh} onGo={go} />
-      ) : tab === "voicestudio" ? (
+      
+      ) : viewTab === "avatar" ? (
+        <div className="workspace-retired-notice" style={{ padding: "2rem", maxWidth: 560 }}>
+          <h2 style={{ marginTop: 0 }}>Avatar Studio is not available in this version</h2>
+          <p>
+            Avatar Studio has been temporarily retired from the current Adept UI.
+            InfiniteTalk / Wan are not part of the current production direction.
+            Existing Avatar outputs remain in Library. Voice Creator remains available.
+          </p>
+          <p style={{ opacity: 0.8 }}>Future direction: cloud Avatar for Adept UI v1.2 (no delivery date).</p>
+          <button type="button" onClick={() => go("home")}>Back to Project Home</button>
+        </div>
+      ) : viewTab === "voicestudio" ? (
         <VoiceStudioShell
           project={project}
-          initialCharacterId={
-            new URLSearchParams(locationSearch).get("characterId") ||
-            (() => {
-              try {
-                return sessionStorage.getItem("adept_selected_character") || "";
-              } catch {
-                return "";
-              }
-            })() ||
-            undefined
-          }
+          initialCharacterId={new URLSearchParams(locationSearch).get("characterId") || undefined}
           onChange={refresh}
           returnWorkspace={
             new URLSearchParams(locationSearch).get("returnWorkspace") ||
@@ -729,11 +876,12 @@ export default function ProjectEditor() {
             undefined
           }
         />
-      ) : tab === "characters" || tab === "identityregistry" ? (
+      ) : viewTab === "characters" || viewTab === "identityregistry" ? (
         <CharacterProfileWorkspace
           project={project}
+          onGo={go}
           onChange={refresh}
-          initialTab={tab === "identityregistry" ? "identityRegistry" : undefined}
+          initialTab={viewTab === "identityregistry" ? "identityRegistry" : undefined}
           initialCharacterId={
             new URLSearchParams(locationSearch).get("characterId") ||
             (() => {
@@ -752,13 +900,13 @@ export default function ProjectEditor() {
             undefined
           }
         />
-      ) : tab === "magi" || tab === "editor" ? (
+      ) : viewTab === "magi" || viewTab === "editor" ? (
         <MagiEditorWorkspace project={project} onChange={refresh} />
-      ) : tab === "audiostudio" ? (
+      ) : viewTab === "audiostudio" ? (
         <AudioStudioWorkspace project={project} onChange={refresh} onGo={go} />
-      ) : tab === "generationtools" ? (
+      ) : viewTab === "generationtools" ? (
         <GenerationToolsHub project={project} onChange={refresh} onGo={go} />
-      ) : tab === "scriptwriter" ? (
+      ) : viewTab === "scriptwriter" ? (
         <ScriptwriterStudio
           project={project}
           onChange={refresh}
@@ -766,52 +914,44 @@ export default function ProjectEditor() {
           onActiveDocumentId={setActiveDocumentId}
           onActiveSceneChange={setActiveScriptSceneId}
         />
-      ) : tab === "brandstudio" ? (
-        <BrandStudioWorkspace project={project} onChange={refresh} />
-      ) : tab === "posecraft" ? (
+      ) : viewTab === "posecraft" && isPoseCraftEnabled() ? (
         <PoseCraftWorkspace
           project={project}
           onChange={refresh}
           onGo={go}
           onAskCoDirector={(p) => openCoDirector(p, { autoSend: Boolean(p) })}
         />
-      ) : tab === "continuity" ? (
+      ) : viewTab === "continuity" ? (
         <ContinuityWorkspace project={project} onChange={refresh} onGo={go} />
-      ) : tab === "settings" ? (
+      ) : viewTab === "settings" ? (
         <ProjectSettings project={project} onChange={() => void refresh()} />
-      ) : tab === "setup" ? (
+      ) : viewTab === "setup" ? (
         <SetupWizardPanel projectId={project.id} />
-      ) : tab === "profiles" ? (
-        <ProfilesWorkspace onOpenAvatar={(profileId) => {
-          go("avatar");
-          // profile query handled via session bootstrap when user reopens; store hint
-          try {
-            sessionStorage.setItem("adept_avatar_profile", profileId);
-          } catch {
-            /* ignore */
-          }
-        }} />
-      ) : tab === "imagegen" ? (
+      ) : viewTab === "imagegen" ? (
         <CinematicImageStudio project={project} onChange={refresh} onGo={go} />
-      ) : tab === "txt2vid" ? (
+      ) : viewTab === "txt2vid" ? (
         <Txt2VidPanel project={project} onChange={refresh} onGo={go} />
-      ) : tab === "library" ? (
+      ) : viewTab === "one" ? (
+        <OneFramePanel project={project} scene={selectedSceneObj} onChange={refresh} />
+      ) : viewTab === "three" ? (
+        <ThreeFramePanel project={project} scene={selectedSceneObj} onChange={refresh} />
+      ) : viewTab === "library" ? (
         <LibraryPanel project={project} onChange={refresh} onGo={go} />
-      ) : tab === "marketplace" ? (
+      ) : viewTab === "marketplace" ? (
         <MarketplacePanel project={project} />
       ) : showTimelineShell ? (
         <DirectorSelectionProvider>
           <DirectorWorkspaceShell
             project={project}
             selectedScene={selectedScene}
-            setSelectedScene={setSelectedScene}
-            tab={tab}
+            setSelectedScene={commitSelectedScene}
+            tab={viewTab}
             refresh={refresh}
             onGoEditor={() => go("magi")}
             onOpenCharacterCreator={() => go("characters")}
           />
         </DirectorSelectionProvider>
-      ) : tab === "tools" ? (
+      ) : viewTab === "tools" ? (
         <>
           <ImageToolsPanel project={project} onChange={refresh} />
           <div className="page" style={{ width: "min(1100px, 100%)", paddingTop: 0 }}>
@@ -821,7 +961,7 @@ export default function ProjectEditor() {
             </div>
           </div>
         </>
-      ) : tab === "generate" ? (
+      ) : viewTab === "generate" ? (
         <div className="page generate-page">
           <GenerateTimelinePanel
             project={project}
@@ -829,11 +969,11 @@ export default function ProjectEditor() {
             onOpenTimeline={() => go("timeline")}
           />
         </div>
-      ) : tab === "spatial" ? (
-        <SpatialMapPanel projectId={project.id} onGoTab={go} />
-      ) : tab === "script" ? (
+      ) : viewTab === "spatial" && isSpatialMapEnabled() ? (
+        <SpatialMapPanel projectId={project.id} onGoTab={go} variant="standard" />
+      ) : viewTab === "script" ? (
         <StoryboardStudio project={project} onChange={refresh} onGo={go} />
-      ) : tab === "shotlist" ? (
+      ) : viewTab === "shotlist" ? (
         <ScriptStoryboardWorkspace
           project={project}
           onChange={refresh}
@@ -852,7 +992,9 @@ export default function ProjectEditor() {
 }
 
 function ProjectCoDirectorBridge({
-  project,
+  projectId,
+  projectName,
+  primaryProjectType,
   sceneId,
   sceneName,
   workspaceTab,
@@ -862,7 +1004,9 @@ function ProjectCoDirectorBridge({
   onApplyPrompt,
   onAppliedSetup,
 }: {
-  project: Project;
+  projectId: string;
+  projectName: string;
+  primaryProjectType?: string;
   sceneId?: string;
   sceneName?: string;
   workspaceTab: string;
@@ -873,9 +1017,9 @@ function ProjectCoDirectorBridge({
   onAppliedSetup: () => void | Promise<void>;
 }) {
   useBindCoDirectorWorkspace({
-    projectId: project.id,
-    projectName: project.name,
-    primaryProjectType: project.primary_project_type || "custom",
+    projectId,
+    projectName,
+    primaryProjectType: primaryProjectType || "custom",
     sceneId,
     sceneName,
     workspaceTab,

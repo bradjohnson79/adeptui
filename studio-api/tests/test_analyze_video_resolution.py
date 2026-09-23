@@ -96,3 +96,33 @@ def test_falls_back_to_batch_take_when_no_master_asset(db_scene):
 
     resolved = _resolve_playable_video_asset_id(db, pid, sid)
     assert resolved == take.id, "batch take fallback must be preserved when no mastered asset exists"
+
+
+def test_published_master_wins_over_batch_and_output_path(db_scene):
+    from app.director_timeline_w46 import store
+    from app.director_timeline_w46.contracts import ScenePublishState, SceneTimelineMaster
+
+    db, pid, sid = db_scene
+    batch = _video_asset(db, pid, "C:\\assets\\batch_wrong.mp4", tag="Scene 1 — Batch 1")
+    output = _video_asset(db, pid, "C:\\renders\\output_not_publish.mp4", tag="output")
+    published = _video_asset(db, pid, "C:\\renders\\scene12b_master.mp4", tag="Scene 12B")
+    scene = db.get(Scene, sid)
+    scene.output_path = output.path
+    scene.director_json = _director_json_with_batch_take(batch.id)
+    db.commit()
+
+    payload = store.load_master(db, pid, sid)
+    assert payload.get("ok"), payload
+    master_obj = SceneTimelineMaster.model_validate(payload["master"])
+    master_obj.scenePublish = ScenePublishState(
+        publishedAssetId=published.id,
+        publishedAt="2026-09-14T00:00:00Z",
+        sourceSceneStitchAssetId=published.id,
+        lifecycleStatusSnapshot="SCENE_FINISHED",
+        contentFingerprint="fp",
+        version=1,
+    )
+    store.save_master(db, pid, sid, master_obj)
+
+    resolved = _resolve_playable_video_asset_id(db, pid, sid)
+    assert resolved == published.id, "resolver must prefer scenePublish.publishedAssetId"

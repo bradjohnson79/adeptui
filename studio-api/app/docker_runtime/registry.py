@@ -29,6 +29,12 @@ def load_registry() -> InstalledRuntimeRegistry:
         data = json.loads(path.read_text(encoding="utf-8"))
         reg = InstalledRuntimeRegistry.model_validate(data)
         reg.sharedRefs = load_refs() or reg.sharedRefs
+        # Retired local video generators are never seeded and are dropped from
+        # persisted registries (WAN is not an Adept UI generator).
+        for retired_id in ("optional-wan",):
+            if retired_id in reg.runtimes:
+                del reg.runtimes[retired_id]
+                save_registry(reg)
         if not any(r.classification == "core_mandatory" for r in reg.runtimes.values()):
             seed_core_runtimes(reg)
             save_registry(reg)
@@ -74,20 +80,6 @@ def seed_core_runtimes(reg: InstalledRuntimeRegistry) -> None:
             image="host://ltx",
             uninstallAllowed=False,
             healthOk=True,
-        )
-    if "optional-wan" not in reg.runtimes:
-        reg.runtimes["optional-wan"] = DockerRuntimeDescriptor(
-            id="optional-wan",
-            name="WAN",
-            classification="official_optional",
-            ownership="adept_official",
-            modality="video",
-            readiness="ready",
-            lifecycle="stopped",
-            executionClass="native_local",
-            image="host://wan",
-            uninstallAllowed=True,
-            healthOk=False,
         )
 
 

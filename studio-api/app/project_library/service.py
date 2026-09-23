@@ -654,7 +654,11 @@ def repair_library(db: Session, project_id: str) -> dict[str, Any]:
 def enrich_library_item(asset: Asset) -> dict[str, Any]:
     """Shape a library list row with authoritative + display fields."""
     meta = read_asset_library_meta(asset)
-    thumb_url = f"/api/assets/{asset.id}/thumb" if asset.kind == "image" else None
+    from ..project_security.asset_file import canonical_project_asset_thumb_url
+
+    thumb_url = (
+        canonical_project_asset_thumb_url(asset.project_id, asset.id) if asset.kind == "image" else None
+    )
     return {
         "id": asset.id,
         "thumb_url": thumb_url,

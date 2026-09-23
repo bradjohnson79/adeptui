@@ -24,6 +24,9 @@ import {
   normalizedToPixel,
   pixelToNormalized,
   pointerToCell,
+  clientToSlicedSquareViewBox,
+  viewBoxToLocalCss,
+  slicedVisibleSquare,
   remapDerivedCell,
   remapPositionToDensity,
   rotateOrientation,
@@ -39,19 +42,28 @@ describe("gridGeometry cartesian", () => {
     expect(gridScaleLabel(0)).toBe("Neutral (10×10)");
   });
 
-  it("supports 11 Placement Precision levels", () => {
-    expect(MIN_GRID_SCALE).toBe(-5);
-    expect(MAX_GRID_SCALE).toBe(5);
+  it("supports 17 Placement Precision levels", () => {
+    expect(MIN_GRID_SCALE).toBe(-8);
+    expect(MAX_GRID_SCALE).toBe(8);
+    expect(densityForScale(-8)).toBe(2);
+    expect(densityForScale(-7)).toBe(3);
+    expect(densityForScale(-6)).toBe(4);
     expect(densityForScale(-5)).toBe(5);
     expect(densityForScale(-4)).toBe(6);
     expect(densityForScale(-3)).toBe(7);
     expect(densityForScale(-2)).toBe(8);
     expect(densityForScale(-1)).toBe(9);
+    expect(densityForScale(0)).toBe(10);
     expect(densityForScale(1)).toBe(12);
     expect(densityForScale(2)).toBe(14);
     expect(densityForScale(3)).toBe(16);
     expect(densityForScale(4)).toBe(18);
     expect(densityForScale(5)).toBe(20);
+    expect(densityForScale(6)).toBe(22);
+    expect(densityForScale(7)).toBe(24);
+    expect(densityForScale(8)).toBe(26);
+    expect(gridScaleLabel(-8)).toBe("-8 (2×2)");
+    expect(gridScaleLabel(8)).toBe("+8 (26×26)");
     expect(gridScaleLabel(-5)).toBe("-5 (5×5)");
     expect(gridScaleLabel(5)).toBe("+5 (20×20)");
   });
@@ -148,9 +160,11 @@ describe("gridGeometry cartesian", () => {
 
 describe("required cartesian engine API", () => {
   it("exposes all 11 Placement Precision densities", () => {
-    expect(ALL_GRID_SCALES).toEqual([-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]);
-    const expected = [5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20];
+    expect(ALL_GRID_SCALES).toEqual([-8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    const expected = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22, 24, 26];
     expect(ALL_GRID_SCALES.map(densityForScale)).toEqual(expected);
+    expect(new Set(expected).size).toBe(expected.length);
+    expect(ALL_GRID_SCALES).toHaveLength(17);
   });
 
   it("cellToNormalized and normalizedToNearestCell round-trip on every density", () => {
@@ -177,9 +191,15 @@ describe("required cartesian engine API", () => {
     }
   });
 
-  it("rejects corner cells whose center is outside the circle on every density", () => {
+  it("rejects corner cells outside the circle when density is high enough", () => {
     for (const scale of ALL_GRID_SCALES) {
       const density = densityForScale(scale);
+      // dens <= 3: corner centers lie inside the unit circle (valid cells).
+      if (density <= 3) {
+        expect(isCellInsideCircle(0, 0, density)).toBe(true);
+        expect(isValidCell(0, 0, density)).toBe(true);
+        continue;
+      }
       expect(isCellInsideCircle(0, 0, density)).toBe(false);
       expect(isCellInsideCircle(density - 1, density - 1, density)).toBe(false);
       expect(isValidCell(0, 0, density)).toBe(false);
@@ -189,15 +209,24 @@ describe("required cartesian engine API", () => {
   it("adjacentCell stays on valid squares across densities", () => {
     for (const scale of ALL_GRID_SCALES) {
       const density = densityForScale(scale);
-      const mid = Math.floor(density / 2);
-      const east = adjacentCell(mid, mid, 1, 0, density);
-      expect(east).toEqual({ column: mid + 1, row: mid });
-      expect(isCellInsideCircle(east!.column, east!.row, density)).toBe(true);
+      let found = false;
+      for (let row = 0; row < density && !found; row += 1) {
+        for (let column = 0; column < density - 1; column += 1) {
+          if (!isValidCell(column, row, density)) continue;
+          const east = adjacentCell(column, row, 1, 0, density);
+          if (!east) continue;
+          expect(east).toEqual({ column: column + 1, row });
+          expect(isCellInsideCircle(east.column, east.row, density)).toBe(true);
+          found = true;
+          break;
+        }
+      }
+      expect(found).toBe(true);
       expect(adjacentCell(0, 0, -1, 0, density)).toBeNull();
     }
   });
 
-  it("remapPositionToDensity keeps normalized position stable across all 11 densities", () => {
+  it("remapPositionToDensity keeps normalized position stable across all 17 densities", () => {
     const origin = { x: -0.18, y: 0.22 };
     expect(isInsideCircle(origin.x, origin.y)).toBe(true);
     const cells = ALL_GRID_SCALES.map((scale) => {
@@ -301,13 +330,91 @@ describe("Work Order E frontend-testable geometry", () => {
     expect(isCellInsideCircle(0, 0, density)).toBe(false);
   });
 
-  it("clampGridScale stays on the 11-level density table", () => {
-    expect(clampGridScale(-99)).toBe(-5);
-    expect(clampGridScale(99)).toBe(5);
+  it("clampGridScale stays on the 17-level density table", () => {
+    expect(clampGridScale(-99)).toBe(-8);
+    expect(clampGridScale(99)).toBe(8);
     expect(clampGridScale(0.4)).toBe(0);
     expect(clampGridScale(0.6)).toBe(1);
-    expect(densityForScale(99)).toBe(20);
-    expect(densityForScale(-99)).toBe(5);
+    expect(densityForScale(99)).toBe(26);
+    expect(densityForScale(-99)).toBe(2);
+  });
+
+  it("every one of the 17 positions -8..+8 is selectable exactly", () => {
+    for (let s = MIN_GRID_SCALE; s <= MAX_GRID_SCALE; s += 1) {
+      expect(clampGridScale(s)).toBe(s);
+      expect(clampGridScale(s + 0.3)).toBe(s);
+      expect(densityForScale(s)).toBe(GRID_DENSITY[s]);
+    }
+    expect(MAX_GRID_SCALE - MIN_GRID_SCALE + 1).toBe(17);
+  });
+
+  it("density strictly increases from -8 to +8 (no collapsed steps)", () => {
+    const densities = ALL_GRID_SCALES.map(densityForScale);
+    for (let i = 1; i < densities.length; i += 1) {
+      expect(densities[i]).toBeGreaterThan(densities[i - 1]);
+    }
+  });
+
+  it("new outer steps extend size differentiation beyond the old -5..+5 range", () => {
+    // -8 = largest placement (fewest cells), visibly larger than the old -5 floor.
+    expect(densityForScale(-8)).toBeLessThan(densityForScale(-5));
+    expect(densityForScale(-7)).toBeLessThan(densityForScale(-5));
+    expect(densityForScale(-6)).toBeLessThan(densityForScale(-5));
+    // +8 = smallest placement (most cells), visibly smaller than the old +5 ceiling.
+    expect(densityForScale(8)).toBeGreaterThan(densityForScale(5));
+    expect(densityForScale(7)).toBeGreaterThan(densityForScale(5));
+    expect(densityForScale(6)).toBeGreaterThan(densityForScale(5));
+    // Existing -5..+5 meanings are unchanged.
+    expect([5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20]).toEqual(
+      [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5].map(densityForScale),
+    );
+  });
+
+  it("every density including the new low end yields valid cells inside the circle", () => {
+    for (const scale of ALL_GRID_SCALES) {
+      const density = densityForScale(scale);
+      let valid = 0;
+      for (let row = 0; row < density; row += 1) {
+        for (let column = 0; column < density; column += 1) {
+          if (isValidCell(column, row, density)) valid += 1;
+        }
+      }
+      expect(valid).toBeGreaterThan(0);
+      const mid = Math.floor(density / 2);
+      expect(isValidCell(mid, mid, density)).toBe(true);
+    }
+    // Density floor check: -8 (2×2) still yields 4 valid quadrant cells.
+    expect(isValidCell(0, 0, 2)).toBe(true);
+    expect(isValidCell(1, 1, 2)).toBe(true);
+  });
+
+  it("center anchoring: normalized (0,0) is the map center at every density", () => {
+    const size = 640;
+    for (const scale of ALL_GRID_SCALES) {
+      const density = densityForScale(scale);
+      const center = normalizedToPixel(0, 0, size);
+      expect(center.px).toBeCloseTo(size / 2, 6);
+      expect(center.py).toBeCloseTo(size / 2, 6);
+      // Nearest cell to the world center must exist at every density.
+      const cell = nearestValidCell(0, 0, density);
+      expect(cell).not.toBeNull();
+      expect(isValidCell(cell!.column, cell!.row, density)).toBe(true);
+    }
+  });
+
+  it("changing gridScale across the full -8..+8 sweep never mutates normalized placement", () => {
+    const placement = { x: 0.34, y: -0.41 };
+    expect(isInsideCircle(placement.x, placement.y)).toBe(true);
+    for (const scale of ALL_GRID_SCALES) {
+      const density = densityForScale(scale);
+      const cell = remapPositionToDensity(placement.x, placement.y, density);
+      expect(cell).not.toBeNull();
+      // Cell remap is display-only: inputs are untouched.
+      expect(placement).toEqual({ x: 0.34, y: -0.41 });
+      const center = cellCenterNormalized(cell!.column, cell!.row, density);
+      const dist = Math.hypot(center.x - placement.x, center.y - placement.y);
+      expect(dist).toBeLessThan(2 / density + 1e-9);
+    }
   });
 
   it("camera orientation wraps on 45-degree cardinals; unknown labels default to 0", () => {
@@ -321,5 +428,37 @@ describe("Work Order E frontend-testable geometry", () => {
   it("chessCellLabel matches spatial-metric E8", () => {
     expect(chessCellLabel(4, 7)).toBe("E8");
     expect(chessCellLabel(5, 5)).toBe("F6");
+  });
+
+  it("slice pointer mapping keeps a square viewBox under a 16:9 CSS box", () => {
+    const css = { left: 0, top: 0, width: 1600, height: 900 };
+    const vb = 900;
+    const mid = clientToSlicedSquareViewBox(800, 450, css, vb);
+    expect(mid).toEqual({ x: 450, y: 450 });
+    const top = clientToSlicedSquareViewBox(800, 0, css, vb);
+    expect(top).not.toBeNull();
+    expect(top!.y).toBeCloseTo((900 - 506.25) / 2, 5);
+    const vis = slicedVisibleSquare(1600, 900, 900);
+    expect(vis.w).toBeCloseTo(900);
+    expect(vis.h).toBeCloseTo(506.25);
+    expect(vis.x).toBeCloseTo(0);
+    expect(vis.y).toBeCloseTo((900 - 506.25) / 2);
+  });
+
+  it("viewBoxToLocalCss reverses slice mapping", () => {
+    const css = { left: 0, top: 0, width: 1600, height: 900 };
+    const vb = 900;
+    const mid = clientToSlicedSquareViewBox(800, 450, css, vb)!;
+    const back = viewBoxToLocalCss(mid.x, mid.y, css.width, css.height, vb);
+    expect(back.x).toBeCloseTo(800);
+    expect(back.y).toBeCloseTo(450);
+  });
+
+  it("square CSS box maps 1:1 onto the square viewBox", () => {
+    const css = { left: 10, top: 20, width: 512, height: 512 };
+    const point = clientToSlicedSquareViewBox(10 + 128, 20 + 128, css, 512);
+    expect(point).toEqual({ x: 128, y: 128 });
+    const vis = slicedVisibleSquare(512, 512, 512);
+    expect(vis).toEqual({ x: 0, y: 0, w: 512, h: 512 });
   });
 });

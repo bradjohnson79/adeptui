@@ -44,3 +44,26 @@ def test_extract_output_path_from_history_finds_string_path(tmp_path):
     history = {"outputs": {"2": {"string": str(output)}}}
 
     assert extract_output_path_from_history(history) == output
+
+
+def test_extract_output_path_from_history_finds_h3_images_mp4(tmp_path):
+    """H3 SaveVideo writes the MP4 under outputs.images, not videos/gifs."""
+    output = tmp_path / "beffd3d8_perfretake_35f215b9_00001_.mp4"
+    output.write_bytes(b"video")
+    history = {
+        "outputs": {
+            "92": {
+                "images": [
+                    {
+                        "filename": output.name,
+                        "subfolder": "",
+                        "type": "output",
+                    }
+                ],
+                "animated": [True],
+            }
+        }
+    }
+    # Resolve via absolute filename so we don't depend on comfy_output_dir.
+    history["outputs"]["92"]["images"][0]["filename"] = str(output)
+    assert extract_output_path_from_history(history) == output

@@ -96,3 +96,65 @@ export function resolveH3TimelineCanvas(
   const { label, width, height } = resolveH3MegapixelCanvas(mp);
   return { mode, megapixels: mp, label, width, height, auto };
 }
+
+/** Timeline LTX QUALITY tiers — no 480p. Native 4K is UNAVAILABLE. */
+export const LTX_TIMELINE_QUALITY_TIERS = ["720p", "1080p", "2K", "4K"] as const;
+export type LtxTimelineQuality = (typeof LTX_TIMELINE_QUALITY_TIERS)[number];
+
+/** Default Timeline LTX QUALITY (= adapter finalResolution 1280x704). */
+export const LTX_DEFAULT_QUALITY: LtxTimelineQuality = "720p";
+
+/** Legal /32 16:9 canvases for Timeline LTX QUALITY. 4K = null (UNAVAILABLE). */
+export const LTX_QUALITY_CANVAS_16_9: Record<
+  LtxTimelineQuality,
+  { width: number; height: number } | null
+> = {
+  "720p": { width: 1280, height: 704 },
+  "1080p": { width: 1920, height: 1088 },
+  "2K": { width: 2560, height: 1440 },
+  "4K": null,
+};
+
+export function normalizeLtxTimelineQuality(
+  value: string | null | undefined,
+): LtxTimelineQuality {
+  const token = String(value || "").trim();
+  const aliases: Record<string, LtxTimelineQuality> = {
+    "720p": "720p",
+    "1080p": "1080p",
+    "2k": "2K",
+    "2K": "2K",
+    "4k": "4K",
+    "4K": "4K",
+  };
+  return aliases[token] || aliases[token.toLowerCase()] || LTX_DEFAULT_QUALITY;
+}
+
+export function resolveLtxTimelineCanvas(
+  ltxQuality: string | null | undefined,
+): {
+  tier: LtxTimelineQuality;
+  width: number;
+  height: number;
+  available: boolean;
+  honestyLabel: string;
+} {
+  const tier = normalizeLtxTimelineQuality(ltxQuality);
+  const dims = LTX_QUALITY_CANVAS_16_9[tier];
+  if (!dims) {
+    return {
+      tier,
+      width: 0,
+      height: 0,
+      available: false,
+      honestyLabel: "Native 4K is UNAVAILABLE",
+    };
+  }
+  return {
+    tier,
+    width: dims.width,
+    height: dims.height,
+    available: true,
+    honestyLabel: `Native ${tier} — ${dims.width}×${dims.height}`,
+  };
+}

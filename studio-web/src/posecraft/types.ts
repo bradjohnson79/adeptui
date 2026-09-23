@@ -1,4 +1,4 @@
-export const POSECRAFT_SCHEMA_VERSION = 2;
+export const POSECRAFT_SCHEMA_VERSION = 3;
 
 export type ArchetypeId =
   | "adult-male"
@@ -85,6 +85,9 @@ export type CameraState = {
     y: number;
     z: number;
   };
+  minZ?: number;
+  focusId?: string | null;
+  focusKind?: string | null;
 };
 
 /** Co-Director scene labels — optional figure emphasis role (separate from name). */
@@ -99,6 +102,12 @@ export type FigureInstance = {
   colorId: FigureColorId;
   position: {
     x: number;
+    y?: number;
+    z: number;
+  };
+  rotation?: {
+    x: number;
+    y: number;
     z: number;
   };
   rotationY: number;
@@ -160,6 +169,56 @@ export type FurnitureKind =
   | "wall-window-medium"
   | "wall-window-large";
 
+export type PoseCraftObjectSource = "procedural" | "imported" | "reconstructed";
+
+export type PoseCraftObject = {
+  id: string;
+  name: string;
+  source: PoseCraftObjectSource;
+  primitiveKind?: string | null;
+  assetId?: string | null;
+  meshAssetId?: string | null;
+  reconstructionId?: string | null;
+  sourceInstanceId?: string | null;
+  detectedLabel?: string | null;
+  detectedHuman?: boolean;
+  position: { x: number; y?: number; z: number };
+  rotation?: { x: number; y: number; z: number };
+  scale?: { x: number; y: number; z: number } | number;
+  size?: { x: number; y: number; z: number };
+  color?: string;
+  visible?: boolean;
+  locked?: boolean;
+  nameConfirmed?: boolean;
+};
+
+export type PoseCraftEnvironment = {
+  id: string;
+  name: string;
+  visible: boolean;
+  locked: boolean;
+  meshAssetId?: string | null;
+  reconstructionId?: string | null;
+  ersEnvironmentName?: string | null;
+  source: "none" | "reconstructed" | "imported";
+};
+
+export type PoseCraftCamera = {
+  id: string;
+  name: string;
+  state: CameraState;
+};
+
+export type PoseCraftShot = {
+  shotId: string;
+  name: string;
+  camera: CameraState;
+  cameraId?: string | null;
+  figureTransforms?: Record<string, unknown>;
+  objectTransforms?: Record<string, unknown>;
+  createdAt?: string;
+};
+
 export type BlockingPrimitive = {
   /** Permanent machine identity — never changes on rename. */
   id: string;
@@ -214,15 +273,19 @@ export type PoseCraftScene = {
     showLabels?: boolean;
   };
   camera: CameraState;
+  environment?: PoseCraftEnvironment;
   figures: FigureInstance[];
+  objects?: PoseCraftObject[];
   primitives: BlockingPrimitive[];
+  cameras?: PoseCraftCamera[];
+  shots?: PoseCraftShot[];
   selectedFigureId: string | null;
+  selectedObjectId?: string | null;
   selectedJoint: JointName;
-  /** Spatial Map world origin for this scene, in meters (adept-world-v1). */
-  worldOriginMeters?: { x: number; y: number; z: number };
-  /** Final Mandatory GO (D6): selected blocking/furniture primitive for
-   * keyboard Delete/Backspace. Optional for backward-compat with older scenes. */
+  selectedCameraId?: string | null;
+  selectedShotId?: string | null;
   selectedPrimitiveId?: string | null;
+  creatorModified?: boolean;
   // Backward-compat provenance: records when/how a scene was migrated from an
   // older schemaVersion so legacy joint data is traceable, not silently lost.
   provenance?: PoseCraftProvenance;
@@ -256,8 +319,13 @@ export type PoseCraftSnapshot = {
   camera: CameraState;
   /** Frozen figures at capture time (immutable copy). */
   figures: FigureInstance[];
+  objects?: PoseCraftObject[];
   /** Frozen primitives at capture time (immutable copy). */
   primitives: BlockingPrimitive[];
+  shotId?: string | null;
+  cameraId?: string | null;
+  figureIds?: string[];
+  objectIds?: string[];
   /** Frozen custom-figure subset (figures with kind === "custom"). */
   customFigures: FigureInstance[];
   /** Human-readable scene summary using labels (not colors) at capture time. */
@@ -275,6 +343,8 @@ export type PoseCraftDocument = {
   /** The Snapshot currently selected for handoff (null = none selected). */
   selectedSnapshotId?: string | null;
   layoutPrefs?: PoseCraftLayoutPrefs;
+  loadState?: "ok" | "empty" | "corrupt";
+  igHandoffSnapshotId?: string | null;
 };
 
 export type ArchetypeSpec = {

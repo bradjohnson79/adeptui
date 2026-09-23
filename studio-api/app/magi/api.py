@@ -17,6 +17,7 @@ from .production_gate import evaluate_magi_wave4b_gate, evaluate_wave5_may_begin
 from .readiness import readiness_payload
 from .sequence.store import get_sequence, save_sequence
 from .sequence.validation import parse_sequence, validate_asset_ownership
+from .published_master_ingest import ingest_published_master
 from .timeline_handoff import export_to_timeline, import_timeline_asset
 from ..timeline_product.production_gate import evaluate_timeline_wave4c_gate
 
@@ -249,6 +250,25 @@ def put_project_sequence(
     return {"sequence": saved}
 
 
+@router.post("/projects/{project_id}/scenes/{scene_id}/ingest-published-master")
+def ingest_published_master_endpoint(
+    project_id: str,
+    scene_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Load only the Timeline published master onto MAGI VIDEO/AUDIO tracks."""
+    result = ingest_published_master(db, project_id, scene_id)
+    if not result.get("ok"):
+        code = magi_canonical_code(str(result.get("error") or "IMPORT_FAILED"))
+        raise magi_error(
+            code,
+            result.get("message") or "MAGI could not ingest the published master.",
+            status_code=magi_taxonomy(code).get("status_code", 400),
+            fields={"error": result.get("error"), "sceneId": scene_id},
+        )
+    return result
+
+
 @router.post("/projects/{project_id}/timeline/import")
 def import_timeline_asset_endpoint(
     project_id: str,
@@ -356,6 +376,11 @@ def apply_color_grade(
             fields={"body": body},
         )
     result = apply_color_grade_to_asset(db, project_id, asset_id, preset_id, params)
+    out_id = str(result.get("output_asset_id") or result.get("assetId") or "").strip()
+    if out_id:
+        from .finishing import merge_finishing
+
+        merge_finishing(project_id, {"visualResultAssetId": out_id})
     clip_id = body.get("clipId") or body.get("clip_id")
     if not clip_id:
         from .sequence.store import get_sequence
@@ -390,7 +415,7 @@ def preview_upscale(
     asset_id = body.get("asset_id") or body.get("assetId")
     engine = body.get("engine") or "ffmpeg-scale"
     model = body.get("model") or "lanczos"
-    target_resolution = body.get("target_resolution") or "1920x1080"
+    target_resolution = body.get("target_resolution") or body.get("targetResolution") or ""
     if not asset_id:
         raise magi_error(
             "ASSET_REQUIRED",
@@ -399,9 +424,15 @@ def preview_upscale(
         )
     try:
         return _preview_upscale(db, project_id, asset_id, engine, model, target_resolution)
-    except RuntimeError as exc:
-        code = "GPU_UPSCALE_UNAVAILABLE" if "unavailable" in str(exc).lower() else "RENDER_FAILED"
-        raise magi_error(code, str(exc), fields={"engine": engine, "model": model}) from exc
+    except Exception as exc:
+        from .upscale_targets import UpscaleTargetError
+
+        if isinstance(exc, UpscaleTargetError):
+            raise magi_error(exc.code, str(exc), fields={"engine": engine, "model": model}) from exc
+        if isinstance(exc, RuntimeError):
+            code = "GPU_UPSCALE_UNAVAILABLE" if "unavailable" in str(exc).lower() else "RENDER_FAILED"
+            raise magi_error(code, str(exc), fields={"engine": engine, "model": model}) from exc
+        raise
 
 
 @router.post("/projects/{project_id}/upscale/apply")
@@ -416,7 +447,7 @@ def apply_upscale(
     asset_id = body.get("asset_id") or body.get("assetId")
     engine = body.get("engine") or "ffmpeg-scale"
     model = body.get("model") or "lanczos"
-    target_resolution = body.get("target_resolution") or "1920x1080"
+    target_resolution = body.get("target_resolution") or body.get("targetResolution") or ""
     if not asset_id:
         raise magi_error(
             "ASSET_REQUIRED",
@@ -424,10 +455,24 @@ def apply_upscale(
             fields={"body": body},
         )
     try:
-        return _apply_upscale(db, project_id, asset_id, engine, model, target_resolution)
-    except RuntimeError as exc:
-        code = "GPU_UPSCALE_UNAVAILABLE" if "unavailable" in str(exc).lower() else "RENDER_FAILED"
-        raise magi_error(code, str(exc), fields={"engine": engine, "model": model}) from exc
+        result = _apply_upscale(db, project_id, asset_id, engine, model, target_resolution)
+        out_id = str((result or {}).get("output_asset_id") or (result or {}).get("assetId") or "").strip()
+        if out_id:
+            from .finishing import merge_finishing
+
+            merge_finishing(project_id, {"visualResultAssetId": out_id})
+        return result
+    except Exception as exc:
+        from .upscale_targets import UpscaleTargetError
+
+        if isinstance(exc, UpscaleTargetError):
+            raise magi_error(exc.code, str(exc), fields={"engine": engine, "model": model}) from exc
+        if isinstance(exc, ValueError):
+            raise magi_error("ASSET_REQUIRED", str(exc), fields={"engine": engine, "model": model}) from exc
+        if isinstance(exc, RuntimeError):
+            code = "GPU_UPSCALE_UNAVAILABLE" if "unavailable" in str(exc).lower() else "RENDER_FAILED"
+            raise magi_error(code, str(exc), fields={"engine": engine, "model": model}) from exc
+        raise
 
 
 @router.post("/projects/{project_id}/audio/generate")
@@ -436,7 +481,11 @@ def generate_audio(
     body: dict[str, Any],
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Queue MAGI Audio Studio music/SFX. Returns job ids — never optimistic ready."""
+    """Queue MAGI music/SFX onto sequence finishing.audio (Final Render mix authority).
+
+    Places stems on MAGI sequence and writes finishing.audio musicAssetId/sfxAssetId.
+    Adjacent Audio Studio mix.json is not updated and is not Final Render authority.
+    Returns job ids — never optimistic ready."""
     try:
         from .audio_generate import enqueue_audio
 
@@ -455,6 +504,10 @@ def create_render(
     body: dict[str, Any],
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    """Enqueue MAGI final/preview render.
+
+    Mix stage authority is sequence finishing.audio only (not Audio Studio mix).
+    """
     from .final_render import enqueue_final_render
 
     try:

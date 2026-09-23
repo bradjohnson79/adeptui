@@ -232,6 +232,9 @@ def _parse_document(row: SpatialMapDocumentRow) -> SpatialMapDocument:
         raise _corrupt_document(row, f"stored document_json failed validation: {exc}")
     doc.warnings = consistency_warnings(doc)
     migrate_document(doc)
+    from .movement import hydrate_movement_segments
+
+    hydrate_movement_segments(doc)
     return doc
 
 
@@ -299,6 +302,10 @@ def _validate_document_attachments(document: SpatialMapDocument) -> None:
 
 
 def _save_document(db: Session, row: SpatialMapDocumentRow, document: SpatialMapDocument) -> SpatialMapDocument:
+    from .movement import hydrate_movement_segments, write_through_active
+
+    hydrate_movement_segments(document)
+    write_through_active(document)
     from .metric import sync_document
 
     _validate_document_attachments(document)
@@ -456,6 +463,7 @@ def create_document(db: Session, project_id: str, body: SpatialMapCreateBody) ->
         bounds=body.bounds,
         backgroundAssetId=body.backgroundAssetId,
         masterEnvironmentPrompt=(body.masterEnvironmentPrompt or "").strip(),
+        geometrySource=body.geometrySource,
         sceneIntent=scene_intent,
         originalEnvironmentReferenceAssetId=body.originalEnvironmentReferenceAssetId,
         originatingUserPrompt=(body.originatingUserPrompt or "").strip(),
@@ -519,6 +527,8 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
         document.backgroundAssetId = body.backgroundAssetId
     if body.masterEnvironmentPrompt is not None:
         document.masterEnvironmentPrompt = body.masterEnvironmentPrompt.strip()
+    if body.geometrySource is not None:
+        document.geometrySource = (body.geometrySource or "").strip() or None
     if body.sceneIntent is not None:
         document.sceneIntent = body.sceneIntent
     elif body.sceneDescription is not None:
@@ -547,6 +557,23 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
     if body.gridScale is not None:
         document.gridScale = clamp_grid_scale(body.gridScale)
         refresh_derived_cells(document)
+    if body.backgroundAlignment is not None:
+        incoming = body.backgroundAlignment
+        prior = document.backgroundAlignment
+        if (
+            prior is not None
+            and incoming.sourceWidth <= 0
+            and incoming.sourceHeight <= 0
+            and (prior.sourceWidth > 0 or prior.sourceHeight > 0)
+        ):
+            incoming = incoming.model_copy(
+                update={
+                    "sourceWidth": prior.sourceWidth,
+                    "sourceHeight": prior.sourceHeight,
+                    "sourceAspectRatio": prior.sourceAspectRatio,
+                }
+            )
+        document.backgroundAlignment = incoming
     if body.anchors is not None:
         document.anchors = [SpatialAnchor(**a) if not isinstance(a, SpatialAnchor) else a for a in body.anchors]
     if body.environmentalAnchors is not None:
@@ -602,6 +629,10 @@ def commit_document(
 
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
+    from .movement import write_through_active
+
+    # Explicit Save also flushes live poses into the active movement snapshot.
+    write_through_active(document)
     _validate_document_attachments(document)
     sync_document(document)
     now = _now()
@@ -623,6 +654,25 @@ def commit_document(
     db.commit()
     db.refresh(row)
     return _parse_document(row)
+
+
+
+def _ensure_movement_for_pose_write(document: SpatialMapDocument, movement_segment_id: str | None) -> None:
+    """Align active movement before pose write-through.
+
+    Placement PATCHes autosave into the *active* segment via write_through_active.
+    If the client still believes it is editing another movement (switch in flight),
+    activate that segment first so M1 poses cannot land in M2's snapshot.
+    """
+    wanted = (movement_segment_id or "").strip()
+    if not wanted:
+        return
+    current = str(document.activeMovementSegmentId or "").strip()
+    if wanted == current:
+        return
+    from .movement import activate_segment
+
+    activate_segment(document, wanted)
 
 
 def place_character(
@@ -724,8 +774,10 @@ def update_character(
 ) -> SpatialMapDocument:
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
-    placement = _find_item(document.characters, placement_id, kind="character")
     updates = body.model_dump(exclude_unset=True)
+    movement_segment_id = updates.pop("movementSegmentId", None)
+    _ensure_movement_for_pose_write(document, movement_segment_id)
+    placement = _find_item(document.characters, placement_id, kind="character")
     for key, value in updates.items():
         setattr(placement, key, value)
     # Character move updates only this character. Attached props keep attachment
@@ -743,8 +795,10 @@ def update_prop(
 ) -> SpatialMapDocument:
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
-    placement = _find_item(document.props, placement_id, kind="prop")
     updates = body.model_dump(exclude_unset=True)
+    movement_segment_id = updates.pop("movementSegmentId", None)
+    _ensure_movement_for_pose_write(document, movement_segment_id)
+    placement = _find_item(document.props, placement_id, kind="prop")
     _prop_entity_or_error(db, project_id, updates.get("propId"))
     for key, value in updates.items():
         setattr(placement, key, value)
@@ -790,6 +844,7 @@ def create_camera(db: Session, project_id: str, document_id: str, body: SpatialC
             fovPreset=body.fovPreset,
             shotSize=body.shotSize,
             primarySubject=body.primarySubject,
+            attachMode=body.attachMode,
             gridRow=body.gridRow,
             gridColumn=body.gridColumn,
             normalizedX=body.normalizedX,
@@ -798,6 +853,9 @@ def create_camera(db: Session, project_id: str, document_id: str, body: SpatialC
         )
     )
     _apply_placement_from_body(document.cameras[-1], body, document)
+    from .movement import add_camera_to_all_segments
+
+    add_camera_to_all_segments(document, document.cameras[-1])
     saved = _save_document(db, row, document)
     try:
         from ..production_events import ACTOR_USER, record_production_event
@@ -829,8 +887,10 @@ def update_camera(
 ) -> SpatialMapDocument:
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
-    camera = _find_item(document.cameras, camera_id, kind="camera")
     updates = body.model_dump(exclude_unset=True)
+    movement_segment_id = updates.pop("movementSegmentId", None)
+    _ensure_movement_for_pose_write(document, movement_segment_id)
+    camera = _find_item(document.cameras, camera_id, kind="camera")
     look_id = updates.pop("lookAtId", None)
     raise_m = updates.pop("raiseMeters", None)
     orbit = updates.pop("orbitDegrees", None)
@@ -990,6 +1050,9 @@ def remove_camera(db: Session, project_id: str, document_id: str, camera_id: str
     document.cameras = [item for item in document.cameras if item.id != camera_id]
     if removed.hero and document.cameras:
         document.cameras[0].hero = True
+    from .movement import remove_camera_from_all_segments
+
+    remove_camera_from_all_segments(document, camera_id)
     saved = _save_document(db, row, document)
     try:
         from ..production_events import ACTOR_USER, record_production_event
@@ -1191,6 +1254,81 @@ def consistency_warnings(document: SpatialMapDocument) -> list[str]:
     return sorted(set(warnings))
 
 
+_ORIENTATION_WORDS = {
+    "N": "north",
+    "NE": "northeast",
+    "E": "east",
+    "SE": "southeast",
+    "S": "south",
+    "SW": "southwest",
+    "W": "west",
+    "NW": "northwest",
+}
+
+_GEOMETRY_SOURCE_LINES = {
+    "supplied": "Using the uploaded Spatial Map as-is. The original pixels were not regenerated.",
+    "designed": "This Spatial Map was generated in Adept.",
+    "reconstructed": "This Spatial Map was reconstructed from a location image.",
+}
+
+
+def _float_coord(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _planning_item(item: Any, *, fallback: str) -> dict[str, Any]:
+    x = _float_coord(getattr(item, "x", None))
+    y = _float_coord(getattr(item, "y", None))
+    z = _float_coord(getattr(item, "z", None))
+    labels = creative_position_labels(x=x, y=y, z=z)
+    orientation = str(getattr(item, "orientation", "") or "").strip().upper()
+    return {
+        "id": str(getattr(item, "id", "") or ""),
+        "label": str(getattr(item, "label", "") or fallback).strip() or fallback,
+        "summary": labels["summary"],
+        "height": labels["height"],
+        "gridCell": str(getattr(item, "gridCell", "") or ""),
+        "gridRow": int(getattr(item, "gridRow", -1) or -1),
+        "gridColumn": int(getattr(item, "gridColumn", -1) or -1),
+        "x": x,
+        "y": y,
+        "z": z,
+        "orientation": orientation,
+        "facing": _ORIENTATION_WORDS.get(orientation, ""),
+    }
+
+
+def planning_context(document: SpatialMapDocument) -> dict[str, Any]:
+    """Compact planning facts for Co-Director. Not a second Spatial Map store."""
+
+    source = str(getattr(document, "geometrySource", "") or "").strip()
+    characters = [
+        {
+            **_planning_item(item, fallback="Character"),
+            "characterId": str(getattr(item, "characterId", "") or ""),
+        }
+        for item in (document.characters or [])
+    ]
+    props = [_planning_item(item, fallback="Prop") for item in (document.props or [])]
+    cameras = [_planning_item(item, fallback="Camera") for item in (document.cameras or [])]
+    return {
+        "id": document.id,
+        "title": document.title,
+        "geometrySource": source,
+        "backgroundAssetId": document.backgroundAssetId,
+        "pixelsUnchanged": source == "supplied",
+        "sourceLine": _GEOMETRY_SOURCE_LINES.get(source, ""),
+        "characters": characters,
+        "props": props,
+        "cameras": cameras,
+    }
+
+
 def document_summary(document: SpatialMapDocument) -> dict[str, Any]:
     return {
         "documentId": document.id,
@@ -1199,7 +1337,11 @@ def document_summary(document: SpatialMapDocument) -> dict[str, Any]:
         "propCount": len(document.props),
         "cameraCount": len(document.cameras),
         "positionLabels": {
-            placement.id: creative_position_labels(x=placement.x, y=placement.y, z=placement.z)
+            placement.id: creative_position_labels(
+                x=_float_coord(placement.x),
+                y=_float_coord(placement.y),
+                z=_float_coord(placement.z),
+            )
             for placement in [*document.characters, *document.props]
         },
         "warnings": document.warnings,
@@ -1208,3 +1350,178 @@ def document_summary(document: SpatialMapDocument) -> dict[str, Any]:
         "widthMeters": document.widthMeters,
         "depthMeters": document.depthMeters,
     }
+
+
+def _optional_scene_description(text: str | None) -> str | None:
+    """Ready-map import must not fail because a generate-quality description is missing."""
+    from .scene_intent import SceneDescriptionError, validate_scene_description
+
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None
+    try:
+        return validate_scene_description(cleaned)
+    except SceneDescriptionError:
+        return None
+
+
+def _mark_ready_atlas_asset(asset: Any, *, width: int = 0, height: int = 0) -> None:
+    """Tag the existing file as an Atlas. Never rewrite pixels or create a copy."""
+    tag = str(getattr(asset, "tag", "") or "").strip()
+    if tag not in {"atlas_shot", "atlas", "spatial_atlas"} and not tag.startswith("codirector_atlas_"):
+        asset.tag = "atlas_shot"
+    try:
+        meta = json.loads(asset.prompt_meta_json or "{}") if asset.prompt_meta_json else {}
+    except Exception:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    meta.setdefault("purpose", "atlas_shot")
+    meta.setdefault("objective", "atlas_shot")
+    meta["assignedExisting"] = True
+    meta["pixelsUnchanged"] = True
+    if width > 0:
+        meta["atlasPixelWidth"] = int(width)
+    if height > 0:
+        meta["atlasPixelHeight"] = int(height)
+    asset.prompt_meta_json = json.dumps(meta)
+
+
+def assign_existing_atlas(
+    db: Session,
+    project_id: str,
+    atlas_asset_id: str,
+    *,
+    original_environment_reference_asset_id: str | None = None,
+    scene_description: str | None = None,
+    title: str | None = None,
+) -> SpatialMapDocument:
+    """Register an already-finished Atlas as the Spatial Map. Never generates."""
+    from pathlib import Path
+
+    from ..db import Asset
+
+    _project_or_404(db, project_id)
+    asset_id = str(atlas_asset_id or "").strip()
+    asset = db.get(Asset, asset_id) if asset_id else None
+    if asset is None or str(asset.project_id or "") != project_id:
+        raise raise_http_error(
+            SpatialMapErrorCode.ASSIGNMENT_INVALID,
+            "That image is not in this project.",
+            assetId=asset_id,
+        )
+    width = 0
+    height = 0
+    path = str(getattr(asset, "path", "") or "").strip()
+    if path and Path(path).is_file():
+        try:
+            from PIL import Image
+
+            with Image.open(path) as img:
+                width, height = int(img.width), int(img.height)
+        except Exception:
+            width, height = 0, 0
+    _mark_ready_atlas_asset(asset, width=width, height=height)
+    lineage = {
+        "backgroundAssetId": asset.id,
+        "originalEnvironmentReferenceAssetId": (
+            str(original_environment_reference_asset_id or "").strip() or asset.id
+        ),
+        "geometrySource": "supplied",
+    }
+    description = _optional_scene_description(scene_description)
+    existing = list_documents(db, project_id)
+    if existing:
+        update = SpatialMapUpdateBody(
+            backgroundAssetId=lineage["backgroundAssetId"],
+            originalEnvironmentReferenceAssetId=lineage["originalEnvironmentReferenceAssetId"],
+            geometrySource="supplied",
+            sceneDescription=description,
+            title=title,
+        )
+        return update_document(db, project_id, existing[0].id, update)
+    return create_document(
+        db,
+        project_id,
+        SpatialMapCreateBody(
+            title=title or "Spatial Map",
+            backgroundAssetId=lineage["backgroundAssetId"],
+            originalEnvironmentReferenceAssetId=lineage["originalEnvironmentReferenceAssetId"],
+            geometrySource="supplied",
+            sceneDescription=description,
+        ),
+    )
+
+
+def create_movement(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    body: Any = None,
+) -> SpatialMapDocument:
+    from .movement import create_inherited_movement
+    from .schemas import MovementCreateBody
+
+    row = _row_or_404(db, project_id, document_id)
+    document = _parse_document(row)
+    payload = body if isinstance(body, MovementCreateBody) else MovementCreateBody.model_validate(body or {})
+    create_inherited_movement(document, payload)
+    return _save_document(db, row, document)
+
+
+def update_movement(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    segment_id: str,
+    body: Any,
+) -> SpatialMapDocument:
+    from .movement import update_segment_narrative
+    from .schemas import MovementUpdateBody
+
+    row = _row_or_404(db, project_id, document_id)
+    document = _parse_document(row)
+    payload = body if isinstance(body, MovementUpdateBody) else MovementUpdateBody.model_validate(body or {})
+    update_segment_narrative(document, segment_id, payload)
+    return _save_document(db, row, document)
+
+
+def activate_movement(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    segment_id: str,
+) -> SpatialMapDocument:
+    from .movement import activate_segment
+
+    row = _row_or_404(db, project_id, document_id)
+    document = _parse_document(row)
+    activate_segment(document, segment_id)
+    return _save_document(db, row, document)
+
+
+def remove_movement(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    segment_id: str,
+) -> SpatialMapDocument:
+    from .movement import delete_segment
+
+    row = _row_or_404(db, project_id, document_id)
+    document = _parse_document(row)
+    delete_segment(document, segment_id)
+    return _save_document(db, row, document)
+
+
+def movement_arrows(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    character_id: str = "",
+) -> list[dict[str, Any]]:
+    from .movement import compute_arrows
+
+    document = get_document(db, project_id, document_id)
+    return compute_arrows(document, selected_character_id=character_id or None)
+

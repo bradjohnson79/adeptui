@@ -20,6 +20,7 @@ from .definitions import (
 )
 from .aliases import resolve_tool_id
 from .handlers import (
+    movement_tools,
     audio_studio_tools,
     avatar_m412,
     bible_domain,
@@ -37,13 +38,16 @@ from .handlers import (
     magi,
     minimax_h3_tools,
     multi_shot_tools,
+    omni_deposit_tools,
     posecraft,
+    prop_creator,
     project,
     project_context,
     project_decisions,
     system_status,
     prompt_intelligence,
     scenes,
+    scene_prompt_templates,
     setup_guided,
     storyboard,
     spatial_m411,
@@ -83,6 +87,8 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "candidate.list": production.list_candidates,
     "candidate.resolve": production.resolve_candidate,
     "list_scenes": scenes.list_scenes,
+    "list_scene_prompt_templates": scene_prompt_templates.list_scene_prompt_templates,
+    "load_scene_prompt_template": scene_prompt_templates.load_scene_prompt_template,
     "get_scene": scenes.get_scene,
     "get_active_scene": scenes.get_active_scene,
     "get_current_bible_version": bible_read.get_current_bible_version,
@@ -127,6 +133,8 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "character_creator.get_performance_bible": character_creator.get_performance_bible,
     "character_creator.get_relationship_graph": character_creator.get_relationship_graph,
     "character_creator.get_prompt_package": character_creator.get_prompt_package,
+    "character_creator.get_angles": character_creator.get_angles,
+    "prop_creator.get_views": prop_creator.get_views,
     "character_creator.get_visual_sheet_status": character_creator.get_visual_sheet_status,
     "character_creator.get_voice_status": character_creator.get_voice_status,
     "character_creator.get_voice_profile": character_creator.get_voice_profile,
@@ -151,6 +159,8 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "voice_performance.get_reaction_coverage": voice_performance.get_reaction_coverage,
     "voice_performance.open_workspace": voice_performance.open_workspace,
     "workspace.open_scriptwriter": scriptwriter_tools.open_scriptwriter,
+    "workspace.open_scene_creator": movement_tools.open_scene_creator,
+    "workspace.open_image_generator": movement_tools.open_image_generator,
     "voice.performance_context": voice_m410.performance_context,
     "voice.analyze_dialogue": voice_m410.analyze_dialogue,
     "voice.create_performance_plan": voice_m410.create_performance_plan,
@@ -187,6 +197,7 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "spatial.check_visibility": spatial_m411.check_visibility,
     "spatial.check_consistency": spatial_m411.check_consistency,
     "spatial.build_reference_bundle": spatial_m411.build_reference_bundle,
+    "spatial.get_spin_camera": spatial_m411.get_spin_camera,
     "audio.status": audio_studio_tools.status,
     "audio.library": audio_studio_tools.library,
     "audio.scene_status": audio_studio_tools.scene_status,
@@ -281,6 +292,7 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "timeline.get_settings": director_timeline_tools.get_settings,
     "timeline.get_guidance_priority": director_timeline_tools.get_guidance_priority,
     "timeline.inspect_batches": director_timeline_tools.inspect_batches,
+    "timeline.inspect_scene_takes": director_timeline_tools.inspect_scene_takes,
     "timeline.preflight": director_timeline_tools.preflight,
     "timeline.explain_asset_reference_name": director_timeline_tools.explain_asset_reference_name,
     "timeline.focus_ui": director_timeline_tools.focus_ui,
@@ -336,6 +348,10 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "magi.inspect_tracks": magi.inspect_tracks,
     "magi.inspect_selection": magi.inspect_selection,
     "magi.inspect_timeline_lineage": magi.inspect_timeline_lineage,
+    "magi.inspect_post_context": magi.inspect_post_context,
+    "magi.inspect_grade": magi.inspect_grade,
+    "magi.inspect_job": magi.inspect_job,
+    "magi.verify_action": magi.verify_action,
     "magi.readiness": magi.readiness,
     "project.read_context": project_context.read_project_context,
     "script.estimate_timing": script_timing.read_script_timing,
@@ -344,6 +360,10 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
 }
 
 _MUTATION_HANDLERS: dict[str, MutationHandler] = {
+    "character.approve_candidate": MutationHandler(
+        character_identity.preview_approve_character_candidate,
+        character_identity.apply_approve_character_candidate,
+    ),
     "create_draft_character_profile": MutationHandler(
         character_identity.preview_create_draft_character_profile,
         character_identity.apply_create_draft_character_profile,
@@ -407,6 +427,46 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "character_creator.submit_for_review": MutationHandler(
         character_creator.preview_submit_for_review,
         character_creator.apply_submit_for_review,
+    ),
+    "character_creator.delete_profile": MutationHandler(
+        character_creator.preview_delete_profile,
+        character_creator.apply_delete_profile,
+    ),
+    "character_creator.adopt_angle": MutationHandler(
+        character_creator.preview_adopt_angle,
+        character_creator.apply_adopt_angle,
+    ),
+    "character_creator.approve_angle": MutationHandler(
+        character_creator.preview_approve_angle,
+        character_creator.apply_approve_angle,
+    ),
+    "character_creator.generate_angles": MutationHandler(
+        character_creator.preview_generate_angles,
+        character_creator.apply_generate_angles,
+    ),
+    "prop_creator.adopt_view": MutationHandler(
+        prop_creator.preview_adopt_view,
+        prop_creator.apply_adopt_view,
+    ),
+    "prop_creator.approve_view": MutationHandler(
+        prop_creator.preview_approve_view,
+        prop_creator.apply_approve_view,
+    ),
+    "prop_creator.generate_view": MutationHandler(
+        prop_creator.preview_generate_view,
+        prop_creator.apply_generate_view,
+    ),
+    "prop_creator.create_profile": MutationHandler(
+        prop_creator.preview_create_profile,
+        prop_creator.apply_create_profile,
+    ),
+    "prop_creator.generate_reference_sheet": MutationHandler(
+        prop_creator.preview_generate_reference_sheet,
+        prop_creator.apply_generate_reference_sheet,
+    ),
+    "prop_creator.delete_profile": MutationHandler(
+        prop_creator.preview_delete_profile,
+        prop_creator.apply_delete_profile,
     ),
     "voice_performance.generate_segments": MutationHandler(
         voice_performance.preview_generate_segments,
@@ -588,9 +648,29 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
         spatial_m411.preview_prepare_video_generation,
         spatial_m411.apply_prepare_video_generation,
     ),
+    "spatial.place_spin_camera": MutationHandler(
+        spatial_m411.preview_place_spin_camera,
+        spatial_m411.apply_place_spin_camera,
+    ),
+    "spin.generate_package": MutationHandler(
+        spatial_m411.preview_generate_package,
+        spatial_m411.apply_generate_package,
+    ),
+    "spin.regenerate_direction": MutationHandler(
+        spatial_m411.preview_regenerate_direction,
+        spatial_m411.apply_regenerate_direction,
+    ),
+    "spin.build_ers": MutationHandler(
+        spatial_m411.preview_build_ers,
+        spatial_m411.apply_build_ers,
+    ),
     "create_scene": MutationHandler(scenes.preview_create_scene, scenes.apply_create_scene),
     "update_scene_title": MutationHandler(scenes.preview_update_scene_title, scenes.apply_update_scene_title),
     "set_scene_prompt": MutationHandler(scenes.preview_set_scene_prompt, scenes.apply_set_scene_prompt),
+    "save_scene_prompt_template": MutationHandler(
+        scene_prompt_templates.preview_save_scene_prompt_template,
+        scene_prompt_templates.apply_save_scene_prompt_template,
+    ),
     "prompt.apply_enhancement": MutationHandler(
         prompt_intelligence.preview_prompt_apply_enhancement,
         prompt_intelligence.apply_prompt_apply_enhancement,
@@ -791,9 +871,11 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
         generation_tools.preview_propose_video_upscale, generation_tools.apply_propose_video_upscale
     ),
     "magi.color.apply": MutationHandler(magi.preview_color_apply, magi.apply_color_apply),
+    "magi.graphics.apply": MutationHandler(magi.preview_graphics_apply, magi.apply_graphics_apply),
     "magi.upscale": MutationHandler(magi.preview_upscale, magi.apply_upscale),
     "magi.audio.generate": MutationHandler(magi.preview_audio_generate, magi.apply_audio_generate),
     "magi.render": MutationHandler(magi.preview_render, magi.apply_render),
+    "magi.propose_finish": MutationHandler(magi.preview_propose_finish, magi.apply_propose_finish),
     "propose_video_extend": MutationHandler(
         media_execution.preview_propose_video_extend_w6p,
         media_execution.apply_propose_video_extend_w6p,
@@ -853,9 +935,6 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "job.retry": MutationHandler(
         media_execution.preview_job_retry,
         media_execution.apply_job_retry,
-    ),
-    "propose_brand_generate": MutationHandler(
-        generation_tools.preview_propose_brand_generate, generation_tools.apply_propose_brand_generate
     ),
     "propose_vision_correction": MutationHandler(
         vision.preview_propose_vision_correction, vision.apply_propose_vision_correction
@@ -1038,6 +1117,18 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
         director_timeline_tools.preview_propose_retake,
         director_timeline_tools.apply_propose_retake,
     ),
+    "timeline.propose_new_scene_take": MutationHandler(
+        director_timeline_tools.preview_propose_new_scene_take,
+        director_timeline_tools.apply_propose_new_scene_take,
+    ),
+    "timeline.propose_make_scene_take_current": MutationHandler(
+        director_timeline_tools.preview_propose_make_scene_take_current,
+        director_timeline_tools.apply_propose_make_scene_take_current,
+    ),
+    "timeline.propose_preview_scene_take": MutationHandler(
+        director_timeline_tools.preview_propose_preview_scene_take,
+        director_timeline_tools.apply_propose_preview_scene_take,
+    ),
     "timeline.attach_optional_reference": MutationHandler(
         director_timeline_tools.preview_attach_optional_reference,
         director_timeline_tools.apply_attach_optional_reference,
@@ -1114,6 +1205,10 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
         multi_shot_tools.preview_send_to_timeline,
         multi_shot_tools.apply_send_to_timeline,
     ),
+    "omni.deposit_video_to_timeline": MutationHandler(
+        omni_deposit_tools.preview_deposit_video_to_timeline,
+        omni_deposit_tools.apply_deposit_video_to_timeline,
+    ),
     # CDX-033: legacy ers.* 4-direction chat mutation tools are INERT - they
     # stay registered so definitions.py closure validation passes, but
     # exposure.py never surfaces them to the model (chat 'generate the ERS'
@@ -1153,6 +1248,10 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "ers.export_sheet": MutationHandler(
         environment_reference_sheet.preview_export_sheet,
         environment_reference_sheet.apply_export_sheet,
+    ),
+    "ers.delete_sheet": MutationHandler(
+        environment_reference_sheet.preview_delete_sheet,
+        environment_reference_sheet.apply_delete_sheet,
     ),
     "minimax_h3.prepare_plan": MutationHandler(
         minimax_h3_tools.preview_prepare_plan,
@@ -1221,6 +1320,16 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "posecraft.send_to_storyboard": MutationHandler(
         posecraft.preview_send_to_storyboard, posecraft.apply_send_to_storyboard
     ),
+    "posecraft.add_object": MutationHandler(posecraft.preview_add_object, posecraft.apply_add_object),
+    "posecraft.move_object": MutationHandler(posecraft.preview_move_object, posecraft.apply_move_object),
+    "posecraft.place_figure": MutationHandler(posecraft.preview_place_figure, posecraft.apply_place_figure),
+    "posecraft.sit_on_object": MutationHandler(posecraft.preview_sit_on_object, posecraft.apply_sit_on_object),
+    "posecraft.look_at": MutationHandler(posecraft.preview_look_at, posecraft.apply_look_at),
+    "posecraft.focus_figure": MutationHandler(posecraft.preview_focus_figure, posecraft.apply_focus_figure),
+    "posecraft.save_shot": MutationHandler(posecraft.preview_save_shot, posecraft.apply_save_shot),
+    "posecraft.capture_previz": MutationHandler(posecraft.preview_capture_previz, posecraft.apply_capture_previz),
+    "posecraft.propose_previz_plan": MutationHandler(posecraft.preview_propose_previz_plan, posecraft.apply_propose_previz_plan),
+    "posecraft.execute_previz_plan": MutationHandler(posecraft.preview_execute_previz_plan, posecraft.apply_execute_previz_plan),
 }
 
 _BY_ID: dict[str, ToolDefinition] = {t.tool_id: t for t in TOOL_DEFINITIONS}

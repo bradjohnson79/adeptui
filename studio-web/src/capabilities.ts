@@ -44,6 +44,11 @@ export interface Capability {
   summary: string;
   details: Record<string, unknown>;
   lastCheckedAt: string;
+  readinessClass?: string;
+  v11Requirement?: string;
+  workflowScope?: string;
+  severity?: string;
+  productionEffect?: string;
 }
 
 export interface CapabilityBlocker {
@@ -55,6 +60,11 @@ export interface CapabilityBlocker {
   message: string;
   recommendedAction?: string | null;
   componentIds: string[];
+  readinessClass?: string;
+  v11Requirement?: string;
+  workflowScope?: string;
+  severity?: string;
+  productionEffect?: string;
 }
 
 export interface CapabilitySnapshot {
@@ -72,6 +82,11 @@ export interface CapabilitySnapshot {
   /** Roadmap-deferred capability ids. */
   deferred?: string[];
   probeWarnings: string[];
+  readinessPolicyVersion?: string;
+  snapshotIncomplete?: boolean;
+  productionBlockers?: CapabilityBlocker[];
+  workflowBlockers?: CapabilityBlocker[];
+  advisoryBlockers?: CapabilityBlocker[];
 }
 
 export interface ComfyHealth {

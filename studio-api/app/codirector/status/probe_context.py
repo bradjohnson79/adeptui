@@ -72,8 +72,8 @@ _TIMEOUT_BY_CHECK: dict[str, float] = {
     "capabilities.registry": 12.0,
     "tools.registry": 20.0,
     # Layer 4–5: runtime / dependency / smoke
-    "codirector.provider": 8.0,
-    "comfy.health": 12.0,
+    "codirector.provider": 15.0,
+    "comfy.health": 20.0,
     "gpu.stats": 4.0,
     "source_manager.overview": 8.0,
     "image_runtime.readiness": 10.0,
@@ -85,6 +85,13 @@ _TIMEOUT_BY_CHECK: dict[str, float] = {
     "bible.versions": 5.0,
     "scriptwriter.documents": 5.0,
     "timeline.preflight": 8.0,
+    "create.path": 3.0,
+    "timeline.generator_truth": 4.0,
+    "timeline.context_binding": 4.0,
+    "posecraft.identity_nav": 4.0,
+    "codirector.grounded_routing": 3.0,
+    "runtime.authority": 4.0,
+    "codirector.temporal_continuity": 5.0,
 }
 
 _DEFAULT_STANDARD = 5.0
@@ -93,6 +100,10 @@ _DEFAULT_DEEP = 15.0
 _LAST_HEALTHY_LOCK = RLock()
 _LAST_HEALTHY_AT: dict[str, str] = {}
 _LAST_HEALTHY_SUMMARY: dict[str, str] = {}
+
+# Last-known-good window: a transient unreachable/timeout within this many seconds
+# of a healthy result must not flip Comfy to offline / Blocked 35.
+LKG_WINDOW_SEC = 60.0
 
 
 def timeout_for_check(check_id: str, mode: str = "standard") -> float:
@@ -112,6 +123,7 @@ def awaited_dependency_for(check_id: str) -> str:
         "api.health": "Studio API operator health",
         "image_runtime.readiness": "image runtime readiness",
         "video_runtime.readiness": "video runtime diagnostics",
+        "codirector.temporal_continuity": "bound-scene production Temporal Continuity packet",
     }
     return mapping.get(check_id, check_id)
 
@@ -134,6 +146,19 @@ def last_healthy_summary(check_id: str) -> Optional[str]:
         return _LAST_HEALTHY_SUMMARY.get(check_id)
 
 
+def seconds_since_healthy(check_id: str) -> Optional[float]:
+    """Whole seconds since this check was last verified healthy, or None."""
+    stamp = last_healthy_at(check_id)
+    if not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except Exception:  # noqa: BLE001
+        return None
+    elapsed = (datetime.now(timezone.utc) - parsed).total_seconds()
+    return max(0.0, elapsed)
+
+
 @dataclass
 class SharedProbeBundle:
     """Warm results shared across a single status-check run."""
@@ -144,7 +169,7 @@ class SharedProbeBundle:
     warm_errors: list[str] = field(default_factory=list)
 
 
-async def warm_shared_bundle(project_id: Optional[str] = None) -> SharedProbeBundle:
+async def warm_shared_bundle(project_id: Optional[str] = None, *, force: bool = False) -> SharedProbeBundle:
     """Pre-warm Comfy + capability snapshot once before parallel probes."""
     bundle = SharedProbeBundle(warmed_at=datetime.now(timezone.utc).isoformat())
 
@@ -160,10 +185,12 @@ async def warm_shared_bundle(project_id: Optional[str] = None) -> SharedProbeBun
         try:
             from ...capabilities import service as capability_service
 
+            if force:
+                capability_service.invalidate_cache()
             if project_id:
-                bundle.capabilities = await capability_service.get_project_capabilities(project_id, force=False)
+                bundle.capabilities = await capability_service.get_project_capabilities(project_id, force=force)
             else:
-                bundle.capabilities = await capability_service.get_capabilities(force=False)
+                bundle.capabilities = await capability_service.get_capabilities(force=force)
         except Exception as exc:  # noqa: BLE001
             bundle.warm_errors.append(f"capabilities: {exc}")
 

@@ -1,32 +1,31 @@
-/**
+﻿/**
  * Declarative Production menu catalog.
  * Labels, routes, descriptions, help, and availability keys only — no health fetches.
  */
 import type { EditorTab } from "./workspaces";
 import type { ProductionAvailabilityKey, ProductAvailability } from "./productionAvailability";
-import type { ProductionRecentItem } from "./productionRecent";
 
 export type ProductionCategoryId =
   | "create"
-  | "profiles"
   | "pre-production"
   | "creative-studios"
-  | "post-production";
+  | "post-production"
+  | "recent-projects";
 
 export const PRODUCTION_CATEGORY_ORDER: readonly ProductionCategoryId[] = [
   "create",
-  "profiles",
   "pre-production",
   "creative-studios",
   "post-production",
+  "recent-projects",
 ] as const;
 
 export const PRODUCTION_CATEGORY_LABELS: Record<ProductionCategoryId, string> = {
   create: "Create",
-  profiles: "Profiles",
   "pre-production": "Pre-Production",
   "creative-studios": "Creative Studios",
   "post-production": "Post",
+  "recent-projects": "Recent Projects",
 };
 
 /** @deprecated Old IDs — kept for docs/migration notes only */
@@ -175,32 +174,6 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
     ],
   },
   {
-    id: "profiles",
-    label: PRODUCTION_CATEGORY_LABELS.profiles,
-    entries: [
-      {
-        id: "characters",
-        label: "Character Creator",
-        description: "Build characters, voices, wardrobe, and performance",
-        helpLabel: "What is Character Creator?",
-        helpContent:
-          "Create and refine characters — sheets, voice, wardrobe, expressions, performance, relationships, and approved look.",
-        action: "workspace",
-        workspace: "characters",
-      },
-      {
-        id: "profiles",
-        label: "Project Profile",
-        description: "Shared visual, tonal, and technical project identity",
-        helpLabel: "What is Project Profile?",
-        helpContent:
-          "Defines the shared visual, tonal, technical, and creative identity of the project.",
-        action: "workspace",
-        workspace: "profiles",
-      },
-    ],
-  },
-  {
     id: "pre-production",
     label: PRODUCTION_CATEGORY_LABELS["pre-production"],
     entries: [
@@ -214,41 +187,22 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
         workspace: "scriptwriter",
       },
       {
-        id: "scenecreator",
-        label: "Scene Creator",
-        description: "Turn an Environment Reference Sheet into scene-shot images for the Timeline",
-        helpLabel: "What is Scene Creator?",
-        helpContent: "Create scene shots from your Environment Reference Sheet, approve a look, and send it to the Timeline.",
+        id: "environmentcreator",
+        label: "Environment Creator",
+        description: "Plan and create Environment Reference Sheets (ERS) for locations and sets",
+        helpLabel: "What is Environment Creator?",
+        helpContent: "Plan and create the Environment Reference Sheet (ERS) for a location or set — the environment identity your production builds from, like a CRS for characters or a PRS for props. Not shot creation or storyboard.",
         action: "workspace",
-        workspace: "scenecreator",
+        workspace: "environmentcreator",
       },
       {
         id: "propcreator",
         label: "Prop Creator",
         description: "Create project Prop identities and approve a production look",
         helpLabel: "What is Prop Creator?",
-        helpContent: "Create and refine project Props — description, reference, generated looks, and an approved identity used by Spatial Map and Scene Creator.",
+        helpContent: "Create and refine project Props — description, reference, generated looks, and an approved identity used by the Image Generator.",
         action: "workspace",
         workspace: "propcreator",
-      },
-      {
-        id: "spatial",
-        label: "Spatial Map",
-        description: "Plan environments, blocking, and spatial relationships",
-        helpLabel: "What is Spatial Map?",
-        helpContent: "Plan environments, blocking, and spatial relationships.",
-        action: "workspace",
-        workspace: "spatial",
-      },
-      {
-        id: "posecraft",
-        label: "PoseCraft",
-        description: "Pose characters on a 3D stage with cameras, lenses, and guides",
-        helpLabel: "What is PoseCraft?",
-        helpContent:
-          "Pose characters on a 3D stage with camera, lenses, and guides to stage shots before generation. The 3D staging studio feeds Image Generation and Storyboard.",
-        action: "workspace",
-        workspace: "posecraft",
       },
     ],
   },
@@ -257,22 +211,14 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
     label: PRODUCTION_CATEGORY_LABELS["creative-studios"],
     entries: [
       {
-        id: "avatar",
-        label: "Avatar Studio",
-        description: "Speaking portraits bound to a character",
-        helpLabel: "What is Avatar Studio?",
-        helpContent: "Create speaking portrait performances for a selected character.",
+        id: "characters",
+        label: "Character Creator",
+        description: "Build characters, voices, wardrobe, and performance",
+        helpLabel: "What is Character Creator?",
+        helpContent:
+          "Create and refine characters — sheets, voice, wardrobe, expressions, performance, relationships, and approved look.",
         action: "workspace",
-        workspace: "avatar",
-      },
-      {
-        id: "brandstudio",
-        label: "Brand Studio",
-        description: "Brand identities, visual systems, and campaign assets",
-        helpLabel: "What is Brand Studio?",
-        helpContent: "Create brand identities, visual systems, campaign assets, and reusable production styling.",
-        action: "workspace",
-        workspace: "brandstudio",
+        workspace: "characters",
       },
       {
         id: "voicestudio",
@@ -293,6 +239,15 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
         action: "workspace",
         workspace: "audiostudio",
         availabilityKey: "audioStudio",
+      },
+      {
+        id: "library",
+        label: "Library",
+        description: "Browse and manage project media, references, images, video, and audio",
+        helpLabel: "What is Library?",
+        helpContent: "Browse and manage project media, references, images, video, and audio.",
+        action: "workspace",
+        workspace: "library",
       },
     ],
   },
@@ -334,7 +289,6 @@ export type BuiltProductionMenu = {
     quickActions: BuiltProductionMenuEntry[];
   };
   categories: BuiltProductionCategory[];
-  recent: ProductionRecentItem[];
   projectId?: string;
   selectedCharacterId?: string;
 };
@@ -343,7 +297,6 @@ export function buildProductionMenu(input: {
   availability: Record<ProductionAvailabilityKey, ProductAvailability>;
   projectId?: string;
   selectedCharacterId?: string;
-  recent?: ProductionRecentItem[];
 }): BuiltProductionMenu {
   const selected = (input.selectedCharacterId || "").trim();
   const decorate = (entry: ProductionMenuEntryDef): BuiltProductionMenuEntry => {
@@ -364,7 +317,6 @@ export function buildProductionMenu(input: {
     },
     projectId: input.projectId,
     selectedCharacterId: selected || undefined,
-    recent: input.recent || [],
     categories: PRODUCTION_MENU_CATALOG.map((cat) => ({
       id: cat.id,
       label: cat.label,

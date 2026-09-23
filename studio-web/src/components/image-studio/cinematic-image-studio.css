@@ -1,4 +1,4 @@
-.cinematic-image-studio {
+﻿.cinematic-image-studio {
   max-width: 1180px;
   margin: 0 auto;
   padding-bottom: 2.5rem;
@@ -91,14 +91,14 @@
 }
 
 .cis-accordion__summary::after {
-  content: "▾";
+  content: "â–¾";
   opacity: 0.55;
   font-size: 0.9rem;
   flex-shrink: 0;
 }
 
 .cis-accordion:not([open]) > .cis-accordion__summary::after {
-  content: "▸";
+  content: "â–¸";
 }
 
 .cis-accordion__action {
@@ -985,4 +985,256 @@
   .cis-result-grid {
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   }
+}
+
+/* Journey 1 authority references (below Category|Mode|Batch) */
+.cis-auth-refs-wrap {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.cis-auth-refs-wrap__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.45rem;
+}
+
+.cis-auth-refs__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+}
+
+.cis-auth-refs__header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.cis-auth-refs__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.65rem;
+}
+
+.cis-auth-ref__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.cis-auth-ref__field label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.cis-auth-ref__field select,
+.cis-auth-ref__select {
+  width: 100%;
+  min-height: 0;
+  height: 2.15rem;
+  font-size: 0.85rem;
+  padding: 0.28rem 0.45rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cis-auth-ref__select:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.cis-auth-ref__library-btn {
+  width: 100%;
+  min-height: 2.15rem;
+  justify-content: center;
+}
+
+.cis-auth-ref__field--pose .cis-auth-ref__field {
+  margin: 0;
+}
+
+.cis-auth-refs__chips {
+  margin-top: 0.75rem;
+}
+
+.cis-auth-refs__chips-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.cis-auth-chip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.cis-auth-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.28rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  max-width: 100%;
+}
+
+.cis-auth-chip img {
+  width: 1.35rem;
+  height: 1.35rem;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.cis-auth-chip span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.cis-auth-chip strong {
+  font-size: 0.82rem;
+}
+
+.cis-auth-refs-warn {
+  margin-top: 0.45rem;
+}
+
+/* —— Prompt-native ACTIVE REFERENCES strip (directly under Shot Description) —— */
+.cis-active-refs-strip {
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border, #445) 75%, transparent);
+  background: color-mix(in srgb, var(--panel, #12161e) 92%, transparent);
+}
+.cis-active-refs-strip__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+.cis-active-refs-strip__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.cis-active-refs-strip__chip {
+  display: grid;
+  grid-template-columns: 1.7rem auto auto;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.2rem 0.3rem 0.2rem 0.2rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border, #445) 80%, transparent);
+  background: color-mix(in srgb, #0a0d12 70%, transparent);
+}
+.cis-active-refs-strip__chip img {
+  width: 1.7rem;
+  height: 1.7rem;
+  object-fit: cover;
+  border-radius: 999px;
+  background: #0a0d12;
+}
+.cis-active-refs-strip__tag {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0.15rem;
+  text-align: left;
+  max-width: 11rem;
+}
+.cis-active-refs-strip__tag strong {
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.cis-active-refs-strip__remove {
+  min-width: 1.4rem;
+  padding: 0 0.2rem;
+  line-height: 1.2;
+}
+.ig-prompt-native__editor {
+  position: relative;
+}
+.ig-prompt-autocomplete {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  top: calc(100% - 0.15rem);
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  max-height: 14rem;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border, #445) 85%, transparent);
+  background: #0d1118;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.ig-prompt-autocomplete__row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ig-prompt-autocomplete__row.is-active,
+.ig-prompt-autocomplete__row:hover {
+  background: color-mix(in srgb, var(--accent, #5b8cff) 22%, transparent);
+}
+.ig-prompt-autocomplete__empty {
+  padding: 0.45rem 0.55rem;
+  color: color-mix(in srgb, #9aa3b5 90%, #fff);
+  font-size: 0.8rem;
+}
+.cis-prompt-tag-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.4rem;
+}
+.cis-prompt-tag-warn .pill {
+  margin: 0;
+}
+.cis-refids-debug {
+  margin: 0.35rem 0 0;
+  opacity: 0.75;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  word-break: break-all;
 }

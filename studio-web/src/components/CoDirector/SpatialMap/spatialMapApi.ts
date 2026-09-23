@@ -18,6 +18,9 @@ import {
   type SpatialPropPlacementBody,
   type SpatialPropPlacementUpdateBody,
   type SpatialPropAttachmentFields,
+  type SpinCameraPlacement,
+  type SpinPackageManifest,
+  type SpinViewKey,
 } from "./types";
 
 type CameraBody = {
@@ -41,12 +44,15 @@ type CameraBody = {
   shotSize?: string;
   /** Scene Creator Mini: auto|environment|<characterId>. */
   primarySubject?: string;
+  attachMode?: "pov" | "free" | "follow";
   normalizedX?: number | null;
   normalizedY?: number | null;
   gridRow?: number;
   gridColumn?: number;
   /** Optional. Default true. false hides the marker only; assignment and coords stay. */
   visible?: boolean;
+  /** Active movement to autosave this pose into (avoids M1/M2 switch races). */
+  movementSegmentId?: string;
 };
 
 export const spatialMapApi = {
@@ -59,6 +65,22 @@ export const spatialMapApi = {
       return -ta;
     });
     return sorted[0] || docs[0];
+  },
+
+  async classifyAtlasSource(
+    projectId: string,
+    assetId: string,
+    intendedRoute = "assign",
+  ): Promise<{
+    kind: string;
+    action: string;
+    confidence: number;
+    message: string;
+    pixelsRead: boolean;
+    width: number;
+    height: number;
+  }> {
+    return api.spatialMap.classifyAtlasSource(projectId, { assetId, intendedRoute });
   },
 
   async listMaps(projectId: string): Promise<SpatialMapDocument[]> {
@@ -85,6 +107,48 @@ export const spatialMapApi = {
   async saveMap(projectId: string, documentId: string): Promise<SpatialMapDocument> {
     const res = await api.spatialMap.saveMap(projectId, documentId);
     return res.document as unknown as SpatialMapDocument;
+  },
+
+  async getCorrectAreaState(projectId: string, documentId: string) {
+    return api.spatialMap.getCorrectAreaState(projectId, documentId);
+  },
+
+  async getCorrectAreaEngine(projectId: string) {
+    return api.spatialMap.getCorrectAreaEngine(projectId);
+  },
+
+  async startCorrectArea(
+    projectId: string,
+    documentId: string,
+    body: {
+      prompt: string;
+      maskAssetId: string;
+      sourceAssetId?: string;
+      width?: number;
+      height?: number;
+      preserveStyle?: boolean;
+      preservePerspective?: boolean;
+      preserveLighting?: boolean;
+    },
+  ) {
+    return api.spatialMap.startCorrectArea(projectId, documentId, body);
+  },
+
+  async acceptCorrectArea(
+    projectId: string,
+    documentId: string,
+    body?: {
+      sessionId?: string;
+      outputAssetId?: string;
+      resultAssetId?: string;
+      acceptToken?: string;
+    },
+  ) {
+    return api.spatialMap.acceptCorrectArea(projectId, documentId, body);
+  },
+
+  async undoCorrectArea(projectId: string, documentId: string) {
+    return api.spatialMap.undoCorrectArea(projectId, documentId);
   },
 
   async placeCharacter(
@@ -229,6 +293,118 @@ export const spatialMapApi = {
   ): Promise<SpatialMapDocument> {
     const res = await api.spatialMap.assignScene(projectId, documentId, body);
     return res.document as unknown as SpatialMapDocument;
+  },
+
+  async createMovement(
+    projectId: string,
+    documentId: string,
+    body?: Record<string, unknown>,
+  ): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.createMovement(projectId, documentId, body);
+    return res.document as unknown as SpatialMapDocument;
+  },
+
+  async updateMovement(
+    projectId: string,
+    documentId: string,
+    segmentId: string,
+    body: Record<string, unknown>,
+  ): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.updateMovement(projectId, documentId, segmentId, body);
+    return res.document as unknown as SpatialMapDocument;
+  },
+
+  async activateMovement(
+    projectId: string,
+    documentId: string,
+    segmentId: string,
+  ): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.activateMovement(projectId, documentId, segmentId);
+    return res.document as unknown as SpatialMapDocument;
+  },
+
+  async removeMovement(
+    projectId: string,
+    documentId: string,
+    segmentId: string,
+  ): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.removeMovement(projectId, documentId, segmentId);
+    return res.document as unknown as SpatialMapDocument;
+  },
+
+  async movementArrows(
+    projectId: string,
+    documentId: string,
+    characterId?: string,
+  ): Promise<unknown[]> {
+    const res = await api.spatialMap.movementArrows(projectId, documentId, characterId);
+    return (res as { arrows?: unknown[] }).arrows || [];
+  },
+
+  async getSpinCamera(
+    projectId: string,
+    documentId: string,
+  ): Promise<{ placement: SpinCameraPlacement | null; centerStatus: { centered: boolean; distanceMeters: number; toleranceMeters: number } | null }> {
+    const res = await api.spatialMap.getSpinCamera(projectId, documentId);
+    return {
+      placement: (res.placement as SpinCameraPlacement | null) || null,
+      centerStatus: (res.centerStatus as { centered: boolean; distanceMeters: number; toleranceMeters: number } | null) || null,
+    };
+  },
+
+  async placeSpinCamera(
+    projectId: string,
+    documentId: string,
+    body: { x: number; z: number; sceneId?: string | null },
+  ): Promise<{ placement: SpinCameraPlacement; centerStatus: { centered: boolean; distanceMeters: number; toleranceMeters: number } }> {
+    const res = await api.spatialMap.placeSpinCamera(projectId, documentId, body);
+    return {
+      placement: res.placement as SpinCameraPlacement,
+      centerStatus: res.centerStatus as { centered: boolean; distanceMeters: number; toleranceMeters: number },
+    };
+  },
+
+  async removeSpinCamera(projectId: string, documentId: string): Promise<void> {
+    await api.spatialMap.removeSpinCamera(projectId, documentId);
+  },
+
+  async listSpinPackages(projectId: string, documentId: string): Promise<SpinPackageManifest[]> {
+    const res = await api.spatialMap.listSpinPackages(projectId, documentId);
+    return ((res as { manifests?: unknown[] }).manifests || []) as SpinPackageManifest[];
+  },
+
+  async createSpinPackage(
+    projectId: string,
+    documentId: string,
+    body: { provider: string; confirmPaidCloud?: boolean },
+  ): Promise<SpinPackageManifest> {
+    const res = await api.spatialMap.createSpinPackage(projectId, documentId, body);
+    return res.manifest as SpinPackageManifest;
+  },
+
+  async getSpinPackage(projectId: string, documentId: string, packageId: string): Promise<SpinPackageManifest> {
+    const res = await api.spatialMap.getSpinPackage(projectId, documentId, packageId);
+    return res.manifest as SpinPackageManifest;
+  },
+
+  async regenerateSpinView(
+    projectId: string,
+    documentId: string,
+    packageId: string,
+    direction: SpinViewKey,
+    body: { confirmPaidCloud?: boolean } = {},
+  ): Promise<SpinPackageManifest> {
+    const res = await api.spatialMap.regenerateSpinView(projectId, documentId, packageId, direction, body);
+    return res.manifest as SpinPackageManifest;
+  },
+
+  async buildErsFromSpinPackage(
+    projectId: string,
+    documentId: string,
+    packageId: string,
+  ): Promise<{ ersAssetId: string | null }> {
+    const res = await api.spatialMap.buildErsFromSpinPackage(projectId, documentId, packageId);
+    return { ersAssetId: (res as { ersAssetId?: string | null }).ersAssetId || null };
   },
 
 };

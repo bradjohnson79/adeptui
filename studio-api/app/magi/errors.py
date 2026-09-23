@@ -155,6 +155,12 @@ MAGI_ERROR_TAXONOMY: dict[str, dict[str, Any]] = {
         "kind": "not_found",
         "message": "MAGI job not found.",
     },
+    "PUBLISHED_MASTER_REQUIRED": {
+        "status_code": 409,
+        "kind": "validation",
+        "message": "This scene has no published master. Publish the scene on Timeline first.",
+        "recovery": "Publish the scene on Timeline, then open MAGI.",
+    },
 }
 
 MAGI_ERROR_LEGACY_ALIASES: dict[str, str] = {

@@ -236,6 +236,18 @@ def emit_job_status(
     )
 
 
+def _execution_id_from_job_params(params: dict[str, Any]) -> str:
+    raw = params.get("executionId") or params.get("execution_id") or ""
+    if raw:
+        return str(raw)
+    ctx = params.get("creativeContext")
+    if isinstance(ctx, dict):
+        nested = ctx.get("executionId") or ctx.get("execution_id") or ""
+        if nested:
+            return str(nested)
+    return ""
+
+
 def bridge_job_status_change(
     db: "Session",
     job_id: str,
@@ -243,49 +255,35 @@ def bridge_job_status_change(
     stage: str = "",
     message: str = "",
 ) -> None:
-    """Bridge a Studio ``JobQueue._set_status`` transition to the SSE bus.
+    """Advance the owning execution pack, then emit job SSE.
 
-    Called from ``queue_worker.JobQueue._set_status`` after the ``Job`` row is
-    committed. Resolves the owning execution pack + child view by reading
-    ``executionId`` from ``Job.params_json`` (stamped by capability handlers
-    when they enqueue child jobs), then emits the matching ``job.*`` event.
-
-    No-op for non-Co-Director jobs (no ``executionId`` in params). All
-    failures are swallowed — the bus is best-effort and must never take down
-    the job-completion path. The pack store remains the source of truth.
+    Resolves ``executionId`` from Job params or ``creativeContext.executionId``
+    (image.generate stamps the nested form). Updates the pack store first —
+    SSE is a projection, not the authority.
     """
     try:
-        from ...db import ProjectTraitRow  # local import avoids cycle
         import json as _json
 
-        job = db.get(Job, job_id) if hasattr(db, "get") else None
+        from ...db import Job as JobRow
+        from .advance import advance_execution_pack
+        from .pack_store import load_pack
+
+        job = db.get(JobRow, job_id) if hasattr(db, "get") else None
         if job is None:
             return
-        params: dict = {}
+        params: dict[str, Any] = {}
         try:
             params = _json.loads(job.params_json) if job.params_json else {}
         except Exception:
             params = {}
-        execution_id = params.get("executionId") or params.get("execution_id")
+        execution_id = _execution_id_from_job_params(params)
         if not execution_id:
             return
         project_id = job.project_id
-        # Find the pack + child view.
-        row = (
-            db.query(ProjectTraitRow)
-            .filter(
-                ProjectTraitRow.project_id == project_id,
-                ProjectTraitRow.category == "execution_pack",
-                ProjectTraitRow.key == execution_id,
-            )
-            .order_by(ProjectTraitRow.id.desc())
-            .first()
+        plan = advance_execution_pack(db, project_id, execution_id) or load_pack(
+            db, project_id, execution_id
         )
-        if not row:
-            return
-        try:
-            plan = ExecutionPlan.model_validate_json(row.value)
-        except Exception:
+        if plan is None:
             return
         child_index = 0
         child_label = ""
@@ -309,7 +307,7 @@ def bridge_job_status_change(
             child_index=child_index,
             child_label=child_label,
             asset_id=asset_id if job_status == "done" else None,
-            stage=stage or job.stage or "",
+            stage=stage or getattr(job, "stage", "") or "",
             error=(message or None) if job_status == "failed" else None,
             surface_type=plan.surface_type,
             completed=plan.completed_children,

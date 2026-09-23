@@ -8,26 +8,6 @@ from ...workflows.readiness import WORKFLOW_MODEL_COMPONENTS, workflow_readiness
 from ...workflows.registry import DEFAULT_WORKFLOW_REGISTRY
 from .schema import RequiredComponentResolution, RequiredNodeResolution
 
-_KNOWN_EXTENSION_COMPONENT_IDS = (
-    "comfyui_hunyuan_nodes",
-    "comfyui_hunyuan_video_nodes",
-)
-
-# The catalogued ComfyUI extension representative currently installs
-# Kijai's wrapper package, which exports the HyVideo* node family rather
-# than the older/native HunyuanVideo15*/13B* node ids.
-_KNOWN_HUNYUAN_NODES = frozenset(
-    {
-        "HyVideoModelLoader",
-        "HyVideoSampler",
-        "HyVideoTextEncode",
-        "HyVideoI2VEncode",
-        "HyVideoVAELoader",
-        "DownloadAndLoadHyVideoTextEncoder",
-    }
-)
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -46,32 +26,11 @@ def _live_node_types() -> set[str] | None:
 def _match_workflows(capability_id: str) -> list[str]:
     needle = capability_id.strip().lower()
     matched: list[str] = []
-    family_aliases = {
-        "hunyuan_video_15": "hunyuan15",
-        "hunyuan_video_13b": "hunyuan13b",
-    }
-    family_hint = family_aliases.get(needle, needle)
     for metadata in DEFAULT_WORKFLOW_REGISTRY.list():
-        family = metadata.family.lower()
         capabilities = {item.lower() for item in metadata.capabilities}
         if needle == metadata.key.lower() or needle in capabilities:
             matched.append(metadata.key)
-            continue
-        if family_hint.startswith("hunyuan") and family == family_hint:
-            matched.append(metadata.key)
-            continue
-        if needle.startswith("hunyuan") and family.startswith("hunyuan"):
-            matched.append(metadata.key)
     return matched
-
-
-def _registered_extension_component_id() -> str | None:
-    from ...setup.catalog import BY_ID
-
-    for component_id in _KNOWN_EXTENSION_COMPONENT_IDS:
-        if component_id in BY_ID:
-            return component_id
-    return None
 
 
 def resolve_requirements(capability_id: str) -> RequiredComponentResolution:
@@ -105,31 +64,15 @@ def resolve_requirements(capability_id: str) -> RequiredComponentResolution:
         if readiness.get("message"):
             messages.append(str(readiness["message"]))
 
-    extension_component_id = _registered_extension_component_id()
-    node_resolutions = []
-    for node_type in sorted(missing_nodes):
-        if node_type in _KNOWN_HUNYUAN_NODES:
-            node_resolutions.append(
-                RequiredNodeResolution(
-                    nodeType=node_type,
-                    extensionComponentId=extension_component_id or "comfyui_hunyuan_nodes",
-                    sourceStatus="official" if extension_component_id else "user_required",
-                    message=(
-                        "Mapped to the Hunyuan ComfyUI extension component. Install, restart ComfyUI, then verify nodes."
-                        if extension_component_id
-                        else "This Hunyuan node is known, but no installable ComfyUI extension component is registered."
-                    ),
-                )
-            )
-        else:
-            node_resolutions.append(
-                RequiredNodeResolution(
-                    nodeType=node_type,
-                    extensionComponentId=None,
-                    sourceStatus="user_required",
-                    message="No catalogued extension component is registered for this node type.",
-                )
-            )
+    node_resolutions = [
+        RequiredNodeResolution(
+            nodeType=node_type,
+            extensionComponentId=None,
+            sourceStatus="user_required",
+            message="No catalogued extension component is registered for this node type.",
+        )
+        for node_type in sorted(missing_nodes)
+    ]
 
     if missing_nodes:
         status = "blocked"

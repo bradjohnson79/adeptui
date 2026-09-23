@@ -47,6 +47,7 @@ _DOMAIN_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("voice", "voice"),
     ("character_creator", "character"),
     ("character", "character"),
+    ("prop_creator", "prop"),
     ("production_bible", "bible"),
     ("production_plan", "plan"),
     ("image_pipeline", "image_pipeline"),
@@ -150,6 +151,94 @@ _LEGACY_ERS_MUTATION_TOOL_IDS: frozenset[str] = frozenset(
     }
 )
 
+# Adept UI v1.1 — Spatial Map / PoseCraft / Fire3D shelved for creators.
+# Keep tools registered (dormant) for v1.2 Cloud; never expose to the model.
+_SHELVED_SPATIAL_CREATOR_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "spatial.create_map",
+        "spatial.update_bounds",
+        "spatial.place_character",
+        "spatial.place_prop",
+        "spatial.move_placement",
+        "spatial.create_camera",
+        "spatial.update_camera",
+        "spatial.create_path",
+        "spatial.generate_360_plan",
+        "spatial.assign_to_scene",
+        "spatial.prepare_image_generation",
+        "spatial.prepare_video_generation",
+        "spatial.place_spin_camera",
+        "image_pipeline.load_spatial_map",
+        "ers.attach_spatial_map",
+        "voice_environment.inspect_spatial_map",
+        "image_pipeline.preview_posecraft",
+        "image_pipeline.prepare_posecraft",
+    }
+)
+
+# Prefix siblings of the explicit set. Fail-closed while the v1.1 shelf is on.
+_SHELVED_SPATIAL_CREATOR_PREFIXES: tuple[str, ...] = (
+    "spatial.",
+    "posecraft.",
+    "spatial.create_map",
+    "spatial.update_bounds",
+    "spatial.place_",
+    "spatial.move_placement",
+    "spatial.create_camera",
+    "spatial.update_camera",
+    "spatial.create_path",
+    "spatial.generate_360",
+    "spatial.assign_to_scene",
+    "spatial.prepare_image_generation",
+    "spatial.prepare_video_generation",
+    "spatial.place_spin_camera",
+    "image_pipeline.load_spatial_map",
+    "ers.attach_spatial_map",
+    "voice_environment.inspect_spatial_map",
+    "image_pipeline.preview_posecraft",
+    "image_pipeline.prepare_posecraft",
+)
+
+
+
+# Avatar Studio temporarily retired from current Adept UI (InfiniteTalk/Wan unsuitable).
+# Keep tools registered (dormant) for possible Adept UI v1.2 cloud revisit; never expose.
+_SHELVED_AVATAR_STUDIO_PREFIXES: tuple[str, ...] = (
+    "avatar.",
+)
+
+def _is_shelved_avatar_studio_tool(tool_id: str) -> bool:
+    """True when Avatar Studio tools must stay registered but hidden from the model."""
+    tid = (tool_id or "").strip()
+    if not tid:
+        return False
+    return any(tid == p or tid.startswith(p) for p in _SHELVED_AVATAR_STUDIO_PREFIXES)
+
+
+def _spatial_creator_execution_gated() -> bool:
+    """Fail-closed: treat Spatial Map / PoseCraft as shelved if the gate cannot be imported."""
+    try:
+        from ..routing.v11_spatial_shelf import (
+            is_posecraft_creator_execution_gated,
+            is_spatial_map_creator_execution_gated,
+        )
+
+        return bool(is_spatial_map_creator_execution_gated() or is_posecraft_creator_execution_gated())
+    except Exception:
+        return True
+
+
+def _is_shelved_spatial_creator_tool(tool_id: str) -> bool:
+    """True when a tool must stay registered but hidden from the model."""
+    if not _spatial_creator_execution_gated():
+        return False
+    tid = (tool_id or "").strip()
+    if not tid:
+        return False
+    if tid in _SHELVED_SPATIAL_CREATOR_TOOL_IDS:
+        return True
+    return any(tid == prefix or tid.startswith(prefix) for prefix in _SHELVED_SPATIAL_CREATOR_PREFIXES)
+
 
 _BASELINE_READ_TOOL_IDS: frozenset[str] = frozenset(
     {
@@ -185,8 +274,9 @@ _INTENT_DOMAIN_SIGNALS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("voice", "dialogue", "speech", "performance", "take", "voiceover"), "voice"),
     (("bible", "canon", "continuity", "character update", "reference link", "lore"), "bible"),
     (("character", "profile", "wardrobe", "voice profile", "visual identity"), "character"),
+    (("prop creator", "prop view", "prop views", "prop sheet", "prs"), "prop"),
     (("scene", "shot", "storyboard", "setup"), "scene"),
-    (("image", "render", "generate", "upscale", "txt2vid", "ltx", "wan", "generation"), "generation"),
+    (("image", "render", "generate", "upscale", "txt2vid", "ltx", "generation"), "generation"),
     (("audio", "music", "sfx", "ambience", "sound"), "audio"),
     (("spatial", "map", "360", "panorama"), "spatial"),
     (("script", "outline", "beat", "dialogue line"), "script"),
@@ -199,7 +289,7 @@ _INTENT_DOMAIN_SIGNALS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("environment", "ers", "sheet"), "environment"),
     (("minimax", "h3", "ltx fallback"), "minimax"),
     (("library", "folder", "storage"), "library"),
-    (("avatar", "lip-sync"), "avatar"),
+    # Avatar Studio retired — do not expand avatar domain from intent
     (("magi", "magieditor", "magi sequence"), "magi"),
 )
 
@@ -222,6 +312,9 @@ _SURFACE_DOMAIN: dict[str, str] = {
     "voice": "voice",
     "bible": "bible",
     "character": "character",
+    "prop": "prop",
+    "propcreator": "prop",
+    "prop_creator": "prop",
     "scene": "scene",
     "library": "library",
     "setup": "setup",
@@ -235,7 +328,7 @@ _SURFACE_DOMAIN: dict[str, str] = {
     "references": "references",
     "plan": "plan",
     "prompt": "prompt",
-    "avatar": "avatar",
+    # "avatar" surface retired — do not map to avatar domain
     "generation": "generation",
     "director": "timeline",
     "storyboard": "scene",
@@ -261,6 +354,22 @@ def _domains_from_surface(surface: Optional[str]) -> set[str]:
 # --------------------------------------------------------------------------
 
 UNSUPPORTED_SYSTEMS: frozenset[str] = frozenset()
+
+_MAGI_SURFACES: frozenset[str] = frozenset({"magi", "magieditor"})
+_MAGI_BLOCKED_TOOL_SUBSTRINGS: tuple[str, ...] = (
+    "retake",
+    "inpaint",
+    "timed_prompt",
+    "timedprompt",
+)
+
+
+def _blocked_on_magi_surface(tool_id: str) -> bool:
+    """Production generation / Re-Take / inpaint stay on Timeline, never MAGI."""
+    if tool_id.startswith("magi."):
+        return False
+    lowered = tool_id.lower()
+    return any(token in lowered for token in _MAGI_BLOCKED_TOOL_SUBSTRINGS)
 
 
 def assert_unsupported_systems_have_no_tools() -> None:
@@ -347,11 +456,21 @@ def expose(
             return True
         return bool(readiness.get(cap, True))
 
+    surface_key = (workspace_surface or "").strip().lower()
     exposed: set[str] = set(_BASELINE_READ_TOOL_IDS)
     for definition in defs:
         if definition.tool_id in _LEGACY_ERS_MUTATION_TOOL_IDS:
             # CDX-033: legacy ers.* mutation tools are inert in chat;
             # 'generate the ERS' routes to the ers.generate capability.
+            continue
+        if _is_shelved_spatial_creator_tool(definition.tool_id):
+            # Adept UI v1.1: Spatial Map creator tools stay registered but are not
+            # recommended/exposed while shelved. Fail-closed if the gate import fails.
+            continue
+        if _is_shelved_avatar_studio_tool(definition.tool_id):
+            # Avatar Studio temporarily retired — not part of current production build.
+            continue
+        if surface_key in _MAGI_SURFACES and _blocked_on_magi_surface(definition.tool_id):
             continue
         domain = derive_domain(
             definition.tool_id, capability=definition.capability, kind=definition.kind
@@ -361,6 +480,9 @@ def expose(
     # Baseline tools are included even if their domain was not selected / not
     # ready — they are the never-remove floor.
     exposed |= _BASELINE_READ_TOOL_IDS
+    if surface_key in _MAGI_SURFACES:
+        exposed = {tid for tid in exposed if not _blocked_on_magi_surface(tid)}
+        exposed |= _BASELINE_READ_TOOL_IDS
     return exposed
 
 

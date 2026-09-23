@@ -159,6 +159,51 @@ class VideoPerceptionObservation(BaseModel):
     parseOk: bool = False
 
 
+
+class ImportantEvent(BaseModel):
+    """Event observed during full-clip review (not only the tail)."""
+
+    label: str = ""
+    approxTimeSec: Optional[float] = None
+    phase: Literal["early", "mid", "late", "unknown"] = "unknown"
+    detail: str = ""
+
+
+class VisualAnchor(BaseModel):
+    """Stable visual fact to carry into the next R2V shot."""
+
+    kind: str = ""  # character | prop | wardrobe | environment | camera | identity
+    label: str = ""
+    detail: str = ""
+    assetId: Optional[str] = None
+    identityId: Optional[str] = None
+
+
+class ExitState(BaseModel):
+    """End-of-shot state used as the handoff digest into N+1."""
+
+    summary: str = ""
+    characterStates: list[str] = Field(default_factory=list)
+    cameraState: Optional[str] = None
+    environmentState: Optional[str] = None
+
+
+class RollingSceneDigest(BaseModel):
+    """Accumulated scene continuity under Co-Director — not a second authority."""
+
+    schemaVersion: str = "rolling-scene-digest-v1"
+    preserve: list[str] = Field(default_factory=list)
+    continue_: list[str] = Field(default_factory=list, alias="continue")
+    avoid: list[str] = Field(default_factory=list)
+    importantEvents: list[ImportantEvent] = Field(default_factory=list)
+    visualAnchors: list[VisualAnchor] = Field(default_factory=list)
+    exitState: ExitState = Field(default_factory=ExitState)
+    sourcePacketIds: list[str] = Field(default_factory=list)
+    updatedAt: str = Field(default_factory=_now)
+
+    model_config = {"populate_by_name": True}
+
+
 class TemporalContinuityPacket(BaseModel):
     schemaVersion: str = PACKET_SCHEMA
     packetId: str = Field(default_factory=_nid)
@@ -175,9 +220,13 @@ class TemporalContinuityPacket(BaseModel):
     decision: ContinuityDecision = "keep_and_continue"
     observation: Optional[VideoPerceptionObservation] = None
     creatorMarker: Optional[str] = None
+    importantEvents: list[ImportantEvent] = Field(default_factory=list)
+    visualAnchors: list[VisualAnchor] = Field(default_factory=list)
+    exitState: Optional[ExitState] = None
+    rollingSceneDigest: Optional[RollingSceneDigest] = None
     createdAt: str = Field(default_factory=_now)
     extras: dict[str, Any] = Field(default_factory=dict)
 
     def is_gate_ready(self) -> bool:
-        """Any explicit packet — including degraded — releases the N+1 gate."""
-        return self.availability in ("ready", "unavailable", "low_confidence")
+        """Only a successful Omni review of the current take releases N+1."""
+        return self.availability == "ready"

@@ -1,22 +1,31 @@
-"""Shared vision review layer — one Kie Gemini vision call with images + text.
+"""Shared Co-Director Vision layer — fal.ai any-llm/vision only.
 
-Reused by the ERS semantic gate and Scene Creator Mini candidate validation.
-No new VLM infrastructure: this wraps the existing hosted_providers Kie chat
-adapter with data-URL encoding for local images (bounded), exactly like the
-original ers_gate implementation.
+Character Creator, ERS, and Scene Mini call this layer. Provider routing
+stays here. No Kie fallback.
 """
 
 from __future__ import annotations
 
 import base64
 import logging
+import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_VLM_MODEL = "gemini-3-pro"
+FAL_VISION_ENDPOINT = "fal-ai/any-llm/vision"
+FAL_VISION_MODEL_DEFAULT = "google/gemini-2.5-flash-lite"
+DEFAULT_VLM_MODEL = FAL_VISION_MODEL_DEFAULT
 MAX_DATA_URL_BYTES = 4_000_000
+_KIE_VISION_ALIASES = {
+    "gemini-3-pro",
+    "gemini-3.1-pro",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-3-flash",
+}
 
 
 def data_url_from_path(path: str | Path, *, max_bytes: int = MAX_DATA_URL_BYTES) -> str:
@@ -34,49 +43,147 @@ def data_url_from_path(path: str | Path, *, max_bytes: int = MAX_DATA_URL_BYTES)
     return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
 
 
+def resolve_vision_model(requested: str | None = None) -> str:
+    """Nested fal vision model. Kie Gemini ids resolve to the canonical fal model."""
+    raw = str(requested or "").strip()
+    if raw and raw not in _KIE_VISION_ALIASES and "/" in raw:
+        return raw
+    try:
+        from ...hosted_providers.models import resolve_model_mapping
+
+        mapping = resolve_model_mapping("Co-Director Vision", "fal") or {}
+        nested = str(mapping.get("nestedModelId") or "").strip()
+        if nested:
+            return nested
+    except Exception:
+        pass
+    return FAL_VISION_MODEL_DEFAULT
+
+
+def _extract_part_url(part: dict[str, Any]) -> str:
+    if not isinstance(part, dict):
+        return ""
+    if str(part.get("type") or "") == "text":
+        return ""
+    image = part.get("image_url")
+    if isinstance(image, dict):
+        return str(image.get("url") or "").strip()
+    if isinstance(image, str):
+        return image.strip()
+    return str(part.get("url") or "").strip()
+
+
+def _data_url_to_temp(url: str) -> Path | None:
+    if not url.startswith("data:") or ";base64," not in url:
+        return None
+    header, _, b64 = url.partition(";base64,")
+    try:
+        raw = base64.b64decode(b64)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    suffix = ".png" if "png" in header.lower() else ".jpg"
+    tmp = tempfile.NamedTemporaryFile(prefix="adept-vision-", suffix=suffix, delete=False)
+    tmp.write(raw)
+    tmp.close()
+    return Path(tmp.name)
+
+
+def _is_http_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+async def _collect_fal_image_urls(
+    *,
+    api_key: str,
+    parts: list[dict[str, Any]] | None,
+    image_paths: list[Path] | None,
+) -> list[str]:
+    from ...fal_client import upload_file_to_fal
+
+    urls: list[str] = []
+    temps: list[Path] = []
+    try:
+        for path in image_paths or []:
+            p = Path(path)
+            if not p.is_file():
+                raise FileNotFoundError(str(p))
+            urls.append(await upload_file_to_fal(p, api_key))
+        if urls:
+            return urls
+        for part in parts or []:
+            ref = _extract_part_url(part)
+            if not ref:
+                continue
+            if _is_http_url(ref):
+                urls.append(ref)
+                continue
+            temp = _data_url_to_temp(ref)
+            if temp is None:
+                continue
+            temps.append(temp)
+            urls.append(await upload_file_to_fal(temp, api_key))
+        return urls
+    finally:
+        for temp in temps:
+            try:
+                temp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _fal_output(result: Any) -> str:
+    if isinstance(result, dict):
+        output = str(result.get("output") or "")
+        if not output and isinstance(result.get("data"), dict):
+            output = str(result["data"].get("output") or "")
+        return output
+    return str(result or "")
+
+
 async def chat_vision(
     *,
     instructions: str,
-    parts: list[dict[str, Any]],
+    parts: list[dict[str, Any]] | None = None,
+    image_paths: list[Path] | None = None,
     model_id: str = DEFAULT_VLM_MODEL,
     temperature: float = 0.0,
     timeout_sec: float = 90.0,
 ) -> dict[str, Any]:
-    """One vision review call. Returns {ok, output?, error?} — never raises.
+    """One fal.ai vision review call. Returns {ok, output?, error?} — never raises.
 
-    Honest degrade: missing provider key / provider error -> ok=False with a
-    reason. No fake pass is ever returned by this layer.
+    Honest degrade: missing fal key / provider error -> ok=False with a reason.
+    Never calls Kie. No fake pass.
     """
     from ...secrets_store import get_secret
 
-    api_key = get_secret("kie_api_key")
+    api_key = get_secret("fal_api_key")
     if not api_key:
         return {"ok": False, "error": "no_vlm_configured", "reason": "no_vlm_configured"}
 
-    content: list[dict[str, Any]] = [{"type": "text", "text": instructions}, *parts]
+    model = resolve_vision_model(model_id)
     try:
-        from ...hosted_providers.adapters.kie_adapter import chat_kie
-
-        response = await chat_kie(
-            api_key,
-            model_id=model_id,
-            messages=[{"role": "user", "content": content}],
-            temperature=temperature,
-            timeout_sec=timeout_sec,
-        )
+        urls = await _collect_fal_image_urls(api_key=api_key, parts=parts, image_paths=image_paths)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Vision review call failed: %s", exc)
-        return {"ok": False, "error": str(exc), "reason": "vlm_error"}
-    if not response.get("ok"):
+        logger.warning("Vision image upload failed: %s", exc)
+        return {"ok": False, "error": str(exc), "reason": str(exc), "provider": "fal", "model": model}
+    if not urls:
         return {
             "ok": False,
-            "error": str(response.get("error") or "vlm_error"),
-            "reason": str(response.get("error") or "vlm_error"),
+            "error": "image_unreadable",
+            "reason": "image_unreadable",
+            "provider": "fal",
+            "model": model,
         }
-    return {"ok": True, "output": str(response.get("output") or "")}
-
-
-FAL_VISION_MODEL_DEFAULT = "google/gemini-2.5-flash-lite"
+    return await chat_vision_fal(
+        prompt=instructions,
+        image_urls=urls,
+        model=model,
+        timeout_sec=timeout_sec,
+        temperature=temperature,
+    )
 
 
 async def chat_vision_fal(
@@ -85,11 +192,9 @@ async def chat_vision_fal(
     image_urls: list[str],
     model: str = FAL_VISION_MODEL_DEFAULT,
     timeout_sec: float = 120.0,
+    temperature: float = 0.0,
 ) -> dict[str, Any]:
-    """fal-ai/any-llm/vision review call (public image URLs required).
-
-    Honest degrade: missing fal key / provider error -> ok=False with reason.
-    """
+    """fal-ai/any-llm/vision review call (HTTPS image URLs required)."""
     from ...secrets_store import get_secret
 
     api_key = get_secret("fal_api_key")
@@ -98,30 +203,47 @@ async def chat_vision_fal(
     urls = [u for u in (image_urls or []) if str(u or "").strip()]
     if not urls:
         return {"ok": False, "error": "no_image_urls", "reason": "generated_unreadable"}
+    resolved = resolve_vision_model(model)
     args: dict[str, Any] = {
-        "model": model,
+        "model": resolved,
         "prompt": prompt,
-        "image_url": urls[0],
+        "temperature": temperature,
     }
-    if len(urls) > 1:
+    if len(urls) == 1:
+        args["image_url"] = urls[0]
+    else:
         args["image_urls"] = urls
     try:
         from ...fal_client import run_fal_model
 
-        result = await run_fal_model("fal-ai/any-llm/vision", args, api_key, timeout_sec=min(timeout_sec, 240.0))
+        result = await run_fal_model(
+            FAL_VISION_ENDPOINT,
+            args,
+            api_key,
+            timeout_sec=min(timeout_sec, 240.0),
+        )
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": str(exc), "reason": "vlm_error"}
-    output = ""
-    if isinstance(result, dict):
-        output = str(result.get("output") or "")
-        if not output and isinstance(result.get("data"), dict):
-            output = str(result["data"].get("output") or "")
+        err = str(exc).strip() or "vlm_error"
+        return {
+            "ok": False,
+            "error": err,
+            "reason": err,
+            "provider": "fal",
+            "model": resolved,
+        }
+    output = _fal_output(result)
     if not output:
-        return {"ok": False, "error": "empty_output", "reason": "vlm_error"}
+        return {
+            "ok": False,
+            "error": "fal returned no vision text.",
+            "reason": "empty_output",
+            "provider": "fal",
+            "model": resolved,
+        }
     return {
         "ok": True,
         "provider": "fal",
-        "model": model,
+        "model": resolved,
         "output": output,
     }
 

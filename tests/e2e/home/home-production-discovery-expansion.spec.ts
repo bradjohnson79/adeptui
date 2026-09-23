@@ -27,42 +27,38 @@ const ARTIFACT_DIR = path.join(
 const MANUAL_HANDOFF_ID = "77a4b96c-8e3f-4501-897c-51bab99bedb7";
 const RUN_ID = `DISCOVERY-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 
-// Option A: expanded Explore grid — 15 canonical cards (core creation workspaces added, Library retained).
+// Explore grid: 4×3 creator/tool roster. Timeline/MAGI remain Home feature cards.
 const EXPECTED_IDS = [
-  "timeline",
-  "magi",
-  "brandstudio",
-  "spatial",
-  "posecraft",
   "imagegen",
   "txt2vid",
   "one",
   "three",
   "characters",
+  "propcreator",
+  "environmentcreator",
+  "script",
   "scriptwriter",
-  "avatar",
   "voicestudio",
   "audiostudio",
   "library",
 ] as const;
 
 const EXPECTED_TITLES = [
-  "Timeline",
-  "MAGI Editor",
-  "Brand Studio",
-  "Spatial Map",
-  "PoseCraft",
   "Image Generation",
   "Text to Video",
   "1 Frame",
   "3 Frame",
   "Character Creator",
+  "Prop Creator",
+  "Environment Creator",
+  "Storyboard",
   "Scriptwriter",
-  "Avatar Studio",
   "Voice Studio",
   "Audio Studio",
   "Library",
 ] as const;
+
+const EXPLORE_CARD_COUNT = EXPECTED_IDS.length;
 
 type ProjectSummary = { id: string; name: string; archived?: number };
 
@@ -230,10 +226,10 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
     const handoffBefore = await request.get(`${API}/api/projects/${MANUAL_HANDOFF_ID}`);
 
     try {
-      await test.step("Scenario A: Explore roster is exactly the 11 canonical workspaces incl PoseCraft", async () => {
+      await test.step("Scenario A: Explore roster is the v1.1 canonical workspaces (Spatial/3D shelved)", async () => {
         await gotoHome(page);
         const cards = page.getByTestId("explore-adept-ui").locator("[data-testid^='explore-workspace-']");
-        await expect(cards).toHaveCount(15);
+        await expect(cards).toHaveCount(EXPLORE_CARD_COUNT);
         for (const id of EXPECTED_IDS) {
           await expect(page.getByTestId(`explore-workspace-${id}`)).toBeVisible();
         }
@@ -242,10 +238,12 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
             page.getByTestId(`explore-workspace-${EXPECTED_IDS[i]}`).locator(".ds-workspace-card__title"),
           ).toHaveText(EXPECTED_TITLES[i]);
         }
-        const posecraftImg = page.getByTestId("explore-workspace-posecraft").locator("img");
-        await expect(posecraftImg).toHaveAttribute("src", /ws-posecraft\.jpg/);
-        const alt = await posecraftImg.getAttribute("alt");
-        expect(alt && alt.trim().length > 0).toBeTruthy();
+        await expect(page.getByTestId("explore-workspace-posecraft")).toHaveCount(0);
+        await expect(page.getByTestId("explore-workspace-spatial")).toHaveCount(0);
+        await expect(page.getByTestId("explore-workspace-timeline")).toHaveCount(0);
+        await expect(page.getByTestId("explore-workspace-magi")).toHaveCount(0);
+        await expect(page.getByText("PoseCraft", { exact: true })).toHaveCount(0);
+        await expect(page.getByText("Spatial Map", { exact: true })).toHaveCount(0);
         await page.screenshot({ path: path.join(artifactDir, "scenario-a-roster-1440.png"), fullPage: true });
       });
 
@@ -275,37 +273,40 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
         });
       }
 
-      await test.step("Scenario B: PoseCraft Home Explore card opens posecraft workspace", async () => {
+      await test.step("Scenario B: stale PoseCraft URL silently opens Image Generator", async () => {
         await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-posecraft").click();
-        await assertWorkspaceShell(page, "posecraft", "posecraft-workspace", active.id);
-        await expect(page.getByTestId("posecraft-experimental-badge")).toBeVisible();
-        await expect(page.getByTestId("posecraft-open-characters")).toBeVisible();
-        await expect(page.getByTestId("posecraft-open-imagegen")).toBeVisible();
-        await page.screenshot({ path: path.join(artifactDir, "scenario-b-posecraft-home-card.png"), fullPage: true });
+        await page.goto(`/project/${active.id}?workspace=posecraft`);
+        await assertWorkspaceShell(page, "imagegen", "cinematic-image-studio", active.id);
+        await expect(page.getByTestId("posecraft-workspace")).toHaveCount(0);
+        await page.screenshot({ path: path.join(artifactDir, "scenario-b-posecraft-stale-redirect.png"), fullPage: true });
       });
 
-      await test.step("Scenario C: PoseCraft Production menu entry under Pre-Production opens posecraft workspace", async () => {
+      await test.step("Scenario C: Pre-Production has no PoseCraft item; Spatial Map stale URL opens Environment Creator", async () => {
         await waitForActiveProjectContext(active);
         await page.getByRole("button", { name: /^Production$/ }).click();
         const preProd = page.getByTestId("production-cat-pre-production");
         await expect(preProd).toBeVisible({ timeout: 10_000 });
-        await expect(preProd.getByTestId("production-item-posecraft")).toBeVisible({ timeout: 10_000 });
-        await preProd.getByTestId("production-item-posecraft").click();
-        await assertWorkspaceShell(page, "posecraft", "posecraft-workspace", active.id);
-        await page.screenshot({ path: path.join(artifactDir, "scenario-c-posecraft-menu.png"), fullPage: true });
+        await expect(preProd.getByTestId("production-item-posecraft")).toHaveCount(0);
+        await expect(page.getByTestId("production-item-spatial")).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await page.goto(`/project/${active.id}?workspace=spatial`);
+        await expect(page).toHaveURL(new RegExp(`/project/${active.id}\\?.*workspace=environmentcreator`), {
+          timeout: 45_000,
+        });
+        await expect(page.getByTestId("environment-creator-surface")).toBeVisible({ timeout: 45_000 });
+        await page.screenshot({ path: path.join(artifactDir, "scenario-c-spatial-stale-redirect.png"), fullPage: true });
       });
 
-      await test.step("Scenario D: Brand Studio route repair — Home card and Production menu both reach brand-studio", async () => {
-        await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-brandstudio").click();
-        await assertWorkspaceShell(page, "brandstudio", "brand-studio", active.id);
-
-        await waitForActiveProjectContext(active);
-        await openProductionItem(page, "brandstudio");
-        await assertWorkspaceShell(page, "brandstudio", "brand-studio", active.id);
-        await expect(page).toHaveURL(new RegExp(active.id));
-        await page.screenshot({ path: path.join(artifactDir, "scenario-d-brand-route.png"), fullPage: true });
+      await test.step("Scenario D: Brand Studio is retired — no Explore card, no Production item, stale route does not remount", async () => {
+        await gotoHome(page);
+        await expect(page.getByTestId("explore-workspace-brandstudio")).toHaveCount(0);
+        await page.getByRole("button", { name: /^Production$/ }).click();
+        await expect(page.getByTestId("production-item-brandstudio")).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await page.goto(`/project/${active.id}?workspace=brandstudio`);
+        await expect(page).not.toHaveURL(/workspace=brandstudio/, { timeout: 45_000 });
+        await expect(page.getByTestId("brand-studio")).toHaveCount(0);
+        await page.screenshot({ path: path.join(artifactDir, "scenario-d-brand-retired.png"), fullPage: true });
       });
 
       await test.step("Scenario E: Voice Studio and Audio Studio routes still resolve (no regression)", async () => {
@@ -362,7 +363,7 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
         }
       });
 
-      await test.step("Scenario G: no-project PoseCraft entry opens Create Project modal (no silent Untitled)", async () => {
+      await test.step("Scenario G: no-project Image Generator entry opens Create Project modal (no silent Untitled)", async () => {
         for (const project of await listProjects(request)) {
           if (project.name.startsWith(RUN_ID) && project.id !== active.id) {
             await deleteProject(request, project.id);
@@ -373,7 +374,7 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
         const cancelBaseline = monitors.createCount();
         await withZeroEligibleProjects(page, async () => {
           await gotoHome(page);
-          await page.getByTestId("explore-workspace-posecraft").click();
+          await page.getByTestId("explore-workspace-imagegen").click();
           await expect(page.getByTestId("create-project-modal-panel")).toBeVisible({ timeout: 15_000 });
           expect(monitors.createCount()).toBe(cancelBaseline);
           await page.getByTestId("create-project-cancel").click();
@@ -381,11 +382,11 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
           expect(monitors.createCount()).toBe(cancelBaseline);
         });
         await expect
-          .poll(async () => (await listProjects(request)).some((p) => p.name === `${RUN_ID} posecraft`))
+          .poll(async () => (await listProjects(request)).some((p) => p.name === `${RUN_ID} imagegen`))
           .toBeFalsy();
       });
 
-      await test.step("Scenario H: responsive layout — 11 cards, no overflow across viewports", async () => {
+      await test.step("Scenario H: responsive layout — v1.1 cards, no overflow across viewports", async () => {
         const viewports = [
           { label: "1920x1080", width: 1920, height: 1080 },
           { label: "1440x900", width: 1440, height: 900 },
@@ -396,7 +397,7 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           await gotoHome(page);
           const grid = page.getByTestId("explore-adept-ui");
-          await expect(grid.locator("[data-testid^='explore-workspace-']")).toHaveCount(15);
+          await expect(grid.locator("[data-testid^='explore-workspace-']")).toHaveCount(EXPLORE_CARD_COUNT);
           const overflow = await grid.evaluate((el) => {
             const section = el.closest("section") || el;
             return {
@@ -419,36 +420,32 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
 
       await test.step("Scenario I: keyboard/a11y + console/network clean; handoff project untouched", async () => {
         await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-posecraft").focus();
-        await expect(page.getByTestId("explore-workspace-posecraft")).toBeFocused();
+        await page.getByTestId("explore-workspace-imagegen").focus();
+        await expect(page.getByTestId("explore-workspace-imagegen")).toBeFocused();
         await page.keyboard.press("Enter");
-        await assertWorkspaceShell(page, "posecraft", "posecraft-workspace", active.id);
+        await assertWorkspaceShell(page, "imagegen", "cinematic-image-studio", active.id);
 
         await waitForActiveProjectContext(active);
         await page.getByRole("button", { name: /^Production$/ }).focus();
         await page.keyboard.press("Enter");
-        await expect(page.getByTestId("production-item-posecraft")).toBeVisible();
-        await page.getByTestId("production-item-posecraft").focus();
-        await page.keyboard.press("Enter");
-        await assertWorkspaceShell(page, "posecraft", "posecraft-workspace", active.id);
+        await expect(page.getByTestId("production-item-posecraft")).toHaveCount(0);
+        await expect(page.getByTestId("production-item-imagegen")).toBeVisible();
 
-        // Studio card images have meaningful alt text (a11y) for the three replaced studios + PoseCraft.
         await waitForActiveProjectContext(active);
-        for (const id of ["brandstudio", "voicestudio", "audiostudio", "posecraft"] as const) {
+        for (const id of ["voicestudio", "audiostudio", "imagegen"] as const) {
           const alt = await page.getByTestId(`explore-workspace-${id}`).locator("img").getAttribute("alt");
           expect(alt && alt.trim().length > 0).toBeTruthy();
         }
 
-        // Console/network clean for a PoseCraft open.
         const noiseAllowed = /favicon|\.map\b|Download the React DevTools|net::ERR_ABORTED/i;
         const consoleErrors: string[] = [];
         await waitForActiveProjectContext(active);
         page.once("pageerror", (err) => consoleErrors.push(err.message));
-        await page.getByTestId("explore-workspace-posecraft").click();
-        await assertWorkspaceShell(page, "posecraft", "posecraft-workspace", active.id);
+        await page.getByTestId("explore-workspace-imagegen").click();
+        await assertWorkspaceShell(page, "imagegen", "cinematic-image-studio", active.id);
         expect(consoleErrors.filter((t) => !noiseAllowed.test(t))).toEqual([]);
 
-        monitors.assertClean("PoseCraft + Brand/Voice/Audio discovery");
+        monitors.assertClean("Image Generator + Brand/Voice/Audio discovery");
       });
     } finally {
       monitors.dispose();

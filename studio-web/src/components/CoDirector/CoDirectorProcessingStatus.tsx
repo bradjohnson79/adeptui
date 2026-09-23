@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { Button } from "../ui";
 import { api } from "../../api";
 import { useCoDirectorSession } from "./CoDirectorSession";
@@ -153,9 +153,9 @@ export function CoDirectorProcessingStatus() {
         ) : null}
         {stages.length > 0 ? (
           <ul className="codirector-processing-stages" data-testid="codirector-processing-stages">
-            {stages.slice(-6).map((stage) => (
-              <li key={stage} className="muted">
-                {stage === active && busy ? "◌ " : "✓ "}
+            {stages.slice(-6).map((stage, idx) => (
+              <li key={`${stage}-${idx}`} className="muted">
+                {stage === active && busy ? "â—Œ " : "âœ“ "}
                 {STAGE_LABELS[stage] || stage}
               </li>
             ))}

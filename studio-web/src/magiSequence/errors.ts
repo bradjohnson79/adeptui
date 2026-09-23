@@ -159,6 +159,13 @@ export const MAGI_ERROR_TAXONOMY: Record<string, MagiErrorInfo> = {
     message: "This MAGI surface is not executable yet.",
     recovery: "Use the certified image MAGI Actions path instead.",
   },
+  PUBLISHED_MASTER_REQUIRED: {
+    code: "PUBLISHED_MASTER_REQUIRED",
+    status: 409,
+    kind: "handoff",
+    message: "This scene has not been published from Timeline yet.",
+    recovery: "Publish the scene on Timeline, then open MAGI.",
+  },
   UNKNOWN: {
     code: "UNKNOWN",
     kind: "unknown",
@@ -209,12 +216,28 @@ export async function magiErrorFromResponse(res: Response): Promise<MagiErrorInf
   return { ...info, status: res.status, message: serverMessage || info.message };
 }
 
+function looksLikeJsonPayload(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
+}
+
 /** Resolve any thrown value to a short creator-facing message (never a stack). */
 export function describeMagiError(err: unknown): string {
   if (err instanceof MagiApiError) {
-    return err.info.recovery ? `${err.info.message} ${err.info.recovery}` : err.info.message;
+    return err.info.message;
   }
-  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "code" in err) {
+    const code = String((err as { code?: string }).code || "");
+    if (code && MAGI_ERROR_TAXONOMY[magiCanonicalCode(code)]) {
+      return magiErrorInfo(code).message;
+    }
+  }
+  if (err instanceof Error) {
+    if (looksLikeJsonPayload(err.message)) {
+      return MAGI_ERROR_TAXONOMY.UNKNOWN.message;
+    }
+    return err.message;
+  }
   return MAGI_ERROR_TAXONOMY.UNKNOWN.message;
 }
 

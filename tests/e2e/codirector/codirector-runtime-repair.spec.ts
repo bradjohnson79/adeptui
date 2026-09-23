@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { API, createTempProject, deleteProject, waitForAppReady } from "../helpers/app";
+import { openCoDirectorContentTab } from "./helpers/audit";
 
 type ViewportCase = { name: string; width: number; height: number };
 
@@ -124,7 +125,7 @@ test.describe("@critical codirector runtime repair", () => {
 
         await expectFullscreenShell(page, viewport);
 
-        await page.getByTestId("codirector-content-tab-approvals").click();
+        await openCoDirectorContentTab(page, "approvals");
         const card = page.locator(".codirector-proposal-card").first();
         await expect(card).toBeVisible({ timeout: 20_000 });
         await card.getByRole("button", { name: "Approve" }).click();

@@ -118,45 +118,103 @@ def _write_scene_clip(
     duration_sec: float,
     volume: float,
     sync_event: str | None = None,
+    label: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
 ) -> bool:
-    """Upsert one cue onto the scene's DirectorTimeline. False when the scene is unusable."""
+    """Upsert one cue onto SceneTimelineMaster audio/SFX arrays. False when the scene is unusable."""
 
-    from ....db import Scene
-    from ....director_timeline import (
-        TimelineClip,
-        dumps_director_timeline_preserving_embedded,
-        parse_director_timeline,
+    from ....db import Asset, Scene
+    from ....director_timeline_w46 import store as timeline_store
+    from ....director_timeline_w46.contracts import BatchClip
+    from ....director_timeline_w46.master_clip_mutate import (
+        append_clip,
+        ensure_windows,
+        flatten_attr,
     )
+    from ....director_timeline_w46.service import load_timeline_bundle
+    from ....timeline_media_labels import resolve_media_clip_labels
 
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         return False
-    tl = parse_director_timeline(
-        scene.director_json,
-        fallback_duration=float(scene.duration_sec or 5),
-        fallback_prompt=scene.prompt or "",
+    bundle = load_timeline_bundle(db, project_id, scene_id)
+    if not bundle.get("ok"):
+        return False
+    master = bundle["master"]
+    ensure_windows(master, scene_id=scene_id, duration_sec=float(scene.duration_sec or 5))
+    # music/ambience land on audioClips; sfx on sfxClips (existing law).
+    from ....director_timeline_w46.same_track_no_overlap import (
+        SameTrackOverlapError,
+        audio_lane_kind,
+        find_same_track_intersection,
     )
-    track = tl.sfx_clips if kind == "sfx" else tl.audio_clips
-    clip_label = f"sync:{sync_event}" if sync_event else ""
+
+    lane = audio_lane_kind(kind)
+    attr = "sfxClips" if lane == "sfx" else "audioClips"
+    track = flatten_attr(master, attr)
+    asset_row = db.get(Asset, asset_id) if asset_id else None
+    resolver_kind = "sfx" if kind == "sfx" else ("music" if kind == "music" else ("ambience" if kind == "ambience" else "audio"))
+    resolved = resolve_media_clip_labels(
+        {
+            "kind": resolver_kind,
+            "clip": {
+                "title": title,
+                "description": description,
+                "label": label,
+                "asset_id": asset_id,
+            },
+            "asset": {
+                "tag": getattr(asset_row, "tag", None) if asset_row else None,
+                "filename": getattr(asset_row, "filename", None) if asset_row else None,
+            },
+        }
+    )
+    clip_title = resolved.get("title")
+    clip_description = resolved.get("description")
+    # Persist FULL title as label; Timeline UI truncates via resolveMediaClipLabels.
+    clip_label = (
+        (clip_title or "").strip()
+        or (label or "").strip()
+        or (f"sync:{sync_event}" if sync_event else "")
+        or kind
+    )
+    upsert = None
     for existing in track:
-        if existing.asset_id == asset_id and abs(float(existing.start) - start_sec) < 1e-6:
-            existing.length = duration_sec
-            existing.volume = volume
-            if clip_label:
-                existing.label = clip_label
+        existing_asset = getattr(existing, "assetId", None) or getattr(existing, "asset_id", None)
+        if existing_asset == asset_id and abs(float(existing.start) - start_sec) < 1e-6:
+            upsert = existing
             break
+    candidate = {
+        "id": getattr(upsert, "id", None),
+        "start": start_sec,
+        "length": duration_sec,
+    }
+    hit = find_same_track_intersection(track, candidate)
+    if hit is not None:
+        other = getattr(hit, "id", None) or "(other)"
+        raise SameTrackOverlapError(
+            f"SAME_TRACK_OVERLAP: clip intersects {other} on the {lane} track"
+        )
+    if upsert is not None:
+        upsert.length = duration_sec
+        upsert.volume = volume
+        upsert.label = clip_label
     else:
-        track.append(
-            TimelineClip(
-                asset_id=asset_id,
+        append_clip(
+            master,
+            BatchClip(
+                kind="sfx" if lane == "sfx" else "audio",
+                assetId=asset_id,
                 start=start_sec,
                 length=duration_sec,
                 volume=volume,
-                label=clip_label or kind,
-            )
+                label=clip_label,
+            ),
+            start_sec,
+            attr,
         )
-    scene.director_json = dumps_director_timeline_preserving_embedded(tl, scene.director_json)
-    db.commit()
+    timeline_store.save_master(db, project_id, scene_id, master, bump_revision=True)
     return True
 
 
@@ -516,6 +574,8 @@ class AudioService:
                             providerKey=payload.get("providerKey"),
                             registryId=str(registry_id),
                             negativePrompt=payload.get("negativePrompt"),
+                            eventCount=payload.get("eventCount"),
+                            cfgStrength=payload.get("cfgStrength"),
                             sampleRate=int(payload.get("sampleRate") or 48000),
                             channels=int(payload.get("channels") or 1),
                             format=str(payload.get("format") or "wav"),
@@ -610,6 +670,13 @@ class AudioService:
         ducking: bool = False,
         sync_event: str | None = None,
         beat_map: dict[str, float] | None = None,
+        label: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        fade_in_sec: float | None = None,
+        fade_out_sec: float | None = None,
+        loop: bool = False,
+        end_sec: float | None = None,
     ) -> dict[str, Any]:
         """Deterministic cue placement onto m29_audio_cues (+ optional director timeline)."""
         ensure_m29_tables()
@@ -617,6 +684,33 @@ class AudioService:
             start_sec=start_sec, sync_event=sync_event, beat_map=beat_map
         )
         cue_id = uuid.uuid4().hex
+        from ....timeline_media_labels import resolve_media_clip_labels
+        from ....db import Asset as _AssetForLabels
+
+        _asset_row = db.get(_AssetForLabels, asset_id) if asset_id else None
+        _resolver_kind = (
+            "sfx"
+            if kind == "sfx"
+            else ("music" if kind == "music" else ("ambience" if kind == "ambience" else "audio"))
+        )
+        _resolved = resolve_media_clip_labels(
+            {
+                "kind": _resolver_kind,
+                "clip": {"title": title, "description": description, "label": label, "asset_id": asset_id},
+                "asset": {
+                    "tag": getattr(_asset_row, "tag", None) if _asset_row else None,
+                    "filename": getattr(_asset_row, "filename", None) if _asset_row else None,
+                },
+            }
+        )
+        resolved_title = _resolved.get("title")
+        resolved_description = _resolved.get("description")
+        resolved_label = (
+            (resolved_title or "").strip()
+            or (_resolved.get("label") or "").strip()
+            or (label or "").strip()
+            or None
+        )
         meta = {
             "volume": volume,
             "ducking": ducking,
@@ -624,6 +718,13 @@ class AudioService:
             "syncEvent": sync_label,
             "requestedStartSec": start_sec,
             "resolvedFromSync": bool(sync_label and abs(resolved_start - start_sec) > 1e-9),
+            "label": resolved_label,
+            "title": resolved_title,
+            "description": resolved_description,
+            "fadeInSec": fade_in_sec,
+            "fadeOutSec": fade_out_sec,
+            "loop": loop,
+            "endSec": end_sec,
         }
         db.execute(
             text(
@@ -658,6 +759,9 @@ class AudioService:
                 duration_sec=duration_sec,
                 volume=volume,
                 sync_event=sync_label,
+                label=resolved_label,
+                title=resolved_title,
+                description=resolved_description,
             )
         return {
             "cueId": cue_id,
@@ -672,6 +776,10 @@ class AudioService:
             "timelinePlaced": placed,
             "syncEvent": sync_label,
             "requestedStartSec": start_sec,
+            "fadeInSec": fade_in_sec,
+            "fadeOutSec": fade_out_sec,
+            "loop": loop,
+            "endSec": end_sec,
         }
 
     @staticmethod

@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { API, BETA_TARGET, waitForAppReady } from "../helpers/app";
-import { openCoDirectorFullScreen } from "./helpers/audit";
+import { openCoDirectorContentTab, openCoDirectorFullScreen } from "./helpers/audit";
 
 const PROJECT_NAME = "The Dreamweaver";
 const ARTIFACT_DIR = path.join(process.cwd(), "docs/release-gate/compiled-wiki/artifacts");
@@ -133,9 +133,11 @@ DR. KYUNG LEONG waits.
     await openCoDirectorFullScreen(page, project.id);
     await expect(page.getByTestId("codirector-content-tab-wiki")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("codirector-content-tab-notes")).toBeVisible();
-    await expect(page.getByTestId("codirector-content-tab-casting")).toBeVisible();
-    await expect(page.getByTestId("codirector-content-group-story")).toBeVisible();
-    await expect(page.getByTestId("codirector-content-group-production")).toBeVisible();
+    await expect(page.getByTestId("codirector-content-tab-library")).toBeVisible();
+    await expect(page.getByTestId("codirector-content-group-more")).toHaveCount(0);
+    await expect(page.getByTestId("codirector-content-tab-casting")).toHaveCount(0);
+    await expect(page.getByTestId("codirector-content-group-story")).toHaveCount(0);
+    await expect(page.getByTestId("codirector-content-group-production")).toHaveCount(0);
     gates["Clean navigation"] = "GO";
 
     await page.getByTestId("codirector-content-tab-wiki").click();
@@ -146,7 +148,7 @@ DR. KYUNG LEONG waits.
     await expect(page.getByTestId("codirector-notes-panel")).toBeVisible({ timeout: 20_000 });
     gates["Notes separate from Wiki"] = "GO";
 
-    await page.getByTestId("codirector-content-tab-casting").click();
+    await openCoDirectorContentTab(page, "casting");
     await expect(page.getByTestId("codirector-casting-panel")).toBeVisible({ timeout: 20_000 });
     gates["Casting surface"] = "GO";
 

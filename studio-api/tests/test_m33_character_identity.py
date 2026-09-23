@@ -243,6 +243,56 @@ def test_consent_required_and_short_reference_rejected(client: TestClient, proje
     assert ok.status_code == 200
     assert ok.json()["ok"] is True
 
+    no_transcript = client.post(
+        f"/api/projects/{project_id}/characters/{cid}/voice-profiles/validate-reference",
+        json={"path": str(long)},
+    )
+    assert no_transcript.status_code == 200
+    assert no_transcript.json()["ok"] is True
+    assert no_transcript.json()["transcript_present"] is False
+
+
+def test_voice_studio_clone_generate_contract(client: TestClient, project_id: str, tmp_path: Path):
+    cid = client.post(
+        f"/api/projects/{project_id}/characters",
+        json={"name": "Korri", "role": "lead"},
+    ).json()["id"]
+    long = tmp_path / "korri.wav"
+    long.write_bytes(_wav(11.0))
+
+    missing = client.post(
+        f"/api/projects/{project_id}/characters/{cid}/voice/clone/generate",
+        json={
+            "name": "Korri Clone",
+            "reference_path": str(long),
+            "testLine": "Light circuitry, not tattoos, doofus.",
+            "sampleCount": 1,
+            "consent": {"consent_confirmed": False, "confirmed_by": "owner"},
+        },
+    )
+    assert missing.status_code == 400
+    assert missing.json()["detail"]["code"] == "CONSENT_MISSING"
+
+    confirmed = client.post(
+        f"/api/projects/{project_id}/characters/{cid}/voice/clone/generate",
+        json={
+            "name": "Korri Clone",
+            "reference_path": str(long),
+            "testLine": "Light circuitry, not tattoos, doofus.",
+            "sampleCount": 1,
+            "consent": {
+                "source_owner_name": "Korri",
+                "performer_name": "Korri",
+                "consent_confirmed": True,
+                "confirmed_by": "owner",
+            },
+        },
+    )
+    assert confirmed.status_code != 400
+    detail = confirmed.json().get("detail") or {}
+    if isinstance(detail, dict):
+        assert detail.get("code") not in {"CONSENT_MISSING", "EMPTY_TRANSCRIPT"}
+
 
 def test_voice_design_honest_model_not_installed(client: TestClient, project_id: str):
     cid = client.post(
@@ -342,6 +392,10 @@ def test_codirector_character_tools_registered():
         "inspect_character_coverage",
         "inspect_character_voice",
         "create_draft_character_profile",
+        "character_creator.get_angles",
+        "character_creator.adopt_angle",
+        "character_creator.approve_angle",
+        "character_creator.generate_angles",
     ):
         assert tid in TOOL_IDS, tid
         assert tool_registry.find(tid) is not None

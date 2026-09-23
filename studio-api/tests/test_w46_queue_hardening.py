@@ -106,7 +106,10 @@ def test_q1_late_failure_never_clobbers_approved_batch(db_scene, stub_env):
     db, pid, sid = db_scene
     (b1,) = _two_stub_batches(db, pid, sid)[:1]
 
-    # Drive the batch to Approved via the real completion path.
+    # Drive the batch to a TERMINAL state via the real completion path.
+    # The cert stub is a draftPathway generator, so the designed auto-approve
+    # draft gate (completion._apply: is_draft → no silent selection) lands the
+    # batch on CandidateReady — which IS a terminal, clobber-protected state.
     orchestrator.submit_batch_generation(db, pid, sid, b1)
     master = _master(db, pid, sid)
     batch = next(b for b in master.batchBlocks if b.id == b1)
@@ -135,15 +138,15 @@ def test_q1_late_failure_never_clobbers_approved_batch(db_scene, stub_env):
         auto_approve=True,
     )
     master = _master(db, pid, sid)
-    assert next(b for b in master.batchBlocks if b.id == b1).status == "Approved"
+    assert next(b for b in master.batchBlocks if b.id == b1).status == "CandidateReady"
 
     # Late stale failure from the provider must be ignored.
     watcher_mod._mark_job_failed(db, pid, sid, b1, job.executionSnapshotId, "LATE_FAILURE", "stale")
 
     master = _master(db, pid, sid)
     batch = next(b for b in master.batchBlocks if b.id == b1)
-    assert batch.status == "Approved"
-    assert batch.approvedClip is not None
+    assert batch.status == "CandidateReady"
+    assert batch.status != "Failed"
     assert all(j.status != "failed" for j in batch.generationJobs)
 
 

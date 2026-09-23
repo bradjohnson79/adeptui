@@ -20,7 +20,12 @@ _CREDENTIAL_VERIFIERS = {
     "kie_key": ("kie_api_key", "Kie.ai"),
     "wavespeed_key": ("wavespeed_api_key", "WaveSpeed.ai"),
 }
-from .catalog import ComponentDefinition, get_component
+from .catalog import (
+    ComponentDefinition,
+    get_component,
+    is_retired_obsolete_setup_component,
+    is_retired_video_setup_component,
+)
 from .paths import ensure_configured_paths
 from .state import load_state, update_state
 
@@ -311,7 +316,27 @@ def _verify_krea2_files(location: str | None) -> Verification:
     )
 
 
+def _comfy_install_root() -> str | None:
+    """Filesystem install/shared root. Never a URL."""
+
+    from ..readiness.contract import is_filesystem_install_path
+
+    models = getattr(settings, "comfy_models_dir", None)
+    if models:
+        root = Path(models)
+        candidate = root.parent if root.name.lower() == "models" else root
+        if is_filesystem_install_path(str(candidate)) and candidate.exists():
+            return str(candidate)
+    input_dir = getattr(settings, "comfy_input_dir", None)
+    if input_dir:
+        shared = Path(input_dir).parent
+        if is_filesystem_install_path(str(shared)) and shared.exists():
+            return str(shared)
+    return None
+
+
 def _service(url: str, suffix: str, name: str) -> Verification:
+    install_root = _comfy_install_root() if name == "ComfyUI" else None
     try:
         import httpx
 
@@ -320,14 +345,33 @@ def _service(url: str, suffix: str, name: str) -> Verification:
             return Verification(
                 False, False, "service_http_error",
                 f"{name} responded with HTTP {response.status_code}.",
-                details=(f"URL: {url}",), recommendation="repair",
+                path=install_root,
+                details=(f"probe: {url}",), recommendation="repair",
             )
         version = response.headers.get("server")
-        return Verification(True, False, None, f"{name} is reachable.", path=url, version=version)
+        if name == "ComfyUI" and not install_root:
+            return Verification(
+                True,
+                False,
+                "ready_requires_filesystem_path",
+                "ComfyUI is running, but Setup has no install folder — only a URL.",
+                path=None,
+                version=version,
+                details=(f"probe: {url}",),
+                recommendation="correct_path",
+            )
+        return Verification(
+            True,
+            False,
+            None,
+            f"{name} is reachable.",
+            path=install_root,
+            version=version,
+        )
     except Exception as exc:
         return Verification(
             False, True, "service_unreachable", f"{name} is not reachable.",
-            path=url, details=(str(exc)[:200],), recommendation="install",
+            path=install_root, details=(str(exc)[:200],), recommendation="install",
             requires_user_interaction=True,
         )
 
@@ -337,6 +381,25 @@ def verify_component(component_id: str, state: dict[str, Any] | None = None) -> 
     if cached and (time.monotonic() - cached[0]) < _VERIFY_CACHE_TTL_SEC:
         return cached[1]
     result = _verify_component_uncached(component_id, state)
+    if is_retired_video_setup_component(component_id) and not result.healthy:
+        try:
+            name = get_component(component_id).name
+        except Exception:  # noqa: BLE001
+            name = component_id
+        result = Verification(
+            False,
+            result.absent,
+            "retired_video_generator",
+            (
+                f"{name} is retired from local video generation and is not a "
+                "production requirement."
+            ),
+            result.path,
+            result.version,
+            result.details,
+            recommendation="none",
+            requires_user_interaction=False,
+        )
     if result.healthy or component_id in _CACHE_UNHEALTHY_COMPONENTS:
         _VERIFY_CACHE[component_id] = (time.monotonic(), result)
     else:
@@ -357,6 +420,43 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
     # Keep in-memory state aligned with Adept-owned defaults so callers that do
     # not go through build_status still see an obvious configured path.
     ensure_configured_paths(state)
+
+    if component.verifier == "wonder3d_multiview" or component.id == "wonder3d_multiview":
+        return Verification(
+            False,
+            True,
+            "license_blocked",
+            "Wonder3D weights are AGPL-3.0 and are never installed.",
+            recommendation="none",
+        )
+
+    if component.verifier == "character_multiview_engine" or component.id == "character_multiview_engine":
+        try:
+            from ..character_identity.multiview_engine import production_engine_status
+
+            status = production_engine_status(force=True)
+        except Exception as exc:
+            return Verification(
+                False,
+                True,
+                "RUNTIME_NOT_READY",
+                str(exc),
+                recommendation="install",
+            )
+        if status.get("available") and status.get("status") == "READY":
+            return Verification(
+                True,
+                False,
+                None,
+                str(status.get("creatorMessage") or "Character Angles are ready."),
+            )
+        return Verification(
+            False,
+            True,
+            str(status.get("code") or "RUNTIME_NOT_READY"),
+            str(status.get("creatorMessage") or "Character Angles are unavailable."),
+            recommendation="install",
+        )
 
     if component.verifier == "python":
         executable = Path(sys.executable)
@@ -423,21 +523,6 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
         )
 
     location = _configured_location(component_id, state)
-    if component.verifier == "ltx_file":
-        path = _candidate_file(location, settings.ltx_checkpoint, ("checkpoints", "diffusion_models"))
-        if path:
-            if os.access(path, os.R_OK) and path.stat().st_size > 0:
-                return Verification(True, False, None, "The LTX checkpoint is available and readable.", str(path))
-            return Verification(
-                False, False, "permission_denied", "The LTX checkpoint cannot be read.", str(path),
-                recommendation="grant_permission", requires_user_interaction=True,
-            )
-        return Verification(
-            False, True, "required_model_missing", "The required LTX checkpoint was not found.",
-            location, details=(f"Expected file: {settings.ltx_checkpoint}",),
-            recommendation="correct_path" if location else "install", requires_user_interaction=True,
-        )
-
     if component.verifier == "ltx_2_5_file":
         path = _candidate_file(location, settings.ltx_2_5_checkpoint, ("diffusion_models", "checkpoints"))
         if path:
@@ -451,47 +536,6 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             False, True, "required_model_missing", "The required LTX 2.5 checkpoint was not found.",
             location, details=(f"Expected file: {settings.ltx_2_5_checkpoint}",),
             recommendation="correct_path" if location else "install", requires_user_interaction=True,
-        )
-
-    if component.verifier == "wan_files":
-        names = (settings.wan_high_noise, settings.wan_low_noise, settings.wan_vae, settings.wan_text_encoder)
-        found = [_candidate_file(location, name, ("diffusion_models", "vae", "text_encoders")) for name in names]
-        missing = [name for name, path in zip(names, found) if path is None]
-        if not missing and all(path and os.access(path, os.R_OK) for path in found):
-            return Verification(True, False, None, "All required WAN model files are readable.", location)
-        return Verification(
-            False, not any(found), "required_models_missing", "One or more WAN model files are missing.",
-            location, details=tuple(f"Missing: {name}" for name in missing),
-            recommendation="correct_path" if location else "install", requires_user_interaction=True,
-        )
-
-    if component.verifier == "hunyuan_files":
-        from ..video_runtime.hunyuan_providers import PROVIDER_BY_COMPONENT
-        from ..video_runtime.hunyuan_install import verify_weights, hardware_preflight
-
-        provider_id = PROVIDER_BY_COMPONENT.get(component_id)
-        if not provider_id:
-            return Verification(
-                False, True, "unknown_component", "Unknown Hunyuan component.",
-                recommendation="install", requires_user_interaction=True,
-            )
-        verify = verify_weights(provider_id)
-        if verify.get("ok"):
-            return Verification(
-                True, False, None, verify.get("message") or "Hunyuan weights verified.",
-                verify.get("path"),
-            )
-        pre = hardware_preflight(provider_id)
-        details = tuple(verify.get("missing") or ()) + tuple(pre.get("reasons") or ())
-        return Verification(
-            False,
-            True,
-            "required_models_missing",
-            verify.get("message") or "Hunyuan weights missing or incomplete.",
-            verify.get("path"),
-            details=details,
-            recommendation="install",
-            requires_user_interaction=True,
         )
 
     if component.verifier == "zimage_files":
@@ -647,37 +691,6 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
                 requires_user_interaction=True,
             )
         return Verification(True, False, None, f"{component.name} files are available and readable.", location)
-
-    if component.verifier == "ic_lora_file":
-        from ..references.ic_lora_status import ingredients_status
-        from ..references.models import INGREDIENTS_FILENAME
-
-        status = ingredients_status(location)
-        st = status.get("status")
-        if st == "ready":
-            return Verification(
-                True, False, None,
-                status.get("summary") or status.get("message") or "Ingredients IC-LoRA is ready.",
-                status.get("path"),
-            )
-        issue = status.get("issue_code") or "ic_lora_model_missing"
-        absent = st in ("missing", "authorization_required")
-        recommendation = "configure" if st == "authorization_required" else (
-            "correct_path" if location else "install"
-        )
-        details = [f"Expected file: {INGREDIENTS_FILENAME}"]
-        if status.get("hf"):
-            details.append(f"HF probe: {status['hf']}")
-        return Verification(
-            False,
-            absent,
-            issue,
-            status.get("summary") or status.get("message") or "Ingredients IC-LoRA is not ready.",
-            status.get("path") or location,
-            details=tuple(str(d) for d in details),
-            recommendation=recommendation,
-            requires_user_interaction=True,
-        )
 
     if component.verifier == "m210b_sandbox":
         from ..codirector.m210b.qwen_voice_install import runtime_ready
@@ -924,6 +937,51 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             requires_user_interaction=True,
         )
 
+    if component.verifier == "qwen_omni_files":
+        from ..codirector.video_intelligence.paths import (
+            QWEN_OMNI_MARKERS,
+            model_present,
+            qwen_omni_dir,
+        )
+
+        dest = qwen_omni_dir()
+        configured = _configured_location(component_id, state)
+        if configured:
+            dest = Path(configured)
+        markers = QWEN_OMNI_MARKERS
+        if model_present(dest, markers):
+            from ..codirector.video_intelligence.health import probe_component
+
+            health = probe_component(component_id)
+            if not health.get("ok"):
+                return Verification(
+                    False,
+                    False,
+                    health.get("reason") or "worker_unhealthy",
+                    f"{component.name} files are present but the worker is not ready.",
+                    str(dest),
+                    details=("local media intelligence", f"health={health.get('reason')}"),
+                    recommendation="repair",
+                    requires_user_interaction=True,
+                )
+            return Verification(
+                True,
+                False,
+                None,
+                f"{component.name} weights are installed.",
+                str(dest),
+                details=("local media intelligence", "config verified"),
+            )
+        return Verification(
+            False,
+            True,
+            "not_installed",
+            f"{component.name} is not installed.",
+            str(dest),
+            recommendation="install",
+            requires_user_interaction=True,
+        )
+
     if component.verifier == "stills_perception_files":
         from ..codirector.perception.paths import COMPONENT_SPECS, model_present
 
@@ -1126,69 +1184,6 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             version=manifest.version,
         )
 
-    if component.verifier == "comfy_extension_nodes":
-        from ..source_manager.install_jobs.comfy_extension_installer import (
-            probe_required_nodes,
-            resolve_custom_nodes_dir,
-            resolve_extension_source,
-        )
-
-        try:
-            source = resolve_extension_source(component_id)
-            target = resolve_custom_nodes_dir() / str(source["packageName"])
-        except Exception:
-            target = resolve_custom_nodes_dir() / component_id
-            source = {}
-        if not target.is_dir():
-            return Verification(
-                False,
-                True,
-                "not_installed",
-                f"{component.name} is not installed in ComfyUI custom_nodes.",
-                recommendation="install",
-                requires_user_interaction=True,
-            )
-        provides = str((source or {}).get("provides") or "")
-        needed = [n.strip() for n in provides.split(",") if n.strip()]
-        if component_id == "comfyui_sensenova_nodes" and not needed:
-            needed = [
-                "SenseNovaU1LocalLoader",
-                "SenseNovaU1LocalTextToImage",
-                "SenseNovaU1LocalImageEdit",
-            ]
-        probe = probe_required_nodes(needed or None)
-        if probe.get("ok"):
-            return Verification(
-                True,
-                False,
-                None,
-                f"{component.name} is installed and required nodes are registered.",
-                str(target),
-                details=(probe.get("message") or "",),
-            )
-        if not probe.get("available"):
-            return Verification(
-                False,
-                False,
-                "restart_required",
-                "Extension files are present, but ComfyUI must restart before nodes can be verified.",
-                str(target),
-                details=(probe.get("message") or "",),
-                recommendation="repair",
-                requires_user_interaction=True,
-            )
-        missing = ", ".join(probe.get("missing") or [])
-        return Verification(
-            False,
-            False,
-            "nodes_missing",
-            f"Extension installed, but required nodes were not registered: {missing}.",
-            str(target),
-            details=(probe.get("message") or "",),
-            recommendation="repair",
-            requires_user_interaction=True,
-        )
-
     # ── Generic single-file model verifiers keyed by component_id ──────────
     # These cover LTX 2.5 text encoder / VAE / audio VAE / spatial upscaler,
     # which the catalog declares with generic verifier names (text_encoder_file,
@@ -1251,6 +1246,38 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
                 recommendation="correct_path" if location else "install", requires_user_interaction=True,
             )
 
+    if component.verifier == "world_intelligence_files" or component.id == "vjepa2_world_intelligence":
+        from ..codirector.world_intelligence.paths import (
+            vjepa2_21_dir,
+            vjepa2_21_present,
+            vjepa2_dir,
+            vjepa2_present,
+        )
+
+        if vjepa2_21_present():
+            return Verification(
+                True,
+                False,
+                None,
+                "Optional World Intelligence model files are available.",
+                str(vjepa2_21_dir()),
+            )
+        if vjepa2_present():
+            return Verification(
+                True,
+                False,
+                None,
+                "Optional World Intelligence model files are available.",
+                str(vjepa2_dir()),
+            )
+        return Verification(
+            False,
+            True,
+            "required_model_missing",
+            "Optional World Intelligence model files are not installed.",
+            recommendation="install",
+        )
+
     _UPSCALE_FILES = {
         "ltx_2_5_spatial_upscaler": (settings.ltx_2_5_spatial_upscaler, ("upscale_models",)),
     }
@@ -1282,6 +1309,35 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
 
 def diagnose(component_id: str) -> dict[str, Any]:
     component = get_component(component_id)
+    if is_retired_video_setup_component(component_id):
+        return {
+            "component_id": component_id,
+            "healthy": True,
+            "issue_code": "retired_video_generator",
+            "summary": (
+                f"{component.name} is retired from local video generation and is not "
+                "required for Adept UI production (MiniMax H3 + LTX 2.5)."
+            ),
+            "technical_details": ["Retired local video generator — not a setup failure."],
+            "recommendation": "none",
+            "recommended_action_label": "No Action Required",
+            "requires_user_interaction": False,
+            "checked_at": utc_now(),
+        }
+    if is_retired_obsolete_setup_component(component_id):
+        return {
+            "component_id": component_id,
+            "healthy": True,
+            "issue_code": "retired_obsolete_component",
+            "summary": (
+                f"{component.name} is obsolete and is not part of current Adept UI production."
+            ),
+            "technical_details": ["Obsolete setup leftover — not a setup failure."],
+            "recommendation": "none",
+            "recommended_action_label": "No Action Required",
+            "requires_user_interaction": False,
+            "checked_at": utc_now(),
+        }
     state = load_state()
     auto_bound = ensure_configured_paths(state)
     if auto_bound:

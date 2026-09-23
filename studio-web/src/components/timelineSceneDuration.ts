@@ -1,5 +1,8 @@
-/** Per-scene local Timeline render cap. Project-total summing is stale. */
-export const LOCAL_SCENE_DURATION_CAP_SEC = 20;
+/**
+ * Seed ceiling for Add Scene defaults only — not a persist max.
+ * Creators set any scene length they want in Scene Inspector.
+ */
+export const LOCAL_SCENE_DURATION_CAP_SEC = 3600;
 
 /** MiniMax H3 Timeline max request (= creator new-scene default). Matches H3_TIMELINE_MAX_REQUEST_SEC. */
 export const MINIMAX_H3_NEW_SCENE_SEC = 15;

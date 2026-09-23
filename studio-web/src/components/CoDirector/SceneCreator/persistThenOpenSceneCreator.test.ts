@@ -35,8 +35,8 @@ describe("persistThenOpenSceneCreator", () => {
       sceneId: "guess",
       onGoTab,
     });
-    expect(order).toEqual(["persist", "nav:scenecreator"]);
-    expect(onGoTab).toHaveBeenCalledWith("scenecreator", {
+    expect(order).toEqual(["persist", "nav:imagegen"]);
+    expect(onGoTab).toHaveBeenCalledWith("imagegen", {
       scene_id: "scene-server",
       sheet_id: "sheet-server",
       spatialProfileId: "handoff-1",

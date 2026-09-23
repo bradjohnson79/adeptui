@@ -1,4 +1,4 @@
-﻿"""Omni Wave 2B — deposit a completed Library VIDEO onto Timeline Visual.
+"""Omni Wave 2B — deposit a completed Library VIDEO onto Timeline Visual.
 
 No regeneration. Video-only. Reuses W46 master save + MAGI export_to_timeline
 for batch-owned clip ledger. Does not edit 1F/3F/T2V generation graphs.
@@ -11,10 +11,9 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ...db import Asset
-from ...director_timeline import TimelineClip, parse_director_timeline
 from ...magi.timeline_handoff import SCENE_SHOT_CLIP_PREFIX, export_to_timeline
 from .. import store
-from ..contracts import SceneTimelineMaster
+from ..contracts import BatchClip, SceneTimelineMaster
 
 OMNI_EXPORT_CLIP_PREFIX = "omni_export_"
 
@@ -30,7 +29,7 @@ def export_completed_video_to_timeline(
 ) -> dict[str, Any]:
     """Place a completed video asset onto Timeline Visual (media_mode=video).
 
-    Primary: director_json.video_clips upsert (kind semantics = video / Visual media).
+    Primary: Master batch.visualClips upsert (kind=video).
     Secondary: MAGI/W46 export_to_timeline for batch-owned visual clip ledger.
     """
     aid = str(asset_id or "").strip()
@@ -66,44 +65,37 @@ def export_completed_video_to_timeline(
         return {**bundle, "mock": False}
     master = SceneTimelineMaster.model_validate(bundle["master"])
 
-    director_tl = parse_director_timeline(
-        scene.director_json,
-        fallback_duration=float(scene.duration_sec or 5.0),
-        fallback_prompt=scene.prompt or "",
-    )
     length = max(0.15, float(scene.duration_sec or 5.0))
     clip_label = (label or asset.tag or asset.filename or "Exported take").strip()
     surface = (source_surface or "omni").strip() or "omni"
     clip_id = f"{OMNI_EXPORT_CLIP_PREFIX}{aid.replace('-', '')[:16]}"
 
-    retained = [
-        c
-        for c in (director_tl.video_clips or [])
-        if str(c.id) != clip_id
-    ]
+    blocks = sorted(master.batchBlocks, key=lambda b: int(getattr(b, "order", 0) or 0))
+    target = blocks[-1] if blocks else None
+    if target is None:
+        return {"ok": False, "error": "NO_EXECUTION_WINDOW", "mock": False}
+
+    retained = [c for c in (target.visualClips or []) if str(c.id) != clip_id]
     cursor = 0.0
     for c in retained:
         cursor = max(cursor, float(c.start or 0.0) + float(c.length or 0.0))
 
-    clip = TimelineClip(
+    clip = BatchClip(
         id=clip_id,
-        asset_id=aid,
+        kind="video",
+        assetId=aid,
         start=cursor,
         length=length,
-        trim_start=0.0,
+        trimStart=0.0,
         label=clip_label,
-        media_type="video",
     )
-    director_tl.video_clips = retained + [clip]
-    director_tl.media_mode = "video"
-    director_tl.duration_sec = max(float(director_tl.duration_sec or 0.0), cursor + length)
+    target.visualClips = retained + [clip]
 
     store.save_master(
         db,
         project_id,
         scene_id,
         master,
-        director_tl=director_tl,
         bump_revision=True,
     )
 

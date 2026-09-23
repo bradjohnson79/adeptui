@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import settings
-from .catalog import COMPONENTS, get_component
+from .catalog import get_component, is_retired_video_setup_component, public_components
 from .diagnostics import diagnose, invalidate_verify_cache, verify_component
 from .operations import registry
 from .paths import browse_path, path_selector_mode, suggested_install_path
@@ -149,7 +149,7 @@ def _checkpoint_for(component_id: str, recommendation: str) -> dict[str, Any]:
     if recommendation in ("correct_path", "configure") or component.installer == "path_link":
         kind = (
             "model_path"
-            if component.id in ("ltx_checkpoint", "wan_models", "zimage_models")
+            if component.id in ("ltx_2_5_checkpoint", "zimage_models")
             else "path"
         )
         selector = path_selector_mode(component_id)
@@ -231,19 +231,32 @@ def _checkpoint_for(component_id: str, recommendation: str) -> dict[str, Any]:
             "independent_install": True,
         }
     elif component.installer == "huggingface_snapshot":
-        if component.id in ("videochat3_4b", "internvideo3_8b"):
+        if component.id == "qwen2_5_omni_7b":
+            kind = "media_intelligence_hf_install"
+            summary = (
+                f"Install {component.name} from the Hugging Face snapshot "
+                "(isolated media-intelligence directory, reused if already present). "
+                "Progress appears in Source Manager Active Downloads."
+            )
+        elif component.id in ("videochat3_4b", "internvideo3_8b"):
             kind = "video_understanding_hf_install"
             summary = (
                 f"Install {component.name} from the pinned Hugging Face snapshot "
                 "(isolated video-understanding directory, reused if already present). "
                 "Progress appears in Source Manager Active Downloads."
             )
-        else:
-            kind = "hunyuan_hf_install"
+        elif is_retired_video_setup_component(component.id):
+            kind = "retired_video_generator"
             summary = (
-                f"Install {component.name} from the official Tencent Hugging Face repository "
-                "(isolated model directory, resume-safe). Each Hunyuan model installs independently — "
-                "this never overwrites the other. Progress appears in Source Manager Active Downloads."
+                f"{component.name} is retired from local video generation. "
+                "Adept UI local video is MiniMax H3 and LTX 2.5 only. This component is not installed."
+            )
+        else:
+            kind = "huggingface_snapshot_install"
+            summary = (
+                f"Install {component.name} from the official Hugging Face snapshot "
+                "(isolated directory, reused if already present). "
+                "Progress appears in Source Manager Active Downloads."
             )
         fields = []
         extra = {
@@ -276,8 +289,8 @@ def get_prepare_plan() -> dict[str, Any]:
     actions: list[dict[str, Any]] = []
     checkpoints: list[dict[str, Any]] = []
     required_disk = 0
-    for component in COMPONENTS:
-        if not component.required:
+    for component in public_components():
+        if not component.required or is_retired_video_setup_component(component.id):
             continue
         current = by_id[component.id]
         if current["status"] in ("ready", "update_available"):
@@ -315,7 +328,9 @@ def get_prepare_plan() -> dict[str, Any]:
         )
     return {
         "required_actions": actions,
-        "skipped_optional_component_ids": [item.id for item in COMPONENTS if not item.required],
+        "skipped_optional_component_ids": [
+            item.id for item in public_components() if not item.required
+        ],
         "required_disk_bytes": required_disk,
         "available_disk_bytes": available_disk,
         "user_checkpoints": checkpoints,
@@ -1048,6 +1063,66 @@ def _enqueue_video_understanding_install(component_id: str) -> dict[str, Any]:
     )
 
 
+def _enqueue_qwen_omni_install(component_id: str) -> dict[str, Any]:
+    """Product path: queue Qwen2.5-Omni 7B HF snapshot install via Source Manager."""
+    from ..codirector.video_intelligence.paths import (
+        QWEN_OMNI_HF_ID,
+        QWEN_OMNI_MARKERS,
+        model_present,
+        qwen_omni_dir,
+    )
+    from ..source_manager.downloads.models import create_install_plan
+    from ..source_manager.downloads.queue import get_queue_manager
+
+    dest = qwen_omni_dir()
+    markers = QWEN_OMNI_MARKERS
+    if model_present(dest, markers):
+        operation = registry.create("component_action", [component_id])
+        return registry.finish(
+            operation["operation_id"],
+            result={
+                "component_id": component_id,
+                "queued": False,
+                "reused": True,
+                "message": "Existing media-intelligence weights reused.",
+                "localDir": str(dest),
+            },
+        )
+
+    repo = QWEN_OMNI_HF_ID
+    plan = create_install_plan(
+        component_id=component_id,
+        source_id=repo,
+        provider_id="huggingface_snapshot",
+        artifacts=[
+            {
+                "remotePath": repo,
+                "destinationRelativePath": ".",
+                "downloadUrl": f"https://huggingface.co/{repo}",
+            }
+        ],
+        destination_root=str(dest),
+        estimated_download_bytes=get_component(component_id).download_bytes,
+        estimated_extracted_bytes=get_component(component_id).installed_bytes,
+        metadata={"componentId": component_id, "officialOnly": True, "mediaIntelligence": True},
+    )
+    op = get_queue_manager().enqueue(plan, priority=45)
+    operation = registry.create("component_action", [component_id])
+    return registry.finish(
+        operation["operation_id"],
+        result={
+            "component_id": component_id,
+            "queued": True,
+            "downloadOperationId": op.get("id"),
+            "message": (
+                f"{component_id} install queued from the Hugging Face snapshot. "
+                "Track progress in Source Manager Active Downloads."
+            ),
+            "operation": op,
+        },
+    )
+
+
 def _enqueue_stills_perception_install(component_id: str) -> dict[str, Any]:
     from ..codirector.perception.paths import COMPONENT_SPECS, model_present
     from ..source_manager.downloads.models import create_install_plan
@@ -1101,24 +1176,19 @@ def _enqueue_stills_perception_install(component_id: str) -> dict[str, Any]:
 
 
 def _enqueue_hunyuan_install(component_id: str) -> dict[str, Any]:
-    from ..video_runtime.hunyuan_install import enqueue_install
-
-    op_wrap = enqueue_install(component_id)
-    op = op_wrap.get("operation") or {}
+    """Retired Hunyuan Video install surface — never enqueue a new download."""
     operation = registry.create("component_action", [component_id])
     return registry.finish(
         operation["operation_id"],
+        error="retired_video_generator",
         result={
             "component_id": component_id,
-            "queued": True,
-            "downloadOperationId": op.get("id"),
-            "providerId": op_wrap.get("providerId"),
+            "queued": False,
+            "retired": True,
             "message": (
-                f"{component_id} install queued from official Tencent HF source. "
-                "Track progress in Source Manager Active Downloads. "
-                "The other Hunyuan model is not queued."
+                f"{component_id} is retired from local video generation. "
+                "Adept UI local video is MiniMax H3 and LTX 2.5 only."
             ),
-            "operation": op,
         },
     )
 
@@ -1182,6 +1252,21 @@ def _install_index_tts2(component_id: str, *, force: bool = False) -> dict[str, 
 
 def execute_recommended_action(component_id: str) -> dict[str, Any]:
     component = get_component(component_id)
+    if is_retired_video_setup_component(component_id):
+        operation = registry.create("component_action", [component_id])
+        return registry.finish(
+            operation["operation_id"],
+            error="retired_video_generator",
+            result={
+                "component_id": component_id,
+                "queued": False,
+                "retired": True,
+                "message": (
+                    f"{component.name} is retired from local video generation. "
+                    "Adept UI local video is MiniMax H3 and LTX 2.5 only."
+                ),
+            },
+        )
     diagnostic = diagnose_component(component_id)
     action = diagnostic["recommendation"]
 
@@ -1209,7 +1294,8 @@ def execute_recommended_action(component_id: str) -> dict[str, Any]:
     ):
         if component_id in ("videochat3_4b", "internvideo3_8b"):
             return _enqueue_video_understanding_install(component_id)
-        return _enqueue_hunyuan_install(component_id)
+        if component_id == "qwen2_5_omni_7b":
+            return _enqueue_qwen_omni_install(component_id)
 
     if component.installer == "index_tts2" and action in (
         "install",

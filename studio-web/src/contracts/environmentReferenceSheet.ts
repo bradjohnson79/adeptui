@@ -125,6 +125,8 @@ export type EnvironmentReferenceSheet = {
   status: ERSStatus;
   createdAt: string;
   updatedAt: string;
+  isGlobal?: boolean;
+  is_global?: boolean;
   profile: EnvironmentProfile;
   spatialMap?: SpatialMapReference | null;
   directionalViews: DirectionalViewRecord[];
@@ -155,4 +157,9 @@ export type EnvironmentReferenceSheetSummary = {
   has_reference?: boolean;
   exportKinds: ERSExportKind[];
   updatedAt: string;
+  isGlobal?: boolean;
+  is_global?: boolean;
+  /** Prompt-facing #tag when backend sends it (never invent aliases). */
+  canonicalTag?: string | null;
+  canonical_tag?: string | null;
 };

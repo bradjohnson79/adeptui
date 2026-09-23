@@ -13,10 +13,9 @@
   "audioStudio": "Studio audio",
   "imagegen": "ImageGen",
   "txt2vid": "Txt2Vid",
-  "profiles": "Profils",
+  "tools": "Character / Angles",
   "script": "Scénario / Storyboard",
   "shotlist": "Liste des plans",
-  "mastersheet": "Fiche maître de scène",
   "marketplace": "Marketplace",
   "avatar": "Studio Avatar",
   "sourceManager": "Gestionnaire de sources",
@@ -34,7 +33,6 @@
   "spatialMap": "Carte spatiale",
   "posecraft": "PoseCraft",
   "scriptwriter": "Scénariste",
-  "sceneCreator": "Créateur de scènes",
   "brandStudio": "Brand Studio",
   "generationTools": "Generation Tools"
 }

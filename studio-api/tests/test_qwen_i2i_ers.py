@@ -213,6 +213,7 @@ def _patch_handler(monkeypatch, sheet, document, captured_bodies):
     monkeypatch.setattr("app.spatial_map.service.get_document", lambda db, pid, mid: document)
     monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", lambda *a, **k: None)
     monkeypatch.setattr("app.environment_reference_sheet.store.save_sheet", lambda current: None)
+    monkeypatch.setattr(ers_generate, "_public_asset_url", lambda aid: f"https://assets.example/{aid}")
 
 
 def test_ers_requires_authoritative_source_image(monkeypatch) -> None:
@@ -238,7 +239,7 @@ def test_ers_requires_authoritative_source_image(monkeypatch) -> None:
     assert not captured
 
 
-def test_ers_defaults_to_qwen_i2i_with_source(monkeypatch) -> None:
+def test_ers_defaults_to_gpt_image_2_with_source(monkeypatch) -> None:
     project_id = f"proj-{uuid.uuid4()}"
     spatial_map_id = f"map-{uuid.uuid4()}"
     sheet = _sheet(project_id, spatial_map_id)
@@ -252,10 +253,34 @@ def test_ers_defaults_to_qwen_i2i_with_source(monkeypatch) -> None:
     ers_generate.handle(db=None, project_id=project_id, execution_id="e-2", spatial_map_id=spatial_map_id)
     assert len(captured) == 1
     body = captured[0]
-    assert body.get("forceWorkflowKey") == "qwen2512.ref"
+    assert body.get("hostedModelId") == "gpt-image-2-kie"
+    assert body.get("kieImageModelId") == "gpt-image-2-image-to-image"
+    assert body.get("forceWorkflowKey") != "qwen2512.ref"
     assert body.get("sourceAssetId") == ATLAS_ID
     assert body["creativeContext"]["referenceGrounding"]["mode"] == "pixel"
-    assert "qwen2512.ref" in str(body.get("creativeContext") or {}).replace("'", '"')
+
+
+def test_ers_refuses_qwen_selection(monkeypatch) -> None:
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    sheet = _sheet(project_id, spatial_map_id)
+    captured: list[dict] = []
+    _patch_handler(
+        monkeypatch,
+        sheet,
+        SpatialMapDocument(projectId=project_id, id=spatial_map_id, backgroundAssetId=ATLAS_ID),
+        captured,
+    )
+    with pytest.raises(RuntimeError, match="GPT Image 2 API only"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id="e-qwen",
+            spatial_map_id=spatial_map_id,
+            model="qwen2512",
+            model_family_preference="qwen2512",
+        )
+    assert not captured
 
 
 # ---------------------------------------------------------------------------

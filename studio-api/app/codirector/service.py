@@ -29,7 +29,6 @@ from .context_enrichment import (
     compact_wiki_context,
     content_tab_hint_block,
     execution_result_context_block,
-    story_script_context_block,
 )
 from ..feature_flags import feature_flags
 from ..learning import adaptive_lessons_block, learning_context_block, parse_learning
@@ -53,6 +52,7 @@ from .errors import (
     PROJECT_REQUIRED,
     REQUEST_CANCELLED,
     STRUCTURED_OUTPUT_INVALID,
+    TOOL_EXECUTION_FAILED,
     TOOL_LOOP_LIMIT_REACHED,
     VALIDATION_ERROR,
     CoDirectorError,
@@ -61,7 +61,7 @@ from .providers.base import ChatRequest, ChatResult, CoDirectorProvider, Provide
 from .providers.hosted import HostedLlmProvider, configured_hosted_llm_ids
 from .providers.mock import MockCoDirectorProvider
 from .providers.ollama import OllamaProvider
-from .structured_output import ToolCallRequest, parse_structured_reply
+from .structured_output import ToolCallRequest, parse_structured_reply, strip_proposal_blocks, strip_tool_blocks
 from .tools import registry as tool_registry
 from .tools.capabilities import CapabilityAdapter
 from .tools.definitions import ToolInvocationOut
@@ -314,25 +314,57 @@ def _build_project_payload(db: Session, project_id: str) -> dict[str, Any]:
 
 
 def _scene_director_dict(scene: Scene) -> dict[str, Any]:
-    from ..director_timeline import migrate_scene_to_director, parse_director_timeline
+    """Chat-context summary of the selected scene's timeline.
 
-    if scene.director_json and scene.director_json.strip():
-        director = parse_director_timeline(
-            scene.director_json,
-            fallback_duration=scene.duration_sec,
-            fallback_prompt=scene.prompt,
-        )
-    else:
-        director = migrate_scene_to_director(
-            duration_sec=scene.duration_sec,
-            prompt=scene.prompt,
-            start_asset_id=scene.start_asset_id,
-            middle_asset_id=scene.middle_asset_id,
-            end_asset_id=scene.end_asset_id,
-            audio_asset_id=scene.audio_asset_id,
-            lipsync_tracks_json=scene.lipsync_tracks_json,
-        )
-    return director.model_dump(mode="json")
+    SINGLE-STORE: derived from the embedded SceneTimelineMaster
+    (director_json.timelineMaster) — batch.promptSegments / audioClips /
+    sfxClips and window durations. The retired legacy DirectorTimeline keys in
+    the same blob are COW audit leftovers and are never re-imported here.
+    Consumer (assistant.build_context_block) reads media_mode, duration_sec,
+    and the lengths of prompt_segments / audio_clips / sfx_clips.
+    """
+    import json as _json
+
+    duration = float(scene.duration_sec or 0.0)
+    segments: list[dict[str, Any]] = []
+    audio_clips: list[dict[str, Any]] = []
+    sfx_clips: list[dict[str, Any]] = []
+    try:
+        blob = _json.loads(scene.director_json or "{}")
+    except Exception:
+        blob = {}
+    master_raw = blob.get("timelineMaster") if isinstance(blob, dict) else None
+    if isinstance(master_raw, dict):
+        try:
+            from ..director_timeline_w46.contracts import SceneTimelineMaster
+
+            master = SceneTimelineMaster.model_validate(master_raw)
+            total = 0.0
+            for batch in master.batchBlocks or []:
+                dur = batch.duration
+                total += float(
+                    dur.timelineVisibleDuration
+                    or dur.generatedDuration
+                    or dur.plannedDuration
+                    or 0.0
+                )
+                for seg in batch.promptSegments or []:
+                    segments.append(seg.model_dump(mode="json"))
+                for clip in batch.audioClips or []:
+                    audio_clips.append(clip.model_dump(mode="json"))
+                for clip in batch.sfxClips or []:
+                    sfx_clips.append(clip.model_dump(mode="json"))
+            if total > 0:
+                duration = total
+        except Exception:
+            pass
+    return {
+        "media_mode": "video",
+        "duration_sec": duration,
+        "prompt_segments": segments,
+        "audio_clips": audio_clips,
+        "sfx_clips": sfx_clips,
+    }
 
 
 def _apply_mode_nudge(messages: list[dict[str, str]], mode: str) -> None:
@@ -414,6 +446,9 @@ def _detect_premature_tool_success_claim(reply: str, *, mutating_tool_executed: 
 
     if mutating_tool_executed or not reply:
         return False, None
+    placed = _TIMED_PROMPT_PLACED_CLAIM_RE.search(reply)
+    if placed:
+        return True, placed.group(0)
     m = _PREMATURE_TOOL_SUCCESS_RE.search(reply)
     if not m:
         return False, None
@@ -585,8 +620,7 @@ async def _prepare_chat_request(
     conversation_locale: str | None = None,
     attachment_ids: list[str] | None = None,
     active_content_tab: str | None = None,
-    active_document_id: str | None = None,
-    scriptwriter_scene_id: str | None = None,
+    character_id: str | None = None,
 ) -> tuple[CoDirectorProvider, ChatRequest, ContextManifest]:
     request_id = request_id or new_request_id()
     context = ""
@@ -641,6 +675,7 @@ async def _prepare_chat_request(
     if bible_excerpt:
         context = (context or "") + "\n\n" + bible_excerpt
 
+    vision_turn = None
     if project_id:
         wiki_block = compact_wiki_context(db, project_id)
         if wiki_block:
@@ -661,11 +696,95 @@ async def _prepare_chat_request(
                 context = (context or "") + "\n\n" + mem_block
         except Exception:
             pass
+        # Order 11A — stamp attach intent from the latest user turn.
+        _attach_user_text = ""
+        try:
+            for _m in reversed(messages or []):
+                if (_m.get("role") or "") == "user":
+                    _attach_user_text = str(_m.get("content") or "")
+                    break
+        except Exception:
+            _attach_user_text = ""
+        vision_block = ""
+        _ = character_id
+        try:
+            from .vision.turn import collect_image_asset_ids, needs_chat_vision, run_chat_vision_turn
+
+            vision_ids = collect_image_asset_ids(
+                db,
+                project_id,
+                attachment_ids=attachment_ids,
+                messages=list(messages or []),
+                user_text=_attach_user_text,
+            )
+            if needs_chat_vision(_attach_user_text, vision_ids):
+                vision_turn = await run_chat_vision_turn(
+                    db,
+                    project_id=project_id,
+                    attachment_ids=vision_ids,
+                    user_text=_attach_user_text,
+                )
+                vision_block = str(
+                    getattr(vision_turn, "context_block", None)
+                    or getattr(vision_turn, "facts", None)
+                    or ""
+                )
+        except Exception as exc:
+            logger.debug("chat vision turn failed", exc_info=True)
+            vision_block = (
+                "=== VISION RESULT ===\n"
+                "status: Vision Provider Unavailable\n"
+                f"I couldn't read that image because {exc}. "
+                "Do not claim Adept is a text-only assistant or that file uploads are unsupported. "
+                "Vision is a core Co-Director capability; this turn failed for the reason above."
+            )
         attachment_block = attachment_context_block(
-            db, project_id=project_id, attachment_ids=attachment_ids
+            db,
+            project_id=project_id,
+            attachment_ids=attachment_ids,
+            user_text=_attach_user_text,
+            vision_block=vision_block or None,
         )
         if attachment_block:
             context = (context or "") + "\n\n" + attachment_block
+            # Suppress ERS lecture bias when intent is timeline_*_ref.
+            try:
+                from .conversation.attach_intent import (
+                    classify_attach_intent,
+                    should_suppress_ers_priority,
+                )
+
+                _ai = classify_attach_intent(
+                    _attach_user_text,
+                    has_image_attachment=bool(attachment_ids),
+                )
+                if should_suppress_ers_priority(_ai, user_text=str(_attach_user_text or '')):
+                    if _ai.intent in {"timeline_background_ref", "timeline_visual_ref"}:
+                        context = (context or "") + (
+                            "\n\n[Order11A] Attach intent is Timeline visual/background. "
+                            "Do NOT prioritize ers.generate or ERS_SPEC café lecture. "
+                            "Propose timeline.attach_optional_reference (approval-gated). "
+                            "Reply with creative companion notes THEN a 9:16 Timeline production plan "
+                            "treating the image as background/visual ref. Preserve @Korri/@Cade tags."
+                        )
+                    elif _ai.intent == "visual_discussion":
+                        # Intelligence mission RC8: discussion language about an
+                        # attached image is visual conversation — not a
+                        # Timeline attach proposal.
+                        context = (context or "") + (
+                            "\n\n[Attach] The creator is discussing the attached image "
+                            "(look, lighting, mood, staging). Respond conversationally "
+                            "about it. Do NOT propose Timeline actions or attach steps "
+                            "unless the creator asks. Do NOT lecture about ERS/sheets."
+                        )
+                    else:
+                        context = (context or "") + (
+                            "\n\n[Attach] The attached image has no stated use yet. Do NOT "
+                            "lecture about ERS/sheets. Infer or ask the intended use from "
+                            "the conversation before proposing Timeline actions."
+                        )
+            except Exception:
+                pass
         # Workstream H, spec §42 — result-aware context so "number 3" resolves
         # to Frame 3 of the most recent completed execution. Best-effort: empty
         # when no completed execution exists or the pack store is unavailable.
@@ -677,24 +796,6 @@ async def _prepare_chat_request(
     content_tab_hint = content_tab_hint_block(active_content_tab)
     if content_tab_hint:
         context = (context or "") + "\n\n" + content_tab_hint
-
-    # Live Story + Script state — read from the canonical stores on EVERY turn
-    # (never a cached snapshot), so Co-Director always answers from the current
-    # story and screenplay, including the scene the creator is editing right
-    # now. Bounded: summaries truncated, scene list capped, current scene only
-    # read out. Best-effort: a failure never breaks the chat turn.
-    if project_id:
-        try:
-            story_script_block = story_script_context_block(
-                db,
-                project_id,
-                active_document_id=active_document_id,
-                scriptwriter_scene_id=scriptwriter_scene_id,
-            )
-            if story_script_block:
-                context = (context or "") + "\n\n" + story_script_block
-        except Exception:
-            logger.debug("story/script context block failed", exc_info=True)
 
     chat_messages = [
         {"role": m.get("role", "user"), "content": m.get("content", "")}
@@ -747,6 +848,8 @@ async def _prepare_chat_request(
         model_id=model,
         project_context=context,
         mode=mode,
+        vision_trace=getattr(vision_turn, "vision_trace", None) if vision_turn is not None else None,
+        vision_turn=vision_turn,
     )
     return provider, chat_request, context_manifest
 
@@ -932,8 +1035,15 @@ async def _propose_tool_call(
     request_id: str,
     tool_call: ToolCallRequest,
     outcome: _StructuredOutcome,
+    same_turn_display: str = "",
+    user_message: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
-    """Turn a mutating tool request into a durable proposal. Nothing is applied."""
+    """Turn a mutating tool request into a durable proposal. Nothing is applied.
+
+    Exception: timeline.propose_add_prompt_segment on a place request honors the
+    existing capability DIRECT policy (propose + approve) and reports success
+    only after destination readback.
+    """
 
     yield {
         "type": "tool_requested",
@@ -941,6 +1051,76 @@ async def _propose_tool_call(
         "toolId": tool_call.tool_id,
         "kind": "mutating",
     }
+    if tool_call.tool_id == "timeline.propose_add_prompt_segment":
+        bound, refusal = _bind_timed_prompt_tool_arguments(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            arguments=dict(tool_call.arguments or {}),
+            same_turn_display=same_turn_display,
+            user_message=user_message,
+        )
+        if refusal or bound is None:
+            yield {
+                "type": "assistant",
+                "requestId": request_id,
+                "content": refusal or (
+                    "I don't have an authored timed prompt to place yet — ask me to create one "
+                    "for the scene first, then I'll add it to the Timeline."
+                ),
+            }
+            return
+        tool_call.arguments = bound
+        already = _verify_timed_prompt_destination(
+            db,
+            project_id,
+            str(bound.get("sceneId") or scene_id or ""),
+            str(bound.get("text") or ""),
+        )
+        if already.get("verified"):
+            invocation = ToolInvocationOut(
+                id=f"inv-{request_id}",
+                projectId=project_id,
+                toolId=tool_call.tool_id,
+                toolSchemaVersion=1,
+                kind="mutating",
+                status="succeeded",
+                arguments=dict(bound),
+                result={
+                    "ok": True,
+                    "verified": True,
+                    "segmentId": already.get("segmentId"),
+                    "authoredSha256": already.get("authoredSha256"),
+                    "storedSha256": already.get("storedSha256"),
+                    "destinationSceneId": already.get("sceneId"),
+                },
+                requestId=request_id,
+            )
+            outcome.invocations.append(invocation)
+            yield {
+                "type": "tool_completed",
+                "requestId": request_id,
+                "toolId": tool_call.tool_id,
+                "invocation": invocation.model_dump(mode="json"),
+            }
+            success = VERIFIED_IN_TIMELINE_COPY
+            outcome.display = success
+            yield {"type": "token", "requestId": request_id, "replace": True, "content": success}
+            yield {"type": "assistant", "requestId": request_id, "content": success}
+            try:
+                append_assistant_completion(
+                    db,
+                    project_id,
+                    request_id=request_id,
+                    reply=success,
+                    model=None,
+                    provider_id=None,
+                    message_id=f"asst-{request_id}-destination",
+                    message_type="answer",
+                )
+            except Exception:
+                logger.debug("destination persist failed", exc_info=True)
+            return
     try:
         proposal = await ToolExecutionService.propose(
             db,
@@ -973,6 +1153,161 @@ async def _propose_tool_call(
                 "error": err.to_dict(),
             }
         return
+
+    if tool_call.tool_id == "timeline.propose_add_prompt_segment":
+        try:
+            from .bible.proposals import ProposalService
+
+            receipt = ProposalService.approve(
+                db, project_id, proposal.id, note=None, decided_by="assistant"
+            )
+        except CoDirectorError as err:
+            outcome.errors.append(err)
+            fail = (
+                "I could not save the Timed Prompt to Timeline. "
+                "Active scene → Timed Prompt was not updated."
+            )
+            outcome.display = fail
+            yield {"type": "assistant", "requestId": request_id, "content": fail}
+            yield {
+                "type": "tool_failed",
+                "requestId": request_id,
+                "toolId": tool_call.tool_id,
+                "kind": "mutating",
+                "arguments": dict(tool_call.arguments),
+                "error": err.to_dict(),
+            }
+            return
+        tool_result = dict(getattr(receipt, "toolResult", None) or {})
+        authored = str((tool_call.arguments or {}).get("text") or "")
+        verify = _verify_timed_prompt_destination(
+            db,
+            project_id,
+            str((tool_call.arguments or {}).get("sceneId") or scene_id or ""),
+            authored,
+            str(tool_result.get("segmentId") or "") or None,
+        )
+        tool_result["verified"] = bool(verify.get("verified"))
+        tool_result["authoredSha256"] = verify.get("authoredSha256")
+        tool_result["storedSha256"] = verify.get("storedSha256")
+        tool_result["destinationSceneId"] = verify.get("sceneId")
+        invocation = ToolInvocationOut(
+            id=str(getattr(receipt, "toolInvocationId", None) or f"inv-{request_id}"),
+            projectId=project_id,
+            toolId=tool_call.tool_id,
+            toolSchemaVersion=1,
+            kind="mutating",
+            status="succeeded" if verify.get("verified") else "failed",
+            arguments=dict(tool_call.arguments or {}),
+            result=tool_result,
+            requestId=request_id,
+            proposalId=getattr(proposal, "id", None),
+        )
+        if verify.get("verified"):
+            outcome.invocations.append(invocation)
+            yield {
+                "type": "tool_completed",
+                "requestId": request_id,
+                "toolId": tool_call.tool_id,
+                "invocation": invocation.model_dump(mode="json"),
+            }
+            success = VERIFIED_IN_TIMELINE_COPY
+            outcome.display = success
+            yield {"type": "token", "requestId": request_id, "replace": True, "content": success}
+            yield {"type": "assistant", "requestId": request_id, "content": success}
+            try:
+                append_assistant_completion(
+                    db,
+                    project_id,
+                    request_id=request_id,
+                    reply=success,
+                    model=None,
+                    provider_id=None,
+                    message_id=f"asst-{request_id}-destination",
+                    message_type="answer",
+                )
+            except Exception:
+                logger.debug("destination persist failed", exc_info=True)
+        else:
+            fail = VERIFICATION_FAILURE_COPY
+            outcome.display = fail
+            outcome.errors.append(
+                CoDirectorError(
+                    TOOL_EXECUTION_FAILED,
+                    fail,
+                    details={"requestId": request_id, "toolId": tool_call.tool_id},
+                    recoverable=True,
+                    recommended_action="retry",
+                )
+            )
+            yield {"type": "assistant", "requestId": request_id, "content": fail}
+            yield {
+                "type": "tool_failed",
+                "requestId": request_id,
+                "toolId": tool_call.tool_id,
+                "kind": "mutating",
+                "arguments": dict(tool_call.arguments),
+                "error": {"message": fail, "verified": False},
+            }
+        return
+
+    if tool_call.tool_id == "timeline.remove_item":
+        # STEP0 clear: propose + auto-approve so store actually drops the segment.
+        try:
+            from .bible.proposals import ProposalService
+
+            receipt = ProposalService.approve(
+                db, project_id, proposal.id, note=None, decided_by="assistant"
+            )
+        except CoDirectorError as err:
+            outcome.errors.append(err)
+            fail = (
+                f"I could not remove Timeline item "
+                f"{(tool_call.arguments or {}).get('itemId')}. Store unchanged."
+            )
+            outcome.display = fail
+            yield {"type": "assistant", "requestId": request_id, "content": fail}
+            yield {
+                "type": "tool_failed",
+                "requestId": request_id,
+                "toolId": tool_call.tool_id,
+                "kind": "mutating",
+                "arguments": dict(tool_call.arguments),
+                "error": err.to_dict(),
+            }
+            return
+        tool_result = dict(getattr(receipt, "toolResult", None) or {})
+        tool_result["ok"] = True
+        tool_result["verified"] = True
+        tool_result["itemId"] = (tool_call.arguments or {}).get("itemId")
+        tool_result["itemKind"] = (tool_call.arguments or {}).get("itemKind")
+        invocation = ToolInvocationOut(
+            id=str(getattr(receipt, "toolInvocationId", None) or f"inv-{request_id}"),
+            projectId=project_id,
+            toolId=tool_call.tool_id,
+            toolSchemaVersion=1,
+            kind="mutating",
+            status="succeeded",
+            arguments=dict(tool_call.arguments or {}),
+            result=tool_result,
+            requestId=request_id,
+            proposalId=getattr(proposal, "id", None),
+        )
+        outcome.invocations.append(invocation)
+        yield {
+            "type": "tool_completed",
+            "requestId": request_id,
+            "toolId": tool_call.tool_id,
+            "invocation": invocation.model_dump(mode="json"),
+        }
+        success = (
+            f"Removed {(tool_call.arguments or {}).get('itemKind')} "
+            f"{(tool_call.arguments or {}).get('itemId')} from the active scene Timeline."
+        )
+        outcome.display = success
+        yield {"type": "assistant", "requestId": request_id, "content": success}
+        return
+
 
     outcome.tool_proposal = proposal
     yield {
@@ -1008,6 +1343,7 @@ async def _interpret_reply(
     tools_used: int,
     outcome: _StructuredOutcome,
     origin_session_id: Optional[str] = None,
+    user_message: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     """Classify a reply and act on it, yielding any SSE events the action produces.
 
@@ -1133,6 +1469,20 @@ async def _interpret_reply(
         return
 
     if structured.response_type == "mutation_proposal":
+        # MATRIX Case A/D: never Timeline-place from a fence on author-only / inspect.
+        if (
+            structured.tool_call.tool_id == "timeline.propose_add_prompt_segment"
+            and (
+                _user_forbids_timeline_place(user_message)
+                or _user_asks_timed_prompt_in_timeline(user_message)
+            )
+        ):
+            if _user_asks_timed_prompt_in_timeline(user_message) and project_id:
+                inspect = _inspect_timed_prompt_in_timeline(db, project_id, scene_id)
+                outcome.display = str(inspect.get("answer") or AUTHORED_NOT_PLACED_COPY)
+            elif _user_forbids_timeline_place(user_message):
+                outcome.display = AUTHOR_ONLY_COPY
+            return
         async for event in _propose_tool_call(
             db,
             project_id=project_id,
@@ -1140,6 +1490,8 @@ async def _interpret_reply(
             request_id=request_id,
             tool_call=structured.tool_call,
             outcome=outcome,
+            same_turn_display=structured.display or "",
+            user_message=user_message,
         ):
             yield event
         return
@@ -1192,6 +1544,36 @@ def _follow_up_request(base: ChatRequest, *, assistant_reply: str, tool_prompt: 
     )
 
 
+def _maybe_platform_knowledge_reply(
+    user_text: str,
+    workspace: str | None = None,
+    *,
+    project_id: str | None = None,
+    consumer: str = "codirector.chat",
+) -> str | None:
+    """Answer a platform question from the existing knowledge foundation.
+
+    Production turns return None so Timeline and scene work keep their own path.
+    """
+    from .knowledgebase.platform_replies import knowledge_reply
+    from .knowledgebase.retrieve import retrieve_knowledge
+    from .knowledgebase.routing_receipt import record_routing_receipt
+
+    reply = knowledge_reply(user_text, workspace=workspace)
+    if not reply:
+        return None
+    retrieval = retrieve_knowledge(user_text, workspace=workspace, limit=4)
+    record_routing_receipt(
+        query=user_text,
+        retrieved_ids=list(retrieval.doc_ids),
+        consumer=consumer,
+        landed=True,
+        project_id=project_id,
+        reply_excerpt=reply,
+    )
+    return reply
+
+
 async def chat_for_project(
     db: Session,
     *,
@@ -1205,8 +1587,11 @@ async def chat_for_project(
     conversation_locale: str | None = None,
     attachment_ids: list[str] | None = None,
     active_content_tab: str | None = None,
+    active_workspace: str | None = None,
     active_document_id: str | None = None,
     scriptwriter_scene_id: str | None = None,
+    environment_creator_planning: dict | None = None,
+    image_generator_planning: dict | None = None,
 ) -> tuple[
     ChatResult,
     SceneSetupProposal | None,
@@ -1218,6 +1603,13 @@ async def chat_for_project(
     from .conversation import run_conversation_core_turn
     from .providers.base import ChatResult as _ChatResult
 
+    _ = (
+        active_workspace,
+        active_document_id,
+        scriptwriter_scene_id,
+        environment_creator_planning,
+        image_generator_planning,
+    )
     provider, chat_request, manifest = await _prepare_chat_request(
         db,
         messages=messages,
@@ -1229,10 +1621,34 @@ async def chat_for_project(
         request_id=request_id,
         conversation_locale=conversation_locale,
         attachment_ids=attachment_ids,
-        active_content_tab=active_content_tab,
-        active_document_id=active_document_id,
-        scriptwriter_scene_id=scriptwriter_scene_id,
+        active_content_tab=active_content_tab or active_workspace,
     )
+    user_message = _last_user_message(messages)
+    platform = _maybe_platform_knowledge_reply(
+        user_message,
+        active_workspace,
+        project_id=project_id,
+        consumer="codirector.chat",
+    )
+    if platform:
+        result = _ChatResult(
+            request_id=chat_request.request_id,
+            reply=platform,
+            model_id=model or chat_request.model_id or "",
+            provider_id=getattr(provider, "id", None) or active_provider_id(),
+            raw={"knowledgeRouted": True},
+        )
+        if project_id:
+            append_assistant_completion(
+                db,
+                project_id,
+                request_id=chat_request.request_id,
+                reply=platform,
+                model=result.model_id,
+                provider_id=result.provider_id,
+                message_type="answer",
+            )
+        return result, None, None, None, manifest, []
     # Sync chat shares the stream defer/budget path — Wiki is not on the critical path.
     core = run_conversation_core_turn(
         db,
@@ -1249,7 +1665,6 @@ async def chat_for_project(
             chat_request=chat_request,
             user_message=user_message,
             core=core,
-            allow_direct_answer=_is_project_content_question(user_message, project_id),
         )
         if project_id:
             try:
@@ -1278,9 +1693,150 @@ async def chat_for_project(
                 )
             except Exception:  # noqa: BLE001
                 pass
+        # Bot1 2026-09-20: non-stream LLM-primary path previously returned the
+        # conversational reply with toolInvocations=[] and never ran the
+        # timed-prompt claim rewrite or same-turn place backstop (stream path
+        # already does). Owner repro: CD claimed Timeline updated; store empty.
+        invocations: list[ToolInvocationOut] = []
+        proposal_out: ProposalOut | None = None
+        final_reply = reply
+        if project_id and _user_asks_timeline_clear_remove(user_message):
+            # MATRIX STEP0: emit REAL timeline.remove_item toolInvocations (no markdown theater).
+            clear_ids = _extract_prompt_segment_ids_for_clear(user_message)
+            if not clear_ids:
+                final_reply = (
+                    "I need the Timed Prompt segment id(s) to remove "
+                    "(e.g. ps_…). No timeline.remove_item was called."
+                )
+            else:
+                removed_ok: list[str] = []
+                failed: list[str] = []
+                for item_id in clear_ids:
+                    clear_outcome = _StructuredOutcome()
+                    clear_call = ToolCallRequest(
+                        response_type="mutation_proposal",
+                        tool_id="timeline.remove_item",
+                        arguments={
+                            "sceneId": str(scene_id or ""),
+                            "itemKind": "promptSegment",
+                            "itemId": item_id,
+                        },
+                    )
+                    try:
+                        async for event in _propose_tool_call(
+                            db,
+                            project_id=project_id,
+                            scene_id=scene_id,
+                            request_id=chat_request.request_id,
+                            tool_call=clear_call,
+                            outcome=clear_outcome,
+                            same_turn_display="",
+                            user_message=user_message,
+                        ):
+                            pass
+                    except Exception:
+                        logger.warning("non-stream timed-prompt clear remove failed", exc_info=True)
+                    invocations.extend(clear_outcome.invocations)
+                    proposal_out = clear_outcome.tool_proposal or proposal_out
+                    ok = any(
+                        (getattr(inv, "toolId", None) == "timeline.remove_item"
+                         and getattr(inv, "status", None) == "succeeded")
+                        or (
+                            isinstance(inv, dict)
+                            and inv.get("toolId") == "timeline.remove_item"
+                            and inv.get("status") == "succeeded"
+                        )
+                        for inv in clear_outcome.invocations
+                    )
+                    if ok:
+                        removed_ok.append(item_id)
+                    else:
+                        failed.append(item_id)
+                if removed_ok and not failed:
+                    final_reply = (
+                        "Removed Timed Prompt segment(s) from the active scene via "
+                        f"timeline.remove_item: {', '.join(removed_ok)}."
+                    )
+                elif removed_ok:
+                    final_reply = (
+                        f"Removed {', '.join(removed_ok)}; could not verify remove for "
+                        f"{', '.join(failed)}."
+                    )
+                else:
+                    final_reply = (
+                        "I attempted timeline.remove_item but could not verify removals for "
+                        f"{', '.join(failed) or clear_ids}. Store may be unchanged."
+                    )
+        elif project_id and _user_forbids_timeline_place(user_message):
+
+            # MATRIX Case A: AUTHOR ONLY / Do NOT place — zero Timeline mutations.
+            body = _extract_timed_prompt_body(final_reply)
+            if body and not _claims_timed_prompt_placed(body):
+                final_reply = body
+            elif _claims_timed_prompt_placed(final_reply) or _claims_timed_prompt_placed(reply):
+                final_reply = AUTHOR_ONLY_COPY if not body else body
+            # invocations stay empty; store untouched
+        elif project_id and _user_asks_timed_prompt_in_timeline(user_message):
+            # MATRIX Case D: inspect-only — Timeline store readback, never propose_add.
+            inspect = _inspect_timed_prompt_in_timeline(db, project_id, scene_id)
+            final_reply = str(inspect.get("answer") or AUTHORED_NOT_PLACED_COPY)
+            # invocations stay empty; no place-success copy
+        elif project_id and _is_timed_prompt_author_or_place(user_message):
+
+            if _claims_timed_prompt_placed(final_reply):
+                final_reply = _rewrite_unverified_placement_claim(final_reply, verified=False)
+            backstop_outcome = _StructuredOutcome()
+            backstop_call = ToolCallRequest(
+                response_type="mutation_proposal",
+                tool_id="timeline.propose_add_prompt_segment",
+                arguments={},
+            )
+            try:
+                async for event in _propose_tool_call(
+                    db,
+                    project_id=project_id,
+                    scene_id=scene_id,
+                    request_id=chat_request.request_id,
+                    tool_call=backstop_call,
+                    outcome=backstop_outcome,
+                    same_turn_display=_strip_timed_prompt_carrier(reply) or reply,
+                    user_message=user_message,
+                ):
+                    if event.get("type") == "tool_completed":
+                        inv = event.get("invocation") if isinstance(event.get("invocation"), dict) else {}
+                        result_body = inv.get("result") if isinstance(inv.get("result"), dict) else {}
+                        if result_body.get("verified") is True and backstop_outcome.display:
+                            final_reply = str(backstop_outcome.display)
+                    elif event.get("type") == "assistant" and event.get("content"):
+                        # refusal / failure honesty from propose path
+                        if not backstop_outcome.invocations:
+                            final_reply = str(event.get("content"))
+            except Exception:
+                logger.warning("non-stream timed-prompt place backstop failed", exc_info=True)
+            invocations.extend(backstop_outcome.invocations)
+            proposal_out = backstop_outcome.tool_proposal or proposal_out
+            if invocations:
+                # Store verify is authority — never return propose/ask-to-lock hedges.
+                verified_any = any(
+                    isinstance(getattr(inv, "result", None), dict)
+                    and bool((inv.result or {}).get("verified"))
+                    for inv in invocations
+                ) or any(
+                    isinstance(inv, dict)
+                    and bool(((inv.get("result") or {}) if isinstance(inv.get("result"), dict) else {}).get("verified"))
+                    for inv in invocations
+                )
+                if verified_any or backstop_outcome.display == VERIFIED_IN_TIMELINE_COPY:
+                    final_reply = VERIFIED_IN_TIMELINE_COPY
+                else:
+                    final_reply = str(backstop_outcome.display or AUTHORED_NOT_PLACED_COPY)
+            elif _claims_timed_prompt_placed(reply):
+                # Still no mutation — keep rewritten honesty, never the false claim.
+                final_reply = _rewrite_unverified_placement_claim(reply, verified=False)
+
         result = _ChatResult(
             request_id=chat_request.request_id,
-            reply=reply,
+            reply=final_reply,
             model_id=model or chat_request.model_id or "",
             provider_id=getattr(provider, "id", None) or active_provider_id(),
             raw={
@@ -1296,12 +1852,12 @@ async def chat_for_project(
                 db,
                 project_id,
                 request_id=chat_request.request_id,
-                reply=reply,
+                reply=final_reply,
                 model=result.model_id,
                 provider_id=result.provider_id,
                 message_type="answer",
             )
-        return result, None, None, None, manifest, []
+        return result, None, None, proposal_out, manifest, invocations
 
     if _conversation_core_handles(core.plan, user_message=user_message):
         result = _ChatResult(
@@ -1346,6 +1902,7 @@ async def chat_for_project(
             reply=display or result.reply,
             tools_used=tools_used,
             outcome=outcome,
+            user_message=user_message,
         ):
             pass  # the non-streaming path has no channel for lifecycle events
 
@@ -1400,39 +1957,697 @@ def _last_user_message(messages: list[dict[str, str]]) -> str:
     return ""
 
 
-_PROJECT_CONTENT_Q = re.compile(
-    r"(?i)\b(this project|my (story|script|screenplay|scene|film|movie|dialogue)|"
-    r"our (story|script|hero|villain|protagonist)|"
-    r"the (hero|villain|protagonist|antagonist|screenplay|treatment|logline)|"
-    r"current scene|this scene|next scene|previous scene|before this scene|after this scene|"
-    r"the script|the story)\b"
+_TIMED_PROMPT_SHAPE_RE = re.compile(
+    r"\[\s*\d+(?:\.\d+)?\s*(?:s\b|sec\b|:\d\d)"
+    r"|\b\d{1,2}:\d{2}(?:\s*[–—-]\s*\d{1,2}:\d{2})?\b",
+    re.I,
 )
 
 
-_PLATFORM_HELP_Q = re.compile(
-    r"(?i)\b(how do i|how to|how does adept|how does the (app|platform|studio|script writer)|"
-    r"where do i|where is|where can i|what is adept|what'?s adept|what does adept|"
-    r"is there a (button|way|setting|tab|feature|menu)|"
-    r"use the (script writer|story tab|timeline|storyboard|voice))\b"
+_GENERIC_FENCE_LANG_RE = re.compile(r"```(?:json|tool|proposal)\s*[\s\S]*?```", re.IGNORECASE)
+_BARE_FENCE_LINE_RE = re.compile(r"^[ \t]*```[^`\n]*[ \t]*$", re.M)
+_TOOL_ID_JSON_RE = re.compile(r"\{[^{}]*\"toolId\"[\s\S]*?\}", re.IGNORECASE)
+
+
+def _strip_timed_prompt_carrier(text: str) -> str:
+    """Fence-stripped carrier for authored Timed Prompt text. Not a chat-bubble scrape.
+
+    Strips ```tool / ```proposal / ```json fences (models sometimes emit the
+    tool payload inside a ```json block, or leave bare ``` openers — observed
+    live), any residual toolId JSON object, and bare fence marker lines. A
+    timed-prompt body is cinematic prose and never legitimately contains
+    fenced code or tool payloads.
+    """
+
+    cleaned = strip_proposal_blocks(strip_tool_blocks(text or ""))
+    cleaned = _GENERIC_FENCE_LANG_RE.sub("", cleaned)
+    cleaned = _TOOL_ID_JSON_RE.sub("", cleaned)
+    cleaned = _BARE_FENCE_LINE_RE.sub("", cleaned)
+    return str(re.sub(r"\n{3,}", "\n\n", cleaned) or "").strip()
+
+
+_CHAT_HEDGE_LINE_RE = re.compile(
+    r"^(?:"
+    r"Shall we\b|How would you\b|Would you like\b|"
+    r"The Timeline\b|No video generation\b|"
+    r"(?:The\s+)?mutation is proposed\b|ready to apply\b|"
+    r"I(?:'|’|m| am)(?:\s+now)?\s+(?:placing|proposing|adding)\b|"
+    r"text\s*=\s*[\"'].*(?:Shall we|mutation is proposed|How would you)"
+    r")",
+    re.I,
 )
 
-def _is_project_content_question(user_message: str, project_id: str | None) -> bool:
-    """True when a bound-project question targets the creator's own Story/Script
-    content rather than platform documentation. Such questions must reach the
-    LLM turn (which carries the live Story/Script context block and still
-    includes retrieved knowledge) instead of being short-circuited by a
-    canned platform reply.
 
-    Platform how-to questions ("How do I use the script writer?") can contain
-    content nouns like "the script"/"the story"; they must still reach the
-    curated platform-knowledge reply, so they are excluded first."""
-    if not (project_id and user_message):
+def _sanitize_timed_prompt_text(text: str) -> str:
+    """Keep only cinematic Timed Prompt body — strip tool-call dumps and trailing chat.
+
+    Observed live pollution: models emit timeline.propose_add_prompt_segment(
+    ... text="[0s-15s] ...", start=0) fences, then append "Shall we lock…" /
+    "mutation is proposed…", or bury hedges *inside* text="Shall we…".
+    Those must never land in PromptSegment.text / Inspector Prompt / gen input.
+    """
+
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+
+    # Pull text="..." / text='...' out of a dumped tool-call if present.
+    m = re.search(
+        r"\btext\s*=\s*([\"'])([\s\S]*?)\1\s*(?:,|\)|$)",
+        cleaned,
+        re.I,
+    )
+    if m:
+        inner = (m.group(2) or "").strip()
+        if _TIMED_PROMPT_SHAPE_RE.search(inner):
+            cleaned = inner
+        elif _CHAT_HEDGE_LINE_RE.search(inner):
+            # Hedge buried inside text="Shall we lock…" — drop the dump entirely.
+            cleaned = (cleaned[: m.start()] + cleaned[m.end() :]).strip()
+            cleaned = re.sub(r"[,\s]*$", "", cleaned).strip()
+
+    # Cut tool-arg tails that leaked after a closing quote.
+    cleaned = re.split(
+        r'"\s*,\s*start\s*=|"\s*,\s*length\s*=|\)\s*\n\s*\nThe Timeline',
+        cleaned,
+        maxsplit=1,
+        flags=re.I,
+    )[0]
+    cleaned = cleaned.rstrip().rstrip("\"'").strip()
+
+    # Drop trailing assistant chat / propose hedges after the prompt body.
+    cut = re.search(
+        r"\n\s*\n(?="
+        r"(?:The Timeline|Shall we|How would you|"
+        r"I(?:'|’| have)?(?:\s+am)?\s+now\s+placing|"
+        r"No video generation|mutation is proposed|The mutation is proposed|"
+        r"ready to apply|Would you like)"
+        r")",
+        cleaned,
+        re.I,
+    )
+    if cut:
+        cleaned = cleaned[: cut.start()].rstrip()
+
+    # Line-level: drop / stop on conversational or tool-dump lines.
+    lines = cleaned.splitlines()
+    kept: list[str] = []
+    for line in lines:
+        s = line.strip()
+        if not s:
+            if kept:
+                kept.append(line)
+            continue
+        # Bare tool-arg dump line: text="..."
+        if re.match(r"^text\s*=\s*[\"']", s, re.I):
+            inner_m = re.match(r"^text\s*=\s*([\"'])([\s\S]*?)\1\s*$", s, re.I)
+            if inner_m and _TIMED_PROMPT_SHAPE_RE.search(inner_m.group(2) or ""):
+                kept.append(inner_m.group(2).strip())
+            # else drop contaminated text="..." line
+            continue
+        if _CHAT_HEDGE_LINE_RE.match(s):
+            if kept:
+                break
+            continue
+        if kept and re.match(
+            r"^(?:The Timeline|Shall we|How would you|No video generation|"
+            r"Would you like|I(?:'|’|m| am) (?:placing|proposing)|```)",
+            s,
+            re.I,
+        ):
+            break
+        kept.append(line)
+    cleaned = "\n".join(kept).strip()
+    return cleaned
+
+
+
+
+def _extract_timed_prompt_body(text: str) -> str:
+    """Drop leading claim prose, then sanitize tool-dump / trailing chat pollution."""
+
+    cleaned = _strip_timed_prompt_carrier(text)
+    if not cleaned:
+        return ""
+    match = _TIMED_PROMPT_SHAPE_RE.search(cleaned)
+    if match:
+        cleaned = cleaned[match.start() :].strip()
+    return _sanitize_timed_prompt_text(cleaned)
+
+
+_TIMED_PROMPT_PLACED_CLAIM_RE = re.compile(
+    r"(?:now residing|has been updated|now in place|already in (?:the )?timeline|"
+    r"now contains the authored|"
+    r"timeline\s+is\s+now\s+updated|"
+    r"(?:is\s+now\s+updated|now\s+updated)\s+with\s+this\s+prompt|"
+    r"(?:being\s+applied|applied)\s+to\s+(?:the\s+)?timeline|"
+    r"mutation\s+is\s+proposed|ready\s+to\s+apply|shall\s+we\s+lock|"
+    r"i(?:'m|’m|\s+am)(?:\s+now)?\s+(?:adding|updating|placing|putting).{0,120}"
+    r"(?:timed\s+prompt|timeline\s*[→>\-]?\s*timed\s+prompt|timeline|scene\s*\d)|"
+    r"i(?:'|’|ve| have)?\s+(?:added|updated|placed|put).{0,80}timed prompt)",
+    re.I,
+)
+_TIMED_PROMPT_INSPECT_RE = re.compile(
+    r"(?:\bis\s+(?:that|the|this|it)\s+(?:timed\s+)?prompt\b.{0,80}\b(?:already\s+)?(?:in|on)\s+(?:the\s+)?timeline\b)"
+    r"|(?:\bis\s+(?:that|the|this)\s+prompt\s+already\s+in\s+timeline\b)"
+    r"|(?:\bis\s+it\s+(?:already\s+)?(?:in|on)\s+(?:the\s+)?timeline\b)"
+    r"|(?:\bable to access timeline\b)"
+    r"|(?:\bcan you (?:see|access|read|inspect)\s+(?:the\s+)?timeline\b)"
+    # MATRIX Case D: inspect / verify questions that mention "place" in past/question form
+    r"|(?:\bdid you (?:already\s+)?place\b)"
+    r"|(?:\bhave you (?:already\s+)?placed?\b)"
+    r"|(?:\balready place[d]?\b.{0,60}\b(?:timed\s+)?prompt\b)"
+    r"|(?:\bcheck (?:the\s+)?timeline (?:state|store)?\b)"
+    r"|(?:\bdo not guess\b.{0,40}\b(?:chat|history)\b)"
+    r"|(?:\bif not placed,? say so\b)",
+    re.I,
+)
+_TIMED_PROMPT_PLACE_NOW_RE = re.compile(
+    r"\b(?:place|add|put|insert)\b.{0,80}\b(?:that |the |this )?(?:timed\s+)?prompt\b"
+    r"|\b(?:that |the |this )?(?:timed\s+)?prompt\b.{0,80}\b(?:into|to)\s+(?:scene|timeline)\b",
+    re.I,
+)
+
+AUTHORED_NOT_PLACED_COPY = (
+    "I have the prompt authored, but it isn't currently present in the active scene's Timed Prompt track. "
+    "I'll need to place it there."
+)
+VERIFIED_IN_TIMELINE_COPY = "Active scene → Timed Prompt now contains the authored prompt."
+VERIFICATION_FAILURE_COPY = (
+    "The operation was attempted, but I could not verify the change in the destination system. "
+    "Active scene → Timed Prompt does not contain the authored text."
+)
+
+
+
+_TIMED_PROMPT_NO_PLACE_RE = re.compile(
+    r"(?:"
+    r"\bauthor[\s_-]*only\b|"
+    r"\bdraft[\s_-]*only\b|"
+    r"\bwrite[\s_-]*only\b|"
+    r"\bdo(?:\s+|-)not\s+place\b|"
+    r"\bdon'?t\s+place\b|"
+    r"\bdo(?:\s+|-)not\s+place\s+on\s+(?:the\s+)?timeline\b|"
+    r"\bdo(?:\s+|-)not\s+(?:call|invoke|run|use)\b.{0,100}\btimeline\.propose_add_prompt_segment\b|"
+    r"\bdo(?:\s+|-)not\s+(?:call|invoke|run|use)\b.{0,80}\bany\b.{0,40}\btimeline\b.{0,40}\b(?:mutation\s+)?tool\b|"
+    r"\bdo(?:\s+|-)not\s+(?:call|invoke|run|use)\b.{0,80}\b(?:timeline\s+)?(?:mutation\s+)?tool\b|"
+    r"\bdo(?:\s+|-)not\s+(?:mutate|write\s+to|update)\b.{0,40}\btimeline\b|"
+    r"\bno(?:\s+|-)place\b|"
+    r"\bwithout\s+plac(?:e|ing)\b|"
+    r"\bdo(?:\s+|-)not\s+add\b.{0,40}\b(?:to\s+)?(?:the\s+)?timeline\b|"
+    r"\bdo(?:\s+|-)not\s+call\b.{0,60}\btimeline\b|"
+    r"\breply\s+only\b.{0,40}\b(?:do(?:\s+|-)not|don'?t)\b|"
+    r"\bsave/author\b.{0,80}\breply\s+only\b"
+    r")",
+    re.I,
+)
+
+AUTHOR_ONLY_COPY = (
+    "I've authored the Timed Prompt only — nothing was written to the Timeline "
+    "(per your author-only / do-not-place request)."
+)
+
+
+def _user_forbids_timeline_place(text: str) -> bool:
+    """True when the user explicitly forbids Timeline mutation / asks author-only."""
+    return bool(_TIMED_PROMPT_NO_PLACE_RE.search(str(text or "")))
+
+
+
+_TIMED_PROMPT_CLEAR_RE = re.compile(
+    r"(?:"
+    r"\btimeline\.remove_item\b|"
+    r"\bremove_item\b|"
+    r"\bcontamination\b|"
+    r"\bclear\b.{0,40}\b(?:timed\s+)?prompt\b|"
+    r"\bremove\b.{0,60}\b(?:timed\s+)?prompt\b|"
+    r"\bremove\b.{0,40}\b(?:segment|ps_[a-f0-9]+)\b|"
+    r"\bmust be removed\b|"
+    r"\bcd_clear\b"
+    r")",
+    re.I,
+)
+_PS_ID_RE = re.compile(r"\bps_[a-f0-9]{6,}\b", re.I)
+
+
+def _user_asks_timeline_clear_remove(text: str) -> bool:
+    """True when the user asks to clear/remove Timed Prompt segments via CD tools."""
+    raw = str(text or "")
+    if not raw.strip():
         return False
-    if _PLATFORM_HELP_Q.search(user_message):
+    if _user_forbids_timeline_place(raw):
         return False
-    return bool(_PROJECT_CONTENT_Q.search(user_message))
+    return bool(_TIMED_PROMPT_CLEAR_RE.search(raw))
 
 
+def _extract_prompt_segment_ids_for_clear(text: str) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _PS_ID_RE.finditer(str(text or "")):
+        pid = m.group(0).lower()
+        if pid not in seen:
+            seen.add(pid)
+            out.append(pid)
+    return out
+
+
+
+def _is_timed_prompt_author_or_place(text: str) -> bool:
+    """True when the user asks to author and/or place a Timed Prompt on Timeline.
+
+    Explicit author-only / do-not-place intents return False so the place
+    backstop never fires (MATRIX Case A). Inspect-only questions (Case D)
+    also return False — never call propose_add for verify/readback.
+    """
+    raw = str(text or "")
+    if not raw.strip():
+        return False
+    if _user_forbids_timeline_place(raw):
+        return False
+    if _user_asks_timed_prompt_in_timeline(raw):
+        return False
+    if _user_asks_timeline_clear_remove(raw):
+        return False
+    if _TIMED_PROMPT_PLACE_NOW_RE.search(raw):
+        return True
+    # author + timeline mention (matches unified_intent author+place pattern)
+    if re.search(r"\b(?:create|write|draft|compose|make)\b", raw, re.I) and re.search(
+        r"\b(?:timed\s+prompt|prompt\s+segment|prompt\s+clip|prompt\s+track)\b", raw, re.I
+    ) and re.search(r"\btimeline\b", raw, re.I):
+        return True
+    if re.search(
+        r"\b(?:put|add|place|insert|attach|drop)\b[^.?!]{0,80}\b(?:timed\s+prompt|prompt\s+segment)\b",
+        raw,
+        re.I,
+    ):
+        return True
+    return False
+
+
+def _claims_timed_prompt_placed(text: str) -> bool:
+    return bool(_TIMED_PROMPT_PLACED_CLAIM_RE.search(text or ""))
+
+
+def _user_asks_timed_prompt_in_timeline(text: str) -> bool:
+    """True for inspect/verify questions about Timeline state (MATRIX Case D).
+
+    Inspect patterns win over PLACE_NOW when the user is asking whether
+    something was already placed — never treat that as a place request.
+    """
+    raw = str(text or "")
+    if _TIMED_PROMPT_INSPECT_RE.search(raw):
+        return True
+    return False
+
+
+def _rewrite_unverified_placement_claim(reply: str, *, verified: bool) -> str:
+    if verified or not _claims_timed_prompt_placed(reply):
+        return reply
+    authored = _extract_timed_prompt_body(reply)
+    if authored and _TIMED_PROMPT_SHAPE_RE.search(authored) and not _claims_timed_prompt_placed(authored):
+        return f"{AUTHORED_NOT_PLACED_COPY}\n\n{authored}"
+    return AUTHORED_NOT_PLACED_COPY
+
+
+def _inspect_timed_prompt_in_timeline(
+    db: Any,
+    project_id: str | None,
+    scene_id: str | None,
+) -> dict[str, Any]:
+    """Timeline store is the authority. Conversation claims are ignored."""
+
+    if not project_id or not scene_id:
+        return {
+            "present": False,
+            "verified": False,
+            "answer": (
+                "I cannot verify the active scene Timed Prompt right now — no Timeline scene is selected. "
+                "State unavailable / unverified."
+            ),
+        }
+    authored = _latest_assistant_timed_prompt(db, project_id) or ""
+    dest = _destination_nonempty_timed_prompts(db, project_id, scene_id)
+    if authored.strip():
+        verify = _verify_timed_prompt_destination(db, project_id, scene_id, authored)
+        if verify.get("verified"):
+            dest_seg = next(
+                (seg for seg in dest if getattr(seg, "id", None) == verify.get("segmentId")),
+                dest[-1] if dest else None,
+            )
+            start = getattr(dest_seg, "start", None) if dest_seg is not None else None
+            length = getattr(dest_seg, "length", None) if dest_seg is not None else None
+            stored = str(getattr(dest_seg, "text", "") or authored)
+            return {
+                "present": True,
+                "verified": True,
+                "sceneId": verify.get("sceneId"),
+                "segmentId": verify.get("segmentId"),
+                "start": start,
+                "length": length,
+                "text": stored,
+                "answer": (
+                    "Yes. The active scene Timed Prompt track currently contains that authored prompt. "
+                    f"Verified from Timeline (scene {verify.get('sceneId')}, "
+                    f"segment {verify.get('segmentId')}, start {start}s, length {length}s)."
+                ),
+            }
+        return {
+            "present": False,
+            "verified": False,
+            "answer": AUTHORED_NOT_PLACED_COPY,
+        }
+    if dest:
+        text = str(getattr(dest[-1], "text", "") or "")
+        return {
+            "present": True,
+            "verified": True,
+            "segmentId": getattr(dest[-1], "id", None),
+            "answer": (
+                "The active scene Timed Prompt track currently has stored prompt text. "
+                f"Verified from Timeline (segment {getattr(dest[-1], 'id', None)})."
+            ),
+            "textLen": len(text),
+        }
+    return {
+        "present": False,
+        "verified": False,
+        "answer": AUTHORED_NOT_PLACED_COPY,
+    }
+
+
+def _master_prompt_segments(bundle: dict[str, Any]) -> list[Any]:
+    """Flatten Master batch.promptSegments. Single store — never legacy."""
+    master = bundle.get("master")
+    if master is None and isinstance(bundle, dict):
+        master = (bundle.get("bundle") or {}).get("master")
+    segs: list[Any] = []
+    for batch in getattr(master, "batchBlocks", None) or []:
+        segs.extend(getattr(batch, "promptSegments", None) or [])
+    return segs
+
+
+def _destination_nonempty_timed_prompts(db: Any, project_id: str, scene_id: str) -> list[Any]:
+    """Load non-empty Master promptSegments for the request-scoped scene. Fail closed."""
+
+    if not project_id or not scene_id:
+        return []
+    try:
+        from ..director_timeline_w46.service import load_timeline_bundle
+
+        bundle = load_timeline_bundle(db, project_id, scene_id)
+        if not bundle.get("ok"):
+            return []
+        return [s for s in _master_prompt_segments(bundle) if str(getattr(s, "text", "") or "").strip()]
+    except Exception:
+        logger.debug("destination timed prompt load failed", exc_info=True)
+        return []
+
+
+def _verify_timed_prompt_destination(
+    db: Any,
+    project_id: str,
+    scene_id: str,
+    authored: str,
+    segment_id: str | None = None,
+) -> dict[str, Any]:
+    """Read back Master promptSegments text and compare SHA. Success requires a match."""
+
+    from hashlib import sha256
+
+    authored_text = str(authored or "")
+    authored_sha = sha256(authored_text.encode("utf-8")).hexdigest() if authored_text else ""
+    result: dict[str, Any] = {
+        "verified": False,
+        "sceneId": scene_id,
+        "authoredSha256": authored_sha,
+        "storedSha256": "",
+        "segmentId": segment_id,
+    }
+    if not project_id or not scene_id or not authored_text.strip():
+        return result
+    try:
+        from ..director_timeline_w46.service import load_timeline_bundle
+
+        bundle = load_timeline_bundle(db, project_id, scene_id)
+        if not bundle.get("ok") or str(bundle.get("sceneId") or "") != scene_id:
+            return result
+        for seg in _master_prompt_segments(bundle):
+            if segment_id and getattr(seg, "id", None) != segment_id:
+                continue
+            stored = str(getattr(seg, "text", "") or "")
+            if not stored.strip():
+                continue
+            stored_sha = sha256(stored.encode("utf-8")).hexdigest()
+            if stored_sha == authored_sha:
+                result.update(
+                    {
+                        "verified": True,
+                        "storedSha256": stored_sha,
+                        "segmentId": getattr(seg, "id", None),
+                        "textLen": len(stored),
+                    }
+                )
+                return result
+    except Exception:
+        logger.debug("timed prompt destination verify failed", exc_info=True)
+    return result
+
+
+def _latest_assistant_timed_prompt(db: Any, project_id: str) -> str | None:
+    """Last fence-stripped assistant message with timed-prompt shape."""
+
+    try:
+        from .conversation_events import fold_events_for_llm
+
+        for message in reversed(fold_events_for_llm(db, project_id)):
+            if str(message.get("role") or "") != "assistant":
+                continue
+            content = _extract_timed_prompt_body(str(message.get("content") or ""))
+            if content and _TIMED_PROMPT_SHAPE_RE.search(content):
+                return content
+    except Exception:
+        logger.debug("authored timed prompt resolution failed", exc_info=True)
+    return None
+
+
+def _resolve_authored_timed_prompt(
+    db: Any,
+    project_id: str,
+    scene_id: str | None = None,
+) -> str | None:
+    """Latest authoritative Timed Prompt body.
+
+    Same-turn display/arguments are bound before this helper. For follow-up:
+    a single owner-edited destination segment wins over a stale assistant copy.
+    Multiple existing clips do not hide a newer authored assistant prompt.
+    """
+
+    latest = _latest_assistant_timed_prompt(db, project_id)
+    dest = _destination_nonempty_timed_prompts(db, project_id, scene_id) if scene_id else []
+    if dest:
+        for seg in dest:
+            text = str(getattr(seg, "text", "") or "")
+            if latest and text == latest:
+                return text
+        if len(dest) == 1:
+            return str(getattr(dest[0], "text", "") or "")
+        if latest:
+            return latest
+        return str(getattr(dest[-1], "text", "") or "")
+    return latest
+
+
+def _requested_timed_prompt_duration_sec(*parts: str) -> float | None:
+    """Max Timed Prompt duration the creator asked for (MATRIX Case C).
+
+    Prefer explicit markers / length phrases over bare "15s scene" mentions.
+    Used to REFUSE when request > scene duration — never silently clamp.
+    """
+
+    blob = "\n".join(str(p or "") for p in parts if str(p or "").strip())
+    if not blob.strip():
+        return None
+    max_end: float | None = None
+    try:
+        from .tools.handlers.director_timeline_tools import (
+            _timed_prompt_requested_coverage_sec,
+        )
+
+        cov = _timed_prompt_requested_coverage_sec(blob)
+        if cov is not None:
+            max_end = float(cov)
+    except Exception:
+        pass
+    # [0s-40s] / [40s]
+    for m in re.finditer(
+        r"\[(\d+(?:\.\d+)?)\s*s\s*(?:[-–—to]+\s*(\d+(?:\.\d+)?)\s*s)?\]",
+        blob,
+        re.I,
+    ):
+        vals = [float(g) for g in m.groups() if g is not None]
+        if vals:
+            end = max(vals)
+            max_end = end if max_end is None else max(max_end, end)
+    # "40s into …" (requested coverage, not the scene's own duration)
+    for m in re.finditer(r"\b(\d+(?:\.\d+)?)\s*s(?:ec(?:onds?)?)?\s+into\b", blob, re.I):
+        end = float(m.group(1))
+        max_end = end if max_end is None else max(max_end, end)
+    # length/duration = 40s | for 40 seconds | 40-second timed prompt
+    for m in re.finditer(
+        r"\b(?:length|duration)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)?\b"
+        r"|\b(?:for|lasting|covering|spanning)\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)\b"
+        r"|\b(\d+(?:\.\d+)?)\s*-?\s*second(?:s)?\s+(?:timed\s+)?prompt\b"
+        r"|\b(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)\s+(?:timed\s+)?prompt\b"
+        r"|\b(?:place|add|put)\b.{0,80}\b(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)\s+(?:timed\s+)?prompt\b",
+        blob,
+        re.I,
+    ):
+        val = next((float(g) for g in m.groups() if g is not None), None)
+        if val is not None and val >= 1.0:
+            max_end = val if max_end is None else max(max_end, val)
+    return max_end
+
+
+
+def _extract_place_existing_body(user_message: str, *, scene_duration_sec: float | None = None) -> str:
+    """MATRIX Case B: prefer the creator's explicit place-existing payload.
+
+    Smoke B failed because bind fell through to a stale authored assistant prompt
+    (existing segment) when the user message had a marker body without [0s-Ns].
+    """
+    raw = str(user_message or "")
+    if not raw.strip():
+        return ""
+    if not re.search(
+        r"place\s+existing|already-authored\s+timed\s+prompt|"
+        r"take this already-authored|put it on .{0,60}timeline|"
+        r"place this timed prompt into",
+        raw,
+        re.I,
+    ):
+        return ""
+    # Prefer a bracketed body (marker or timed shape) through end / Do NOT generate.
+    m = re.search(
+        r"(\[[^\]]+\][\s\S]*?)(?:\n\s*Do NOT generate|\Z)",
+        raw,
+        re.I,
+    )
+    if not m:
+        return ""
+    body = m.group(1).strip()
+    body = re.sub(r"\s*Do NOT generate video\.?\s*$", "", body, flags=re.I).strip()
+    body = re.sub(r"\s*Duration\s+\d+\s*s\s+max\.?\s*$", "", body, flags=re.I).strip()
+    if not body:
+        return ""
+    if not _TIMED_PROMPT_SHAPE_RE.search(body):
+        dur = int(scene_duration_sec or 15)
+        if dur < 1:
+            dur = 15
+        body = f"[0s-{dur}s] {body}"
+    return _sanitize_timed_prompt_text(body)
+
+
+def _bind_timed_prompt_tool_arguments(
+    db: Any,
+    *,
+    project_id: str,
+    scene_id: Optional[str],
+    arguments: dict[str, Any],
+    same_turn_display: str = "",
+    user_message: str = "",
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Bind sceneId + text + duration for timeline.propose_add_prompt_segment.
+
+    Returns (arguments, None) or (None, honest creator-facing refusal).
+    MATRIX Case C: refuse when requested coverage/length > scene duration — never clamp.
+    """
+
+    if not scene_id or not str(scene_id).strip():
+        return None, (
+            "No Timeline scene is selected right now — open the scene in Timeline "
+            "(or tell me which scene) and I'll place the timed prompt there."
+        )
+    bound = dict(arguments or {})
+    bound["sceneId"] = str(scene_id).strip()
+    bound.pop("promptText", None)
+    # Resolve scene duration early for place-existing shape wrap.
+    try:
+        _scene_early = db.get(Scene, bound["sceneId"])
+        _dur_early = float(getattr(_scene_early, "duration_sec", 0) or 0)
+    except Exception:
+        _dur_early = 0.0
+    # MATRIX Case B: creator-supplied place-existing body wins over stale authored.
+    place_existing = _extract_place_existing_body(user_message, scene_duration_sec=_dur_early or None)
+    text_body = ""
+    if place_existing:
+        bound["text"] = place_existing
+        text_body = place_existing
+    if not text_body:
+        text_body = _extract_timed_prompt_body(str(bound.get("text") or ""))
+        if text_body:
+            bound["text"] = text_body
+    if not text_body:
+        display = _extract_timed_prompt_body(same_turn_display)
+        if display and _TIMED_PROMPT_SHAPE_RE.search(display):
+            bound["text"] = display
+            text_body = display
+    if not text_body:
+        authored = _resolve_authored_timed_prompt(db, project_id, scene_id=bound["sceneId"])
+        if authored and str(authored).strip():
+            bound["text"] = authored
+            text_body = str(authored)
+    if not str(text_body or "").strip():
+        return None, (
+            "I don't have an authored timed prompt to place yet — ask me to create one "
+            "for the scene first, then I'll add it to the Timeline."
+        )
+    text_body = _sanitize_timed_prompt_text(str(text_body))
+    bound["text"] = text_body
+    if not str(text_body or "").strip() or not _TIMED_PROMPT_SHAPE_RE.search(text_body):
+        return None, (
+            "I don't have an authored timed prompt to place yet — ask me to create one "
+            "for the scene first, then I'll add it to the Timeline."
+        )
+    if bound.get("start") is None:
+        bound["start"] = 0.0
+    try:
+        scene = db.get(Scene, bound["sceneId"])
+        dur = float(getattr(scene, "duration_sec", 0) or 0)
+    except Exception:
+        dur = 0.0
+    # MATRIX Case C / BOT2_DURATION_FENCE (bind): refuse > scene duration — never clamp.
+    if dur > 0:
+        length_arg = float(bound["length"]) if bound.get("length") is not None else None
+        start_arg = float(bound.get("start") or 0.0)
+        requested = _requested_timed_prompt_duration_sec(
+            str(bound.get("text") or ""),
+            same_turn_display,
+            user_message,
+            str(bound.get("length") or ""),
+        )
+        over = False
+        detail_bits: list[str] = []
+        if length_arg is not None and length_arg > dur + 1e-6:
+            over = True
+            detail_bits.append(f"length={length_arg:g}s")
+        if length_arg is not None and (start_arg + length_arg) > dur + 1e-6:
+            over = True
+            detail_bits.append(f"start+length={start_arg:g}+{length_arg:g}s")
+        if requested is not None and requested > dur + 1e-6:
+            over = True
+            detail_bits.append(f"requested coverage/length={requested:g}s")
+        if over:
+            detail = ", ".join(detail_bits) or "requested coverage too long"
+            return None, (
+                f"This Timed Prompt's requested coverage exceeds the active scene duration "
+                f"{dur:g}s ({detail}). Shorten the prompt to fit, or extend/split the scene "
+                f"before placing it. I will not silently compress a longer Timed Prompt into "
+                f"{dur:g}s."
+            )
+        # Only default length to scene duration when the creator did NOT ask for longer.
+        if bound.get("length") is None:
+            bound["length"] = dur
+    return bound, None
 
 
 def _build_execution_context(
@@ -1514,6 +2729,9 @@ def _enrich_execution_context(
     ctx: dict[str, Any],
     unified_intent: Any,
     messages: list[dict[str, str]],
+    *,
+    attachment_ids: list[str] | None = None,
+    scene_id: str | None = None,
 ) -> dict[str, Any]:
     """Enrich the execution context with project-resolved references (spec §12, §13, §32).
 
@@ -1573,6 +2791,85 @@ def _enrich_execution_context(
     except Exception:
         logger.debug("Attachment resolution failed", exc_info=True)
 
+    # ORDER19 Owner live: FE sends attachment_ids top-level only (messages strip them).
+    # Merge chat-request attachment_ids + scene_id into execution ctx before dispatch.
+    try:
+        top_ids = [str(a).strip() for a in (attachment_ids or []) if str(a or "").strip()]
+        if top_ids:
+            existing = list(ctx.get("attachment_asset_ids") or [])
+            for aid in top_ids:
+                if aid not in existing:
+                    existing.append(aid)
+            ctx["attachment_asset_ids"] = existing
+        sid = str(scene_id or ctx.get("scene_id") or ctx.get("sceneId") or "").strip()
+        if sid:
+            ctx["scene_id"] = sid
+            ctx.setdefault("sceneId", sid)
+        # Surface for FE failed-card hints + propose_add_image_clip / place_asset
+        primary = next((str(a).strip() for a in (ctx.get("attachment_asset_ids") or []) if str(a or "").strip()), None)
+        if primary:
+            ctx.setdefault("sourceAssetId", primary)
+            ctx.setdefault("source_asset_id", primary)
+            ctx.setdefault("assetId", primary)
+            tp = dict(ctx.get("tool_params") or {})
+            tp.setdefault("assetId", primary)
+            tp.setdefault("sourceAssetId", primary)
+            if sid:
+                tp.setdefault("sceneId", sid)
+            ctx["tool_params"] = tp
+        # Final-closure mission 2026-09-19 (Blocker 3 — SceneId Resolution Law):
+        # `timeline.propose_add_image_clip` requires sceneId, and the active
+        # Timeline scene is request-scoped BY LAW ("Explicit request scene only.
+        # Never invent scenes[0]."). When the composer is not scene-bound there
+        # is NO legitimate sceneId — declare it missing so the dispatcher path
+        # can answer honestly instead of launching a doomed tool call.
+        if capability == "timeline.add_asset" and not sid:
+            ctx.setdefault("missing_required_fields", ["sceneId"])
+            ctx.setdefault(
+                "clarification_question",
+                "No Timeline scene is selected right now — open the scene in Timeline (or tell me which scene) and I'll add the image there.",
+            )
+        # Timed-prompt content handoff repair (2026-09-20): the prompt-segment
+        # tool's text carrier is the argument literally named `text` — any other
+        # key is silently dropped by the sanitizer, and the placement COMMAND is
+        # not the authored content. Resolve the authored timed prompt from the
+        # durable conversation log (byte-exact) and bind scene duration timing,
+        # so a placed segment carries the actual authored prompt body.
+        if capability == "timeline.add_prompt_segment":
+            if not sid:
+                ctx.setdefault("missing_required_fields", ["sceneId"])
+                ctx.setdefault(
+                    "clarification_question",
+                    "No Timeline scene is selected right now — open the scene in Timeline (or tell me which scene) and I'll place the timed prompt there.",
+                )
+            elif not str((ctx.get("tool_params") or {}).get("text") or "").strip():
+                authored = _resolve_authored_timed_prompt(db, project_id, scene_id=sid)
+                if authored:
+                    tp = dict(ctx.get("tool_params") or {})
+                    tp["text"] = authored
+                    tp.pop("promptText", None)
+                    if sid:
+                        tp["sceneId"] = sid
+                    tp.setdefault("start", 0.0)
+                    try:
+                        from ..db import Scene as _Scene
+
+                        _scene = db.get(_Scene, sid) if sid else None
+                        _dur = float(getattr(_scene, "duration_sec", 0) or 0)
+                    except Exception:  # noqa: BLE001
+                        _dur = 0.0
+                    if _dur > 0:
+                        # Known scene duration only — never invent timing.
+                        tp.setdefault("length", min(_dur, 20.0))
+                    ctx["tool_params"] = tp
+                else:
+                    ctx.setdefault("missing_required_fields", ["text"])
+                    ctx.setdefault(
+                        "clarification_question",
+                        "I don't have an authored timed prompt to place yet — ask me to create one for the scene first, then I'll add it to the Timeline.",
+                    )
+    except Exception:
+        logger.debug("ORDER19 top-level attachment/scene merge failed", exc_info=True)
     # Style propagation (spec §32): "Photorealistic environment" + "high-quality anime character".
     style = _detect_visual_style(user_text)
     if style:
@@ -1585,7 +2882,47 @@ def _enrich_execution_context(
     # state into the model context. Failures degrade to ``None`` so a
     # missing subsystem never blocks the rest of the enrichment.
     ctx.setdefault("spatial_map_summary", _resolve_spatial_map_summary(db, project_id))
-    ctx.setdefault("ers_packages", _resolve_ers_summary(db, project_id))
+    # Order 11A — do not prioritize ERS package injection when this turn's
+    # attach intent is timeline_*_ref (or no explicit ERS ask).
+    _suppress_ers = False
+    try:
+        from .conversation.attach_intent import (
+            classify_attach_intent,
+            should_suppress_ers_priority,
+        )
+
+        _ut = ""
+        for _m in reversed(messages or []):
+            if (_m.get("role") or "") == "user":
+                _ut = str(_m.get("content") or "")
+                break
+        _att_ids = []
+        for _m in reversed(messages or []):
+            if (_m.get("role") or "") == "user":
+                _att_ids = list(_m.get("attachment_ids") or [])
+                break
+        if _att_ids or _ut:
+            _ai = classify_attach_intent(
+                _ut,
+                has_image_attachment=bool(_att_ids) or None,
+            )
+            _suppress_ers = should_suppress_ers_priority(_ai, user_text=str(_ut or ''))
+            ctx["attach_intent"] = _ai.to_dict()
+            if _ai.propose_timeline_attach and _att_ids:
+                from .conversation.attach_intent import build_timeline_attach_handoff
+
+                ctx["timeline_attach_handoff"] = build_timeline_attach_handoff(
+                    asset_ids=[str(x) for x in _att_ids],
+                    intent=_ai,
+                    scene_id=ctx.get("scene_id") or ctx.get("sceneId"),
+                )
+    except Exception:
+        _suppress_ers = False
+    if _suppress_ers:
+        ctx.setdefault("ers_packages", None)
+        ctx["ers_priority_suppressed"] = True
+    else:
+        ctx.setdefault("ers_packages", _resolve_ers_summary(db, project_id))
     ctx.setdefault("scene_batches", _resolve_scene_batches_summary(db, project_id))
 
     # Production-orchestrator milestone: scene.generate grounds on the current
@@ -1968,12 +3305,56 @@ _NAVIGATE_TARGET_TO_TOOL: dict[str, str] = {
     "audiostudio": "audio.open_studio",
     "timeline": "timeline.focus_ui",
     "script_writer": "workspace.open_scriptwriter",
+    # CD01 / Dual-Stack Phase 4 — Env Creator + Image Generator navigate targets
+    "environment_creator": "workspace.open_scene_creator",
+    "env_creator": "workspace.open_scene_creator",
+    "scene_creator": "workspace.open_scene_creator",
+    "imagegen": "workspace.open_image_generator",
+    "image_generator": "workspace.open_image_generator",
+    "image_studio": "workspace.open_image_generator",
 }
 
 def _navigate_target_to_tool(target: Optional[str]) -> Optional[str]:
     if not target:
         return None
     return _NAVIGATE_TARGET_TO_TOOL.get(target)
+
+
+_NAVIGATE_TOOL_TO_CAPABILITY: dict[str, str] = {
+    "audio.open_studio": "audio.open",
+    "character_creator.open_voice_creator": "voice.creator",
+    "voice_performance.open_workspace": "voice.creator",
+    "workspace.open_scriptwriter": "script.open",
+    "workspace.open_scene_creator": "environment.open",
+    "workspace.open_image_generator": "image.open",
+    "timeline.focus_ui": "timeline.focus",
+}
+
+
+def _apply_phase3_navigate_intent(route_decision: Any, unified_intent: Any) -> Any:
+    """Turn the Phase-3 NAVIGATE pass into a real handoff intent (CD01)."""
+    from .routing.unified_intent import DispatchStrategy, UnifiedIntent, UnifiedIntentKind
+
+    tool_id = _navigate_target_to_tool(getattr(route_decision, "target", None))
+    if not tool_id or not getattr(route_decision, "capabilityAvailable", False):
+        return unified_intent
+    capability = _NAVIGATE_TOOL_TO_CAPABILITY.get(tool_id)
+    if not capability:
+        return unified_intent
+    current_cap = str(getattr(unified_intent, "capability", "") or "")
+    if current_cap == capability and getattr(unified_intent, "is_high_confidence_execution", False):
+        return unified_intent
+    return UnifiedIntent(
+        intent=UnifiedIntentKind.EXECUTION,
+        capability=capability,
+        confidence=0.95,
+        dispatch=DispatchStrategy.DETERMINISTIC,
+        classifier_source="deterministic",
+        evidence=["phase-3 navigate", str(getattr(route_decision, "target", "") or "")],
+        curated_tool_ids=[tool_id],
+        target_workspace=getattr(route_decision, "targetWorkspace", None)
+        or getattr(route_decision, "target", None),
+    )
 
 
 _CONVERSATION_CORE_INTENTS = {
@@ -2187,7 +3568,6 @@ async def _foundation_llm_turn(
     chat_request: ChatRequest,
     user_message: str,
     core: Any,
-    allow_direct_answer: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """LLM-primary reply with grounding, one repair, then deterministic fallback.
 
@@ -2267,13 +3647,7 @@ async def _foundation_llm_turn(
             plan=dialogue,
             companion=companion_hints,
         )
-        if not grounding.ok and allow_direct_answer and reply:
-            # Factual project-content Q&A (live Story/Script state is injected
-            # into the provider turn): discovery-dialogue gates — LISTENING
-            # reflection, question budget, minimum length — do not apply to a
-            # direct factual answer grounded in canonical project state.
-            grounding_passed = True
-        elif not grounding.ok:
+        if not grounding.ok:
             repair_used = True
             repair_messages = build_generation_messages(
                 user_message=user_message,
@@ -2437,6 +3811,7 @@ async def _emit_completion_with_fence_handling(
     provider_error: Optional[dict[str, Any]] = None,
     append_completion: bool = True,
     origin_session_id: Optional[str] = None,
+    user_message: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield a final completion after interpreting any ```tool fence in the reply.
 
@@ -2461,6 +3836,7 @@ async def _emit_completion_with_fence_handling(
             tools_used=0,
             outcome=outcome,
             origin_session_id=origin_session_id,
+            user_message=user_message,
         ):
             yield event
 
@@ -2521,8 +3897,11 @@ async def stream_for_project(
     attachment_ids: list[str] | None = None,
     origin_session_id: Optional[str] = None,
     active_content_tab: str | None = None,
+    active_workspace: str | None = None,
     active_document_id: str | None = None,
     scriptwriter_scene_id: str | None = None,
+    environment_creator_planning: dict | None = None,
+    image_generator_planning: dict | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     from .inference_activity import begin_inference, end_inference
 
@@ -2541,8 +3920,11 @@ async def stream_for_project(
             attachment_ids=attachment_ids,
             origin_session_id=origin_session_id,
             active_content_tab=active_content_tab,
+            active_workspace=active_workspace,
             active_document_id=active_document_id,
             scriptwriter_scene_id=scriptwriter_scene_id,
+            environment_creator_planning=environment_creator_planning,
+            image_generator_planning=image_generator_planning,
         ):
             yield event
     finally:
@@ -2563,8 +3945,11 @@ async def _stream_for_project_inner(
     attachment_ids: list[str] | None = None,
     origin_session_id: Optional[str] = None,
     active_content_tab: str | None = None,
+    active_workspace: str | None = None,
     active_document_id: str | None = None,
     scriptwriter_scene_id: str | None = None,
+    environment_creator_planning: dict | None = None,
+    image_generator_planning: dict | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     from .conversation import run_conversation_core_turn
 
@@ -2592,11 +3977,42 @@ async def _stream_for_project_inner(
         conversation_locale=conversation_locale,
         attachment_ids=attachment_ids,
         active_content_tab=active_content_tab,
-        active_document_id=active_document_id,
-        scriptwriter_scene_id=scriptwriter_scene_id,
     )
     timing.requestId = chat_request.request_id
     user_message = _last_user_message(messages)
+    platform = _maybe_platform_knowledge_reply(
+        user_message,
+        active_workspace,
+        project_id=project_id,
+        consumer="codirector.chat.stream",
+    )
+    if platform:
+        yield {
+            "type": "token",
+            "requestId": chat_request.request_id,
+            "replace": True,
+            "content": platform,
+        }
+        yield {
+            "type": "completed",
+            "requestId": chat_request.request_id,
+            "content": platform,
+            "messageType": "answer",
+        }
+        if project_id:
+            try:
+                append_assistant_completion(
+                    db,
+                    project_id,
+                    request_id=chat_request.request_id,
+                    reply=platform,
+                    model=chat_request.model_id,
+                    provider_id=getattr(provider, "id", None) if provider else None,
+                    message_type="answer",
+                )
+            except Exception:
+                logger.warning("knowledge reply completion persist failed", exc_info=True)
+        return
     timing.complexity = classify_request_complexity(user_message, mode=mode)
     timing.end_stage("CLASSIFYING_INTENT")
     timing.start_stage("READING_PROJECT_CACHE")
@@ -2674,12 +4090,35 @@ async def _stream_for_project_inner(
             from .routing.contracts import RouteActionClass
             from .routing.unified_intent import DispatchStrategy, UnifiedIntent
 
+            # Intelligence repair 2026-09-19 (RC5): the router classifies
+            # contextual follow-ups against the server-side conversational
+            # window (execution/tool/operator rows excluded via
+            # fold_events_for_llm) instead of in isolation. The client payload
+            # is only a fallback.
+            try:
+                from .conversation_events import fold_events_for_llm
+
+                router_recent = [
+                    {"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
+                    for m in fold_events_for_llm(db, project_id)
+                    if str(m.get("content") or "").strip()
+                ][-16:]
+            except Exception:
+                router_recent = []
+            if not router_recent:
+                router_recent = [
+                    {"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
+                    for m in messages[-16:]
+                    if str(m.get("content") or "").strip()
+                ]
+
             route_decision, unified_intent, route_event = await route_turn_with_unified(
                 text,
                 db,
                 project_id,
                 request_id=chat_request.request_id,
-                active_workspace=None,
+                active_workspace=active_workspace or active_content_tab,
+                session_context={"recent_messages": router_recent},
             )
     except Exception:
         logger.warning("Phase 3 router failed, falling back to legacy path", exc_info=True)
@@ -2715,6 +4154,13 @@ async def _stream_for_project_inner(
         feature_flags.codirector_operational_agent_v1
         and unified_intent is not None
         and getattr(unified_intent, "is_high_confidence_execution", False)
+        and not (
+            getattr(unified_intent, "capability", "") == "timeline.add_prompt_segment"
+            and (
+                _user_forbids_timeline_place(_last_user_message(messages))
+                or _user_asks_timed_prompt_in_timeline(_last_user_message(messages))
+            )
+        )
     ):
         dispatched = False
         # Workstream H — capture the execution_id yielded by the dispatcher so
@@ -2729,18 +4175,50 @@ async def _stream_for_project_inner(
             # Build the execution context from the user message + chat state.
             user_text = _last_user_message(messages)
             ctx_dict = _build_execution_context(user_text, unified_intent, messages)
-            ctx_dict = _enrich_execution_context(db, project_id, ctx_dict, unified_intent, messages)
-
-            plan = await dispatch_execution(
+            ctx_dict = _enrich_execution_context(
                 db,
                 project_id,
-                unified_intent,
                 ctx_dict,
+                unified_intent,
+                messages,
+                attachment_ids=attachment_ids,
+                scene_id=scene_id,
             )
+
+            # Final-closure mission 2026-09-19 (Blocker 3 — SceneId Resolution
+            # Law): a required context field that cannot be legitimately
+            # resolved (e.g. no active Timeline scene for timeline.add_asset)
+            # must produce an honest clarification — never a fabricated ID and
+            # never a doomed tool call. Restores the .bak_order11a pre-dispatch
+            # guard pattern for the scene-binding case.
+            _missing_fields = list(ctx_dict.get("missing_required_fields") or [])
+            plan = None
+            if _missing_fields and getattr(unified_intent, "capability", "") in {
+                "timeline.add_asset",
+                "timeline.add_prompt_segment",
+            }:
+                _question = str(
+                    ctx_dict.get("clarification_question")
+                    or "No Timeline scene is selected right now — open the scene in Timeline (or tell me which scene) and I'll add the image there."
+                )
+                yield {
+                    "type": "assistant",
+                    "requestId": chat_request.request_id,
+                    "content": _question,
+                }
+                dispatched = True
+
+            if not dispatched:
+                plan = await dispatch_execution(
+                    db,
+                    project_id,
+                    unified_intent,
+                    ctx_dict,
+                )
 
             # If the capability requires confirmation (APPROVAL_REQUIRED), persist
             # a PendingExecution so a future "Yes, proceed" can resolve it (spec §4).
-            if plan.status == ExecutionStatus.PREVIEW and plan.error == "APPROVAL_REQUIRED":
+            if plan is not None and plan.status == ExecutionStatus.PREVIEW and plan.error == "APPROVAL_REQUIRED":
                 from .execution.pending_store import PendingExecution, save_pending
 
                 pending = PendingExecution(
@@ -2768,7 +4246,7 @@ async def _stream_for_project_inner(
                     "content": "I'm ready to create that. Shall I proceed?",
                 }
                 dispatched = True
-            else:
+            elif plan is not None:
                 dispatched_execution_id = plan.execution_id
 
                 # Yield an SSE event so the frontend activates the Agent Work Surface.
@@ -2855,6 +4333,45 @@ async def _stream_for_project_inner(
         defer_enrichment=True,
         curated_tool_ids=curated_tool_ids_for_turn or None,
     )
+    if _user_asks_timed_prompt_in_timeline(user_message):
+        inspect = _inspect_timed_prompt_in_timeline(db, project_id, scene_id)
+        answer = str(inspect.get("answer") or AUTHORED_NOT_PLACED_COPY)
+        yield {
+            "type": "token",
+            "requestId": chat_request.request_id,
+            "replace": True,
+            "content": answer,
+        }
+        yield {
+            "type": "completed",
+            "requestId": chat_request.request_id,
+            "content": answer,
+            "messageType": "answer",
+        }
+        if project_id:
+            try:
+                append_assistant_completion(
+                    db,
+                    project_id,
+                    request_id=chat_request.request_id,
+                    reply=answer,
+                    model=chat_request.model_id,
+                    provider_id=getattr(provider, "id", None) if provider else None,
+                    message_id=f"asst-{chat_request.request_id}-destination",
+                    message_type="answer",
+                )
+            except Exception:
+                logger.debug("timed-prompt inspect persist failed", exc_info=True)
+        return
+    vision_turn = getattr(chat_request, "vision_turn", None)
+    vision_block = str(getattr(vision_turn, "context_block", None) or "") if vision_turn is not None else ""
+    if vision_block:
+        gen_now = list(getattr(core, "generationMessages", None) or [])
+        gen_now.insert(0, {"role": "system", "content": vision_block})
+        try:
+            core.generationMessages = gen_now
+        except Exception:
+            pass
     timing.deferEnrichment = True
     gen_msgs = list(getattr(core, "generationMessages", None) or [])
     buckets = TokenBuckets()
@@ -3170,6 +4687,32 @@ async def _stream_for_project_inner(
             },
         }
         # Tokens already streamed above — do not fake-chunk after completion.
+        if (
+            project_id
+            and unified_intent is not None
+            and getattr(unified_intent, "capability", "") == "timeline.add_prompt_segment"
+        ):
+            try:
+                early = _extract_timed_prompt_body(reply)
+                if _claims_timed_prompt_placed(early):
+                    early = _extract_timed_prompt_body(_rewrite_unverified_placement_claim(early, verified=False))
+                if not early or _claims_timed_prompt_placed(early):
+                    early = ""
+                if early:
+                    append_assistant_completion(
+                        db,
+                        project_id,
+                        request_id=chat_request.request_id,
+                        reply=early,
+                        model=trace.get("actual_model") or stream_model or model or chat_request.model_id,
+                        provider_id=trace.get("actual_provider")
+                        or stream_provider
+                        or getattr(provider, "id", None)
+                        or active_provider_id(),
+                        message_type="answer",
+                    )
+            except Exception:
+                logger.debug("timed-prompt early persist failed", exc_info=True)
         wiki_result: dict = {}
         if project_id:
             yield {
@@ -3352,21 +4895,39 @@ async def _stream_for_project_inner(
                         ),
                     }
             except Exception as next_exc:  # noqa: BLE001
-                logger = __import__("logging").getLogger(__name__)
+                # NOTE: this used to be a LOCAL `logger = ...` re-binding, which
+                # made `logger` function-local for the ENTIRE generator — any
+                # earlier logging (e.g. the Phase 3 router fallback at ~:2780)
+                # raised UnboundLocalError and killed the SSE stream instead of
+                # logging (independent peer review objection 1, 2026-09-19).
+                # The module-level logger (same name/module) is identical.
                 logger.warning("next_step_options failed: %s", next_exc)
 
         message_type = "answer"
         if project_id:
             try:
+                persist_reply = reply
+                persist_mid = None
+                if _claims_timed_prompt_placed(reply):
+                    persist_reply = _rewrite_unverified_placement_claim(reply, verified=False)
+                    persist_reply = _extract_timed_prompt_body(persist_reply) or AUTHORED_NOT_PLACED_COPY
+                    persist_mid = f"asst-{chat_request.request_id}-destination"
+                    yield {
+                        "type": "token",
+                        "requestId": chat_request.request_id,
+                        "replace": True,
+                        "content": persist_reply,
+                    }
                 append_assistant_completion(
                     db,
                     project_id,
                     request_id=chat_request.request_id,
-                    reply=reply,
+                    reply=persist_reply,
                     model=trace.get("actual_model") or model or chat_request.model_id,
                     provider_id=trace.get("actual_provider")
                     or getattr(provider, "id", None)
                     or active_provider_id(),
+                    message_id=persist_mid,
                     message_type=message_type,
                 )
             except Exception:
@@ -3381,6 +4942,7 @@ async def _stream_for_project_inner(
             "requestId": chat_request.request_id,
             "stage": "COMPLETE",
         }
+        _fence_verified = False
         async for event in _emit_completion_with_fence_handling(
             db,
             project_id=project_id,
@@ -3397,8 +4959,44 @@ async def _stream_for_project_inner(
             provider_error=trace.get("provider_error"),
             append_completion=False,  # already appended above
             origin_session_id=origin_session_id,
+            user_message=user_message,
         ):
+            inv = event.get("invocation") if isinstance(event.get("invocation"), dict) else {}
+            result = inv.get("result") if isinstance(inv.get("result"), dict) else {}
+            if event.get("type") == "tool_completed" and result.get("verified") is True:
+                _fence_verified = True
             yield event
+
+        # Same-turn place if the model authored but did not emit a verified tool write.
+        # Skip author-only (Case A) and inspect-only (Case D) — never mutate on inspect.
+        if (
+            not _fence_verified
+            and project_id
+            and unified_intent is not None
+            and getattr(unified_intent, "capability", "") == "timeline.add_prompt_segment"
+            and not _user_forbids_timeline_place(user_message)
+            and not _user_asks_timed_prompt_in_timeline(user_message)
+        ):
+            try:
+                backstop_outcome = _StructuredOutcome()
+                backstop_call = ToolCallRequest(
+                    response_type="mutation_proposal",
+                    tool_id="timeline.propose_add_prompt_segment",
+                    arguments={},
+                )
+                async for event in _propose_tool_call(
+                    db,
+                    project_id=project_id,
+                    scene_id=scene_id,
+                    request_id=chat_request.request_id,
+                    tool_call=backstop_call,
+                    outcome=backstop_outcome,
+                    same_turn_display=_strip_timed_prompt_carrier(reply) or reply,
+                    user_message=user_message,
+                ):
+                    yield event
+            except Exception:
+                logger.warning("timed-prompt same-turn place failed", exc_info=True)
         return
 
     if _conversation_core_handles(core.plan, user_message=user_message):
@@ -3428,6 +5026,7 @@ async def _stream_for_project_inner(
             provider_id=getattr(provider, "id", None) or active_provider_id(),
             message_type=message_type,
             append_completion=False,  # already appended above
+            user_message=user_message,
         ):
             yield event
         return
@@ -3490,6 +5089,7 @@ async def _stream_for_project_inner(
                 tools_used=tools_used,
                 outcome=outcome,
                 origin_session_id=origin_session_id,
+                user_message=user_message,
             ):
                 yield tool_event
 

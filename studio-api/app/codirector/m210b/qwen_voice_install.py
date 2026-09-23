@@ -198,6 +198,19 @@ def pip_install_runtime(py: Path, *, on_progress: ProgressCb | None = None, canc
             "numpy",
             "qwen-tts",
         ],
+        # qwen-tts pulls CPU torch from PyPI. Replace it with CUDA wheels.
+        # Never leave this venv on torch+cpu — Voice Design and Voice Clone are GPU-only.
+        [
+            str(py),
+            "-m",
+            "pip",
+            "install",
+            "--force-reinstall",
+            "--index-url",
+            "https://download.pytorch.org/whl/cu128",
+            "torch",
+            "torchaudio",
+        ],
     ]
     for cmd in cmds:
         if cancel_check and cancel_check():

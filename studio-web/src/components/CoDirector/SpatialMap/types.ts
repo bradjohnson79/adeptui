@@ -27,6 +27,7 @@ import type {
 } from "../../../contracts/spatialMapM411";
 
 export type { GridScale } from "./gridGeometry";
+export type { BackgroundAlignment } from "./backgroundAlignment";
 
 /** Cartesian grid placement extension. */
 export type SpatialPlacementGridExtension = {
@@ -114,6 +115,12 @@ export type SpatialCamera = _SpatialCamera & {
   shotSize?: string;
   /** Scene Creator Mini: auto|environment|<characterId>. */
   primarySubject?: string;
+  /**
+   * Map glyph attach. Default is free (a placeable entity like a Character).
+   * POV only when Shot Size = POV (also inferred from shotType/attachMode).
+   * Legacy attachMode 'follow' is treated as free -- no auto-ride on characters.
+   */
+  attachMode?: 'pov' | 'free' | 'follow';
   normalizedX?: number | null;
   normalizedY?: number | null;
   gridRow: number;
@@ -132,6 +139,7 @@ export const SHOT_SIZES = [
   "medium_close",
   "close_up",
   "extreme_close",
+  "pov",
 ] as const;
 export type ShotSize = (typeof SHOT_SIZES)[number];
 
@@ -143,6 +151,7 @@ export function normalizeShotSize(value: string | null | undefined): ShotSize {
 export function shotSizeLabel(value: string | null | undefined): string {
   const v = normalizeShotSize(value);
   if (v === "auto") return "Auto";
+  if (v === "pov") return "POV";
   return v
     .split("_")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -190,6 +199,8 @@ export type MovementSegment = {
   characterStates: SpatialCharacterPlacement[];
   propStates: SpatialPropPlacement[];
   cameraStateRefs?: string[];
+  /** Per-movement camera pose snapshots (free-entity persist). */
+  cameraStates?: SpatialCamera[];
   userDirection?: string;
   productionPrompt?: string;
   actions?: MovementAction[];
@@ -248,6 +259,14 @@ export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props
   props: SpatialPropPlacement[];
   cameras: SpatialCamera[];
   gridScale: number;
+  backgroundAlignment?: {
+    offsetX: number;
+    offsetY: number;
+    scale?: number;
+    sourceWidth?: number;
+    sourceHeight?: number;
+    sourceAspectRatio?: number;
+  };
   placementGrid?: string;
   metricSchema?: string | null;
   metersPerCell?: number;
@@ -258,6 +277,8 @@ export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props
   sceneIntent?: SceneIntent | null;
   originalEnvironmentReferenceAssetId?: string | null;
   originatingUserPrompt?: string;
+  /** designed | reconstructed | supplied — supplied means imported pixels, never generated. */
+  geometrySource?: string | null;
   /** Server-computed lineage fingerprint for ERS staleness. */
   groundingFingerprint?: string;
   /** Explicit Save commit marker (Spatial Map Save Gate). Dirty = savedVersion !== version. */
@@ -266,23 +287,38 @@ export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props
   movementSegments?: MovementSegment[];
   activeMovementSegmentId?: string | null;
   movementSegmentRevision?: number;
+  /** Dedicated Spin Camera placement — not part of C1-C4 cameras. */
+  spinCamera?: SpinCameraPlacement | null;
 };
 
 /** Body types extended with V1 Cartesian grid fields. */
 export type SpatialCharacterPlacementBody = _SpatialCharacterPlacementBody & Partial<SpatialPlacementGridExtension>;
 
-export type SpatialCharacterPlacementUpdateBody = _SpatialCharacterPlacementUpdateBody & Partial<SpatialPlacementGridExtension>;
+export type SpatialCharacterPlacementUpdateBody = _SpatialCharacterPlacementUpdateBody & Partial<SpatialPlacementGridExtension> & {
+  movementSegmentId?: string;
+};
 
 export type SpatialPropPlacementBody = _SpatialPropPlacementBody & Partial<SpatialPlacementGridExtension> & Partial<SpatialPropAttachmentFields>;
 
-export type SpatialPropPlacementUpdateBody = _SpatialPropPlacementUpdateBody & Partial<SpatialPlacementGridExtension> & Partial<SpatialPropAttachmentFields>;
+export type SpatialPropPlacementUpdateBody = _SpatialPropPlacementUpdateBody & Partial<SpatialPlacementGridExtension> & Partial<SpatialPropAttachmentFields> & {
+  movementSegmentId?: string;
+};
 
 export type SpatialMapUpdateBody = _SpatialMapUpdateBody & {
   gridScale?: number;
+  backgroundAlignment?: {
+    offsetX: number;
+    offsetY: number;
+    scale?: number;
+    sourceWidth?: number;
+    sourceHeight?: number;
+    sourceAspectRatio?: number;
+  };
   sceneDescription?: string | null;
   sceneIntent?: SceneIntent | null;
   originalEnvironmentReferenceAssetId?: string | null;
   originatingUserPrompt?: string | null;
+  geometrySource?: string | null;
 };
 
 export type SpatialMapSceneIntentCreateBody = SpatialMapCreateBody & {
@@ -290,6 +326,7 @@ export type SpatialMapSceneIntentCreateBody = SpatialMapCreateBody & {
   sceneIntent?: SceneIntent | null;
   originalEnvironmentReferenceAssetId?: string | null;
   originatingUserPrompt?: string | null;
+  geometrySource?: string | null;
 };
 
 export type {
@@ -303,7 +340,7 @@ export type {
   Spatial360Collage,
 };
 
-export type SlotKind = "character" | "prop" | "camera";
+export type SlotKind = "character" | "prop" | "camera" | "spin";
 
 export type ActivePlacement = {
   type: SlotKind;
@@ -389,6 +426,48 @@ export function propPlacementIsBoundApproved(
 }
 
 export type SlotColorKey = "red" | "blue" | "orange" | "green" | "purple" | "brown" | "aqua" | "gray";
+
+/** Spin Camera placement — dedicated field on the Spatial Map document. */
+export type SpinCameraPlacement = {
+  id: string;
+  x: number;
+  z: number;
+  sceneId?: string | null;
+  mapId?: string | null;
+  cameraHeight?: number;
+  fov?: number;
+  lensMm?: number;
+};
+
+/** One of the five canonical spin-package view directions. */
+export type SpinViewKey = "center" | "north" | "east" | "south" | "west";
+
+/** Per-view status inside a Spin Package manifest. */
+export type SpinViewStatus = {
+  assetId: string | null;
+  status: "queued" | "generating" | "done" | "failed";
+  error?: string | null;
+  /** Provider used for a per-direction regenerate (provenance). */
+  provider?: string | null;
+};
+
+/** Manifest stored in the spatial_spin_package ProjectTraitRow. */
+export type SpinPackageManifest = {
+  spinPackageId: string;
+  version: number;
+  sceneId: string | null;
+  mapId: string | null;
+  provider: string;
+  origin: { x: number; z: number };
+  cameraHeight: number;
+  fov: number;
+  lensMm: number;
+  spatialMapAssetId: string | null;
+  views: Record<SpinViewKey, SpinViewStatus>;
+  ersStale: boolean;
+  createdAt: string | null;
+  completedAt: string | null;
+};
 
 export type SlotDef = {
   index: number;

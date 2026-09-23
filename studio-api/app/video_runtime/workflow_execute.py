@@ -48,100 +48,14 @@ def build_leaf_graph(
     audio_file: Optional[str] = None,
     steps: int = 8,
     filename_prefix: str = "studio/render",
-    wan_segment: str = "start_mid",
     video_path: Optional[str] = None,
     audio_path: Optional[str] = None,
+    lora_name: Optional[str] = None,
+    lora_strength: Optional[float] = None,
+    turbo_lora: bool = False,
+    generate_audio: Optional[bool] = None,
 ) -> dict[str, Any]:
     key = contract.leaf_workflow_key
-
-    if key == "wan.first_last_frame":
-        from ..workflows.wan_builder import build_wan_flf_workflow
-
-        return build_wan_flf_workflow(
-            high_noise=settings.wan_high_noise,
-            low_noise=settings.wan_low_noise,
-            vae_name=settings.wan_vae,
-            text_encoder=settings.wan_text_encoder,
-            positive=positive,
-            negative=negative,
-            width=width,
-            height=height,
-            length=length,
-            fps=fps,
-            seed=seed,
-            start_image=start_image,
-            end_image=end_image or middle_image,
-            steps_high=max(2, steps // 2),
-            steps_low=max(2, steps // 2),
-            filename_prefix=filename_prefix,
-        )
-
-    if key == "wan.three_frame":
-        from ..workflows.wan_builder import build_wan_three_frame_workflow
-
-        if not (start_image and middle_image and end_image):
-            raise RuntimeError("wan.three_frame requires start, middle, and end frames")
-        return build_wan_three_frame_workflow(
-            high_noise=settings.wan_high_noise,
-            low_noise=settings.wan_low_noise,
-            vae_name=settings.wan_vae,
-            text_encoder=settings.wan_text_encoder,
-            positive=positive,
-            negative=negative,
-            width=width,
-            height=height,
-            length=length,
-            fps=fps,
-            seed=seed,
-            start_image=start_image,
-            middle_image=middle_image,
-            end_image=end_image,
-            segment=wan_segment,
-            steps_high=max(2, steps // 2),
-            steps_low=max(2, steps // 2),
-            filename_prefix=filename_prefix,
-        )
-
-    if key == "ltx.simple_i2v":
-        from ..workflows.ltx_builder import build_ltx_simple_i2v
-
-        if not start_image:
-            raise RuntimeError("ltx.simple_i2v requires start_image")
-        return build_ltx_simple_i2v(
-            checkpoint=settings.ltx_checkpoint,
-            positive=positive,
-            negative=negative,
-            width=width,
-            height=height,
-            length=length,
-            fps=fps,
-            seed=seed,
-            start_image=start_image,
-            steps=steps,
-            filename_prefix=filename_prefix,
-            text_encoder=settings.ltx_text_encoder,
-        )
-
-    if key == "ltx.scene":
-        from ..workflows.ltx_builder import build_ltx_scene_workflow
-
-        return build_ltx_scene_workflow(
-            checkpoint=settings.ltx_checkpoint,
-            positive=positive,
-            negative=negative,
-            width=width,
-            height=height,
-            length=length,
-            fps=fps,
-            seed=seed,
-            start_image=start_image,
-            middle_image=middle_image,
-            end_image=end_image,
-            audio_file=audio_file,
-            steps=steps,
-            filename_prefix=filename_prefix,
-            text_encoder=settings.ltx_text_encoder,
-        )
 
     if key == "lipsync.latentsync":
         from ..workflows.lipsync_builder import build_latentsync_workflow
@@ -150,80 +64,6 @@ def build_leaf_graph(
             raise RuntimeError("lipsync.latentsync requires video_path and audio_path")
         return build_latentsync_workflow(video_path=video_path, audio_path=audio_path)
 
-    if key in {"hunyuan15.t2v", "hunyuan15.i2v", "hunyuan13b.t2v", "hunyuan13b.i2v"}:
-        from .hunyuan_providers import HUNYUAN_13B, HUNYUAN_15, load_install_status, provider_dir
-
-        provider_id = HUNYUAN_15 if key.startswith("hunyuan15") else HUNYUAN_13B
-        model_root = str(provider_dir(provider_id))
-        profile = (load_install_status(provider_id).get("profile") or "fp8_production")
-        if key == "hunyuan15.t2v":
-            from ..workflows.hunyuan15_builder import build_hunyuan15_t2v
-
-            return build_hunyuan15_t2v(
-                model_root=model_root,
-                positive=positive,
-                negative=negative,
-                width=width,
-                height=height,
-                length=length,
-                fps=fps,
-                seed=seed,
-                steps=max(steps, 20),
-                filename_prefix=filename_prefix,
-            )
-        if key == "hunyuan15.i2v":
-            from ..workflows.hunyuan15_builder import build_hunyuan15_i2v
-
-            if not start_image:
-                raise RuntimeError("hunyuan15.i2v requires start_image")
-            return build_hunyuan15_i2v(
-                model_root=model_root,
-                positive=positive,
-                negative=negative,
-                start_image=start_image,
-                width=width,
-                height=height,
-                length=length,
-                fps=fps,
-                seed=seed,
-                steps=max(steps, 20),
-                filename_prefix=filename_prefix,
-            )
-        if key == "hunyuan13b.t2v":
-            from ..workflows.hunyuan13b_builder import build_hunyuan13b_t2v
-
-            return build_hunyuan13b_t2v(
-                model_root=model_root,
-                positive=positive,
-                negative=negative,
-                width=width,
-                height=height,
-                length=length,
-                fps=fps,
-                seed=seed,
-                steps=max(steps, 30),
-                profile=str(profile),
-                filename_prefix=filename_prefix,
-            )
-        from ..workflows.hunyuan13b_builder import build_hunyuan13b_i2v
-
-        if not start_image:
-            raise RuntimeError("hunyuan13b.i2v requires start_image")
-        return build_hunyuan13b_i2v(
-            model_root=model_root,
-            positive=positive,
-            negative=negative,
-            start_image=start_image,
-            width=width,
-            height=height,
-            length=length,
-            fps=fps,
-            seed=seed,
-            steps=max(steps, 30),
-            profile=str(profile),
-            filename_prefix=filename_prefix,
-        )
-
     if key.startswith("ltx_25."):
         from ..workflows.ltx_25_builder import (
             build_ltx_25_i2v,
@@ -231,7 +71,8 @@ def build_leaf_graph(
         )
 
         length_seconds = length / float(fps) if fps > 0 else 5.0
-        generate_audio = audio_file is not None
+        # generate_audio True → builder wires EmptyAudio+ConcatAV AV path (not BaseSampler).
+        audio_on = bool(generate_audio) if generate_audio is not None else False
         fast_mode = steps <= 16
 
         if key == "ltx_25.t2v":
@@ -245,8 +86,9 @@ def build_leaf_graph(
                 length_seconds=length_seconds,
                 fps=fps,
                 seed=seed,
-                generate_audio=generate_audio,
+                generate_audio=audio_on,
                 fast_mode=fast_mode,
+                turbo_lora=turbo_lora,
             )
 
         if key == "ltx_25.i2v":
@@ -258,13 +100,16 @@ def build_leaf_graph(
                 prompt=positive,
                 negative_prompt=negative,
                 start_image_path=start_image,
+                middle_image_path=middle_image or "",
+                end_image_path=end_image or "",
                 width=width,
                 height=height,
                 length_seconds=length_seconds,
                 fps=fps,
                 seed=seed,
-                generate_audio=generate_audio,
+                generate_audio=audio_on,
                 fast_mode=fast_mode,
+                turbo_lora=turbo_lora,
             )
 
         raise RuntimeError(f"Unknown ltx_25 leaf workflow: {key}")

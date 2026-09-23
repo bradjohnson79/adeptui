@@ -8,221 +8,30 @@ from .contracts import GeneratorCapability, InPaintStrategy
 
 
 def list_generators() -> list[GeneratorCapability]:
-    from ..video_runtime.hunyuan_providers import HUNYUAN_13B, HUNYUAN_15, describe_provider
-    from .generation.adapters.stub_cert import stub_enabled
+    """View of Production Control + adapter join. Not a second catalog."""
+    from ..production_control.generator_authority import timeline_generator_snapshot
 
-    hy15 = describe_provider(HUNYUAN_15)
-    hy13 = describe_provider(HUNYUAN_13B)
-    gens = [
-        GeneratorCapability(
-            id="minimax-h3-local",
-            label="MiniMax H3 (Local)",
-            locality="local",
-            providerId="minimax-h3",
-            capabilityLabel="Testing",
-            maxDurationSec=5.0,
-            supportsStartEndFrame=False,
-            supportsContinuation=False,
-            inPaintStrategies=["complete_batch_retake"],
-            executable=True,
-            supportsQueuedCancel=True,
-            supportsRunningCancel=True,
-            supportsInterrupt=True,
-            draftPathway="none",
-            notes=(
-                "Experimental Private Profile — text-to-video with native audio. "
-                "Routes through the shared Timeline generation adapter registry."
-            ),
-        ),
-        GeneratorCapability(
-            id="ltx-local",
-            label="LTX 2.3/2.5 (Local)",
-            locality="local",
-            providerId="comfy",
-            capabilityLabel="Certified",
-            maxDurationSec=20.0,
-            supportsStartEndFrame=True,
-            supportsContinuation=True,
-            supportsAudio=True,
-            inPaintStrategies=["range_replacement", "complete_batch_retake", "keyframe_repair"],
-            executable=True,
-            supportsQueuedCancel=True,
-            supportsRunningCancel=True,
-            supportsInterrupt=True,
-            draftPathway="local_live",
-            draftResolution="768x432",
-            finalResolution="1280x720",
-            finalRequiresNewGeneration=True,
-            notes="Default production engine. LTX 2.5 variants available via ltx-2.5-full, ltx-2.5-distilled, ltx-2.5-comfy.",
-        ),
-        GeneratorCapability(
-            id="ltx-2.5-full",
-            label="LTX 2.5 Full",
-            locality="local",
-            providerId="comfy",
-            capabilityLabel="Certified",
-            maxDurationSec=20.0,
-            supportsStartEndFrame=True,
-            supportsContinuation=True,
-            supportsAudio=True,
-            inPaintStrategies=["range_replacement", "complete_batch_retake", "keyframe_repair"],
-            executable=True,
-            supportsQueuedCancel=True,
-            supportsRunningCancel=True,
-            supportsInterrupt=True,
-            draftPathway="local_live",
-            notes="Full-precision LTX 2.5 with native audio. Recommended for high-quality production.",
-        ),
-        GeneratorCapability(
-            id="ltx-2.5-distilled",
-            label="LTX 2.5 Distilled",
-            locality="local",
-            providerId="comfy",
-            capabilityLabel="Certified",
-            maxDurationSec=20.0,
-            supportsStartEndFrame=True,
-            supportsContinuation=True,
-            supportsAudio=True,
-            inPaintStrategies=["range_replacement", "complete_batch_retake", "keyframe_repair"],
-            executable=True,
-            supportsQueuedCancel=True,
-            supportsRunningCancel=True,
-            supportsInterrupt=True,
-            draftPathway="local_live",
-            notes="Distilled BF16 LTX 2.5 with fast generation and native audio. Default for auto mode.",
-        ),
-        GeneratorCapability(
-            id="ltx-2.5-comfy",
-            label="LTX 2.5 Comfy INT8",
-            locality="local",
-            providerId="comfy",
-            capabilityLabel="Certified",
-            maxDurationSec=20.0,
-            supportsStartEndFrame=True,
-            supportsContinuation=True,
-            supportsAudio=False,
-            inPaintStrategies=["range_replacement", "complete_batch_retake", "keyframe_repair"],
-            executable=True,
-            supportsQueuedCancel=True,
-            supportsRunningCancel=True,
-            supportsInterrupt=True,
-            draftPathway="local_live",
-            notes="INT8 quantized LTX 2.5 for reduced VRAM. No native audio generation.",
-        ),
-        GeneratorCapability(
-            id="wan-local",
-            label="WAN 2.2 I2V (Local)",
-            locality="local",
-            providerId="comfy",
-            capabilityLabel="Certified",
-            maxDurationSec=8.0,
-            supportsStartEndFrame=True,
-            supportsContinuation=True,
-            inPaintStrategies=["range_replacement", "complete_batch_retake"],
-            executable=True,
-            supportsTimelineGeneration=False,
-            notes="No Timeline adapter registered; available for scene render only.",
-        ),
-        GeneratorCapability(
-            id="hunyuan-video-1.5-local",
-            label="HunyuanVideo 1.5 (Local)",
-            locality="local",
-            providerId="comfy",
-            capabilityLabel="Certified" if hy15.executable else "Requires Setup",
-            maxDurationSec=10.0,
-            supportsStartEndFrame=False,
-            supportsContinuation=False,
-            inPaintStrategies=["range_replacement", "complete_batch_retake"],
-            executable=hy15.executable,
-            supportsTimelineGeneration=False,
-            notes="; ".join(hy15.notes)
-            or "Optional Hunyuan provider. True local T2V only after per-provider certification.",
-        ),
-        GeneratorCapability(
-            id="hunyuan-video-13b-local",
-            label="HunyuanVideo 13B (Local Advanced)",
-            locality="local",
-            providerId="comfy",
-            capabilityLabel="Certified" if hy13.executable else "Requires Setup",
-            maxDurationSec=10.0,
-            supportsStartEndFrame=False,
-            supportsContinuation=False,
-            inPaintStrategies=["range_replacement", "complete_batch_retake"],
-            executable=hy13.executable,
-            supportsTimelineGeneration=False,
-            notes="; ".join(hy13.notes)
-            or "Advanced Hunyuan provider. Official FP8 profile when hardware recommends it.",
-        ),
-        GeneratorCapability(
-            id="seedance-kie",
-            label="Seedance 2.0 — Kie.ai",
-            locality="hosted",
-            providerId="kie",
-            capabilityLabel="Testing",
-            maxDurationSec=12.0,
-            supportsStartEndFrame=True,
-            inPaintStrategies=["complete_batch_retake"],
-            executable=False,
-            draftPathway="cheap_preview",
-            supportsVideoReferences=True,
-            supportsImageAndVideoTogether=True,
-            maximumReferenceVideos=1,
-            notes="Executable only when discovered API model is Ready.",
-        ),
-        GeneratorCapability(
-            id="kling-fal",
-            label="Kling 3.0 — fal.ai",
-            locality="hosted",
-            providerId="fal",
-            capabilityLabel="Certified",
-            maxDurationSec=10.0,
-            supportsStartEndFrame=True,
-            inPaintStrategies=["complete_batch_retake"],
-            executable=False,
-            draftPathway="none",
-            supportsQueuedCancel=False,
-            supportsRunningCancel=False,
-            notes="Draft Mode is unavailable. Cancellation after submit is unavailable.",
-        ),
-        GeneratorCapability(
-            id="comfy-workflow",
-            label="ComfyUI Workflow",
-            locality="local",
-            providerId="comfy",
-            capabilityLabel="Available",
-            inPaintStrategies=["keyframe_repair", "complete_batch_retake"],
-            executable=False,
-            notes="Requires Setup for project-specific workflows.",
-        ),
-    ]
-    # CERT_STUB_ENV_GATED: cert stub generator visible only in certification runs.
-    if stub_enabled():
-        gens.append(
-            GeneratorCapability(
-                id="cert-stub-local",
-                label="Cert Stub (wiring certification only)",
-                locality="local",
-                providerId="cert-stub",
-                capabilityLabel="Testing",
-                maxDurationSec=10.0,
-                supportsStartEndFrame=True,
-                supportsContinuation=True,
-                inPaintStrategies=["range_replacement", "complete_batch_retake"],
-                executable=True,
-                supportsTimelineGeneration=True,
-                notes=(
-                    "Certification stub — replaces the provider execution boundary. "
-                    "Records requests; never executes GPU code."
-                ),
-            )
-        )
-    return gens
+    return timeline_generator_snapshot()
 
 
 def get_generator(generator_id: str | None) -> GeneratorCapability | None:
     if not generator_id:
         return None
-    return next((g for g in list_generators() if g.id == generator_id), None)
+    from ..production_control.generator_authority import canonical_product_id, timeline_adapter_for
+
+    token = str(generator_id).strip()
+    canonical = canonical_product_id(token)
+    adapter = timeline_adapter_for(token)
+    for gen in list_generators():
+        if gen.id == token:
+            return gen
+        if gen.id == canonical or gen.id == adapter:
+            return gen
+        if canonical_product_id(gen.id) == canonical:
+            return gen
+        if gen.timelineAdapterId and gen.timelineAdapterId in {token, canonical, adapter}:
+            return gen
+    return None
 
 
 def registry_snapshot() -> dict[str, Any]:
@@ -237,6 +46,33 @@ def registry_snapshot() -> dict[str, Any]:
 
 
 def validate_duration(generator_id: str | None, planned: float) -> dict[str, Any]:
+    from ..video_runtime.legal_canvas import is_minimax_h3_generator, snap_h3_timeline_duration
+
+    if is_minimax_h3_generator(generator_id):
+        snap = snap_h3_timeline_duration(planned)
+        if not snap.get("ok"):
+            return {
+                "ok": False,
+                "action": "choose",
+                "plannedDuration": planned,
+                "maxDurationSec": snap.get("maxDurationSec"),
+                "legalDurationSec": None,
+                "snapped": False,
+                "options": ["split", "shorten", "keep", "cancel"],
+                "message": snap.get("message")
+                or f"Planned duration {planned}s exceeds MiniMax H3 max 15s — no silent truncate.",
+            }
+        return {
+            "ok": True,
+            "action": "snap" if snap.get("snapped") else "keep",
+            "plannedDuration": planned,
+            "legalDurationSec": snap.get("legalDurationSec"),
+            "maxDurationSec": snap.get("maxDurationSec"),
+            "snapped": bool(snap.get("snapped")),
+            "frames": snap.get("frames"),
+            "message": snap.get("message") or "",
+        }
+
     gen = get_generator(generator_id)
     if not gen or gen.maxDurationSec is None:
         return {"ok": True, "action": "keep", "plannedDuration": planned, "maxDurationSec": None}
@@ -292,3 +128,49 @@ def disclose_inpaint_strategy(generator_id: str | None, requested: InPaintStrate
         "disclosed": True,
         "mock": False,
     }
+
+
+def timeline_visual_sufficient(caps: Any) -> bool:
+    """Image-frame / Visual-ref sufficiency: R2V or I2V.
+
+    supportsImageToVideo=False is NOT a Timeline refuse when
+    supportsReferenceToVideo is True (MiniMax H3).
+    """
+    if caps is None:
+        return False
+    return bool(
+        getattr(caps, "supportsReferenceToVideo", False)
+        or getattr(caps, "supportsImageToVideo", False)
+    )
+
+
+def can_timeline_generate(caps: Any) -> bool:
+    """Timeline generate sufficiency.
+
+    R2V is sufficient. Do not treat supportsImageToVideo as the only
+    Timeline capability gate (H3 is I2V=false / R2V=true).
+    """
+    if caps is None:
+        return False
+    if getattr(caps, "executable", True) is False:
+        return False
+    if getattr(caps, "supportsTimelineGeneration", True) is False:
+        return False
+    return bool(
+        getattr(caps, "supportsReferenceToVideo", False)
+        or getattr(caps, "supportsImageToVideo", False)
+        or getattr(caps, "supportsTextToVideo", False)
+    )
+
+
+def can_timeline_retake(caps: Any) -> bool:
+    """Timeline Re-Take sufficiency — same visual law as generate.
+
+    R2V is sufficient. Image-frame still requires timeline_visual_sufficient
+    at the retake_range gate (I2V or R2V); T2V-only engines refuse image-frame
+    honestly and do not fall back.
+    """
+    if not can_timeline_generate(caps):
+        return False
+    return getattr(caps, "supportsRetake", True) is not False
+

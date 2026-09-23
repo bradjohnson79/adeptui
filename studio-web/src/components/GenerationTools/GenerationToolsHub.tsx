@@ -231,11 +231,6 @@ export function GenerationToolsHub({
                     Open Scriptwriter workspace
                   </Button>
                 )}
-                {selected.id === "brand.studio" && (
-                  <Button variant="ghost" onClick={() => onGo("brandstudio")}>
-                    Open Brand Studio
-                  </Button>
-                )}
                 {(selected.id.startsWith("audio.") || selected.id.includes("music") || selected.id.includes("sfx")) && (
                   <Button variant="ghost" onClick={() => onGo("audiostudio")}>
                     Open Audio Studio

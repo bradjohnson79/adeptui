@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { frameToTimecode } from "../../magiSequence/engine";
 import type { MagiClip, MagiSequenceDocument } from "../../magiSequence/types";
+import { canAddObjectsTrack, objectsSlotOf, visibleMagiTracks } from "../../magiSequence/tracks";
 import { useMagiFocus } from "../../magiSequence/MagiFocusContext";
 
 type DragState = {
@@ -24,6 +25,10 @@ export function MagiSequenceTimeline({
   onMove,
   onDropAsset,
   failedAssetIds,
+  selectedTrackId,
+  onSelectTrack,
+  onAddObjectsTrack,
+  onRemoveObjectsTrack,
 }: {
   sequence: MagiSequenceDocument;
   selection: string[];
@@ -35,6 +40,10 @@ export function MagiSequenceTimeline({
   onMove: (clipId: string, startFrame: number, trackId?: string) => void;
   onDropAsset: (trackId: string, startFrame: number, assetId: string, mode: "Insert" | "Overwrite") => void;
   failedAssetIds?: ReadonlySet<string> | null;
+  selectedTrackId?: string | null;
+  onSelectTrack?: (trackId: string) => void;
+  onAddObjectsTrack?: () => void;
+  onRemoveObjectsTrack?: () => void;
 }) {
   const { t } = useTranslation("magi");
   const { bindRegionProps, setFocusRegion } = useMagiFocus();
@@ -60,10 +69,18 @@ export function MagiSequenceTimeline({
         return;
       }
       const deltaFrames = Math.round((event.clientX - dragState.startX) / pxPerFrame);
+      const hoverTrack = document
+        .elementFromPoint(event.clientX, event.clientY)
+        ?.closest("[data-magi-track-id]") as HTMLElement | null;
+      const hoverTrackId = hoverTrack?.dataset.magiTrackId;
       setDragState((current) => {
         if (!current) return current;
         if (current.mode === "move") {
-          return { ...current, currentFrame: Math.max(0, current.startFrame + deltaFrames) };
+          return {
+            ...current,
+            currentFrame: Math.max(0, current.startFrame + deltaFrames),
+            trackId: hoverTrackId || current.trackId,
+          };
         }
         return { ...current, currentFrame: current.startFrame + deltaFrames };
       });
@@ -172,15 +189,62 @@ export function MagiSequenceTimeline({
           </div>
         </div>
 
-        {sequence.tracks.map((track) => (
-          <div key={track.id} className="track-row magi-sequence-timeline__row" data-track={track.label}>
-            <div className="magi-sequence-timeline__label">{track.label}</div>
+        {visibleMagiTracks(sequence.tracks).map((track) => {
+          const objectsSlot = objectsSlotOf(track);
+          const selected = selectedTrackId === track.id;
+          const testId = objectsSlot ? `magi-track-objects-${objectsSlot}` : `magi-track-${track.label}`;
+          return (
+          <div
+            key={track.id}
+            className={`track-row magi-sequence-timeline__row${selected ? " is-selected-track" : ""}`}
+            data-track={track.label}
+            data-magi-track-id={track.id}
+            data-objects-slot={objectsSlot ?? undefined}
+            data-testid={testId}
+          >
+            <div
+              className="magi-sequence-timeline__label"
+              onClick={() => onSelectTrack?.(track.id)}
+            >
+              <span>{track.label}</span>
+              {objectsSlot === 1 && canAddObjectsTrack(sequence.tracks) && onAddObjectsTrack ? (
+                <button
+                  type="button"
+                  className="magi-objects-add-track"
+                  data-testid="magi-objects-add-track"
+                  aria-label="Add Objects 2"
+                  title="Add Objects 2"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAddObjectsTrack();
+                  }}
+                >
+                  +
+                </button>
+              ) : null}
+              {objectsSlot === 2 && onRemoveObjectsTrack ? (
+                <button
+                  type="button"
+                  className="magi-objects-remove-track"
+                  data-testid="magi-objects-remove-track"
+                  aria-label="Remove Objects 2"
+                  title="Remove Objects 2"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRemoveObjectsTrack();
+                  }}
+                >
+                  ×
+                </button>
+              ) : null}
+            </div>
             <div
               className="track-lane"
               style={{ width }}
-              data-testid={`magi-track-lane-${track.label}`}
+              data-testid={objectsSlot ? `magi-track-lane-objects-${objectsSlot}` : `magi-track-lane-${track.label}`}
               onClick={(event) => {
                 setFocusRegion("timeline");
+                onSelectTrack?.(track.id);
                 if (event.target === event.currentTarget) onSelect([]);
               }}
               onDragOver={(event) => {
@@ -198,7 +262,13 @@ export function MagiSequenceTimeline({
               }}
             >
               {sequence.clips
-                .filter((clip) => clip.trackId === track.id)
+                .filter((clip) => {
+                  const liveTrackId =
+                    dragState?.clipId === clip.id && dragState.mode === "move" && dragState.trackId
+                      ? dragState.trackId
+                      : clip.trackId;
+                  return liveTrackId === track.id;
+                })
                 .map((clip) => (
                   <ClipBlock
                     key={clip.id}
@@ -223,7 +293,8 @@ export function MagiSequenceTimeline({
                 ))}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

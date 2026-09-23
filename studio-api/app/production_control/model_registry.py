@@ -638,13 +638,9 @@ _CATALOG = [
 _BY_ID: dict[str, ModelDescriptor] = {m.id: m for m in _CATALOG}
 
 _SETUP_COMPONENT_BY_MODEL_ID = {
-    "ltx-local": "ltx_checkpoint",
     "ltx-2.5-full": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae", "ltx_2_5_audio_vae"),
     "ltx-2.5-distilled": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae", "ltx_2_5_audio_vae"),
     "ltx-2.5-comfy": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),
-    "wan-local": "wan_models",
-    "hunyuan-video-1.5-local": "hunyuan_video_15",
-    "hunyuan-video-13b-local": "hunyuan_video_13b",
     "qwen-image-edit-2509-local": "qwen_image_edit_2509_models",
     "qwen-image-2512-local": "qwen_image_2512_models",
     "flux-local": "flux1_dev_local",

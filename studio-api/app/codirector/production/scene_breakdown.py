@@ -302,9 +302,25 @@ def synthesize_cinematic_action(intent: DirectorSceneIntent) -> str:
             orphan_dialogue.append(line)
 
     beats = sorted(intent.scene_beats, key=lambda beat: beat.index)
+    # Intentional repetition: consecutive beats with identical normalized
+    # prose stage the same action N times ("Mara raises her hand." × 2). The
+    # compiled ACTION must express the count ("…twice", "…three times") —
+    # repeating the sentence verbatim is a duplicate-staging defect, and
+    # silently dropping the later stagings loses the creator's choreography.
+    _REPETITION_COUNT_WORDS = {2: "twice", 3: "three times", 4: "four times", 5: "five times", 6: "six times"}
+    runs: list[tuple[SceneBeat, int, str]] = []
     for beat in beats:
+        key = re.sub(r"\s+", " ", (beat.description or "").strip().lower()).strip(" .")
+        if runs and key and key == runs[-1][2]:
+            runs[-1] = (runs[-1][0], runs[-1][1] + 1, key)
+        else:
+            runs.append((beat, 1, key))
+    for beat, count, _key in runs:
         description = _sentence(strip_instruction_copy(beat.description))
         if description:
+            if count > 1:
+                phrase = _REPETITION_COUNT_WORDS.get(count, f"{count} times")
+                description = description.rstrip(".!?") + f" {phrase}."
             sentences.append(description)
         for line in dialogue_by_beat.get(beat.index, []):
             sentences.append(_dialogue_sentence(line))

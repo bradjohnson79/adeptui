@@ -33,6 +33,17 @@ CharacterCastStatus = Literal[
     "CAST_LOCKED",
 ]
 SceneReadyStatus = Literal["BLOCKED", "PARTIAL", "READY", "IN_PRODUCTION", "COMPLETE"]
+ReadinessDepartmentStatus = Literal["ready", "not_required", "blocked", "advisory"]
+
+
+class ReadinessDepartment(BaseModel):
+    category: str
+    status: ReadinessDepartmentStatus = "not_required"
+    reason: str = ""
+    resolved: int = 0
+    required: int = 0
+    items: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
 
 
 class CharacterCastingRecord(BaseModel):
@@ -59,6 +70,12 @@ class SceneProductionReadiness(BaseModel):
     generationPlanReady: bool = False
     status: SceneReadyStatus = "BLOCKED"
     blockerSummary: str = ""
+    liveComputed: bool = False
+    castRequired: bool = True
+    voiceRequired: bool = True
+    locationRequired: bool = True
+    referencesRequired: bool = True
+    departments: list[ReadinessDepartment] = Field(default_factory=list)
 
 
 class ProjectProductionLifecycle(BaseModel):

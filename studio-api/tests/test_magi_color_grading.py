@@ -182,6 +182,107 @@ class TestDescribeGrade:
         assert COLOR_PRESETS["anime_vibrant"]["label"] == "Anime Vibrant"
 
 
+
+
+class TestStillImageColorGrade:
+    """Still-image color grade must emit a real image (not H.264-in-.png)."""
+
+    def test_is_still_image_path(self):
+        from app.magi.color_grading import is_still_image_path
+
+        assert is_still_image_path("clip.png")
+        assert is_still_image_path("shot.JPEG")
+        assert not is_still_image_path("clip.mp4")
+        assert not is_still_image_path("clip.mov")
+
+    def test_apply_color_grade_image_produces_openable_png(self, tmp_path):
+        import shutil
+        import subprocess
+        from pathlib import Path
+
+        from PIL import Image
+
+        from app.magi.color_grading import apply_color_grade
+
+        if not shutil.which("ffmpeg"):
+            import pytest
+
+            pytest.skip("ffmpeg not available")
+
+        src = tmp_path / "src.png"
+        dest = tmp_path / "graded.png"
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=160x120",
+                "-frames:v",
+                "1",
+                str(src),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert proc.returncode == 0 and src.is_file(), proc.stderr[-400:]
+        out = apply_color_grade(str(src), str(dest), {"contrast": 0.2, "saturation": 0.5})
+        out_path = Path(out)
+        assert out_path.is_file()
+        assert out_path.suffix.lower() == ".png"
+        image = Image.open(out_path)
+        image.load()
+        assert image.size == (160, 120)
+
+
+class TestOverlayBurnHelper:
+    """Final-render overlay burn: skip when empty, burn when elements exist."""
+
+    def test_count_overlay_elements_empty(self):
+        from app.magi.final_render import _count_overlay_elements
+
+        assert _count_overlay_elements({"overlays": []}) == 0
+        assert _count_overlay_elements({"overlays": [{"type": "text", "visible": False}]}) == 0
+
+    def test_maybe_overlay_returns_none_without_compositions(self, tmp_path):
+        import shutil
+        import subprocess
+
+        from app.magi.final_render import _maybe_overlay
+
+        if not shutil.which("ffmpeg"):
+            import pytest
+
+            pytest.skip("ffmpeg not available")
+
+        video = tmp_path / "edit.mp4"
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=320x180:d=0.5",
+                "-pix_fmt",
+                "yuv420p",
+                str(video),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert proc.returncode == 0
+        assert _maybe_overlay(object(), "no-overlays-project-xyz", video, tmp_path / "o.mp4") is None
+
+
+
 class TestParameterValidation:
     """Verify parameter bounds and edge cases."""
 

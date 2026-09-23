@@ -108,7 +108,7 @@ def generate_prompt_package(profile: dict[str, Any], *, character_version_id: st
     image_prompt = (
         f"{name}, {role}. Appearance: {appearance}. Wardrobe: {wardrobe_txt}. "
         f"Expression/posture: {motion.get('defaultStandingPosture') or 'natural'}. "
-        "Photoreal cinematic character portrait, consistent identity."
+        "Preserve the supplied visual identity. Do not invent a replacement person."
     )
     video_prompt = (
         f"{name} in motion. {motion_txt}. Performance: {performance_txt}. "

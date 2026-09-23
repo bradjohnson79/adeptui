@@ -14,8 +14,10 @@ from app.video_runtime.production_gate import (
 def test_required_local_set_is_release_stable():
     reload_production_gate()
     keys = required_local_keys()
-    assert "ltx.simple_i2v" in keys
-    assert "wan.three_frame" in keys
+    assert "ltx_25.t2v" in keys
+    assert "ltx_25.i2v" in keys
+    assert "ltx.simple_i2v" not in keys
+    assert "wan.three_frame" not in keys
     assert "director.batch_timeline" in keys
     assert "fal.seedance" not in keys
 

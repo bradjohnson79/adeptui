@@ -322,10 +322,10 @@ test.describe.serial("Home project creation audit @critical", () => {
       await test.step("Scenario N: Explore cards, Co-Director entry, and responsive drawer remain usable", async () => {
         await gotoHome(page);
         await expect(page.locator("[data-testid^='project-card-']").first()).toBeVisible();
-        const timelineCard = page.getByTestId("explore-workspace-timeline");
-        await expect(timelineCard).toBeVisible();
-        await timelineCard.click();
-        await expect(page).toHaveURL(/workspace=timeline/, { timeout: 20_000 });
+        const exploreCard = page.getByTestId("explore-workspace-imagegen");
+        await expect(exploreCard).toBeVisible();
+        await exploreCard.click();
+        await expect(page).toHaveURL(/workspace=imagegen/, { timeout: 20_000 });
 
         await gotoHome(page);
         await page.getByTestId("enter-codirector").click();

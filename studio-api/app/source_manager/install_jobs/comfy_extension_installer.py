@@ -10,9 +10,9 @@ from urllib.parse import urlparse
 from ...config import settings
 from ...source_manager.persistence import get_assignment, get_source
 from .errors import InstallJobError, InstallJobErrorCode
-from .requirements import _KNOWN_HUNYUAN_NODES, _live_node_types, resolve_requirements
+from .requirements import _live_node_types, resolve_requirements
 
-# Official / recommended Hunyuan ComfyUI node sources (user may override via Source Manager).
+# Official / recommended ComfyUI extension sources (user may override via Source Manager).
 _KNOWN_SENSENOVA_NODES = (
     "SenseNovaU1LocalLoader",
     "SenseNovaU1LocalTextToImage",
@@ -20,11 +20,6 @@ _KNOWN_SENSENOVA_NODES = (
 )
 
 DEFAULT_EXTENSION_SOURCES: dict[str, dict[str, str]] = {
-    "comfyui_hunyuan_nodes": {
-        "packageName": "ComfyUI-HunyuanVideoWrapper",
-        "defaultUrl": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper",
-        "provides": ",".join(sorted(_KNOWN_HUNYUAN_NODES)),
-    },
     "comfyui_sensenova_nodes": {
         "packageName": "ComfyUI-SenseNova-U1",
         "defaultUrl": "https://github.com/OpenSenseNova/ComfyUI-SenseNova-U1",
@@ -114,9 +109,7 @@ def preflight_extension(
         "executesCode": True,
         "requiresRestart": True,
         "requiredNodes": (
-            sorted(_KNOWN_HUNYUAN_NODES)
-            if component_id.startswith("comfyui_hunyuan")
-            else list(_KNOWN_SENSENOVA_NODES)
+            list(_KNOWN_SENSENOVA_NODES)
             if component_id.startswith("comfyui_sensenova")
             else []
         ),
@@ -333,7 +326,7 @@ def install_extension_dependencies(target_dir: Path, *, component_id: str = "") 
 
 
 def probe_required_nodes(required_nodes: list[str] | None = None) -> dict[str, Any]:
-    needed = list(required_nodes or sorted(_KNOWN_HUNYUAN_NODES))
+    needed = list(required_nodes or [])
     live = _live_node_types()
     if live is None:
         return {
@@ -413,8 +406,6 @@ def extension_error(code: InstallJobErrorCode, message: str, **kwargs: Any) -> I
 
 
 def capability_ids_for_extension(component_id: str) -> list[str]:
-    if component_id.startswith("comfyui_hunyuan"):
-        return ["hunyuan15", "hunyuan_video_15", "hunyuan_video_13b"]
     return [component_id]
 
 

@@ -28,7 +28,6 @@ from ...source_manager.downloads.receipts import history_entries
 from ...source_manager.persistence import get_assignment, get_source
 from ...source_manager.registry import get_provider, select_provider
 from ...source_manager.voice_models import COMPONENT_SPECS
-from ...video_runtime.hunyuan_providers import OFFICIAL_SOURCES, PROVIDER_BY_COMPONENT, provider_dir
 from ...voice_performance.runtime import get_index_tts2_runtime
 from ..contracts import ArtifactQueryContext, SourceInput, VerificationContext
 from .adapter import download_operation_to_install_job, setup_operation_to_install_job
@@ -599,35 +598,6 @@ def _enqueue_video_understanding(component_id: str) -> dict[str, Any]:
     return get_queue_manager().enqueue(plan, priority=45)
 
 
-def _enqueue_hunyuan(component_id: str) -> dict[str, Any]:
-    provider_id = PROVIDER_BY_COMPONENT[component_id]
-    meta = OFFICIAL_SOURCES[provider_id]
-    component = get_component(component_id)
-    plan = create_install_plan(
-        component_id=component_id,
-        source_id=str(meta["hfRepo"]),
-        provider_id="huggingface_snapshot",
-        artifacts=[
-            {
-                "remotePath": str(meta["hfRepo"]),
-                "destinationRelativePath": ".",
-                "downloadUrl": f"https://huggingface.co/{meta['hfRepo']}",
-            }
-        ],
-        destination_root=str(provider_dir(provider_id)),
-        estimated_download_bytes=component.download_bytes,
-        estimated_extracted_bytes=component.installed_bytes,
-        metadata={
-            "componentId": component_id,
-            "providerId": provider_id,
-            "engine": meta["engine"],
-            "officialOnly": True,
-            "hunyuan": True,
-        },
-    )
-    return get_queue_manager().enqueue(plan, priority=40)
-
-
 def _start_avatar_runtime_job(
     component_id: str,
     *,
@@ -1092,7 +1062,6 @@ def create_or_resume_install(
     if component.installer == "huggingface_snapshot":
         if component_id in ("videochat3_4b", "internvideo3_8b"):
             return _serialize(download_operation_to_install_job(_enqueue_video_understanding(component_id)))
-        return _serialize(download_operation_to_install_job(_enqueue_hunyuan(component_id)))
     if component.installer == "asset_pack":
         try:
             plan, source_record, _assignment = _build_provider_plan(

@@ -1,8 +1,33 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { MagiOverlayComposition, MagiOverlayElement } from "./types";
+import { compareOverlayPaintOrder, composeOverlayPaintZ, overlayVisibleAtFrame } from "./types";
 
 function pct(n: number) {
   return `${(n * 100).toFixed(3)}%`;
+}
+
+function localizeGroupChild(child: MagiOverlayElement, group: MagiOverlayElement): MagiOverlayElement {
+  const w = group.width || 1;
+  const h = group.height || 1;
+  return {
+    ...child,
+    x: (child.x - group.x) / w,
+    y: (child.y - group.y) / h,
+    width: child.width / w,
+    height: child.height / h,
+  };
+}
+
+function overlayOpacity(el: MagiOverlayElement, frame: number, fps: number): number {
+  const preset = el.type === "text" || el.type === "group" ? el.animationPreset : null;
+  let factor = 1;
+  if (preset === "fade" && el.startFrame != null && el.endFrame != null) {
+    const fade = Math.max(1, Math.round(0.35 * fps));
+    if (frame < el.startFrame + fade) factor = (frame - el.startFrame) / fade;
+    else if (frame > el.endFrame - fade) factor = (el.endFrame - frame) / fade;
+    factor = Math.max(0, Math.min(1, factor));
+  }
+  return el.opacity * factor;
 }
 
 function renderEl(
@@ -12,7 +37,10 @@ function renderEl(
   editingId: string | null,
   onEditText: (id: string, text: string) => void,
   onBeginEdit: (id: string) => void,
-  onEndEdit: () => void
+  onEndEdit: () => void,
+  assetUrl: ((id: string) => string) | undefined,
+  playheadFrame: number,
+  frameRate: number,
 ): React.ReactNode {
   if (!el.visible) return null;
   if (el.type === "group") {
@@ -25,9 +53,9 @@ function renderEl(
           top: pct(el.y),
           width: pct(el.width),
           height: pct(el.height),
-          opacity: el.opacity,
+          opacity: overlayOpacity(el, playheadFrame, frameRate),
           transform: `rotate(${el.rotation}deg)`,
-          zIndex: el.zIndex,
+          zIndex: composeOverlayPaintZ(el),
         }}
         data-overlay-id={el.id}
         onClick={(e) => {
@@ -36,7 +64,18 @@ function renderEl(
         }}
       >
         {el.children.map((c) =>
-          renderEl(c, selectedId, onSelect, editingId, onEditText, onBeginEdit, onEndEdit)
+          renderEl(
+            localizeGroupChild(c, el),
+            selectedId,
+            onSelect,
+            editingId,
+            onEditText,
+            onBeginEdit,
+            onEndEdit,
+            assetUrl,
+            playheadFrame,
+            frameRate,
+          ),
         )}
       </div>
     );
@@ -53,9 +92,9 @@ function renderEl(
           top: pct(el.y),
           width: pct(el.width),
           height: pct(el.height),
-          opacity: el.opacity,
+          opacity: overlayOpacity(el, playheadFrame, frameRate),
           transform: `rotate(${el.rotation}deg)`,
-          zIndex: el.zIndex,
+          zIndex: composeOverlayPaintZ(el),
           background: el.fill || "transparent",
           border: el.stroke ? `${el.strokeWidth || 1}px solid ${el.stroke}` : undefined,
           borderRadius: el.shape === "circle" || el.shape === "ellipse" ? "50%" : radius,
@@ -65,6 +104,32 @@ function renderEl(
           onSelect(el.id);
         }}
       />
+    );
+  }
+  if (el.type === "image") {
+    return (
+      <div
+        key={el.id}
+        className={`magi-ov-el magi-ov-image ${selectedId === el.id ? "is-selected" : ""}`}
+        data-overlay-id={el.id}
+        style={{
+          left: pct(el.x),
+          top: pct(el.y),
+          width: pct(el.width),
+          height: pct(el.height),
+          opacity: overlayOpacity(el, playheadFrame, frameRate),
+          transform: `rotate(${el.rotation}deg)`,
+          zIndex: composeOverlayPaintZ(el),
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect(el.id);
+        }}
+      >
+        {assetUrl && el.assetId ? (
+          <img src={assetUrl(el.assetId)} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: el.fit || "contain" }} />
+        ) : null}
+      </div>
     );
   }
   const style = el.textStyle;
@@ -80,9 +145,9 @@ function renderEl(
         top: pct(el.y),
         width: pct(el.width),
         height: pct(el.height),
-        opacity: el.opacity,
+        opacity: overlayOpacity(el, playheadFrame, frameRate),
         transform: `rotate(${el.rotation}deg)`,
-        zIndex: el.zIndex,
+        zIndex: composeOverlayPaintZ(el),
         color: style.color,
         fontSize: `clamp(10px, ${style.fontSize / 20}cqi, ${style.fontSize}px)`,
         fontWeight: style.fontWeight,
@@ -150,60 +215,110 @@ export function MagiOverlayLayer({
   onSelect,
   onPatchElement,
   snapEnabled,
-  safeAreaEnabled,
+  playheadFrame = 0,
+  frameRate = 24,
+  assetUrl,
+  interactive = true,
 }: {
   composition: MagiOverlayComposition;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onPatchElement: (id: string, patch: Partial<MagiOverlayElement>) => void;
   snapEnabled: boolean;
-  safeAreaEnabled: boolean;
+  playheadFrame?: number;
+  frameRate?: number;
+  assetUrl?: (id: string) => string;
+  interactive?: boolean;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const drag = useRef<{ id: string; ox: number; oy: number; sx: number; sy: number } | null>(null);
+  const drag = useRef<{
+    id: string;
+    mode: "move" | "se" | "nw";
+    ox: number;
+    oy: number;
+    ow: number;
+    oh: number;
+    sx: number;
+    sy: number;
+  } | null>(null);
+
+  const visibleOverlays = [...composition.overlays]
+    .filter((el) => overlayVisibleAtFrame(el, playheadFrame))
+    .sort(compareOverlayPaintOrder);
 
   const onPointerDown = (e: ReactPointerEvent) => {
-    if (editingId) return;
-    const target = (e.target as HTMLElement).closest("[data-overlay-id]") as HTMLElement | null;
+    if (!interactive || editingId) return;
+    const handle = (e.target as HTMLElement).closest("[data-ov-handle]") as HTMLElement | null;
+    const target = handle || ((e.target as HTMLElement).closest("[data-overlay-id]") as HTMLElement | null);
     if (!target || !rootRef.current) {
       onSelect(null);
       return;
     }
-    const id = target.dataset.overlayId!;
+    const id = target.dataset.overlayId || (target.closest("[data-overlay-id]") as HTMLElement | null)?.dataset.overlayId;
+    if (!id) return;
     onSelect(id);
     const el = composition.overlays
       .flatMap((o) => (o.type === "group" ? [o, ...o.children] : [o]))
       .find((x) => x.id === id);
     if (!el || el.locked) return;
     const rect = rootRef.current.getBoundingClientRect();
+    const mode = (handle?.dataset.ovHandle as "se" | "nw" | undefined) || "move";
     drag.current = {
       id,
+      mode,
       ox: el.x,
       oy: el.y,
+      ow: el.width,
+      oh: el.height,
       sx: (e.clientX - rect.left) / rect.width,
       sy: (e.clientY - rect.top) / rect.height,
     };
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    e.stopPropagation();
   };
 
   const onPointerMove = (e: ReactPointerEvent) => {
     if (!drag.current || !rootRef.current) return;
     const rect = rootRef.current.getBoundingClientRect();
-    let nx = drag.current.ox + (e.clientX - rect.left) / rect.width - drag.current.sx;
-    let ny = drag.current.oy + (e.clientY - rect.top) / rect.height - drag.current.sy;
-    if (snapEnabled) {
-      const snaps = [0.05, 0.5, 0.95, 0.1, 0.9];
-      for (const s of snaps) {
-        if (Math.abs(nx - s) < 0.015) nx = s;
-        if (Math.abs(ny - s) < 0.015) ny = s;
+    const cx = (e.clientX - rect.left) / rect.width;
+    const cy = (e.clientY - rect.top) / rect.height;
+    const dx = cx - drag.current.sx;
+    const dy = cy - drag.current.sy;
+    if (drag.current.mode === "move") {
+      let nx = drag.current.ox + dx;
+      let ny = drag.current.oy + dy;
+      if (snapEnabled) {
+        const snaps = [0.05, 0.5, 0.95, 0.1, 0.9];
+        for (const s of snaps) {
+          if (Math.abs(nx - s) < 0.015) nx = s;
+          if (Math.abs(ny - s) < 0.015) ny = s;
+        }
       }
+      onPatchElement(drag.current.id, {
+        x: Math.min(1.2, Math.max(-0.2, nx)),
+        y: Math.min(1.2, Math.max(-0.2, ny)),
+      } as Partial<MagiOverlayElement>);
+      return;
+    }
+    if (drag.current.mode === "se") {
+      onPatchElement(drag.current.id, {
+        width: Math.min(1.4, Math.max(0.04, drag.current.ow + dx)),
+        height: Math.min(1.4, Math.max(0.04, drag.current.oh + dy)),
+      } as Partial<MagiOverlayElement>);
+      return;
     }
     onPatchElement(drag.current.id, {
-      x: Math.min(1.2, Math.max(-0.2, nx)),
-      y: Math.min(1.2, Math.max(-0.2, ny)),
+      x: Math.min(1.2, Math.max(-0.2, drag.current.ox + dx)),
+      y: Math.min(1.2, Math.max(-0.2, drag.current.oy + dy)),
+      width: Math.min(1.4, Math.max(0.04, drag.current.ow - dx)),
+      height: Math.min(1.4, Math.max(0.04, drag.current.oh - dy)),
     } as Partial<MagiOverlayElement>);
   };
+
+  const selected = visibleOverlays
+    .flatMap((o) => (o.type === "group" ? [o, ...o.children] : [o]))
+    .find((x) => x.id === selectedId);
 
   return (
     <div
@@ -216,7 +331,7 @@ export function MagiOverlayLayer({
         drag.current = null;
       }}
       onKeyDown={(e) => {
-        if (!selectedId || editingId) return;
+        if (!interactive || !selectedId || editingId) return;
         const step = e.shiftKey ? 0.02 : 0.005;
         if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
           e.preventDefault();
@@ -231,6 +346,9 @@ export function MagiOverlayLayer({
           if (e.key === "ArrowDown") patch.y = el.y + step;
           onPatchElement(selectedId, patch);
         }
+        if (e.key === "Delete" || e.key === "Backspace") {
+          e.preventDefault();
+        }
         if (e.key === "Enter" && !editingId) {
           const el = composition.overlays
             .flatMap((o) => (o.type === "group" ? [o, ...o.children] : [o]))
@@ -242,16 +360,7 @@ export function MagiOverlayLayer({
       tabIndex={0}
       aria-label="Overlay composition canvas"
     >
-      {safeAreaEnabled || composition.safeAreaEnabled ? (
-        <div className="magi-safe-guides" aria-hidden="true">
-          <div className="magi-safe-title" />
-          <div className="magi-safe-action" />
-          <div className="magi-safe-center-x" />
-          <div className="magi-safe-center-y" />
-          <div className="magi-safe-lt-baseline" />
-        </div>
-      ) : null}
-      {composition.overlays.map((el) =>
+      {visibleOverlays.map((el) =>
         renderEl(
           el,
           selectedId,
@@ -259,9 +368,32 @@ export function MagiOverlayLayer({
           editingId,
           (id, text) => onPatchElement(id, { text } as Partial<MagiOverlayElement>),
           setEditingId,
-          () => setEditingId(null)
-        )
+          () => setEditingId(null),
+          assetUrl,
+          playheadFrame,
+          frameRate,
+        ),
       )}
+      {interactive && selected && !selected.locked ? (
+        <>
+          <button
+            type="button"
+            className="magi-ov-handle magi-ov-handle--nw"
+            data-ov-handle="nw"
+            data-overlay-id={selected.id}
+            aria-label="Resize overlay"
+            style={{ left: pct(selected.x), top: pct(selected.y), zIndex: 999 }}
+          />
+          <button
+            type="button"
+            className="magi-ov-handle magi-ov-handle--se"
+            data-ov-handle="se"
+            data-overlay-id={selected.id}
+            aria-label="Resize overlay"
+            style={{ left: pct(selected.x + selected.width), top: pct(selected.y + selected.height), zIndex: 999 }}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

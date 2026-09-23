@@ -20,6 +20,18 @@ def assess_creative_temperature(
     explicit_critique: bool = False,
 ) -> CreativeTemperature:
     text = user_message or ""
+    from app.codirector.conversation.foundation.visual_generation import is_executable_image_turn
+
+    if is_executable_image_turn(text):
+        return CreativeTemperature(
+            stage=CreativeDevelopmentStage.PRODUCTION,
+            momentum="HIGH",
+            critique_allowed=True,
+            caution_allowed=True,
+            intrigue_priority="LOW",
+            documentation_priority="MEDIUM",
+            question_budget=0,
+        )
     stage = prior_stage or CreativeDevelopmentStage.EMERGENCE
 
     if explicit_critique or _CRITIQUE_ASK.search(text):

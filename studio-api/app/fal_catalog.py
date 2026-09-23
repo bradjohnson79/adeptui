@@ -3,12 +3,74 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
-FalEngine = Literal["fal_seedance", "fal_kling", "fal_veo", "fal_runway"]
-LocalEngine = Literal["ltx", "wan"]
-EngineName = Literal["auto", "ltx", "wan", "fal_seedance", "fal_kling", "fal_veo", "fal_runway"]
+FalEngine = Literal["fal_seedance", "fal_seedance_25", "fal_kling", "fal_veo", "fal_runway"]
+# Canonical local video: MiniMax H3 + LTX 2.5 only. WAN / LTX 2.3 retired.
+LocalEngine = Literal["ltx-2.5", "minimax-h3"]
+EngineName = Literal[
+    "auto",
+    "ltx-2.5",
+    "minimax-h3",
+    "seedance-2.0",
+    "seedance-2.5",
+    "fal_seedance",
+    "fal_seedance_25",
+    "fal_kling",
+    "fal_veo",
+    "fal_runway",
+]
 
-FAL_ENGINES: tuple[FalEngine, ...] = ("fal_seedance", "fal_kling", "fal_veo", "fal_runway")
-ALL_ENGINES: tuple[EngineName, ...] = ("auto", "ltx", "wan", *FAL_ENGINES)
+FAL_ENGINES: tuple[FalEngine, ...] = ("fal_seedance", "fal_seedance_25", "fal_kling", "fal_veo", "fal_runway")
+ALL_ENGINES: tuple[EngineName, ...] = (
+    "auto",
+    "minimax-h3",
+    "ltx-2.5",
+    "seedance-2.0",
+    "seedance-2.5",
+    "fal_kling",
+    "fal_veo",
+    "fal_runway",
+)
+
+SEEDANCE_ENGINE_ALIASES: dict[str, str] = {
+    "fal_seedance": "seedance-2.0",
+    "seedance-api": "seedance-2.0",
+    "seedance-fal": "seedance-2.0",
+    "fal_seedance_25": "seedance-2.5",
+    "fal_seedance_mini": "seedance-2.0-mini",
+    "seedance-mini": "seedance-2.0-mini",
+    "seedance-2.0-mini": "seedance-2.0-mini",
+    "fal_seedance_fast": "seedance-2.0-fast",
+    "seedance-fast": "seedance-2.0-fast",
+    "seedance-2.0-fast": "seedance-2.0-fast",
+}
+
+SEEDANCE_MODEL_IDS: dict[str, dict[str, str]] = {
+    "seedance-2.0": {
+        "t2v": "bytedance/seedance-2.0/text-to-video",
+        "i2v": "bytedance/seedance-2.0/image-to-video",
+        "r2v": "bytedance/seedance-2.0/reference-to-video",
+        "version": "2.0",
+    },
+    "seedance-2.0-mini": {
+        # Mini is R2V-only in Adept Scene 12. No silent T2V/full remap.
+        "t2v": "bytedance/seedance-2.0/mini/reference-to-video",
+        "i2v": "bytedance/seedance-2.0/mini/reference-to-video",
+        "r2v": "bytedance/seedance-2.0/mini/reference-to-video",
+        "version": "2.0-mini",
+    },
+    "seedance-2.0-fast": {
+        "t2v": "bytedance/seedance-2.0/fast/text-to-video",
+        "i2v": "bytedance/seedance-2.0/fast/image-to-video",
+        "r2v": "bytedance/seedance-2.0/fast/reference-to-video",
+        "version": "2.0-fast",
+    },
+    "seedance-2.5": {
+        "t2v": "bytedance/seedance-2.5/text-to-video",
+        "i2v": "bytedance/seedance-2.5/image-to-video",
+        "r2v": "bytedance/seedance-2.5/reference-to-video",
+        "version": "2.5",
+    },
+}
 
 
 MediaType = Literal["video", "image"]
@@ -35,10 +97,21 @@ FAL_MODELS: dict[FalEngine, FalModel] = {
         provider="ByteDance via fal.ai",
         model_id="bytedance/seedance-2.0/image-to-video",
         mode="image_to_video",
-        durations=(4, 5, 6, 7, 8, 9, 10, 11, 12),
+        durations=(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         default_duration=5,
         supports_end_image=True,
-        description="Cinematic I2V with native audio — strong motion & director control.",
+        description="Cinematic I2V with native audio — Adept CERTIFIED_CURRENT 4–15s (fal OpenAPI).",
+    ),
+    "fal_seedance_25": FalModel(
+        engine="fal_seedance_25",
+        label="Seedance 2.5 (fal.ai)",
+        provider="ByteDance via fal.ai",
+        model_id="bytedance/seedance-2.5/image-to-video",
+        mode="image_to_video",
+        durations=tuple(range(4, 31)),
+        default_duration=5,
+        supports_end_image=True,
+        description="Seedance 2.5 I2V — Adept CERTIFIED_CURRENT 4–30s (fal OpenAPI).",
     ),
     "fal_kling": FalModel(
         engine="fal_kling",
@@ -46,7 +119,7 @@ FAL_MODELS: dict[FalEngine, FalModel] = {
         provider="Kuaishou via fal.ai",
         model_id="fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
         mode="image_to_video",
-        durations=(5, 10),
+        durations=tuple(range(4, 31)),
         default_duration=5,
         supports_end_image=False,
         description="Fluid image-to-video with strong prompt adherence.",
@@ -76,12 +149,7 @@ FAL_MODELS: dict[FalEngine, FalModel] = {
 }
 
 
-# fal image families (Seedream, GPT Image, Nano Banana, …) are not wired yet: no endpoint
-# id for any of them appears anywhere in this repository, and inventing one would produce a
-# model the UI offers and the queue cannot run. Still-image generation currently goes
-# through the local ComfyUI ImageGen path (`imagegen_workflows.py`). Adding a family here
-# means adding its verified endpoint id plus the argument builder below — nothing else in
-# the stack special-cases video.
+# Still-image endpoints live in FAL_IMAGE_ENDPOINT_BY_DOCK. Video engines stay in FAL_MODELS.
 FAL_IMAGE_MODELS: dict[str, FalModel] = {}
 
 
@@ -96,7 +164,31 @@ FAL_IMAGE_ENDPOINT_BY_DOCK: dict[str, str] = {
     "flux-2-pro-fal": "fal-ai/flux-2-pro",
     "flux-schnell-fal": "fal-ai/flux/schnell",
     "nano-banana-2-fal": "fal-ai/nano-banana-2",
+    "gpt-image-2-fal": "openai/gpt-image-2",
 }
+
+
+def fal_still_edit_model_id(model_id: str | None) -> str:
+    """Switch a fal still endpoint to its /edit sibling when reference pixels are present."""
+
+    mid = (model_id or "").strip()
+    if not mid or "/edit" in mid:
+        return mid
+    if mid.rstrip("/").endswith("nano-banana-2"):
+        return "fal-ai/nano-banana-2/edit"
+    if "gpt-image-2" in mid:
+        return "openai/gpt-image-2/edit"
+    return mid
+
+
+def _is_gpt_image_2(model_id: str) -> bool:
+    return "gpt-image-2" in (model_id or "")
+
+
+def _gpt_image_size_enum(width: int, height: int) -> str:
+    if int(width or 0) == int(height or 0):
+        return "square"
+    return "landscape_16_9" if int(width or 0) > int(height or 0) else "portrait_16_9"
 
 
 def fal_image_model_id_for_dock(dock_model_id: str | None) -> str | None:
@@ -134,13 +226,18 @@ def build_fal_image_arguments(
 ) -> dict[str, Any]:
     """Minimal still-image payload for fal queue submit. Does not start a job."""
     args: dict[str, Any] = {"prompt": prompt, "num_images": 1}
-    if seed is not None and int(seed) >= 0:
-        args["seed"] = int(seed)
     mid = (model_id or "").strip()
     w, h = int(width or 1024), int(height or 1024)
     urls = [u.strip() for u in (image_urls or []) if isinstance(u, str) and u.strip()]
     if image_url and str(image_url).strip():
         urls.append(str(image_url).strip())
+    if _is_gpt_image_2(mid):
+        args["image_size"] = _gpt_image_size_enum(w, h)
+        if urls:
+            args["image_urls"] = urls
+        return args
+    if seed is not None and int(seed) >= 0:
+        args["seed"] = int(seed)
     edit = "/edit" in mid or bool(urls)
     if mid.startswith("krea/v2") or edit:
         args["aspect_ratio"] = "1:1" if w == h else ("16:9" if w > h else "9:16")
@@ -157,8 +254,16 @@ def build_fal_image_arguments(
     return args
 
 
+def seedance_product_id(engine: str | None) -> str | None:
+    token = str(engine or "").strip()
+    if token in SEEDANCE_MODEL_IDS:
+        return token
+    return SEEDANCE_ENGINE_ALIASES.get(token)
+
+
 def is_fal_engine(engine: str | None) -> bool:
-    return (engine or "") in FAL_MODELS
+    token = str(engine or "").strip()
+    return token in FAL_MODELS or token in SEEDANCE_MODEL_IDS or token in SEEDANCE_ENGINE_ALIASES
 
 
 def list_fal_models_by_media(media_type: str) -> list[dict[str, Any]]:
@@ -167,9 +272,15 @@ def list_fal_models_by_media(media_type: str) -> list[dict[str, Any]]:
 
 
 def get_fal_model(engine: str) -> FalModel:
-    if engine not in FAL_MODELS:
+    token = str(engine or "").strip()
+    product = seedance_product_id(token)
+    if product == "seedance-2.0":
+        token = "fal_seedance"
+    elif product == "seedance-2.5":
+        token = "fal_seedance_25"
+    if token not in FAL_MODELS:
         raise KeyError(f"Unknown fal engine: {engine}")
-    return FAL_MODELS[engine]  # type: ignore[index]
+    return FAL_MODELS[token]  # type: ignore[index]
 
 
 def list_fal_models() -> list[dict[str, Any]]:
@@ -182,25 +293,32 @@ def list_fal_models() -> list[dict[str, Any]]:
 
 
 def list_engines_for_ui() -> list[dict[str, str]]:
-    return [
-        {"id": "auto", "label": "Auto Select (recommend)", "group": "auto"},
-        {"id": "minimax-h3", "label": "MiniMax H3 (Default · local)", "group": "local"},
-        {"id": "ltx", "label": "LTX Video (local ComfyUI)", "group": "local"},
-        {"id": "hunyuan15", "label": "HunyuanVideo 1.5 (local optional)", "group": "local"},
-        {"id": "hunyuan13b", "label": "HunyuanVideo 13B (local advanced)", "group": "local"},
-        {"id": "wan", "label": "WAN 2.2 (local optional)", "group": "local"},
-        *[
-            {"id": m.engine, "label": m.label, "group": "fal"}
-            for m in FAL_MODELS.values()
-        ],
-    ]
+    """Deprecated second catalog. CREATE uses generator_authority.list_create_engines."""
+    from .production_control.generator_authority import list_create_engines
+
+    return list_create_engines()
 
 
 def nearest_duration(seconds: float, allowed: tuple[int, ...], default: int) -> int:
+    """Fail closed. Never snap a creator duration to a nearby allowed value."""
+    from .video_runtime.legal_canvas import SpecFidelityError
+
     if not allowed:
-        return default
-    target = int(round(seconds))
-    return min(allowed, key=lambda d: abs(d - target))
+        raise SpecFidelityError(
+            "This hosted model has no allowed durations. Adept will not invent one.",
+            suggestions=[],
+            code="ILLEGAL_DURATION",
+        )
+    target = float(seconds)
+    for allowed_sec in allowed:
+        if abs(target - float(allowed_sec)) < 1e-6:
+            return int(allowed_sec)
+    raise SpecFidelityError(
+        f"This hosted model accepts {', '.join(str(d) + 's' for d in allowed)}. "
+        f"You asked for {seconds}s. Adept will not change the duration.",
+        suggestions=[f"{d}s" for d in allowed[:6]],
+        code="ILLEGAL_DURATION",
+    )
 
 
 def aspect_from_size(width: int, height: int) -> str:
@@ -252,25 +370,34 @@ def build_fal_arguments(
 
     if model.mode == "image_to_video" and not image_url:
         # Fall back to text-to-video endpoints where available
-        if engine == "fal_seedance":
-            model_id = "bytedance/seedance-2.0/text-to-video"
+        seedance = seedance_product_id(engine)
+        if seedance:
+            ids = SEEDANCE_MODEL_IDS[seedance]
+            if res not in ("480p", "720p"):
+                from .video_runtime.legal_canvas import SpecFidelityError
+
+                raise SpecFidelityError(
+                    f"Seedance in Adept accepts 480p or 720p. You asked for {res}.",
+                    suggestions=["480p", "720p"],
+                    code="ILLEGAL_CANVAS",
+                )
             args: dict[str, Any] = {
                 "prompt": prompt,
-                "resolution": res if res in ("480p", "720p") else "720p",
+                "resolution": res,
                 "duration": str(duration),
                 "aspect_ratio": aspect,
                 "generate_audio": generate_audio,
             }
             if seed >= 0:
                 args["seed"] = seed
-            return model_id, args
+            return ids["t2v"], args
         if engine == "fal_veo":
             model_id = "fal-ai/veo3.1"
             args = {
                 "prompt": prompt,
-                "aspect_ratio": aspect if aspect in ("16:9", "9:16") else "16:9",
+                "aspect_ratio": aspect if aspect in ("16:9", "9:16") else aspect,
                 "duration": f"{duration}s",
-                "resolution": res if res in ("720p", "1080p") else "720p",
+                "resolution": res,
                 "generate_audio": generate_audio,
             }
             if seed >= 0:
@@ -280,11 +407,21 @@ def build_fal_arguments(
 
     args = {"prompt": prompt}
 
-    if engine == "fal_seedance":
+    seedance = seedance_product_id(engine)
+    if seedance:
+        ids = SEEDANCE_MODEL_IDS[seedance]
+        if res not in ("480p", "720p"):
+            from .video_runtime.legal_canvas import SpecFidelityError
+
+            raise SpecFidelityError(
+                f"Seedance in Adept accepts 480p or 720p. You asked for {res}.",
+                suggestions=["480p", "720p"],
+                code="ILLEGAL_CANVAS",
+            )
         args.update(
             {
                 "image_url": image_url,
-                "resolution": res if res in ("480p", "720p") else "720p",
+                "resolution": res,
                 "duration": str(duration),
                 "aspect_ratio": aspect,
                 "generate_audio": generate_audio,
@@ -294,11 +431,12 @@ def build_fal_arguments(
             args["end_image_url"] = end_image_url
         if seed >= 0:
             args["seed"] = seed
+        return ids["i2v"], args
     elif engine == "fal_kling":
         args.update(
             {
                 "image_url": image_url,
-                "duration": str(duration if duration in (5, 10) else 5),
+                "duration": str(duration),
                 "negative_prompt": negative or "blur, distort, and low quality",
                 "cfg_scale": 0.5,
             }
@@ -307,9 +445,9 @@ def build_fal_arguments(
         args.update(
             {
                 "image_url": image_url,
-                "aspect_ratio": aspect if aspect in ("16:9", "9:16") else "16:9",
-                "duration": f"{duration}s" if duration in (4, 6, 8) else "8s",
-                "resolution": res if res in ("720p", "1080p") else "720p",
+                "aspect_ratio": aspect,
+                "duration": f"{duration}s",
+                "resolution": res,
                 "generate_audio": generate_audio,
             }
         )
@@ -319,7 +457,7 @@ def build_fal_arguments(
         args.update(
             {
                 "image_url": image_url,
-                "duration": duration if duration in (5, 10) else 5,
+                "duration": duration,
             }
         )
         if seed >= 0:
@@ -343,10 +481,26 @@ def build_seedance_r2v_arguments(
     resolution: str | None,
     seed: int = -1,
     generate_audio: bool = True,
+    engine: str | None = "seedance-2.0",
 ) -> tuple[str, dict[str, Any]]:
-    """Seedance 2.0 reference-to-video — used only when a Video Reference is attached."""
-    duration = nearest_duration(float(duration_sec or 5), (4, 5, 6, 7, 8, 9, 10, 11, 12), 5)
-    res = resolution if resolution in ("480p", "720p", "1080p", "4k") else "720p"
+    """Seedance reference-to-video for the selected version. No 2.5↔2.0 remap."""
+    product = seedance_product_id(engine) or "seedance-2.0"
+    ids = SEEDANCE_MODEL_IDS[product]
+    # Mini/2.0 fal contract: 4-15. Seedance 2.5: 4-30.
+    if product == "seedance-2.0-mini":
+        allowed = (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
+    else:
+        allowed = (4, 5, 6, 7, 8, 9, 10, 11, 12)
+    duration = nearest_duration(float(duration_sec or 5), allowed, 5)
+    if resolution and resolution not in ("480p", "720p"):
+        from .video_runtime.legal_canvas import SpecFidelityError
+
+        raise SpecFidelityError(
+            f"Seedance in Adept accepts 480p or 720p. You asked for {resolution}.",
+            suggestions=["480p", "720p"],
+            code="ILLEGAL_CANVAS",
+        )
+    res = resolution if resolution in ("480p", "720p") else "720p"
     aspect = (aspect_ratio or "auto").strip() or "auto"
     args: dict[str, Any] = {
         "prompt": prompt,
@@ -361,4 +515,4 @@ def build_seedance_r2v_arguments(
         args["video_urls"] = list(video_urls)[:1]
     if seed >= 0:
         args["seed"] = seed
-    return SEEDANCE_R2V_MODEL_ID, args
+    return ids["r2v"], args

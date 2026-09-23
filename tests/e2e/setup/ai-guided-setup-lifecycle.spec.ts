@@ -48,14 +48,14 @@ async function mockAiGuidedLifecycle(page: Page, state: { statusById: Record<str
       components: [
         componentFixture(),
         componentFixture({
-          id: "hunyuan_video_13b",
-          name: "Hunyuan Video 13B",
-          description: "Advanced local video model.",
-          status: state.statusById.hunyuan_video_13b,
+          id: "ltx_2_5_checkpoint",
+          name: "LTX 2.5 Checkpoint",
+          description: "Canonical local video model checkpoint.",
+          status: state.statusById.ltx_2_5_checkpoint,
           group: "Video",
           subgroup: "Local Models",
           surfaceGroups: ["Video"],
-          lifecycle_status_label: state.statusById.hunyuan_video_13b === "ready" ? "Ready" : "Not Installed",
+          lifecycle_status_label: state.statusById.ltx_2_5_checkpoint === "ready" ? "Ready" : "Not Installed",
           bestFor: ["Long-form local video", "High-fidelity motion", "short film", "make a short film"],
           badges: ["Video", "Local GPU"],
         }),
@@ -161,7 +161,7 @@ async function mockAiGuidedLifecycle(page: Page, state: { statusById: Record<str
           statusLabel: "Configured",
           configured: true,
           operations: ["image", "video"],
-          modelFamilies: ["flux", "hunyuan"],
+          modelFamilies: ["flux", "seedance"],
         },
       ],
     });
@@ -178,7 +178,7 @@ test.describe("@critical ai-guided setup lifecycle", () => {
     const project = await createTempProject(request, `AI Guided Setup ${Date.now()}`);
     try {
       await mockAiGuidedLifecycle(page, {
-        statusById: { hunyuan_video_13b: "not_installed", flux1_dev_local: "error" },
+        statusById: { ltx_2_5_checkpoint: "not_installed", flux1_dev_local: "error" },
       });
       await openSetup(page, project.id);
 
@@ -210,7 +210,7 @@ test.describe("@critical ai-guided setup lifecycle", () => {
       await expect(page.getByText("Strong fit for anime and stylized illustration work.")).toBeVisible();
       await page.getByPlaceholder("Describe the film, video, scene, or production you want to create...").fill("make a short film");
       await expect(page.getByText("Best fit for short-film and cinematic video generation.")).toBeVisible();
-      await expect(page.getByText("Hunyuan Video 13B").first()).toBeVisible();
+      await expect(page.getByText("LTX 2.5 Checkpoint").first()).toBeVisible();
       await expect(page.locator(".setup-requirement").filter({ hasText: "Not Installed" }).first()).toBeVisible();
     } finally {
       await deleteProject(request, project.id);
@@ -220,7 +220,7 @@ test.describe("@critical ai-guided setup lifecycle", () => {
   test("focused AI-guided deep link reviews plan and records calibrate plus certify", async ({ page, request }) => {
     await waitForAppReady(request);
     const project = await createTempProject(request, `AI Guided Focus ${Date.now()}`);
-    const state = { statusById: { hunyuan_video_13b: "not_installed", flux1_dev_local: "error" } };
+    const state = { statusById: { ltx_2_5_checkpoint: "not_installed", flux1_dev_local: "error" } };
     let lastPlanRequest: Record<string, unknown> | null = null;
     let calibrateCalls = 0;
     let certifyCalls = 0;
@@ -229,33 +229,33 @@ test.describe("@critical ai-guided setup lifecycle", () => {
       await page.route("**/api/setup/lifecycle/install-plan", async (route) => {
         lastPlanRequest = route.request().postDataJSON() as Record<string, unknown>;
         await fulfillJson(route, {
-          componentId: "hunyuan_video_13b",
-          componentName: "Hunyuan Video 13B",
+          componentId: "ltx_2_5_checkpoint",
+          componentName: "LTX 2.5 Checkpoint",
           requiresRuntimeConfirmation: true,
           requiresModelDownloadConfirmation: true,
           steps: ["Verify GPU runtime", "Download official model", "Run post-install health check"],
           warnings: ["Large download"],
         });
       });
-      await page.route("**/api/setup/lifecycle/components/hunyuan_video_13b/calibrate", async (route) => {
+      await page.route("**/api/setup/lifecycle/components/ltx_2_5_checkpoint/calibrate", async (route) => {
         calibrateCalls += 1;
         await fulfillJson(route, { ok: true });
       });
-      await page.route("**/api/setup/lifecycle/components/hunyuan_video_13b/certify", async (route) => {
+      await page.route("**/api/setup/lifecycle/components/ltx_2_5_checkpoint/certify", async (route) => {
         certifyCalls += 1;
         await fulfillJson(route, { ok: true });
       });
 
-      await page.goto(`/project/${project.id}?workspace=setup&setupMode=ai_guided&setupComponent=hunyuan_video_13b`);
+      await page.goto(`/project/${project.id}?workspace=setup&setupMode=ai_guided&setupComponent=ltx_2_5_checkpoint`);
       await expect(page.getByRole("heading", { name: "AI-Guided Setup" })).toBeVisible();
-      await expect(page.getByText("Opened for Hunyuan Video 13B.")).toBeVisible();
+      await expect(page.getByText("Opened for LTX 2.5 Checkpoint.")).toBeVisible();
 
       await page.getByRole("button", { name: "Review Plan" }).first().click();
-      await expect(page.getByText("Hunyuan Video 13B plan")).toBeVisible();
-      expect(lastPlanRequest).toMatchObject({ componentId: "hunyuan_video_13b", action: "install" });
+      await expect(page.getByText("LTX 2.5 Checkpoint plan")).toBeVisible();
+      expect(lastPlanRequest).toMatchObject({ componentId: "ltx_2_5_checkpoint", action: "install" });
 
       await page.getByRole("button", { name: "Calibrate + Certify" }).first().click();
-      await expect(page.getByText("Hunyuan Video 13B calibration and certification recorded.")).toBeVisible();
+      await expect(page.getByText("LTX 2.5 Checkpoint calibration and certification recorded.")).toBeVisible();
       expect(calibrateCalls).toBe(1);
       expect(certifyCalls).toBe(1);
     } finally {
@@ -266,7 +266,7 @@ test.describe("@critical ai-guided setup lifecycle", () => {
   test("verify refresh propagates ready state for focused component", async ({ page, request }) => {
     await waitForAppReady(request);
     const project = await createTempProject(request, `AI Guided Verify ${Date.now()}`);
-    const state = { statusById: { hunyuan_video_13b: "not_installed", flux1_dev_local: "error" } };
+    const state = { statusById: { ltx_2_5_checkpoint: "not_installed", flux1_dev_local: "error" } };
     try {
       await mockAiGuidedLifecycle(page, state);
       await page.route("**/api/setup/lifecycle/components/flux1_dev_local/verify", async (route) => {
@@ -289,7 +289,7 @@ test.describe("@critical ai-guided setup lifecycle", () => {
     const project = await createTempProject(request, `AI Guided Redirect ${Date.now()}`);
     try {
       await mockAiGuidedLifecycle(page, {
-        statusById: { hunyuan_video_13b: "not_installed", flux1_dev_local: "error" },
+        statusById: { ltx_2_5_checkpoint: "not_installed", flux1_dev_local: "error" },
       });
       await page.goto("/?setupMode=ai_guided&setupSource=production_dock&setupComponent=flux1_dev_local#ai-guided-setup-heading");
       await expect.poll(() => page.url()).toContain("/project/");

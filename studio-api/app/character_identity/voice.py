@@ -95,8 +95,7 @@ def validate_voice_reference(path: str | Path, *, transcript: str = "") -> dict[
             f"Voice reference must contain at least {int(MIN_VOICED_SECONDS)} seconds of speech "
             f"(measured ~{voiced_estimate:.1f}s voiced / {duration:.1f}s total).",
         )
-    if not (transcript or "").strip():
-        raise _err("EMPTY_TRANSCRIPT", "A transcript is required (provide or review generated transcript).")
+    has_transcript = bool((transcript or "").strip())
 
     return {
         "ok": True,
@@ -108,7 +107,7 @@ def validate_voice_reference(path: str | Path, *, transcript: str = "") -> dict[
         "clipping": clipping,
         "silence_ratio": silence_ratio,
         "format": suffix.lstrip("."),
-        "transcript_present": True,
+        "transcript_present": has_transcript,
         "min_voiced_seconds": MIN_VOICED_SECONDS,
     }
 

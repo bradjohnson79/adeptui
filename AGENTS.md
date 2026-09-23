@@ -1,5 +1,11 @@
 # Adept UI — Agent Standing Instructions
 
+NEW BUILD CLOSED: Assume the required capability already exists. Audit and reconnect the existing implementation end-to-end, remove any dual-stack contamination, repair every in-scope defect through a continuous GO loop, then lock the certified system. Do not create a replacement or new subsystem without explicit Owner authorization.
+
+LAW — As of 2026-09-13, Spatial Map, PoseCraft, Fire3D and SceneCraft are outside Adept UI v1.1 scope. Preserve them without active production exposure. Development resumes under SceneCraft for Adept UI v1.2 Cloud; their incomplete certification must never block v1.1 GO.
+
+Governing shelf: `docs/release-gate/scenecraft/ADEPT_UI_V1_1_SPATIAL_3D_SHELF.md`
+
 These instructions govern ALL primary agents, coding agents, reviewers,
 subagents, and autonomous implementation work performed on Adept UI.
 
@@ -33,9 +39,29 @@ Always-on Cursor rule:
 
 `.cursor/rules/adept-ui-build-laws.mdc`
 
+Completed System Lock (GO’d modules; Owner unlock only):
+
+`docs/ADEPT_UI_COMPLETED_SYSTEM_LOCK.md`
+
+New Build Closed / Final Convergence (Law 33):
+
+`docs/ADEPT_UI_NEW_BUILD_CLOSED.md`
+
+Fix the System, Not the Project (Law 36):
+
+`.cursor/rules/fix-the-system-not-the-project.mdc`
+
+Project broken → fix the producer, not the project. A project is diagnostic evidence. Do not hand-patch that project's data to certify a platform repair. Data recovery only with `Owner authority: repair this project's data`.
+
 Beta/runtime refresh law:
 
 `.cursor/rules/beta-refresh-after-build.mdc`
+
+ComfyUI / GPU runtime guardrails (operational authority):
+
+`.cursor/rules/comfyui-gpu-runtime-guardrails.mdc`
+
+COMFYUI PROTECTION LAW: The canonical Adept ComfyUI :8188 runtime is persistent protected infrastructure. Ordinary builds, Vite/HMR, API recycles, UI changes, tests, and unrelated feature work must not stop, restart, adopt, replace, or force-kill it. Only the canonical supervisor may own its lifecycle. External processes must never be silently adopted. All process termination requires verified owned:true PID identity. Runtime lifecycle changes require explicit owner mission scope. Any unexpected death must capture forensic evidence before restart. MiniMax :8192 remains an independent managed runtime. Comfy MCP verifies workflows but does not own or restart Comfy.
 
 Architecture and milestone-specific governing documents take precedence over
 older implementation reports.
@@ -397,6 +423,10 @@ Do not kill unrelated:
 - user processes
 
 based solely on executable name.
+
+Reuse of a healthy already-running Comfy is leave-alone, not silent adoption.
+Comfy `:8188` process actions follow the ComfyUI Protection Law in
+`.cursor/rules/comfyui-gpu-runtime-guardrails.mdc`.
 
 ---
 

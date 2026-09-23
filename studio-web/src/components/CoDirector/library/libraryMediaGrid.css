@@ -18,6 +18,28 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.library-media-grid__add-media {
+  min-height: 40px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent, #54a8ff);
+  color: #0b1220;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.library-media-grid__add-media:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.library-media-grid__upload-error {
+  margin: 0;
+  color: #ffb4b4;
+}
+
 .library-media-grid__search {
   flex: 1 1 200px;
   min-width: 0;

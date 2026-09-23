@@ -33,7 +33,7 @@ from app.scriptwriter.models import ScriptDocument, ScriptElement
 from app.scriptwriter.store import save_document
 from app.story import store as legacy_story_store  # noqa: F401 — registers story_documents table
 from app.story_entries.models import StoryEntryCreate
-from app.story_entries.store import create_entry
+from app.story_entries.store import create_entry, ensure_primary_entry, list_entries
 
 TYPED_HTML = (
     "<h1>INT. CAFE - DAY</h1>"
@@ -94,6 +94,32 @@ def test_story_pillar_reads_story_entries(db):
     assert story["source"] == "story_entries"
     assert story["entries"][0]["logline"] == "A pilot who outran a dying star."
     assert "corridor run" in story["entries"][0]["longSummary"]
+
+
+def test_ensure_primary_reuses_existing_entry(db):
+    first = create_entry(db, "proj-a", StoryEntryCreate(title="The Venture — Story", entryType="project_story"))
+    again = ensure_primary_entry(db, "proj-a", title="Should not create")
+    assert again.id == first.id
+    assert len(list_entries(db, "proj-a")) == 1
+
+
+def test_ensure_primary_creates_one_row_when_empty(db):
+    row = ensure_primary_entry(db, "proj-a", title="The Venture — Story")
+    assert row.title == "The Venture — Story"
+    assert row.entry_type == "project_story"
+    assert len(list_entries(db, "proj-a")) == 1
+    assert ensure_primary_entry(db, "proj-a").id == row.id
+
+
+def test_context_block_reads_html_story_document(db):
+    create_entry(db, "proj-a", StoryEntryCreate(
+        title="The Venture — Story",
+        entryType="project_story",
+        longSummary="<h2>Synopsis</h2><p>Korri and Anadriya walk the corridor.</p>",
+    ))
+    block = story_script_context_block(db, "proj-a")
+    assert "Korri and Anadriya walk the corridor" in block
+    assert "<h2>" not in block
 
 
 def test_story_pillar_falls_back_to_legacy_only_when_no_entries(db):
@@ -194,6 +220,8 @@ def test_project_content_questions_still_route_to_llm():
 
     for msg in (
         "What happens in the script right now?",
+        "What does the current story say?",
+        "What is the first scene heading in the current script?",
         "Does the story need a stronger midpoint?",
         "What is the hero's motivation in this scene?",
         "Punch up my dialogue in the current scene",

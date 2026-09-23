@@ -8,8 +8,13 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from ..db import Asset, Scene
-from ..director_timeline import ImageClip, parse_director_timeline
-from ..director_references.tags import ensure_tags, find_clip_by_tag
+from ..director_timeline_w46.master_lookup import (
+    find_master_visual_by_tag,
+    find_master_visual_clip,
+    iter_master_visual_clips,
+    load_scene_master,
+    visual_clip_public,
+)
 from ..feature_flags import feature_flags
 from .errors import (
     BindingNotFound,
@@ -56,20 +61,18 @@ class TimelineReferenceService:
             raise TimelineItemNotFound(scene_id)
         return scene
 
-    def _timeline(self, scene: Scene):
-        tl = parse_director_timeline(
-            scene.director_json,
-            fallback_duration=scene.duration_sec or 5.0,
-            fallback_prompt=scene.prompt or "",
-        )
-        return ensure_tags(tl)
+    def _master(self, scene: Scene):
+        master = load_scene_master(self.db, scene.project_id, scene.id)
+        if master is None:
+            raise TimelineItemNotFound(scene.id)
+        return master
 
-    def _image_clip(self, scene: Scene, item_id: str) -> ImageClip:
-        tl = self._timeline(scene)
-        for clip in tl.image_clips:
-            if clip.id == item_id:
-                return clip
-        raise TimelineItemNotFound(item_id)
+    def _image_clip(self, scene: Scene, item_id: str):
+        master = self._master(scene)
+        clip = find_master_visual_clip(master, item_id)
+        if clip is None:
+            raise TimelineItemNotFound(item_id)
+        return clip
 
     def _assert_asset(self, project_id: str, asset_id: str) -> Asset:
         asset = self.db.get(Asset, asset_id)
@@ -109,20 +112,21 @@ class TimelineReferenceService:
         self.require_flag()
         scene = self._scene(project_id, scene_id)
         clip = self._image_clip(scene, item_id)
+        pub = visual_clip_public(clip)
         ref_set = self.store.load_active_set(project_id, scene_id, item_id)
         if not ref_set:
             return {
                 "timelineItemId": item_id,
-                "displayTag": clip.display_tag,
-                "primaryAssetId": clip.asset_id,
+                "displayTag": pub["displayTag"],
+                "primaryAssetId": pub["assetId"],
                 "id": None,
                 "activeVersion": 0,
                 "count": 0,
                 "bindings": [],
             }
         payload = ref_set.to_public()
-        payload["displayTag"] = clip.display_tag
-        payload["primaryAssetId"] = clip.asset_id
+        payload["displayTag"] = pub["displayTag"]
+        payload["primaryAssetId"] = pub["assetId"]
         return payload
 
     def add_binding(
@@ -335,24 +339,30 @@ class TimelineReferenceService:
         self.require_flag()
         scene = self._scene(project_id, scene_id)
         clip = self._image_clip(scene, item_id)
-        tl = self._timeline(scene)
-        # Prefer production_approval == approved on project assets earlier on the timeline.
+        master = self._master(scene)
+        clip_start = float(getattr(clip, "start", 0.0) or 0.0)
+        clip_length = float(getattr(clip, "length", 0.0) or 0.0)
         candidates = sorted(
-            [c for c in tl.image_clips if c.id != item_id and (c.start + c.length) <= clip.start + 1e-6],
-            key=lambda c: c.start + c.length,
+            [
+                c
+                for _batch, c in iter_master_visual_clips(master)
+                if c.id != item_id
+                and (float(c.start or 0.0) + float(c.length or 0.0)) <= clip_start + 1e-6
+            ],
+            key=lambda c: float(c.start or 0.0) + float(c.length or 0.0),
             reverse=True,
         )
         approved_asset_id = None
         source_item_id = None
         for c in candidates:
-            if not c.asset_id:
+            if not c.assetId:
                 continue
-            asset = self.db.get(Asset, c.asset_id)
+            asset = self.db.get(Asset, c.assetId)
             if not asset or asset.project_id != project_id:
                 continue
             approval = getattr(asset, "production_approval", None) or "none"
             if approval == "approved":
-                approved_asset_id = c.asset_id
+                approved_asset_id = c.assetId
                 source_item_id = c.id
                 break
         if not approved_asset_id:
@@ -505,16 +515,17 @@ class TimelineReferenceService:
     def resolve_tag(self, project_id: str, scene_id: str, tag: str) -> dict[str, Any]:
         self.require_flag()
         scene = self._scene(project_id, scene_id)
-        tl = self._timeline(scene)
-        clip = find_clip_by_tag(tl.image_clips, tag)
+        master = self._master(scene)
+        clip = find_master_visual_by_tag(master, tag) or find_master_visual_clip(master, tag)
         if not clip:
             raise TimelineItemNotFound(tag)
         refs = self.store.load_active_set(project_id, scene_id, clip.id)
+        pub = visual_clip_public(clip)
         return {
             "timelineItemId": clip.id,
-            "displayTag": clip.display_tag,
-            "assetId": clip.asset_id,
-            "start": clip.start,
-            "length": clip.length,
+            "displayTag": pub["displayTag"],
+            "assetId": pub["assetId"],
+            "start": pub["start"],
+            "length": pub["length"],
             "referenceSet": refs.to_public() if refs else None,
         }

@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Asset, EngineName, Project } from "../types";
 import { api } from "../api";
-import { PanelHeading, HelpTip } from "./HelpTip";
-import { getTimelineHelp } from "../timelineMaster/helpCatalog";
+import { PanelHeading } from "./HelpTip";
 import {
   CONTINUITY_KEYS,
   parseContinuity,
@@ -13,6 +12,21 @@ import {
 import { isTimelineMediaAsset, normalizeTimelineMediaKind } from "../timelineMediaTypes";
 import { LibraryQuickPreviewModal } from "./library/LibraryQuickPreviewModal";
 import { eventFromActionControl, isQuickPreviewKind } from "./library/libraryQuickPreview";
+import {
+  assetMatchesLibrarySearch,
+  buildCharacterNameMap,
+  timelineLibraryIdentity,
+} from "./library/timelineLibraryIdentity";
+import { EngineAuthoritySelect } from "./generation/EngineAuthoritySelect";
+import { VideoResolutionSelect } from "./generation/VideoResolutionSelect";
+import { inferVideoTier, resolveSubmitCanvas } from "../video/legalCanvas";
+
+const LIBRARY_FILTERS = [
+  { id: "all" as const, label: "All" },
+  { id: "image" as const, label: "Image" },
+  { id: "audio" as const, label: "Audio" },
+  { id: "video" as const, label: "Video" },
+];
 
 export function AssetTray({
   project,
@@ -21,7 +35,10 @@ export function AssetTray({
   onSelectAsset,
   onAddToTimeline,
   onAddAsReference,
+  onRemoveFromLibrary,
   allowUpload = true,
+  stagedAssetIds,
+  onOpenProjectLibrary,
 }: {
   project: Project;
   onChange: () => void;
@@ -29,14 +46,35 @@ export function AssetTray({
   onSelectAsset?: (asset: Asset) => void;
   onAddToTimeline?: (asset: Asset) => void;
   onAddAsReference?: (asset: Asset) => void;
+  /** Soft-remove from Timeline Library tray (library_asset_ids). Not Project Library delete. */
+  onRemoveFromLibrary?: (asset: Asset) => void;
   allowUpload?: boolean;
+  stagedAssetIds?: string[] | null;
+  onOpenProjectLibrary?: () => void;
 }) {
   const { t } = useTranslation(["timeline", "library", "common"]);
   const [tag, setTag] = useState("");
   const [filter, setFilter] = useState<"all" | "image" | "audio" | "video">("all");
   const [search, setSearch] = useState("");
   const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
+  const [characterNames, setCharacterNames] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .listCharacterProfiles(project.id)
+      .then((payload) => {
+        if (cancelled) return;
+        setCharacterNames(buildCharacterNameMap(payload.items || []));
+      })
+      .catch(() => {
+        if (!cancelled) setCharacterNames({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id]);
 
   const upload = async (files: FileList | null, kind: string) => {
     if (!files?.length) return;
@@ -51,29 +89,41 @@ export function AssetTray({
   // TIMELINE_LIBRARY_MEDIA_ONLY: the Library only lists media that can live
   // on a track (image/video/audio). Documents and other non-media are
   // excluded. "all" means all compatible media, never every asset kind.
-  const timelineAssets = useMemo(
-    () => project.assets.filter((a) => isTimelineMediaAsset(a)),
-    [project.assets],
-  );
+  const timelineAssets = useMemo(() => {
+    const media = project.assets.filter((a) => isTimelineMediaAsset(a));
+    if (stagedAssetIds === undefined) return media;
+    const allowed = new Set(stagedAssetIds || []);
+    return media.filter((a) => allowed.has(a.id));
+  }, [project.assets, stagedAssetIds]);
+  const identities = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof timelineLibraryIdentity>>();
+    for (const asset of timelineAssets) {
+      map.set(asset.id, timelineLibraryIdentity(asset, { characterNames, relatedAssets: project.assets }));
+    }
+    return map;
+  }, [characterNames, project.assets, timelineAssets]);
   const filtered = timelineAssets.filter((a) => {
     if (filter !== "all" && normalizeTimelineMediaKind(a.kind, a.filename) !== filter) return false;
-    const q = search.trim().toLowerCase();
-    if (!q) return true;
-    return (a.tag || "").toLowerCase().includes(q) || (a.filename || "").toLowerCase().includes(q);
+    return assetMatchesLibrarySearch(a, search, identities.get(a.id));
   });
+  const libraryTip = `${t("timeline:libraryTip")} ${t("timeline:libraryPreviewHint")}`;
 
   return (
-    <div className="panel">
-      <PanelHeading
-        title={t("timeline:library")}
-        tip={t("timeline:libraryTip")}
-      />
+    <div className="panel asset-tray">
+      <PanelHeading title={t("timeline:library")} tip={libraryTip}>
+        {onOpenProjectLibrary ? (
+          <button
+            type="button"
+            className="ghost asset-tray__open"
+            data-testid="timeline-library-open"
+            onClick={onOpenProjectLibrary}
+          >
+            {t("timeline:library")}
+          </button>
+        ) : null}
+      </PanelHeading>
       {allowUpload ? (
-        <>
-          <p className="scene-meta">
-            Give assets a short Reference Name so they can be recognized in prompts and reference lists. Leave empty to
-            auto-generate a safe name.
-          </p>
+        <div className="asset-tray__upload">
           <div className="field">
             <label>Reference Name (optional)</label>
             <input
@@ -87,21 +137,21 @@ export function AssetTray({
             </p>
           </div>
           <div className="row-actions">
-            <button onClick={() => fileRef.current?.click()}>Upload image</button>
-            <label className="ghost">
-              <button
-                onClick={() => {
-                  const input = document.createElement("input");
-                  input.type = "file";
-                  input.accept = "audio/*";
-                  input.onchange = () => upload(input.files, "audio");
-                  input.click();
-                }}
-              >
-                Upload audio
-              </button>
-            </label>
+            <button type="button" onClick={() => fileRef.current?.click()}>Upload image</button>
             <button
+              type="button"
+              onClick={() => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.accept = "audio/*";
+                input.onchange = () => upload(input.files, "audio");
+                input.click();
+              }}
+            >
+              Upload audio
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 const input = document.createElement("input");
                 input.type = "file";
@@ -121,58 +171,75 @@ export function AssetTray({
             multiple
             onChange={(e) => upload(e.target.files, "image")}
           />
-        </>
-      ) : (
-        <p className="scene-meta">Use files from this project's Library. Uploads stay in the Library page.</p>
-      )}
-      <div className="asset-filters">
-        {(["all", "image", "audio", "video"] as const).map((f) => (
-          <button
-            key={f}
-            type="button"
-            className={filter === f ? "primary" : "ghost"}
-            onClick={() => setFilter(f)}
-          >
-            {f}
-          </button>
-        ))}
-      </div>
-      <div className="field">
+        </div>
+      ) : null}
+      <div className="asset-tray__browse">
+        <div className="asset-filters" role="group" aria-label={t("timeline:library")}>
+          {LIBRARY_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className={filter === f.id ? "primary" : "ghost"}
+              onClick={() => setFilter(f.id)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
         <label className="sr-only" htmlFor="asset-library-search">Search Library</label>
         <input
           id="asset-library-search"
+          className="asset-tray__search"
           data-testid="asset-library-search"
           placeholder={t("timeline:searchLibrary")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
-      <div className="section-label">Library</div>
-      <p className="scene-meta" style={{ marginTop: 0 }}>
-        {t("timeline:libraryPreviewHint")}
-      </p>
-      <div className="asset-list" data-testid="asset-library-list">
-        {filtered.length === 0 && <div className="empty">No assets yet</div>}
+      <div
+        className="asset-list"
+        data-testid="asset-library-list"
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("application/x-adept-asset")) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          const assetId = event.dataTransfer.getData("application/x-adept-asset");
+          if (!assetId || !onAddToTimeline) return;
+          event.preventDefault();
+          const asset = project.assets.find((row) => row.id === assetId);
+          if (asset) onAddToTimeline(asset);
+        }}
+      >
+        {filtered.length === 0 && (
+          <div className="empty" data-testid="timeline-library-empty">
+            {onOpenProjectLibrary
+              ? t("timeline:libraryChooseFiles", { defaultValue: "Click Library to choose files from this project." })
+              : t("timeline:libraryEmpty", { defaultValue: "No files in this project yet." })}
+          </div>
+        )}
         {filtered.map((a: Asset) => {
           const selected = selectedAssetId === a.id;
+          const identity = identities.get(a.id) || timelineLibraryIdentity(a, { characterNames, relatedAssets: project.assets });
+          const mediaKind = normalizeTimelineMediaKind(a.kind, a.filename);
           return (
             <div
               className={`asset-item${selected ? " selected" : ""}`}
               key={a.id}
               data-testid={`asset-library-item-${a.id}`}
               data-kind={a.kind}
+              data-sheet-kind={identity.sheetKind}
               draggable
               role="button"
               tabIndex={0}
               aria-pressed={selected}
-              aria-label={`Preview ${a.tag || a.filename}`}
+              aria-label={`Preview ${identity.title}`}
+              title={identity.tooltip}
               onClick={() => onSelectAsset?.(a)}
               onDoubleClick={(e) => {
                 if (eventFromActionControl(e.target)) return;
-                const kind = normalizeTimelineMediaKind(a.kind, a.filename);
-                if (!isQuickPreviewKind(kind)) return;
+                if (!isQuickPreviewKind(mediaKind)) return;
                 e.preventDefault();
-                setPreviewAsset({ ...a, kind });
+                setPreviewAsset({ ...a, kind: mediaKind, name: identity.title });
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -186,15 +253,14 @@ export function AssetTray({
                 e.dataTransfer.effectAllowed = "copy";
               }}
             >
-              {a.kind === "image" ? (
-                <img src={api.assetUrl(a.id)} alt={a.filename} />
+              {mediaKind === "image" ? (
+                <img src={api.assetUrl(a.id, null, project.id)} alt="" />
               ) : (
-                <div className="ph">{a.kind}</div>
+                <div className="ph">{mediaKind === "audio" ? "Aud" : "Vid"}</div>
               )}
-              <div>
-                <div className="tag">@{a.tag || "untagged"}</div>
-                <div className="scene-meta">{a.filename}</div>
-                <div className="scene-meta">{a.kind}</div>
+              <div className="asset-item__body">
+                <div className="asset-item__title">{identity.title}</div>
+                <div className="asset-item__meta">{identity.context}</div>
               </div>
               <div
                 className="asset-item__actions"
@@ -203,28 +269,40 @@ export function AssetTray({
               >
                 <button
                   type="button"
-                  className="ghost"
+                  className="ghost asset-item__action"
                   data-testid={`asset-add-timeline-${a.id}`}
+                  title={t("timeline:addToTimeline")}
+                  aria-label={t("timeline:addToTimeline")}
                   onClick={() => onAddToTimeline?.(a)}
                 >
-                  {t("timeline:addToTimeline")}
+                  Timeline
                 </button>
-                <HelpTip
-                  label={getTimelineHelp("add_to_timeline").title}
-                  content={getTimelineHelp("add_to_timeline").body}
-                />
                 <button
                   type="button"
-                  className="ghost"
+                  className="ghost asset-item__action"
                   data-testid={`asset-add-reference-${a.id}`}
+                  title={t("timeline:addToReferences")}
+                  aria-label={t("timeline:addToReferences")}
                   onClick={() => onAddAsReference?.(a)}
                 >
-                  {t("timeline:addToReferences")}
+                  Reference
                 </button>
-                <HelpTip
-                  label={getTimelineHelp("add_as_reference").title}
-                  content={getTimelineHelp("add_as_reference").body}
-                />
+                {onRemoveFromLibrary ? (
+                  <button
+                    type="button"
+                    className="ghost asset-item__action asset-item__action--remove"
+                    data-testid={`asset-remove-library-${a.id}`}
+                    title={t("timeline:removeFromLibraryTitle", {
+                      defaultValue: "Remove from Timeline Library. File stays in Project Library.",
+                    })}
+                    aria-label={t("timeline:removeFromLibrary", {
+                      defaultValue: "Remove from Library",
+                    })}
+                    onClick={() => onRemoveFromLibrary(a)}
+                  >
+                    ×
+                  </button>
+                ) : null}
               </div>
             </div>
           );
@@ -291,24 +369,10 @@ export function PromptComposer({
       />
       <div className="field">
         <label>Engine {scene.engine === "auto" ? <span className="pill">Auto</span> : null}</label>
-        <select value={scene.engine} onChange={(e) => update({ engine: e.target.value as EngineName })}>
-          <optgroup label="Auto">
-            <option value="auto">Auto Select</option>
-          </optgroup>
-          <optgroup label="Local (ComfyUI)">
-            <option value="minimax-h3">MiniMax H3 (Default)</option>
-            <option value="ltx">LTX 2.5</option>
-            <option value="hunyuan15">HunyuanVideo 1.5</option>
-            <option value="hunyuan13b">HunyuanVideo 13B</option>
-            <option value="wan">WAN 2.2 (Optional)</option>
-          </optgroup>
-          <optgroup label="Hosted AI Providers (Kie.ai · WaveSpeed.ai · fal.ai)">
-            <option value="fal_seedance">Seedance 2.0</option>
-            <option value="fal_kling">Kling 2.5 Turbo Pro</option>
-            <option value="fal_veo">Veo 3.1</option>
-            <option value="fal_runway">Runway Gen-3 Turbo</option>
-          </optgroup>
-        </select>
+        <EngineAuthoritySelect
+          value={scene.engine}
+          onChange={(engine) => update({ engine })}
+        />
       </div>
       {rec && showContinuity && (
         <div className="recommend-card">
@@ -334,6 +398,21 @@ export function PromptComposer({
           onChange={(e) => update({ duration_sec: Number(e.target.value) })}
         />
       </div>
+      {(scene.aspect_ratio || "16:9") !== "custom" && (
+        <div className="field">
+          <label htmlFor="asset-tray-resolution">Resolution</label>
+          <VideoResolutionSelect
+            id="asset-tray-resolution"
+            engine={String(scene.engine || "auto")}
+            aspect={scene.aspect_ratio || "16:9"}
+            value={inferVideoTier(
+              Number(scene.width || project.width || 0),
+              Number(scene.height || project.height || 0),
+            )}
+            onChange={(_tier, width, height) => update({ width, height })}
+          />
+        </div>
+      )}
       <div className="field">
         <label>Aspect ratio</label>
         <select
@@ -387,7 +466,7 @@ export function PromptComposer({
           ))}
         </select>
         {(project.vram_gb || 32) < 32 && (scene.fps_mode || "auto") !== "auto" && (
-          <p className="scene-meta">Override on &lt;32 GB VRAM may be clamped by the execution plan.</p>
+          <p className="scene-meta">VRAM advice is shown separately. Adept will not silently change this frame rate.</p>
         )}
       </div>
       <div className="field prompt-box">
@@ -415,38 +494,7 @@ export function PromptComposer({
         <label>Seed</label>
         <input type="number" value={scene.seed} onChange={(e) => update({ seed: Number(e.target.value) })} />
       </div>
-      <div className="field">
-        <label>
-          <input
-            type="checkbox"
-            checked={!!scene.lipsync_enabled}
-            onChange={(e) => update({ lipsync_enabled: e.target.checked })}
-            style={{ width: "auto", marginRight: 8 }}
-          />
-          Enable lip sync after render
-        </label>
-      </div>
-      <div className="field">
-        <label>Lip sync / dialogue audio</label>
-        <select
-          value={scene.lipsync_audio_asset_id || scene.audio_asset_id || ""}
-          onChange={(e) =>
-            update({
-              lipsync_audio_asset_id: e.target.value || null,
-              audio_asset_id: e.target.value || null,
-            })
-          }
-        >
-          <option value="">None</option>
-          {project.assets
-            .filter((a) => a.kind === "audio")
-            .map((a) => (
-              <option key={a.id} value={a.id}>
-                @{a.tag || a.filename}
-              </option>
-            ))}
-        </select>
-      </div>
+      {/* Performance Retake quarantine: legacy LatentSync arming removed — see docs/release-gate/performance-retake/PERFORMANCE_RETAKE_ARCHITECTURE.md §8 */}
       {showContinuity && (
         <>
           <div className="section-label">Continuity locks</div>
@@ -473,19 +521,23 @@ export function PromptComposer({
         <button
           className="primary"
           onClick={async () => {
-            await api.render(project.id, "scene", scene.id);
+            const canvas = resolveSubmitCanvas(
+              String(scene.engine || "auto"),
+              Number(scene.width || project.width || 0),
+              Number(scene.height || project.height || 0),
+              scene.aspect_ratio || "16:9",
+            );
+            if (!canvas.available) return;
+            await api.render(project.id, "scene", scene.id, {
+              engine: scene.engine,
+              width: canvas.width,
+              height: canvas.height,
+              resolution: `${canvas.width}x${canvas.height}`,
+            });
             onChange();
           }}
         >
           Retake scene
-        </button>
-        <button
-          onClick={async () => {
-            await api.lipsync(project.id, scene.id);
-            onChange();
-          }}
-        >
-          Lip sync only
         </button>
         <button
           className="danger"

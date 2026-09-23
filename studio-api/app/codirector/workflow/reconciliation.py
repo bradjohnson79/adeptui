@@ -134,8 +134,8 @@ def _gather_project_info(db: Session, project_id: str) -> dict[str, Any]:
         pass
 
     try:
-        from app.codirector.character_identity import list_character_profiles
-        chars = list_character_profiles(db, project_id)
+        from app.character_identity.service import list_profiles
+        chars = list_profiles(db, project_id)
         info["characters"] = bool(chars)
     except Exception:
         pass

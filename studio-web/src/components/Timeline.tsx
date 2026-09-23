@@ -1,3 +1,4 @@
+import { TIMELINE_BATCHES_CREATOR_UI } from "../timelineMaster/timelineBatchesCreatorUi";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Scene } from "../types";
 import { ApiError, api } from "../api";
@@ -8,24 +9,39 @@ import { LOCAL_SCENE_DURATION_CAP_SEC, nextLocalSceneDurationSec } from "./timel
 import { Menu } from "./ui/Menu";
 import { SceneRemoveDialog, SceneRenameDialog } from "./timeline-master/SceneCardDialogs";
 import { isSceneDeleteAlreadyGone, neighborSceneId, normalizeSceneName } from "../sceneLifecycle";
+import { formatPreviewTakeStatusLabel, sceneTimelineStatusWord } from "../timelineMaster/previewTakeStatus";
 
 /** Compact scene strip — detailed tracks live in DirectorTracks. */
+
+function sceneListStatusText(
+  meta: { batches: number; status: string; statusLabel: string } | undefined,
+): string {
+  const status = meta?.statusLabel || meta?.status || "Draft";
+  // Owner CLEAR: Batches creator labeling off unless TIMELINE_BATCHES_CREATOR_UI.
+  if (!TIMELINE_BATCHES_CREATOR_UI) return status;
+  return `${meta?.batches ?? 0} batches · ${status}`;
+}
+
 export function Timeline({
   project,
   selectedId,
   onSelect,
   onChange,
+  previewTakeId = null,
+  selectedMaster = null,
 }: {
   project: Project;
   selectedId?: string;
   onSelect: (id: string) => void;
   onChange: () => void;
+  previewTakeId?: string | null;
+  selectedMaster?: SceneTimelineMaster | null;
 }) {
   const total = useMemo(
     () => project.scenes.reduce((s, sc) => s + (sc.duration_sec || 0), 0),
     [project.scenes]
   );
-  const [sceneMeta, setSceneMeta] = useState<Record<string, { batches: number; status: string }>>({});
+  const [mastersById, setMastersById] = useState<Record<string, SceneTimelineMaster>>({});
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<Scene | null>(null);
   const [removeTarget, setRemoveTarget] = useState<Scene | null>(null);
@@ -49,28 +65,44 @@ export function Timeline({
       project.scenes.map(async (scene) => {
         try {
           const result = await api.directorTimelineMaster(project.id, scene.id);
-          const master = result.master as SceneTimelineMaster;
-          const statuses = master.batchBlocks.map((batch) => batch.status);
-          const status = statuses.includes("Failed")
-            ? "Needs Attention"
-            : statuses.includes("Generating") || statuses.includes("Queued")
-              ? "Working"
-              : statuses.includes("Ready") || statuses.includes("Approved")
-                ? "Ready"
-                : "Draft";
-          return [scene.id, { batches: master.batchBlocks.length, status }] as const;
+          return [scene.id, result.master as SceneTimelineMaster] as const;
         } catch {
-          return [scene.id, { batches: 0, status: scene.output_path ? "Ready" : "Draft" }] as const;
+          return [scene.id, null] as const;
         }
       }),
     ).then((entries) => {
       if (!alive) return;
-      setSceneMeta(Object.fromEntries(entries));
+      const next: Record<string, SceneTimelineMaster> = {};
+      for (const [id, master] of entries) {
+        if (master) next[id] = master;
+      }
+      setMastersById(next);
     });
     return () => {
       alive = false;
     };
   }, [project.id, project.scenes]);
+
+  const sceneMeta = useMemo(() => {
+    const out: Record<string, { batches: number; status: string; statusLabel: string }> = {};
+    for (const scene of project.scenes) {
+      const master = scene.id === selectedId && selectedMaster ? selectedMaster : mastersById[scene.id];
+      const status = master
+        ? sceneTimelineStatusWord(master)
+        : scene.output_path
+          ? "Ready"
+          : "Draft";
+      const statusLabel = master
+        ? formatPreviewTakeStatusLabel(master, scene.id === selectedId ? previewTakeId : null) || status
+        : status;
+      out[scene.id] = {
+        batches: master?.batchBlocks.length ?? 0,
+        status,
+        statusLabel,
+      };
+    }
+    return out;
+  }, [project.scenes, mastersById, selectedId, previewTakeId, selectedMaster]);
 
   const closeDialogs = () => {
     if (dialogBusy) return;
@@ -134,9 +166,9 @@ export function Timeline({
     <div className="panel timeline">
       <PanelHeading
         title="Scenes"
-        tip="Ordered story beats for this project. Select one to open Timeline tracks. Each local Scene can be up to 20 seconds."
+        tip="Ordered story beats for this project. Select one to open Timeline tracks. Set each Scene as long as you want."
       >
-        <span className="scene-meta">{formatDurationSeconds(total)} · {LOCAL_SCENE_DURATION_CAP_SEC}s max per Scene</span>
+        <span className="scene-meta">{formatDurationSeconds(total)}</span>
       </PanelHeading>
       <div className="timeline-v2__scenes-list" ref={scenesListRef}>
         {project.scenes.length === 0 ? (
@@ -193,8 +225,12 @@ export function Timeline({
                 ]}
               />
             </div>
-            <div className="scene-meta" style={{ marginTop: 6 }}>
-              {(sceneMeta[scene.id]?.batches ?? 0) || 0} batches · {sceneMeta[scene.id]?.status || "Draft"}
+            <div
+              className="scene-meta"
+              style={{ marginTop: 6 }}
+              data-testid={`scene-block-status-${scene.id}`}
+            >
+              {sceneListStatusText(sceneMeta[scene.id])}
             </div>
           </div>
         ))}

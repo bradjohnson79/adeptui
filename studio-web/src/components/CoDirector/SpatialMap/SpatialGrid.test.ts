@@ -1,7 +1,49 @@
 import { describe, expect, it } from "vitest";
 import { toGridPlacements } from "./SpatialGrid";
 import { fovLayersForCameras } from "./placementArm";
+import {
+  ALL_GRID_SCALES,
+  clampGridScale,
+  densityForScale,
+  GRID_DENSITY,
+  MAX_GRID_SCALE,
+  MIN_GRID_SCALE,
+} from "./gridGeometry";
 import type { SpatialCharacterPlacement, SpatialPropPlacement } from "./types";
+
+describe("SpatialGrid grid scale range (-8..+8)", () => {
+  it("toGridPlacements preserves normalized coords verbatim across the full scale sweep", () => {
+    const character = {
+      id: "c-sweep",
+      tag: "Ada",
+      label: "Ada",
+      colorKey: "red",
+      gridRow: 4,
+      gridColumn: 4,
+      normalizedX: 0.34,
+      normalizedY: -0.41,
+      slotIndex: 0,
+      visible: true,
+    } as SpatialCharacterPlacement;
+    // Simulating a gridScale change: placements pass through unchanged —
+    // cell remap is display-only and must never touch normalizedX/Y.
+    for (const scale of ALL_GRID_SCALES) {
+      expect(clampGridScale(scale)).toBe(scale);
+      const mapped = toGridPlacements([character], []);
+      expect(mapped[0]).toMatchObject({ normalizedX: 0.34, normalizedY: -0.41 });
+      expect(densityForScale(scale)).toBe(GRID_DENSITY[scale]);
+    }
+  });
+
+  it("all 17 densities are distinct and bounded by the extended range", () => {
+    expect(MIN_GRID_SCALE).toBe(-8);
+    expect(MAX_GRID_SCALE).toBe(8);
+    const densities = ALL_GRID_SCALES.map(densityForScale);
+    expect(new Set(densities).size).toBe(17);
+    expect(Math.min(...densities)).toBe(2);
+    expect(Math.max(...densities)).toBe(26);
+  });
+});
 
 describe("toGridPlacements (Work Order E)", () => {
   it("keeps a hidden character in the placement list (hide is not delete)", () => {

@@ -3,10 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import type { RecoveryAction, StatusRun } from "../../codirector/status/types";
 
-function statusTone(status: string): string {
-  if (status === "Operational") return "is-healthy";
-  if (status === "Blocked") return "is-blocked";
-  if (status === "Degraded" || status === "Checking") return "is-warning";
+function statusTone(status: string, band?: string): string {
+  if (status === "Blocked" || band === "Blocked") return "is-blocked";
+  if (band === "Advisory" || band === "Workflow Degraded" || status === "Degraded" || status === "Checking") {
+    return "is-warning";
+  }
+  if (status === "Operational" || band === "Operational") return "is-healthy";
   return "";
 }
 
@@ -25,19 +27,37 @@ export function CoDirectorStatusPanel() {
   const [copied, setCopied] = useState(false);
 
   const summary = statusLatestRun?.summary;
+
+  // `not_configured`, `not_applicable`, and `not_tested` are legitimate project
+  // states, not failures — they must render as neutral/informational rather than
+  // as red blockers or amber warnings (they still surface in Category Readiness).
+  const INFORMATIONAL_STATUSES = ["not_configured", "not_applicable", "not_tested"];
+  const isAdvisory = (result: { readinessClass?: string | null }) =>
+    result.readinessClass === "advisory_review_degraded" || result.readinessClass === "optional";
   const blockers = useMemo(
     () =>
-      (statusLatestRun?.results || []).filter((result) =>
-        ["blocked", "failed", "offline", "not_installed", "not_configured"].includes(result.status),
+      (statusLatestRun?.results || []).filter(
+        (result) =>
+          ["blocked", "failed", "offline", "not_installed"].includes(result.status) && !isAdvisory(result),
+      ),
+    [statusLatestRun],
+  );
+  const advisories = useMemo(
+    () =>
+      (statusLatestRun?.results || []).filter(
+        (result) =>
+          isAdvisory(result) &&
+          ["blocked", "failed", "offline", "not_installed", "degraded", "warning"].includes(result.status),
       ),
     [statusLatestRun],
   );
   const warnings = useMemo(
     () =>
-      (statusLatestRun?.results || []).filter((result) =>
-        ["degraded", "warning", "not_tested", "experimental", "unknown", "timed_out", "slow", "starting"].includes(
-          result.status,
-        ),
+      (statusLatestRun?.results || []).filter(
+        (result) =>
+          ["degraded", "warning", "experimental", "unknown", "timed_out", "slow", "starting"].includes(result.status) &&
+          !INFORMATIONAL_STATUSES.includes(result.status) &&
+          !isAdvisory(result),
       ),
     [statusLatestRun],
   );
@@ -46,12 +66,25 @@ export function CoDirectorStatusPanel() {
     [statusLatestRun],
   );
 
+  // Deduplicate recovery actions by their unique target so N checks that all
+  // suggest the same destination render as ONE button (e.g. 8 checks all
+  // suggesting "Open Setup" show a single Open Setup action). Two actions are
+  // considered the same recovery when they resolve to the same panel or route
+  // (or share a kind when no target field is present).
+  const recoveryTargetKey = (action: RecoveryAction): string => {
+    if (action.kind === "open_panel") return "open_panel:" + (action.panel || "");
+    if (action.kind === "open_route") return "open_route:" + (action.path || "");
+    if (action.kind === "open_logs") return "open_logs";
+    // refresh/confirm_api have no navigation target — keep them distinct by id.
+    return action.kind + ":" + action.id;
+  };
+
   const allRecoveryActions = useMemo(() => {
     const seen = new Set<string>();
     const actions: (RecoveryAction & { checkId: string })[] = [];
     for (const result of statusLatestRun?.results || []) {
       for (const action of result.recoveryActions || []) {
-        const key = `${result.checkId}:${action.id}`;
+        const key = recoveryTargetKey(action);
         if (seen.has(key)) continue;
         seen.add(key);
         actions.push({ ...action, checkId: result.checkId });
@@ -101,24 +134,44 @@ export function CoDirectorStatusPanel() {
   return (
     <div className="codirector-overflow-body codirector-status-panel" data-testid="codirector-status-panel">
       <div className="codirector-status-hero">
-        <div className={`codirector-status-gauge ${statusTone(summary?.statusIndicator || "Not Checked")}`}>
-          <strong>{statusChecking ? "…" : summary?.score ?? "—"}</strong>
-          <span>{statusChecking ? "Checking" : summary?.band || "Not Checked"}</span>
+        <div
+          className={`codirector-status-gauge ${statusTone(summary?.statusIndicator || "Not Checked", summary?.band)}`}
+          data-testid="codirector-status-gauge"
+        >
+          <strong data-testid="codirector-status-score">{statusChecking ? "…" : summary?.score ?? "—"}</strong>
+          <span data-testid="codirector-status-band">{statusChecking ? "Checking" : summary?.band || "Not Checked"}</span>
         </div>
         <div className="codirector-status-summary">
           <p className="eyebrow">Production Assurance</p>
-          <h3>{statusChecking ? "Checking studio readiness…" : summary?.statusIndicator || "Not Checked"}</h3>
+          <h3 data-testid="codirector-status-indicator">
+            {statusChecking ? "Checking studio readiness…" : summary?.statusIndicator || "Not Checked"}
+          </h3>
           <p className="muted" data-testid="codirector-status-not-checked-help">
             {statusChecking
               ? "Co-Director is checking project, model, persistence, and production-system readiness."
               : summary?.scoreExplanation ||
                 "Co-Director will automatically check production readiness when opened."}
           </p>
+          <p className="muted" data-testid="codirector-status-score-semantics">
+            {summary?.scoreSemantics || "Adept Platform Production Readiness"}
+            {summary?.readinessPolicyVersion ? ` · ${summary.readinessPolicyVersion}` : ""}
+          </p>
           <div className="row-actions">
-            <button type="button" disabled={statusChecking} onClick={() => void runStatusCheck()}>
+            <button
+              type="button"
+              data-testid="codirector-status-recheck"
+              disabled={statusChecking}
+              onClick={() => void runStatusCheck({ forceRefresh: true })}
+            >
               {statusChecking ? "Checking…" : "Re-check"}
             </button>
-            <button type="button" disabled={statusChecking} onClick={() => void runStatusCheck()}>
+            <button
+              type="button"
+              className="codirector-retry-issues"
+              data-testid="codirector-retry-issues"
+              disabled={statusChecking && blockers.length === 0}
+              onClick={() => void runStatusCheck({ forceRefresh: true })}
+            >
               Retry Issues
             </button>
             <button type="button" disabled={!statusLatestRun} onClick={() => void copySummary(statusLatestRun)}>
@@ -126,10 +179,11 @@ export function CoDirectorStatusPanel() {
             </button>
             <button
               type="button"
+              data-testid="codirector-status-deep-diagnostic"
               disabled={statusChecking}
               onClick={() => {
                 if (window.confirm("Run Deep Diagnostic? This gathers a wider technical review.")) {
-                  void runStatusCheck({ deep: true });
+                  void runStatusCheck({ deep: true, forceRefresh: true });
                 }
               }}
             >
@@ -157,14 +211,27 @@ export function CoDirectorStatusPanel() {
         </div>
       ) : null}
 
-      {(blockers.length || warnings.length || busyChecks.length) && (
+      {(blockers.length || warnings.length || busyChecks.length || advisories.length) && (
         <div className="codirector-status-highlights">
           {!!blockers.length && (
-            <section>
+            <section data-testid="codirector-status-blockers">
               <p className="eyebrow">Blockers</p>
               <ul className="activity-feed">
                 {blockers.map((result) => (
-                  <li key={result.checkId}>
+                  <li key={result.checkId} data-readiness-class={result.readinessClass || ""}>
+                    <strong>{result.title}</strong>
+                    <span>{result.summary}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {!!advisories.length && (
+            <section data-testid="codirector-status-advisories">
+              <p className="eyebrow">Review notes</p>
+              <ul className="activity-feed">
+                {advisories.map((result) => (
+                  <li key={result.checkId} data-readiness-class={result.readinessClass || ""}>
                     <strong>{result.title}</strong>
                     <span>{result.summary}</span>
                   </li>
@@ -213,7 +280,7 @@ export function CoDirectorStatusPanel() {
       )}
 
       {!!allRecoveryActions.length && (
-        <section>
+        <section className={summary?.band === "Blocked" ? "codirector-status-hero-recovery" : undefined}>
           <p className="eyebrow">Recovery Options</p>
           <div className="row-actions codirector-status-actions">
             {allRecoveryActions.slice(0, 8).map((action) => (
@@ -249,18 +316,24 @@ export function CoDirectorStatusPanel() {
                   <ul className="activity-feed">
                     {statusLatestRun.results
                       .filter((result) => result.category === category.category)
-                      .map((result) => (
-                        <li key={result.checkId}>
-                          <strong>{result.title}</strong>
-                          <span>
-                            {result.status.replace(/_/g, " ")} · {result.summary}
-                          </span>
-                          <details>
-                            <summary>Technical Information</summary>
-                            <pre className="explain-panel">{JSON.stringify(result.details, null, 2)}</pre>
-                          </details>
-                        </li>
-                      ))}
+                      .map((result) => {
+                        // Legitimate non-failing project states (`not_configured`,
+                        // `not_applicable`, `not_tested`) render as muted/neutral,
+                        // not as errors.
+                        const informational = INFORMATIONAL_STATUSES.includes(result.status);
+                        return (
+                          <li key={result.checkId} className={informational ? "codirector-status-informational" : undefined}>
+                            <strong>{result.title}</strong>
+                            <span>
+                              {result.status.replace(/_/g, " ")} · {result.summary}
+                            </span>
+                            <details>
+                              <summary>Technical Information</summary>
+                              <pre className="explain-panel">{JSON.stringify(result.details, null, 2)}</pre>
+                            </details>
+                          </li>
+                        );
+                      })}
                   </ul>
                 </details>
               );

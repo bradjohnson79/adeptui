@@ -23,15 +23,35 @@ describe("trackFlags", () => {
     expect(src).toContain("onControlToggle");
     expect(src).toContain("track-control-");
     expect(src).not.toMatch(/<span key=\{control\} className="timeline-v2__track-label-icon" aria-hidden>/);
+    const tracks = readFileSync(join(__dirname, "../components/DirectorTracks.tsx"), "utf8");
+    expect(tracks).toContain("onControlToggle");
+    expect(tracks).toContain("toggleLaneMute");
+    expect(tracks).toContain('onToggleMute={() => toggleLaneMute("audio")}');
+    expect(tracks).toContain('onToggleMute={() => toggleLaneMute("sfx")}');
+    const volume = readFileSync(
+      join(__dirname, "../components/timeline-master/TrackVolumeControl.tsx"),
+      "utf8",
+    );
+    expect(volume).toContain('const muteLabel = muted ? "Unmute" : "Mute"');
+    expect(volume).toContain("alt={muteLabel}");
+    expect(volume).toContain("title={muteLabel}");
+    expect(src).toContain('control === "mute" ? (pressed ? "Unmute" : "Mute")');
+    expect(src).toContain("alt={controlLabel}");
   });
 
-  it("Timeline Inspector uses Temperature and does not show Weight", () => {
-    const src = readFileSync(
+  it("Timed Prompt and Inspector do not show Temperature or Weight", () => {
+    const inspector = readFileSync(
       join(__dirname, "../components/timeline-master/TimelineInspector.tsx"),
       "utf8",
     );
-    expect(src).toContain("TemperatureControl");
-    expect(src).not.toMatch(/<span>\s*Weight\s*<\/span>/);
+    const modal = readFileSync(
+      join(__dirname, "../components/timeline-master/TimedPromptEditorModal.tsx"),
+      "utf8",
+    );
+    expect(inspector).not.toContain("TemperatureControl");
+    expect(modal).not.toContain("TemperatureControl");
+    expect(modal).not.toMatch(/Temperature unavailable/);
+    expect(modal).not.toContain("timeline-temperature");
   });
 
   it("Timeline Library empty copy tells the creator to open the project Library picker", () => {
@@ -80,23 +100,28 @@ describe("trackFlags", () => {
     expect(disabledGuards.length).toBe(2);
   });
 
-  it("TimelineEditorShell remounts the canonical Video Generator dock and Library picker", () => {
+  it("Timeline left drawer keeps Scenes and Library; Video Generator stays in the Inspector", () => {
     const src = readFileSync(
       join(__dirname, "../components/timeline-master/TimelineEditorShell.tsx"),
       "utf8",
     );
-    expect(src).toContain("VideoGeneratorDock");
+    const inspector = readFileSync(
+      join(__dirname, "../components/timeline-master/TimelineInspector.tsx"),
+      "utf8",
+    );
+    expect(src).not.toContain("VideoGeneratorDock");
     expect(src).toContain("AddFromProjectLibraryModal");
     expect(src).toContain("onAssetsChanged");
     expect(src).toContain("timeline-tab-gpu");
     expect(src).toContain("runGenerateScene");
     expect(src).toContain("timeline-v2__dock--scenes");
-    expect(src.indexOf("VideoGeneratorDock")).toBeLessThan(src.indexOf("timeline-v2__dock--scenes"));
+    expect(inspector).toContain('data-testid="timeline-inspector-generator"');
   });
 
   it("DirectorTracks board width is pixelsPerSecond times duration", () => {
     const src = readFileSync(join(__dirname, "../components/DirectorTracks.tsx"), "utf8");
-    expect(src).toContain("pixelsPerSecond(zoom) * boardDuration");
+    expect(src).toContain("pixelsPerSecond(zoom)");
+    expect(src).toContain("scalePxPerSec * scaleBoardDuration");
     expect(src).not.toContain("Math.max(480, pixelsPerSecond");
     expect(src).toContain("--timeline-lane-width");
   });

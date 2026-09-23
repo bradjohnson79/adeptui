@@ -53,6 +53,19 @@ def _slugify(name: str) -> str:
     return s or f"character-{uuid.uuid4().hex[:8]}"
 
 
+def _repair_placeholder_identity(row: CharacterProfileRow) -> bool:
+    from ..creator_scope.contract import (
+        is_placeholder_character_name,
+        is_placeholder_character_slug,
+    )
+
+    changed = False
+    if is_placeholder_character_slug(row.slug) and row.name and not is_placeholder_character_name(row.name):
+        row.slug = _slugify(row.name)
+        changed = True
+    return changed
+
+
 def _loads(raw: str | None, default: Any) -> Any:
     try:
         return json.loads(raw or "") if raw else default
@@ -64,8 +77,435 @@ def _dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=False)
 
 
-def _err(code: str, message: str, status: int = 400) -> HTTPException:
-    return HTTPException(status_code=status, detail={"code": code, "message": message})
+def _err(code: str, message: str, status: int = 400, extra: dict[str, Any] | None = None) -> HTTPException:
+    detail: dict[str, Any] = {"code": code, "message": message}
+    if extra:
+        detail.update(extra)
+        detail["details"] = extra
+    return HTTPException(status_code=status, detail=detail)
+
+
+def _check_character_name_collision(
+    db: Session,
+    *,
+    project_id: str,
+    name: str,
+    exclude_id: str = "",
+    making_global: bool = False,
+) -> None:
+    from ..creator_scope.contract import ENTITY_CHARACTER, CreatorScopeError
+    from ..creator_scope.service import require_unique_profile_name
+
+    try:
+        require_unique_profile_name(
+            db,
+            entity_type=ENTITY_CHARACTER,
+            name=name,
+            owning_project_id=project_id,
+            exclude_id=exclude_id,
+            making_global=making_global,
+        )
+    except CreatorScopeError as exc:
+        raise _err(exc.code, exc.message, exc.status, extra=exc.extra) from exc
+
+
+def _read_is_global(body: Any, *, fallback: bool = False) -> bool:
+    from ..creator_scope.contract import normalize_is_global
+
+    if body is None:
+        return bool(fallback)
+    if isinstance(body, dict):
+        if body.get("isGlobal") is not None:
+            return normalize_is_global(body.get("isGlobal"))
+        if body.get("is_global") is not None:
+            return normalize_is_global(body.get("is_global"))
+        return bool(fallback)
+    if getattr(body, "isGlobal", None) is not None:
+        return normalize_is_global(body.isGlobal)
+    if getattr(body, "is_global", None) is not None:
+        return normalize_is_global(body.is_global)
+    return bool(fallback)
+
+
+def _character_is_global(row: CharacterProfileRow) -> bool:
+    return bool(getattr(row, "is_global", False))
+
+
+def _character_visible(row: CharacterProfileRow | None, project_id: str) -> bool:
+    if row is None:
+        return False
+    return row.project_id == project_id or _character_is_global(row)
+
+
+OWNER_REQUIRED_MESSAGE = "Global characters can only be edited from the project that created them."
+PROFILE_NOT_FOUND_MESSAGE = "Character Profile not found."
+
+
+def _require_visible_profile(db: Session, project_id: str, character_id: str) -> CharacterProfileRow:
+    row = db.get(CharacterProfileRow, character_id)
+    if row is None:
+        healed = _reconcile_missing_local_profile(db, project_id, character_id)
+        if healed is not None:
+            return healed
+        raise _err("NOT_FOUND", PROFILE_NOT_FOUND_MESSAGE, 404)
+    if not _character_visible(row, project_id):
+        raise _err("NOT_FOUND", PROFILE_NOT_FOUND_MESSAGE, 404)
+    return row
+
+
+def require_owned_profile(db: Session, project_id: str, character_id: str) -> CharacterProfileRow:
+    """Visible profiles may be read from any project; mutation/generation requires ownership."""
+    row = _require_visible_profile(db, project_id, character_id)
+    if row.project_id != project_id:
+        raise _err("OWNER_REQUIRED", OWNER_REQUIRED_MESSAGE, 403)
+    return row
+
+
+def _name_from_version_snapshot(row: CharacterVersionRow | None) -> str:
+    if row is None:
+        return ""
+    snap = _loads(row.snapshot_json, {})
+    if isinstance(snap, dict):
+        return str(snap.get("name") or "").strip()
+    return ""
+
+
+def _character_id_from_asset_meta(raw: str | None) -> str:
+    try:
+        meta = json.loads(raw or "{}") if raw else {}
+    except Exception:
+        return ""
+    if not isinstance(meta, dict):
+        return ""
+    cid = str(meta.get("characterId") or meta.get("character_id") or "").strip()
+    if cid:
+        return cid
+    library = meta.get("library") if isinstance(meta.get("library"), dict) else {}
+    return str(library.get("characterId") or library.get("character_id") or "").strip()
+
+
+def _character_name_from_project_assets(db: Session, project_id: str, character_id: str) -> str:
+    cid = str(character_id or "").strip()
+    if not cid:
+        return ""
+    assets = (
+        db.query(Asset)
+        .filter(Asset.project_id == project_id, Asset.prompt_meta_json.contains(cid))
+        .all()
+    )
+    for asset in assets:
+        try:
+            meta = json.loads(asset.prompt_meta_json or "{}")
+        except Exception:
+            continue
+        if not isinstance(meta, dict):
+            continue
+        name = str(meta.get("characterName") or meta.get("character_name") or "").strip()
+        if name:
+            return name
+    return ""
+
+
+def _project_claims_character(db: Session, project_id: str, character_id: str) -> bool:
+    """True when this project already owns assets/jobs bound to the canonical character id."""
+    refs = (
+        db.query(CharacterReferenceAssetRow)
+        .filter(CharacterReferenceAssetRow.character_profile_id == character_id)
+        .all()
+    )
+    for ref in refs:
+        asset_id = str(getattr(ref, "asset_id", "") or "").strip()
+        if not asset_id:
+            continue
+        asset = db.get(Asset, asset_id)
+        if asset is not None and str(getattr(asset, "project_id", "") or "") == project_id:
+            return True
+    from ..db import Job
+
+    job = (
+        db.query(Job)
+        .filter(Job.project_id == project_id, Job.params_json.contains(character_id))
+        .first()
+    )
+    if job is not None:
+        return True
+    asset = (
+        db.query(Asset)
+        .filter(Asset.project_id == project_id, Asset.prompt_meta_json.contains(character_id))
+        .first()
+    )
+    return asset is not None
+
+
+def _reconcile_missing_local_profile(
+    db: Session, project_id: str, character_id: str
+) -> CharacterProfileRow | None:
+    """Recreate a missing profile row when this project already has that canonical identity.
+
+    Does not invent a new character id, does not match by display name, and never
+    re-homes a foreign Global character.
+    """
+    cid = str(character_id or "").strip()
+    if not cid:
+        return None
+    from ..creator_scope.contract import ENTITY_CHARACTER
+    from ..creator_scope.service import is_entity_deleted
+
+    if is_entity_deleted(db, entity_type=ENTITY_CHARACTER, entity_id=cid):
+        return None
+    existing = db.get(CharacterProfileRow, cid)
+    if existing is not None:
+        return None
+    versions = (
+        db.query(CharacterVersionRow)
+        .filter(CharacterVersionRow.character_profile_id == cid)
+        .order_by(CharacterVersionRow.version_number.desc())
+        .all()
+    )
+    traits = (
+        db.query(CharacterTraitRow)
+        .filter(CharacterTraitRow.character_profile_id == cid)
+        .all()
+    )
+    refs = (
+        db.query(CharacterReferenceAssetRow)
+        .filter(CharacterReferenceAssetRow.character_profile_id == cid)
+        .all()
+    )
+    claimed = _project_claims_character(db, project_id, cid)
+    if not versions and not traits and not refs and not claimed:
+        return None
+    if not claimed:
+        return None
+    latest = versions[0] if versions else None
+    name = (
+        _name_from_version_snapshot(latest)
+        or _character_name_from_project_assets(db, project_id, cid)
+        or "Character"
+    )
+    now = _now()
+    vid = latest.id if latest is not None else str(uuid.uuid4())
+    if latest is None:
+        db.add(
+            CharacterVersionRow(
+                id=vid,
+                character_profile_id=cid,
+                version_number=1,
+                version_label="v1",
+                change_summary="Reconciled missing Character Profile",
+                status="DRAFT",
+                snapshot_json=_dumps({"name": name}),
+                created_at=now,
+            )
+        )
+    profile = CharacterProfileRow(
+        id=cid,
+        project_id=project_id,
+        name=name,
+        slug=_slugify(name),
+        role="",
+        description="",
+        visual_description="",
+        visual_style="",
+        apparent_age="",
+        species_or_type="human",
+        gender_presentation="",
+        cultural_background="",
+        height_description="",
+        body_type="",
+        status="DRAFT",
+        approval_status="draft",
+        active_version_id=vid,
+        skin_json="{}",
+        hair_json="{}",
+        personality_json="{}",
+        performance_json="{}",
+        continuity_json="{}",
+        motion_json="{}",
+        emotion_json="{}",
+        relationships_json="[]",
+        prompt_package_json="{}",
+        is_global=False,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    _reattach_orphaned_character_assets(db, profile)
+    _sync_character_scope(db, profile)
+    return profile
+
+
+def _reattach_orphaned_character_assets(db: Session, profile: CharacterProfileRow) -> None:
+    existing = (
+        db.query(CharacterReferenceAssetRow)
+        .filter(CharacterReferenceAssetRow.character_profile_id == profile.id)
+        .count()
+    )
+    if existing:
+        return
+    assets = (
+        db.query(Asset)
+        .filter(
+            Asset.project_id == profile.project_id,
+            Asset.prompt_meta_json.contains(profile.id),
+        )
+        .order_by(Asset.created_at.desc())
+        .all()
+    )
+    picked: Asset | None = None
+    for asset in assets:
+        if str(asset.kind or "") not in {"", "image"}:
+            continue
+        filename = str(asset.filename or "").lower()
+        tag = str(asset.tag or "").lower()
+        if "crs" in filename or "front" in filename or tag == "character_reference":
+            picked = asset
+            break
+    if picked is None:
+        for asset in assets:
+            if str(asset.kind or "") in {"", "image"}:
+                picked = asset
+                break
+    if picked is None:
+        return
+    db.add(
+        CharacterReferenceAssetRow(
+            id=str(uuid.uuid4()),
+            character_profile_id=profile.id,
+            character_version_id=profile.active_version_id,
+            asset_id=picked.id,
+            reference_role="hero_identity",
+            view_angle="",
+            framing="",
+            approval_status="approved",
+            canonical=True,
+            source_type="library",
+            generation_lineage_json="{}",
+            notes="Reconnected from Library after missing profile row",
+            created_at=_now(),
+        )
+    )
+    db.commit()
+
+
+def _heal_orphaned_character_identities(db: Session, project_id: str) -> None:
+    assets = (
+        db.query(Asset)
+        .filter(Asset.project_id == project_id, Asset.prompt_meta_json.contains("characterId"))
+        .all()
+    )
+    seen: set[str] = set()
+    for asset in assets:
+        cid = _character_id_from_asset_meta(getattr(asset, "prompt_meta_json", None))
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+        from ..creator_scope.contract import ENTITY_CHARACTER
+        from ..creator_scope.service import is_entity_deleted
+
+        if is_entity_deleted(db, entity_type=ENTITY_CHARACTER, entity_id=cid):
+            continue
+        if db.get(CharacterProfileRow, cid) is None:
+            _reconcile_missing_local_profile(db, project_id, cid)
+
+
+def _sync_character_scope(db: Session, row: CharacterProfileRow) -> None:
+    try:
+        from ..creator_scope.service import sync_scope
+        from ..creator_scope.contract import ENTITY_CHARACTER
+
+        identity = ""
+        try:
+            identity = str(resolve_approved_reference(db, row.id, "hero_identity") or "").strip()
+        except Exception:
+            identity = ""
+        if not identity:
+            try:
+                identity = str(resolve_approved_reference(db, row.id, "hero_portrait") or "").strip()
+            except Exception:
+                identity = ""
+        if not identity:
+            try:
+                from .cc_v2 import load_state
+
+                state = load_state(db, row.id)
+                front = ((state.get("views") or {}).get("front") or {}) if isinstance(state, dict) else {}
+                identity = str(front.get("assetId") or "").strip()
+                if not identity:
+                    identity = str(((state.get("sheet") or {}) if isinstance(state, dict) else {}).get("assetId") or "").strip()
+            except Exception:
+                identity = identity or ""
+        sync_scope(
+            db,
+            entity_type=ENTITY_CHARACTER,
+            entity_id=row.id,
+            owning_project_id=row.project_id,
+            is_global=_character_is_global(row),
+            tag=row.slug or row.name,
+            name=row.name,
+            identity_asset_id=identity,
+        )
+    except Exception:
+        pass
+
+
+def _check_character_tag_collision(
+    db: Session,
+    *,
+    project_id: str,
+    name: str,
+    slug: str,
+    exclude_id: str = "",
+    making_global: bool = False,
+) -> None:
+    from ..creator_scope.contract import ENTITY_CHARACTER, canonical_tag
+    from ..creator_scope.service import find_tag_collision
+
+    token = canonical_tag(slug or name)
+    if not token:
+        return
+    hit = find_tag_collision(
+        db,
+        entity_type=ENTITY_CHARACTER,
+        tag=token,
+        exclude_id=exclude_id,
+        owning_project_id=project_id,
+        making_global=making_global,
+    )
+    if hit is not None:
+        raise _err(
+            "TAG_COLLISION",
+            f"@{token} is already used by {hit.name or 'another character'} "
+            f"{'as a Global asset' if hit.is_global else 'in this project'}. Choose a different name.",
+            409,
+        )
+    from sqlalchemy import or_
+
+    rows = (
+        db.query(CharacterProfileRow)
+        .filter(
+            or_(
+                CharacterProfileRow.project_id == project_id,
+                CharacterProfileRow.is_global.is_(True),
+            )
+        )
+        .all()
+    )
+    for row in rows:
+        if exclude_id and row.id == exclude_id:
+            continue
+        other = canonical_tag(row.slug or row.name).lower()
+        if other != token:
+            continue
+        if row.project_id == project_id or _character_is_global(row) or making_global:
+            raise _err(
+                "TAG_COLLISION",
+                f"@{token} is already used by {row.name or 'another character'} "
+                f"{'as a Global asset' if _character_is_global(row) else 'in this project'}. Choose a different name.",
+                409,
+            )
 
 
 # CDX-007: canonical identity references must point at real project image
@@ -143,6 +583,10 @@ def ensure_character_identity_tables() -> None:
         prop_rows = conn.execute(text("PRAGMA table_info(character_props)")).fetchall()
         if prop_rows and not any(r[1] == "generation_job_id" for r in prop_rows):
             conn.execute(text("ALTER TABLE character_props ADD COLUMN generation_job_id VARCHAR(36)"))
+            conn.commit()
+        profile_rows = conn.execute(text("PRAGMA table_info(character_profiles)")).fetchall()
+        if profile_rows and not any(r[1] == "is_global" for r in profile_rows):
+            conn.execute(text("ALTER TABLE character_profiles ADD COLUMN is_global BOOLEAN NOT NULL DEFAULT 0"))
             conn.commit()
 
 
@@ -228,24 +672,58 @@ def to_out(db: Session, profile: CharacterProfileRow, *, include_coverage: bool 
         relationships=_loads(getattr(profile, "relationships_json", None) or "[]", []),
         prompt_package=_loads(getattr(profile, "prompt_package_json", None) or "{}", {}),
         coverage=cov,
+        is_global=_character_is_global(profile),
+        isGlobal=_character_is_global(profile),
         created_at=profile.created_at,
         updated_at=profile.updated_at,
     )
 
 
 def list_profiles(db: Session, project_id: str) -> list[CharacterProfileOut]:
+    from sqlalchemy import or_
+
+    from ..creator_scope.contract import is_ephemeral_creator_fixture
+
+    _heal_orphaned_character_identities(db, project_id)
     rows = (
         db.query(CharacterProfileRow)
-        .filter(CharacterProfileRow.project_id == project_id)
+        .filter(
+            or_(
+                CharacterProfileRow.project_id == project_id,
+                CharacterProfileRow.is_global.is_(True),
+            )
+        )
         .order_by(CharacterProfileRow.updated_at.desc())
         .all()
     )
-    return [to_out(db, r) for r in rows]
+    seen: set[str] = set()
+    out: list[CharacterProfileOut] = []
+    for row in rows:
+        if row.id in seen:
+            continue
+        seen.add(row.id)
+        if is_ephemeral_creator_fixture(row.name or row.slug):
+            continue
+        if row.project_id == project_id and _repair_placeholder_identity(row):
+            db.commit()
+            _sync_character_scope(db, row)
+        out.append(to_out(db, row))
+    return out
 
 
 def get_profile(db: Session, project_id: str, character_id: str) -> CharacterProfileOut:
+    row = _require_visible_profile(db, project_id, character_id)
+    if row.project_id == project_id and _repair_placeholder_identity(row):
+        db.commit()
+        db.refresh(row)
+        _sync_character_scope(db, row)
+    return to_out(db, row)
+
+
+def get_profile_by_id(db: Session, character_id: str) -> CharacterProfileOut:
+    """Reference durability: resolve a stored character id even after Global is turned off."""
     row = db.get(CharacterProfileRow, character_id)
-    if not row or row.project_id != project_id:
+    if not row:
         raise _err("NOT_FOUND", "Character Profile not found.", 404)
     return to_out(db, row)
 
@@ -255,6 +733,20 @@ def create_profile(db: Session, project_id: str, body: CharacterProfileCreate) -
     cid = str(uuid.uuid4())
     vid = str(uuid.uuid4())
     slug = body.slug.strip() or _slugify(body.name)
+    is_global = _read_is_global(body, fallback=False)
+    _check_character_name_collision(
+        db,
+        project_id=project_id,
+        name=body.name,
+        making_global=is_global,
+    )
+    _check_character_tag_collision(
+        db,
+        project_id=project_id,
+        name=body.name,
+        slug=slug,
+        making_global=is_global,
+    )
     profile = CharacterProfileRow(
         id=cid,
         project_id=project_id,
@@ -282,6 +774,7 @@ def create_profile(db: Session, project_id: str, body: CharacterProfileCreate) -
         emotion_json="{}",
         relationships_json="[]",
         prompt_package_json="{}",
+        is_global=is_global,
         created_at=now,
         updated_at=now,
     )
@@ -299,15 +792,14 @@ def create_profile(db: Session, project_id: str, body: CharacterProfileCreate) -
     db.add(version)
     db.commit()
     db.refresh(profile)
+    _sync_character_scope(db, profile)
     return to_out(db, profile)
 
 
 def update_profile(
     db: Session, project_id: str, character_id: str, body: CharacterProfileUpdate
 ) -> CharacterProfileOut:
-    row = db.get(CharacterProfileRow, character_id)
-    if not row or row.project_id != project_id:
-        raise _err("NOT_FOUND", "Character Profile not found.", 404)
+    row = require_owned_profile(db, project_id, character_id)
     if row.status in ("LOCKED", "ARCHIVED"):
         raise _err("LOCKED_VERSION", "Cannot mutate a locked or archived Character Profile.", 409)
 
@@ -339,6 +831,39 @@ def update_profile(
         row.approval_status = "draft"
 
     data = body.model_dump(exclude_unset=True)
+    from ..creator_scope.contract import (
+        is_placeholder_character_name,
+        is_placeholder_character_slug,
+    )
+
+    next_global = _read_is_global(body, fallback=_character_is_global(row))
+    if "isGlobal" in data or "is_global" in data:
+        next_global = _read_is_global(body, fallback=_character_is_global(row))
+    incoming_name = str(data.get("name") or "").strip() if "name" in data else ""
+    if incoming_name and is_placeholder_character_name(incoming_name) and not is_placeholder_character_name(row.name):
+        data.pop("name", None)
+        incoming_name = ""
+    next_name = incoming_name or str(row.name or "")
+    next_slug = str(getattr(row, "slug", "") or "")
+    if is_placeholder_character_slug(next_slug) and next_name and not is_placeholder_character_name(next_name):
+        next_slug = _slugify(next_name)
+        row.slug = next_slug
+    _check_character_name_collision(
+        db,
+        project_id=project_id,
+        name=next_name,
+        exclude_id=row.id,
+        making_global=next_global,
+    )
+    _check_character_tag_collision(
+        db,
+        project_id=project_id,
+        name=next_name,
+        slug=next_slug,
+        exclude_id=row.id,
+        making_global=next_global,
+    )
+    row.is_global = next_global
     for key in (
         "name",
         "role",
@@ -380,6 +905,7 @@ def update_profile(
         row.status = "DRAFT" if cov.status == "INCOMPLETE" else cov.status
     db.commit()
     db.refresh(row)
+    _sync_character_scope(db, row)
     return to_out(db, row)
 
 
@@ -896,48 +1422,43 @@ def resolve_character_by_name(
     """
     if not name or not name.strip():
         return None
+    from ..creator_scope.contract import normalize_profile_name
+
     clean = name.strip()
-    lowered = clean.lower()
+    lowered = normalize_profile_name(clean)
 
-    # Exact name match first.
-    row = (
+    from sqlalchemy import or_
+
+    visible = (
         db.query(CharacterProfileRow)
         .filter(
-            CharacterProfileRow.project_id == project_id,
-            CharacterProfileRow.name == clean,
+            or_(
+                CharacterProfileRow.project_id == project_id,
+                CharacterProfileRow.is_global.is_(True),
+            )
         )
-        .first()
-    )
-    if row:
-        return row
-
-    # Slug match.
-    row = (
-        db.query(CharacterProfileRow)
-        .filter(
-            CharacterProfileRow.project_id == project_id,
-            CharacterProfileRow.slug == _slugify(clean),
-        )
-        .first()
-    )
-    if row:
-        return row
-
-    # Case-insensitive name match.
-    rows = (
-        db.query(CharacterProfileRow)
-        .filter(CharacterProfileRow.project_id == project_id)
         .all()
     )
-    for r in rows:
-        if r.name and r.name.lower() == lowered:
+    owned = [r for r in visible if r.project_id == project_id]
+    globals_other = [r for r in visible if r.project_id != project_id]
+    search_order = owned + globals_other
+
+    for r in search_order:
+        if r.name and r.name == clean:
+            return r
+    slug = _slugify(clean)
+    for r in search_order:
+        if r.slug and r.slug == slug:
+            return r
+    for r in search_order:
+        if r.name and normalize_profile_name(r.name) == lowered:
             return r
         if r.slug and r.slug.lower() == lowered:
             return r
 
     compact = re.sub(r"[^a-z0-9]", "", lowered)
     if compact:
-        for r in rows:
+        for r in search_order:
             if r.name and re.sub(r"[^a-z0-9]", "", r.name.lower()) == compact:
                 return r
             if r.slug and re.sub(r"[^a-z0-9]", "", r.slug.lower()) == compact:
@@ -1606,19 +2127,23 @@ def fork_draft_voice_profile(
         approved_at="",
     )
     db.add(row)
-    profile.active_voice_profile_id = vid
+    # Current approved voice stays on the character until the new draft is approved.
     profile.updated_at = now
     db.commit()
     db.refresh(row)
     return row, True
 
 
-def voice_to_dict(row: VoiceProfileRow) -> dict[str, Any]:
+def voice_to_dict(row: VoiceProfileRow, *, character_name: str = "") -> dict[str, Any]:
     lineage = _loads(row.lineage_json, {})
     return {
         "id": row.id,
         "project_id": row.project_id,
         "character_profile_id": row.character_profile_id,
+        "characterId": row.character_profile_id,
+        "character_id": row.character_profile_id,
+        "characterName": character_name,
+        "sourceType": row.source_mode,
         "character_version_id": row.character_version_id,
         "version_number": row.version_number,
         "name": row.name,
@@ -1656,28 +2181,42 @@ def voice_to_dict(row: VoiceProfileRow) -> dict[str, Any]:
     }
 
 
-def get_voice_or_none(
+def require_voice_for_character(
     db: Session, project_id: str, character_id: str, voice_id: str
-) -> VoiceProfileRow | None:
-    get_profile(db, project_id, character_id)
+) -> VoiceProfileRow:
+    """Resolve a voice that belongs to a visible character.
+
+    Voice rows live on the character's home project. A Global character may be
+    viewed from another project without copying the Voice Profile.
+    """
+    profile = _require_visible_profile(db, project_id, character_id)
     row = db.get(VoiceProfileRow, voice_id)
-    if not row or row.project_id != project_id or row.character_profile_id != character_id:
-        return None
+    if not row or row.character_profile_id != character_id:
+        raise _err("NOT_FOUND", "Voice Profile not found.", 404)
+    home = str(profile.project_id)
+    if str(row.project_id) not in {home, str(project_id)}:
+        raise _err("NOT_FOUND", "Voice Profile not found.", 404)
     return row
 
 
+def get_voice_or_none(
+    db: Session, project_id: str, character_id: str, voice_id: str
+) -> VoiceProfileRow | None:
+    try:
+        return require_voice_for_character(db, project_id, character_id, voice_id)
+    except HTTPException:
+        return None
+
+
 def list_voice_profiles(db: Session, project_id: str, character_id: str) -> list[dict[str, Any]]:
-    get_profile(db, project_id, character_id)
+    profile = _require_visible_profile(db, project_id, character_id)
     rows = (
         db.query(VoiceProfileRow)
-        .filter(
-            VoiceProfileRow.project_id == project_id,
-            VoiceProfileRow.character_profile_id == character_id,
-        )
+        .filter(VoiceProfileRow.character_profile_id == character_id)
         .order_by(VoiceProfileRow.version_number.asc())
         .all()
     )
-    return [voice_to_dict(r) for r in rows]
+    return [voice_to_dict(r, character_name=profile.name) for r in rows]
 
 
 def record_consent(
@@ -1724,22 +2263,26 @@ def record_consent(
 def approve_voice_profile(
     db: Session, project_id: str, character_id: str, voice_id: str
 ) -> dict[str, Any]:
-    vp = db.get(VoiceProfileRow, voice_id)
-    if not vp or vp.project_id != project_id or vp.character_profile_id != character_id:
-        raise _err("NOT_FOUND", "Voice Profile not found.", 404)
-    if vp.approval_status == "approved":
-        raise _err("LOCKED_VERSION", "Approved Voice Profiles are immutable. Create a new version.", 409)
+    """Approve a draft Voice Profile, or rebind current to an already-approved one.
+
+    Approved profile *contents* stay immutable. The character's
+    ``active_voice_profile_id`` is the mutable current/default pointer.
+    """
+    require_owned_profile(db, project_id, character_id)
+    vp = require_voice_for_character(db, project_id, character_id, voice_id)
     now = _now()
-    vp.status = "APPROVED"
-    vp.approval_status = "approved"
-    vp.approved_at = now
-    vp.updated_at = now
+    already_approved = str(vp.approval_status or "").lower() == "approved"
+    if not already_approved:
+        vp.status = "APPROVED"
+        vp.approval_status = "approved"
+        vp.approved_at = now
+        vp.updated_at = now
     profile = db.get(CharacterProfileRow, character_id)
     if profile:
         profile.active_voice_profile_id = voice_id
         profile.updated_at = now
     db.commit()
-    return voice_to_dict(vp)
+    return voice_to_dict(vp, character_name=(profile.name if profile else ""))
 
 
 def prompt_hints(db: Session, project_id: str, character_id: str, *, shot_kind: str = "closeup_front") -> dict[str, Any]:
@@ -1771,7 +2314,13 @@ def prompt_hints(db: Session, project_id: str, character_id: str, *, shot_kind: 
     }
 
 
-def delete_profile(db: Session, project_id: str, character_id: str) -> dict[str, Any]:
+def delete_profile(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    *,
+    confirm_cross_project: bool = False,
+) -> dict[str, Any]:
     """Permanently delete a character profile and all owned child records.
 
     This deletes ONLY character-owned rows from the character_identity schema.
@@ -1788,6 +2337,21 @@ def delete_profile(db: Session, project_id: str, character_id: str) -> dict[str,
     name_key = (row.name or "").strip().lower()
     if slug == "korri" or name_key == "korri":
         raise _err("PROTECTED_CHARACTER", "Korri cannot be deleted.", 409)
+
+    from ..creator_scope.contract import ENTITY_CHARACTER, CreatorScopeError
+    from ..creator_scope.service import delete_scope, mark_entity_deleted, require_delete_safety
+
+    try:
+        require_delete_safety(
+            db,
+            entity_type=ENTITY_CHARACTER,
+            entity_id=character_id,
+            owning_project_id=project_id,
+            is_global=_character_is_global(row),
+            confirm_cross_project=confirm_cross_project,
+        )
+    except CreatorScopeError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.as_detail()) from exc
 
     name = row.name
 
@@ -1810,14 +2374,12 @@ def delete_profile(db: Session, project_id: str, character_id: str) -> dict[str,
         from ..scene_references.models import SceneReferenceBinding
 
         now_dt = datetime.now(timezone.utc)
-        for binding in (
-            db.query(SceneReferenceBinding)
-            .filter(
-                SceneReferenceBinding.project_id == project_id,
-                SceneReferenceBinding.identity_id == character_id,
-            )
-            .all()
-        ):
+        bind_q = db.query(SceneReferenceBinding).filter(
+            SceneReferenceBinding.identity_id == character_id,
+        )
+        if not _character_is_global(row):
+            bind_q = bind_q.filter(SceneReferenceBinding.project_id == project_id)
+        for binding in bind_q.all():
             binding.identity_id = None
             binding.enabled = False
             if getattr(binding, "deleted_at", None) is None:
@@ -1862,8 +2424,15 @@ def delete_profile(db: Session, project_id: str, character_id: str) -> dict[str,
         CharacterVersionRow.character_profile_id == character_id
     ).delete(synchronize_session=False)
 
+    mark_entity_deleted(
+        db,
+        entity_type=ENTITY_CHARACTER,
+        entity_id=character_id,
+        owning_project_id=project_id,
+    )
     db.delete(row)
     db.commit()
+    delete_scope(db, entity_type=ENTITY_CHARACTER, entity_id=character_id)
 
     try:
         from ..codirector.conversation.project_cache import invalidate_cache_sections

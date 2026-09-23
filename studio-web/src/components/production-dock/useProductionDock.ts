@@ -14,6 +14,8 @@ import type {
   UserGlobalPreferences,
 } from "../../modelRegistry/contracts";
 import { applyTheme, watchSystemTheme } from "../../theme/applyTheme";
+import { sectionsFromProductionControlModels } from "../../modelRegistry/filterByModality";
+import { formatAudioDockPillLabel } from "./dockLabels";
 
 type DockState = {
   status: ProductionControlStatus | null;
@@ -116,21 +118,16 @@ export function useProductionDock() {
           modalities.map(async (modality) => {
             try {
               const list = await api.productionControlModels(modality);
-              const local = list.sections?.local ?? (list.models ?? []).filter((m) => m.locality === "local");
-              const apiModels = list.sections?.api ?? [];
-              const apiMeta: ApiModelsSectionMeta = {
+              const sections = sectionsFromProductionControlModels(list, modality);
+              const apiMeta: ApiModelsSectionMeta = sections.apiMeta ?? {
                 activeProviderId: list.api?.activeProviderId,
                 emptyReason: list.api?.emptyReason,
                 emptyMessage: list.api?.emptyMessage,
                 summary: list.api?.summary,
                 updatedAt: list.api?.updatedAt,
               };
-              const sections: ModalityModelSections = {
-                local,
-                api: apiModels,
-                apiMeta,
-              };
-              return [modality, list.models ?? list, sections, apiMeta] as const;
+              if (!sections.apiMeta) sections.apiMeta = apiMeta;
+              return [modality, [...sections.local, ...sections.api], sections, apiMeta] as const;
             } catch {
               return [
                 modality,
@@ -278,6 +275,11 @@ export function useProductionDock() {
             : key === "imageRouting"
               ? state.preferences?.imageRouting
               : state.preferences?.audioRouting;
+      const section = state.sections[modality];
+      const known =
+        [...(section?.local ?? []), ...(section?.api ?? []), ...(state.models[modality] ?? [])].find(
+          (m) => m.id === modelId,
+        ) ?? null;
       const patch: Partial<UserGlobalPreferences> = {
         [key]: {
           modality,
@@ -288,6 +290,24 @@ export function useProductionDock() {
           allowFallback: current?.allowFallback ?? false,
         },
       };
+      // Optimistic pill update — audio must leave ACE-Step as soon as ElevenLabs/API is chosen.
+      if (known || modality === "audio") {
+        const optimisticLabel =
+          modality === "audio"
+            ? formatAudioDockPillLabel(known, known?.label || modelId)
+            : known?.label || modelId;
+        setState((s) => ({
+          ...s,
+          resolved: {
+            ...s.resolved,
+            [modality]: {
+              ...(s.resolved[modality] ?? ({} as ResolvedSelection)),
+              activeModelId: modelId,
+              activeLabel: optimisticLabel,
+            } as ResolvedSelection,
+          },
+        }));
+      }
       await patchPreferences(patch);
       if (projectId) {
         const projectPatch: Record<string, string> = {};
@@ -300,13 +320,28 @@ export function useProductionDock() {
         }
       }
       const resolved = await api.productionControlResolve({ modality, projectId: projectId ?? undefined });
+      const finalResolved =
+        modality === "audio"
+          ? {
+              ...resolved,
+              activeLabel: formatAudioDockPillLabel(
+                {
+                  id: resolved.activeModelId ?? modelId,
+                  label: resolved.activeLabel,
+                  locality: known?.locality,
+                  providerId: (known as { providerId?: string } | null)?.providerId,
+                },
+                resolved.activeLabel,
+              ),
+            }
+          : resolved;
       setState((s) => ({
         ...s,
-        resolved: { ...s.resolved, [modality]: resolved },
+        resolved: { ...s.resolved, [modality]: finalResolved },
       }));
       scheduleAutoCollapse();
     },
-    [patchPreferences, projectId, scheduleAutoCollapse, state.preferences],
+    [patchPreferences, projectId, scheduleAutoCollapse, state.preferences, state.sections, state.models],
   );
 
   const setRuntimeFlags = useCallback(
@@ -371,13 +406,20 @@ export function useProductionDock() {
       state.resolved[modality]?.activeLabel ||
       state.status?.modalities?.[modality]?.activeLabel ||
       modality.toUpperCase();
+    // ORDER20 NO-GO: never expose ACE-Step/model chrome via activeLabels.audio.
+    // Footer Audio pill binds audioStudioProvider in ProductionControlDock.
+    const audioModelId = state.resolved.audio?.activeModelId || state.status?.modalities?.audio?.activeModelId;
+    const audioKnown =
+      [...(state.sections.audio?.local ?? []), ...(state.sections.audio?.api ?? []), ...(state.models.audio ?? [])].find(
+        (m) => m.id === audioModelId,
+      ) ?? null;
     return {
       llm: pick("llm"),
       video: pick("video"),
       image: pick("image"),
-      audio: pick("audio"),
+      audio: formatAudioDockPillLabel(audioKnown, "Local"),
     };
-  }, [state.resolved, state.status?.modalities]);
+  }, [state.resolved, state.status?.modalities, state.sections.audio, state.models.audio]);
 
   return {
     projectId,

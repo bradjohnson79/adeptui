@@ -1,4 +1,4 @@
-"""Unified MAGI finishing render — edit → overlays → color → audio → composite → late upscale → encode."""
+"""Unified MAGI finishing render (finishing.audio is sole mix authority for this path) — edit → overlays → color → audio → composite → late upscale → encode."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from ..editor_mix import MixStem, probe_has_audio
 from ..generation_tools.lineage import register_derived_asset
 from . import jobs as magi_jobs
 from .color_grading import COLOR_PRESETS, apply_color_grade, compile_filter_string
+from .authority import finishing_audio_labels
 from .finishing import clip_grade, finishing_of
 from .media import cleanup_dir, disk_preflight, new_temp_dir, probe_media, run_ffmpeg
 from .sequence.store import get_sequence
@@ -125,7 +126,8 @@ def run_final_render_job(db: Session, job: Job) -> dict[str, Any]:
 
         current = edit_path
         if params.get("includeOverlays", True):
-            overlaid = _maybe_overlay(db, job.project_id, current, work / "overlay.mp4")
+            fps = max(int(sequence.get("frameRate") or 24), 1)
+            overlaid = _maybe_overlay(db, job.project_id, current, work / "overlay.mp4", fps=fps)
             if overlaid:
                 current = overlaid
 
@@ -210,7 +212,13 @@ def run_final_render_job(db: Session, job: Job) -> dict[str, Any]:
         db.commit()
         from .finishing import merge_finishing
 
-        merge_finishing(job.project_id, {"render": {"lastJobId": job.id, "profile": profile, "assetId": asset.id}})
+        merge_finishing(
+            job.project_id,
+            {
+                "visualResultAssetId": asset.id,
+                "render": {"lastJobId": job.id, "profile": profile, "assetId": asset.id},
+            },
+        )
         return {
             "ok": True,
             "assetId": asset.id,
@@ -294,13 +302,226 @@ def _build_edit(
     return dest
 
 
-def _maybe_overlay(db: Session, project_id: str, video: Path, dest: Path) -> Path | None:
-    """Skip video overlay burn unless a still composition can be rendered safely.
+def _count_overlay_elements(composition: dict[str, Any]) -> int:
+    """Count burnable overlay elements (text/vector/image/group children)."""
 
-    The Pillow overlay path is image-first. A black full-canvas fallback would
-    hide the edit, so this stage is omitted rather than faked.
+    def walk(els: list[Any]) -> int:
+        n = 0
+        for el in els or []:
+            if not isinstance(el, dict) or el.get("visible") is False:
+                continue
+            t = el.get("type")
+            if t == "group":
+                n += walk(list(el.get("children") or []))
+            elif t in {"text", "vector", "image"}:
+                n += 1
+        return n
+
+    return walk(list(composition.get("overlays") or []))
+
+
+def _overlay_has_fade(el: dict[str, Any]) -> bool:
+    """Return True if this element (or any group child) requests a fade."""
+    if not isinstance(el, dict):
+        return False
+    if el.get("animationPreset") == "fade":
+        return True
+    if el.get("type") == "group":
+        return any(_overlay_has_fade(c) for c in el.get("children") or [])
+    return False
+
+
+def _overlay_paint_key(el: dict[str, Any]) -> tuple[int, int]:
+    """Combined Objects order: (objectsTrack, zIndex). Objects 2 paints above Objects 1."""
+    slot = el.get("objectsTrack") if isinstance(el, dict) else 1
+    try:
+        slot_i = int(slot or 1)
+    except (TypeError, ValueError):
+        slot_i = 1
+    if slot_i not in (1, 2):
+        slot_i = 1
+    try:
+        z = int((el or {}).get("zIndex") or 0)
+    except (TypeError, ValueError):
+        z = 0
+    return (slot_i, z)
+
+
+def _maybe_overlay(db: Session, project_id: str, video: Path, dest: Path, *, fps: int = 24) -> Path | None:
+    """Burn project overlay compositions into the edit video, or honest no-op/refuse.
+
+    - No compositions / empty overlays ? return None (nothing to burn).
+    - Overlays present ? Render each top-level overlay as a timed PNG and FFmpeg
+      overlay it with enable='between(t,start,end)'.
+    - Groups are burned as a single layer (children are not split).
+    - Combined order (objectsTrack, zIndex) is preserved. Viewer guides are never burned.
+    - Burn failure with overlays present ? raise (never silent skip while docs/UI
+      claim an overlays stage).
     """
-    return None
+    from PIL import Image
+
+    from .composition.render import render_composition_to_png
+    from .overlays import store as overlay_store
+
+    comps: list[dict[str, Any]] = []
+    for item in overlay_store.list_compositions(project_id):
+        cid = item.get("compositionId")
+        if not cid:
+            continue
+        full = overlay_store.get_composition(project_id, str(cid))
+        if full and _count_overlay_elements(full) > 0:
+            comps.append(full)
+
+    if not comps:
+        return None
+
+    # Collect top-level overlays across all project compositions, sorted by zIndex.
+    top_overlays: list[tuple[int, int, dict[str, Any]]] = []
+    for comp in comps:
+        cw = int(comp.get("canvasWidth") or 1920)
+        ch = int(comp.get("canvasHeight") or 1080)
+        for el in comp.get("overlays") or []:
+            if isinstance(el, dict) and el.get("visible") is not False:
+                top_overlays.append((cw, ch, el))
+    if not top_overlays:
+        return None
+    top_overlays.sort(key=lambda item: _overlay_paint_key(item[2]))
+
+    probe = probe_media(video)
+    width = int(probe.get("width") or 0) or int(comps[0].get("canvasWidth") or 1920)
+    height = int(probe.get("height") or 0) or int(comps[0].get("canvasHeight") or 1080)
+    if width < 2 or height < 2:
+        raise RuntimeError(
+            "MAGI final render cannot burn overlays: edit video has invalid dimensions."
+        )
+    duration = float(probe.get("duration") or 0.0)
+    frames = int(probe.get("frames") or 0)
+    if duration <= 0 and frames > 0 and fps > 0:
+        duration = frames / fps
+    if duration <= 0:
+        duration = 60.0
+
+    # Resolve image asset paths for render_composition_to_png.
+    asset_paths: dict[str, str] = {}
+
+    def _collect_image_assets(els: list[Any]) -> None:
+        for child in els:
+            if not isinstance(child, dict):
+                continue
+            if child.get("type") == "image" and child.get("assetId"):
+                p = _asset_path(db, project_id, child.get("assetId"))
+                if p:
+                    asset_paths[str(child["assetId"])] = str(p)
+            if child.get("type") == "group":
+                _collect_image_assets(child.get("children") or [])
+
+    for _cw, _ch, el in top_overlays:
+        _collect_image_assets([el])
+
+    work = dest.parent
+    try:
+        inputs: list[str] = ["-i", str(video)]
+        for index, (_cw, _ch, el) in enumerate(top_overlays):
+            render_comp = {
+                "schemaVersion": 1,
+                "compositionId": f"burn_{index:03d}",
+                "projectId": project_id,
+                "sourceAssetId": None,
+                "canvasWidth": width,
+                "canvasHeight": height,
+                "designCanvasWidth": _cw,
+                "designCanvasHeight": _ch,
+                "overlays": [el],
+                "safeAreaEnabled": True,
+            }
+            part_path = work / f"overlay_{index:03d}.png"
+            render_composition_to_png(
+                source_image_path=None,
+                composition=render_comp,
+                out_path=part_path,
+                asset_paths=asset_paths,
+            )
+            # A still PNG is t=0 only. fade=st=START would keep it fully
+            # transparent for the whole shot. Loop faded plates so timestamps exist.
+            if _overlay_has_fade(el):
+                inputs.extend(
+                    [
+                        "-loop",
+                        "1",
+                        "-framerate",
+                        str(max(int(fps), 1)),
+                        "-t",
+                        f"{duration:.3f}",
+                        "-i",
+                        str(part_path),
+                    ]
+                )
+            else:
+                inputs.extend(["-i", str(part_path)])
+
+        filters: list[str] = []
+        current_label = "0:v"
+        for index, (_cw, _ch, el) in enumerate(top_overlays):
+            input_label = f"{index + 1}:v"
+            start_frame = el.get("startFrame")
+            end_frame = el.get("endFrame")
+            start_t = 0.0
+            end_t = duration
+            enable_expr = ""
+            if start_frame is not None or end_frame is not None:
+                start_t = (float(start_frame) if start_frame is not None else 0.0) / fps
+                end_t = (float(end_frame) if end_frame is not None else (frames or int(duration * fps))) / fps
+                start_t = max(0.0, start_t)
+                end_t = min(end_t, duration)
+                enable_expr = f":enable='between(t\\,{start_t:.3f}\\,{end_t:.3f})'"
+
+            if _overlay_has_fade(el):
+                fade_d = min(0.35, max(0.0, (end_t - start_t) / 2))
+                fade_out_st = max(start_t, end_t - fade_d)
+                faded_label = f"f{index}"
+                filters.append(
+                    f"[{input_label}]format=rgba,"
+                    f"fade=t=in:st={start_t:.3f}:d={fade_d:.3f}:alpha=1,"
+                    f"fade=t=out:st={fade_out_st:.3f}:d={fade_d:.3f}:alpha=1"
+                    f"[{faded_label}]"
+                )
+                input_label = faded_label
+
+            is_last = index == len(top_overlays) - 1
+            out_label = "vout" if is_last else f"v{index}"
+            filters.append(
+                f"[{current_label}][{input_label}]overlay=0:0:format=auto{enable_expr}[{out_label}]"
+            )
+            current_label = out_label
+
+        audio_args = ["-c:a", "copy"] if probe_has_audio(video) else ["-an"]
+        maps = ["-map", f"[{current_label}]"]
+        if probe_has_audio(video):
+            maps = ["-map", "0:a?"] + maps
+        run_ffmpeg(
+            [
+                *inputs,
+                "-filter_complex",
+                ";".join(filters),
+                *maps,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-pix_fmt",
+                "yuv420p",
+                *audio_args,
+                str(dest),
+            ]
+        )
+        if not dest.is_file():
+            raise RuntimeError("Overlay burn produced no output file.")
+        return dest
+    except Exception as exc:
+        raise RuntimeError(
+            "MAGI final render cannot burn overlays into the video. "
+            f"{exc}. Fix the overlay composition or set includeOverlays=false."
+        ) from exc
 
 
 def _mix_audio(
@@ -311,6 +532,11 @@ def _mix_audio(
     video: Path,
     dest: Path,
 ) -> tuple[Path, dict[str, Any]]:
+    """Mix MAGI finishing.audio stems only.
+
+    Authority: sequence.json finishing.audio (musicAssetId/sfxAssetId).
+    Does NOT read Audio Studio mix.json or legacy editor tracks.
+    """
     audio_state = finishing.get("audio") if isinstance(finishing.get("audio"), dict) else {}
     stems: list[tuple[str, Path, float]] = []
     owner = project_id or sequence.get("projectId") or ""
@@ -324,7 +550,7 @@ def _mix_audio(
     # already represented by finishing.music/sfx and must not be stacked at 1.0.
 
     if not stems:
-        return video, {"mixed": False, "stems": []}
+        return video, {"mixed": False, "stems": [], **finishing_audio_labels()}
 
     inputs = ["-i", str(video)]
     for _role, path, _gain in stems:
@@ -356,9 +582,11 @@ def _mix_audio(
             str(dest),
         ]
     )
-    return dest, {
+    meta = {
         "mixed": True,
         "stems": [{"role": role, "gain": gain} for role, _path, gain in stems],
         "musicAssetId": audio_state.get("musicAssetId"),
         "sfxAssetId": audio_state.get("sfxAssetId"),
+        **finishing_audio_labels(),
     }
+    return dest, meta

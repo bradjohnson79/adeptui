@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 
 HOSTED_ORDER = ["kie.ai", "wavespeed.ai", "fal.ai"]
+
+_STATUS_TTL_SEC = 45.0
+_STATUS_LOCK = threading.Lock()
+_STATUS_CACHE: tuple[float, dict[str, Any]] | None = None
+
+
+def clear_runtime_status_cache() -> None:
+    global _STATUS_CACHE
+    with _STATUS_LOCK:
+        _STATUS_CACHE = None
 
 
 def _probe_sandbox(adapter_cls_name: str, module_path: str, runtime: str, registry_id: str) -> dict[str, Any]:
@@ -59,7 +71,12 @@ def _probe_sandbox(adapter_cls_name: str, module_path: str, runtime: str, regist
     return row
 
 
-def local_runtime_status() -> dict[str, Any]:
+def local_runtime_status(*, refresh: bool = False) -> dict[str, Any]:
+    global _STATUS_CACHE
+    now = time.monotonic()
+    with _STATUS_LOCK:
+        if not refresh and _STATUS_CACHE and (now - _STATUS_CACHE[0]) < _STATUS_TTL_SEC:
+            return _STATUS_CACHE[1]
     ace = _probe_sandbox(
         "AceStepSandboxAdapter",
         "app.codirector.m210b.adapters.ace_step",
@@ -72,7 +89,10 @@ def local_runtime_status() -> dict[str, Any]:
         "MMAudio",
         "m2101-sfx-031",
     )
-    return {"ACE-Step": ace, "MMAudio": mm}
+    row = {"ACE-Step": ace, "MMAudio": mm}
+    with _STATUS_LOCK:
+        _STATUS_CACHE = (time.monotonic(), row)
+    return row
 
 
 def hosted_audio_status() -> list[dict[str, Any]]:

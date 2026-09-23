@@ -1,3 +1,5 @@
+import { isSpatialMapEnabled } from "../../core/featureFlags";
+
 export type ContentTab =
   | "wiki"
   | "notes"
@@ -15,9 +17,11 @@ export type ContentTab =
   | "story"
   | "script"
   | "characters"
+  | "voice_creator"
   | "prop_creator"
   | "spatial_map"
-  | "scene_creator";
+  | "scene_creator"
+  | "timeline";
 
 export type NavTarget =
   | { kind: "content"; tab: ContentTab }
@@ -43,18 +47,28 @@ export type ContentNavItem =
       children: { id: ContentTab; label: string }[];
     };
 
+/** Programmatic open for surfaces no longer in the creator nav (Approvals, Plans, …). */
+export const OPEN_CONTENT_TAB_EVENT = "adept:open-codirector-content-tab";
+
 /** Creator-facing content navigation — Four Pillars Project Building. */
-export const CONTENT_NAV: ContentNavItem[] = [
+const CONTENT_NAV_ALL: ContentNavItem[] = [
   { kind: "tab", id: "wiki", label: "Wiki" },
   { kind: "tab", id: "notes", label: "Notes" },
   { kind: "tab", id: "story", label: "Story" },
   { kind: "tab", id: "scriptwriter", label: "Script Writer" },
   { kind: "tab", id: "characters", label: "Character Creator" },
+  { kind: "tab", id: "voice_creator", label: "Voice Creator" },
   { kind: "tab", id: "prop_creator", label: "Prop Creator" },
   { kind: "tab", id: "spatial_map", label: "Spatial Map" },
-  { kind: "tab", id: "scene_creator", label: "Scene Creator" },
+  { kind: "tab", id: "scene_creator", label: "Environment Creator" },
+  { kind: "tab", id: "timeline", label: "Timeline" },
   { kind: "tab", id: "library", label: "Library" },
 ];
+
+/** Creator-facing content navigation — Spatial Map filtered when shelved (v1.1). */
+export const CONTENT_NAV: ContentNavItem[] = CONTENT_NAV_ALL.filter(
+  (item) => item.kind !== "tab" || item.id !== "spatial_map" || isSpatialMapEnabled(),
+);
 
 export function buildNavEntries(projectId: string | undefined): NavEntry[] {
   const pid = projectId || "";

@@ -16,7 +16,7 @@ import {
   type ProbeOutcome,
 } from "./hostedProviderSetupCopy";
 
-type ProviderId = "kie" | "wavespeed" | "fal";
+type ProviderId = "kie" | "wavespeed" | "fal" | "elevenlabs";
 
 type ProviderCardData = {
   providerId: string;
@@ -306,7 +306,7 @@ export function HostedProvidersSetupPanel({
         <div>
           <h2 id="api-key-providers-heading">{API_KEY_PROVIDERS_CATEGORY}</h2>
           <p>
-            Add Kie.ai, fal.ai, and WaveSpeed.ai API keys for Production Dock API mode. Keys stay encrypted on
+            Add Kie.ai, fal.ai, WaveSpeed.ai, and ElevenLabs API keys. ElevenLabs is for Voice Studio TTS + Audio Studio SFX (BYOK). Keys stay encrypted on
             this machine — React never calls providers directly.
           </p>
         </div>
@@ -435,7 +435,7 @@ export function HostedProvidersSetupPanel({
             className="linkish"
             data-testid="setup-retry-discovery"
             onClick={() => {
-              const pid = (["kie", "wavespeed", "fal"].includes(String(discoverySummary.providerId))
+              const pid = (["kie", "wavespeed", "fal", "elevenlabs"].includes(String(discoverySummary.providerId))
                 ? discoverySummary.providerId
                 : preferred !== "automatic"
                   ? preferred

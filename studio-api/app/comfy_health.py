@@ -20,10 +20,40 @@ an import cycle.
 from __future__ import annotations
 
 import asyncio
+import socket
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from .config import settings
+
+_TRANSIENT_ERROR_MARKERS = (
+    "timed out",
+    "timeout",
+    "temporarily",
+    "reset",
+    "aborted",
+    "broken pipe",
+    "disconnected",
+    "winerror 10054",
+    "winerror 10053",
+    "winerror 10060",
+    "remote protocol",
+    "network is unreachable",
+    "connecterror",
+    "connecttimeout",
+    "readtimeout",
+    "writetimeout",
+    "pooltimeout",
+)
+_REFUSED_MARKERS = (
+    "connection refused",
+    "actively refused",
+    "winerror 10061",
+    "errno 111",
+    "errno 61",
+    "connectionrefusederror",
+)
 
 DEPENDENCY_UNAVAILABLE = "DEPENDENCY_UNAVAILABLE"
 DEPENDENCY_DEGRADED = "DEPENDENCY_DEGRADED"
@@ -31,13 +61,10 @@ MODEL_MISSING = "MODEL_MISSING"
 
 #: Catalogued components that carry local generation weights, in priority order.
 MODEL_COMPONENT_IDS: tuple[str, ...] = (
-    "ltx_checkpoint",
     "ltx_2_5_checkpoint",
     "ltx_2_5_text_encoder",
     "ltx_2_5_video_vae",
     "ltx_2_5_audio_vae",
-    "wan_models",
-    "ltx23_ic_lora_ingredients",
     "zimage_models",
     "krea2_models",
 )
@@ -124,18 +151,16 @@ def _component_filename_and_path(component_id: str, definition: Any) -> dict[str
     Used so the readiness contract can surface the exact missing dependency file
     (e.g. `gemma4-12b-...safetensors` under `models/text_encoders/`) without the
     frontend inferring from counts. Returns None when no static mapping is known
-    (e.g. composite components like `wan_models`).
+    (e.g. composite still-image components like `zimage_models`).
     """
     from .config import settings
 
     mapping = {
-        "ltx_checkpoint": (settings.ltx_checkpoint, ("checkpoints", "diffusion_models")),
         "ltx_2_5_checkpoint": (settings.ltx_2_5_checkpoint, ("diffusion_models", "checkpoints")),
         "ltx_2_5_text_encoder": (settings.ltx_2_5_text_encoder, ("text_encoders",)),
         "ltx_2_5_video_vae": (settings.ltx_2_5_video_vae, ("vae",)),
         "ltx_2_5_audio_vae": (settings.ltx_2_5_audio_vae, ("vae",)),
         "ltx_2_5_spatial_upscaler": (settings.ltx_2_5_spatial_upscaler, ("upscale_models",)),
-        "ltx_text_encoder": (settings.ltx_text_encoder, ("text_encoders",)),
     }
     spec = mapping.get(component_id)
     if not spec:
@@ -239,6 +264,160 @@ async def comfy_health(*, include_nodes: bool = True) -> dict[str, Any]:
             + ", ".join(missing_required)
             + "."
         )
+    payload["checkedAt"] = _now()
+    return payload
+
+
+def classify_comfy_probe_error(exc: BaseException) -> str:
+    """Classify a probe exception: timeout | transient | refused | other.
+
+    Connection refused is true-death candidate. Timeouts and reset/abort
+    ConnectErrors are transient (busy inference and /free included).
+    """
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    names = " ".join(type(item).__name__.lower() for item in chain)
+    texts = " ".join(str(item).lower() for item in chain)
+    blob = f"{names} {texts}"
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or "timeout" in names or "timed out" in texts:
+        return "timeout"
+    if any(marker in blob for marker in _REFUSED_MARKERS) or any(
+        isinstance(item, ConnectionRefusedError) for item in chain
+    ):
+        return "refused"
+    if any(marker in blob for marker in _TRANSIENT_ERROR_MARKERS):
+        return "transient"
+    return "other"
+
+
+def comfy_port_listening(url: str | None = None) -> bool:
+    """True when something accepts TCP on the configured Comfy host:port."""
+    raw = str(url or settings.comfy_url or "http://127.0.0.1:8188").rstrip("/")
+    host = "127.0.0.1"
+    port = 8188
+    try:
+        parsed = urlparse(raw)
+        host = parsed.hostname or host
+        port = int(parsed.port or 8188)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
+def _apply_stats(payload: dict[str, Any], stats: dict[str, Any]) -> dict[str, Any]:
+    payload["reachable"] = True
+    payload["timeout"] = False
+    payload["trueDeath"] = False
+    payload["version"] = _version(stats)
+    payload["devices"] = _devices(stats)
+    payload["gpuAvailable"] = bool(payload["devices"])
+    payload["status"] = "ready"
+    payload["message"] = "ComfyUI is reachable and GPU is available."
+    payload["checkedAt"] = _now()
+    return payload
+
+
+async def _system_stats_once(timeout_sec: float) -> dict[str, Any]:
+    from .comfy_client import comfy
+
+    stats = await asyncio.wait_for(comfy.health(), timeout=timeout_sec)
+    if not isinstance(stats, dict):
+        raise RuntimeError("ComfyUI /system_stats returned an unexpected payload.")
+    return stats
+
+
+async def comfy_health_fast(
+    *, timeout_sec: float = 4.0
+) -> dict[str, Any]:
+    """Fast ComfyUI reachability check (target 3s).
+
+    Checks only that /system_stats responds 200 with GPU info and version.
+    Unlike comfy_health, this does NOT inspect the node catalogue or
+    verify model components on disk. Use the deep probe for those.
+
+    Transient connect/timeout errors retry once. Busy inference and /free
+    slowness are timeouts, not death. True death is connection refused
+    with no TCP listener on :8188.
+    """
+    payload: dict[str, Any] = {
+        "reachable": False,
+        "status": "unreachable",
+        "version": None,
+        "devices": [],
+        "gpuAvailable": False,
+        "message": "",
+        "checkedAt": _now(),
+        "attempts": 0,
+        "transientRetry": False,
+        "listenerPresent": None,
+        "errorKind": None,
+        "trueDeath": False,
+        "timeout": False,
+        "connectionRefused": False,
+        "confirmedAfterRetry": False,
+    }
+
+    last_kind: str | None = None
+    stats: dict[str, Any] | None = None
+    retry_timeout = min(float(timeout_sec), 3.0)
+    for attempt in range(1, 3):
+        payload["attempts"] = attempt
+        this_timeout = float(timeout_sec) if attempt == 1 else retry_timeout
+        try:
+            stats = await _system_stats_once(this_timeout)
+            last_kind = None
+            break
+        except asyncio.TimeoutError:
+            last_kind = "timeout"
+        except Exception as exc:  # noqa: BLE001
+            last_kind = classify_comfy_probe_error(exc)
+        if attempt == 1 and last_kind in {"timeout", "transient"}:
+            payload["transientRetry"] = True
+            continue
+        break
+
+    if stats is not None:
+        payload["errorKind"] = None
+        payload["listenerPresent"] = True
+        return _apply_stats(payload, stats)
+
+    listener = comfy_port_listening()
+    payload["listenerPresent"] = listener
+    payload["errorKind"] = last_kind
+    payload["connectionRefused"] = last_kind == "refused"
+    payload["trueDeath"] = last_kind == "refused" and not listener
+
+    # Confirm /system_stats only after a cheap connect miss. A full timeout
+    # retry already spent the budget; busy inference / /free stay timed_out.
+    if not payload["trueDeath"] and last_kind != "timeout":
+        try:
+            stats = await _system_stats_once(retry_timeout)
+            payload["confirmedAfterRetry"] = True
+            payload["listenerPresent"] = True
+            return _apply_stats(payload, stats)
+        except Exception:  # noqa: BLE001
+            payload["confirmedAfterRetry"] = False
+
+    if last_kind == "timeout" or (last_kind in {"transient", "other"} and listener):
+        payload["status"] = "timeout"
+        payload["timeout"] = True
+        payload["trueDeath"] = False
+        payload["message"] = f"ComfyUI timed out at {settings.comfy_url}."
+        payload["checkedAt"] = _now()
+        return payload
+
+    payload["status"] = "unreachable"
+    payload["timeout"] = False
+    payload["message"] = f"ComfyUI is not reachable at {settings.comfy_url}."
     payload["checkedAt"] = _now()
     return payload
 

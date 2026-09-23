@@ -9,6 +9,7 @@ Do not invent bindings for unmatched tokens. Do not replace authored prose.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -91,35 +92,46 @@ def load_project_prompt_name_index(db: Session | None, project_id: str | None) -
         return []
     try:
         from app.db import Scene
-        from app.director_timeline import parse_director_timeline
 
         extra: list[dict[str, Any]] = []
         seen: set[str] = set()
         scenes = db.query(Scene).filter(Scene.project_id == project_id).all()
+        from app.director_timeline_w46.migration import extract_master_from_director_dict
+
         for scene in scenes:
             raw = getattr(scene, "director_json", None)
             if not raw:
                 continue
-            tl = parse_director_timeline(raw, fallback_duration=5.0, fallback_prompt="")
-            for seg in tl.prompt_segments or []:
-                for row in dump_prompt_name_bindings(getattr(seg, "reference_name_bindings", None)):
-                    bid = row.get("binding_id") or ""
-                    name = row.get("prompt_name") or ""
-                    tag = row.get("tag") or ""
-                    key = f"{bid}:{_norm(name)}:{_norm(tag)}"
-                    if not bid or key in seen:
-                        continue
-                    seen.add(key)
-                    extra.append(
-                        {
-                            "id": bid,
-                            "alias": name,
-                            "asset_name": name,
-                            "display_token": tag,
-                            "reference_type": row.get("type") or "character",
-                            "media_kind": "entity" if row.get("type") == "character" else row.get("type"),
-                        }
+            try:
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                continue
+            master = extract_master_from_director_dict(parsed if isinstance(parsed, dict) else None)
+            if master is None:
+                continue
+            for batch in getattr(master, "batchBlocks", None) or []:
+                for seg in getattr(batch, "promptSegments", None) or []:
+                    bindings = getattr(seg, "referenceNameBindings", None) or getattr(
+                        seg, "reference_name_bindings", None
                     )
+                    for row in dump_prompt_name_bindings(bindings):
+                        bid = row.get("binding_id") or ""
+                        name = row.get("prompt_name") or ""
+                        tag = row.get("tag") or ""
+                        key = f"{bid}:{_norm(name)}:{_norm(tag)}"
+                        if not bid or key in seen:
+                            continue
+                        seen.add(key)
+                        extra.append(
+                            {
+                                "id": bid,
+                                "alias": name,
+                                "asset_name": name,
+                                "display_token": tag,
+                                "reference_type": row.get("type") or "character",
+                                "media_kind": "entity" if row.get("type") == "character" else row.get("type"),
+                            }
+                        )
         return extra
     except Exception:
         return []
@@ -307,21 +319,28 @@ def resolve_prompt_tokens_to_bindings(
 
 
 def hydrate_segment_prompt_tokens(
-    segment: PromptSegment,
+    segment: Any,
     catalog: list[dict[str, Any]],
     *,
     db: Session | None = None,
     project_id: str | None = None,
 ) -> bool:
-    """Fill empty/partial Prompt Name arrays from registered tokens in `text`. Returns True if changed."""
+    """Fill empty/partial Prompt Name arrays from registered tokens in `text`. Returns True if changed.
+
+    Works on both legacy PromptSegment (reference_name_bindings /
+    reference_binding_ids) and Master TimelinePromptSegment
+    (referenceNameBindings / referenceBindingIds).
+    """
+    names_attr = "referenceNameBindings" if hasattr(segment, "referenceNameBindings") else "reference_name_bindings"
+    ids_attr = "referenceBindingIds" if hasattr(segment, "referenceBindingIds") else "reference_binding_ids"
     existing = backfill_name_binding_identities(
-        getattr(segment, "reference_name_bindings", None),
+        getattr(segment, names_attr, None),
         db,
         project_id,
     )
     resolved = backfill_name_binding_identities(
         resolve_prompt_tokens_to_bindings(
-            segment.text,
+            getattr(segment, "text", "") or "",
             catalog,
             existing,
         ),
@@ -329,16 +348,16 @@ def hydrate_segment_prompt_tokens(
         project_id,
     )
     ids = binding_ids_from_name_bindings(resolved)
-    before_ids = list(segment.reference_binding_ids or [])
+    before_ids = list(getattr(segment, ids_attr, None) or [])
     for existing in before_ids:
         if existing and existing not in ids:
             ids.append(existing)
-    before_names = dump_prompt_name_bindings(getattr(segment, "reference_name_bindings", None))
+    before_names = dump_prompt_name_bindings(getattr(segment, names_attr, None))
     after_names = dump_prompt_name_bindings(resolved)
     if before_ids == ids and before_names == after_names:
         return False
-    segment.reference_name_bindings = resolved
-    segment.reference_binding_ids = ids
+    setattr(segment, names_attr, resolved)
+    setattr(segment, ids_attr, ids)
     return True
 
 
@@ -348,9 +367,17 @@ def hydrate_timeline_prompt_tokens(
     *,
     db: Session | None = None,
     project_id: str | None = None,
+    master: Any = None,
 ) -> bool:
+    """Hydrate @/#/% tokens on Master promptSegments (single store).
+
+    Master is required. The legacy Director adapter is never walked.
+    """
+    if master is None:
+        return False
     changed = False
-    for seg in timeline.prompt_segments or []:
-        if hydrate_segment_prompt_tokens(seg, catalog, db=db, project_id=project_id):
-            changed = True
+    for batch in getattr(master, "batchBlocks", None) or []:
+        for seg in getattr(batch, "promptSegments", None) or []:
+            if hydrate_segment_prompt_tokens(seg, catalog, db=db, project_id=project_id):
+                changed = True
     return changed

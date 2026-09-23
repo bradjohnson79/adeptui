@@ -516,8 +516,6 @@ def _compile_visual_prompt(
             view_instruction=v_instruction,
             extra_negative_constraints=extra_negative_constraints or [],
             full_body=role != "closeup_front",
-            role=role,
-            view=VIEW_ROLE_CANONICAL.get(role, ""),
         )
     return compile_character_image_prompt(
         _compiler_payload(profile),
@@ -2646,20 +2644,33 @@ def reconcile_generating_visual_sheet_packs(db: Session) -> int:
 
 
 def get_visual_sheet_pack(db: Session, project_id: str, character_id: str) -> dict[str, Any]:
-    service.get_profile(db, project_id, character_id)
-    data = _load_pack_raw(db, character_id)
+    empty = {"characterId": character_id, "status": "NOT_STARTED", "jobs": {}, "roleAssets": {}}
+    try:
+        service.get_profile(db, project_id, character_id)
+    except Exception:
+        return empty
+    try:
+        data = _load_pack_raw(db, character_id)
+    except Exception:
+        return empty
     if not data:
-        return {"characterId": character_id, "status": "NOT_STARTED", "jobs": {}, "roleAssets": {}}
-    healed = heal_pack_references(db, project_id, character_id)
-    if healed:
-        data = _load_pack_raw(db, character_id) or data
-        data["referencesHealed"] = healed
+        return empty
+    try:
+        healed = heal_pack_references(db, project_id, character_id)
+        if healed:
+            data = _load_pack_raw(db, character_id) or data
+            data["referencesHealed"] = healed
+    except Exception:
+        pass
     data["characterId"] = character_id
-    changed = recompute_visual_sheet_pack_from_jobs(db, data)
-    if hydrate_visual_sheet_layout(db, data):
-        changed = True
-    if changed:
-        _save_pack(db, project_id, character_id, data)
+    try:
+        changed = recompute_visual_sheet_pack_from_jobs(db, data)
+        if hydrate_visual_sheet_layout(db, data):
+            changed = True
+        if changed:
+            _save_pack(db, project_id, character_id, data)
+    except Exception:
+        data["hydrateDegraded"] = True
     return data
 
 
@@ -4744,6 +4755,10 @@ def _enqueue_txt2img(
     provider_kind: str = "local",
     hosted_model_id: str | None = None,
     sheet_layout: str | None = None,
+    steps: int | None = None,
+    cfg: float | None = None,
+    width: int | None = None,
+    height: int | None = None,
 ) -> Job:
     from ..storyboard_jobs import enqueue_imagegen_job
 
@@ -4760,8 +4775,8 @@ def _enqueue_txt2img(
     body: dict[str, Any] = {
         "prompt": prompt,
         "negative_prompt": negative_prompt or DEFAULT_NEGATIVE_PROMPT,
-        "width": 1024,
-        "height": 1024,
+        "width": int(width) if width else 1024,
+        "height": int(height) if height else 1024,
         "tag": tag,
         "model": model_family_preference,
         "modelFamilyPreference": model_family_preference,
@@ -4862,6 +4877,10 @@ def _enqueue_txt2img(
         body["denoise"] = denoise
     if seed is not None:
         body["seed"] = seed
+    if steps is not None:
+        body["steps"] = int(steps)
+    if cfg is not None:
+        body["cfg"] = float(cfg)
     if provider_kind == "api":
         hosted = hosted_model_id or model_family_preference
         body["source"] = "api"

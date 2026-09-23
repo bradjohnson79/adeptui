@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import type {
   VoicePerformanceCapabilities,
@@ -8,7 +8,6 @@ import type {
   VoicePerformanceEmotionSource,
   VoicePerformanceEmotionVector,
   VoicePerformanceEmotionVectorKey,
-  VoicePerformanceLipsyncResult,
   VoicePerformancePlan,
   VoicePerformanceRecord,
   VoicePerformanceRuntimeStatus,
@@ -178,11 +177,9 @@ export function VoicePerformanceStudio({
   const [approvedTakeId, setApprovedTakeId] = useState("");
   const [comparison, setComparison] = useState<VoicePerformanceComparison | null>(null);
   const [timelineResult, setTimelineResult] = useState<VoicePerformanceTimelinePlacement | null>(null);
-  const [lipsyncResult, setLipsyncResult] = useState<VoicePerformanceLipsyncResult | null>(null);
   const [busyAction, setBusyAction] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [timelineNeedsConfirm, setTimelineNeedsConfirm] = useState(false);
-  const [lipsyncNeedsConfirm, setLipsyncNeedsConfirm] = useState(false);
 
   const dialogueRef = useRef<HTMLElement | null>(null);
   const performanceRef = useRef<HTMLElement | null>(null);
@@ -197,6 +194,7 @@ export function VoicePerformanceStudio({
   const visibleTakes = useMemo(() => [...takes].sort(takeSort).slice(-4), [takes]);
   const activeRuntimeMessage = runtimeStatus?.message || capabilities?.message || "";
   const canGenerateTakes = hasApprovedVoiceIdentity && Boolean(capabilities?.ready);
+  const voiceProvider = useVoiceStudioProviderSource();
 
   const recordNeedsReplacement = useCallback(
     (existing: VoicePerformanceRecord | null) =>
@@ -241,8 +239,7 @@ export function VoicePerformanceStudio({
       setTakes([...(nextRecord.takes || [])].sort(takeSort));
       setApprovedTakeId(String(nextRecord.approvedTakeId || ""));
       setTimelineResult(null);
-      setLipsyncResult(null);
-    },
+          },
     [initialDialogue],
   );
 
@@ -515,7 +512,20 @@ export function VoicePerformanceStudio({
       onMsg("Voice Identity Required");
       return;
     }
-    if (!capabilities?.ready) {
+    if (voiceProvider.source === "elevenlabs") {
+      const health = voiceProvider.health || (await voiceProvider.refreshHealth());
+      if (!health?.configured) {
+        onMsg(health?.message || "API — ElevenLabs is unavailable. Configure fal, Kie, or WaveSpeed in Setup Wizard → Hosted Providers. Generation blocked — Local is not used as a silent fallback.");
+        return;
+      }
+      const fail = ["error", "fail", "failed", "unreachable", "offline"].some((s) =>
+        String(health.connectionStatus || "").toLowerCase().includes(s),
+      );
+      if (fail) {
+        onMsg(health.message || "API — ElevenLabs route failed. Generation blocked — Local is not used as a silent fallback.");
+        return;
+      }
+    } else if (!capabilities?.ready) {
       onMsg(capabilities?.message || "Voice Performance runtime is not ready yet.");
       return;
     }
@@ -538,6 +548,7 @@ export function VoicePerformanceStudio({
       await api.voicePerformanceM410.generateTakes(usableRecord.id, {
         count: takeCount,
         labels: generateTakeLabels(takeCount),
+        ...(voiceProvider.source === "elevenlabs" ? { preferredProvider: "elevenlabs" } : {}),
       });
       await loadTakes();
       setComparison(null);
@@ -589,7 +600,7 @@ export function VoicePerformanceStudio({
         setTakes([...(next.takes || [])].sort(takeSort));
         setApprovedTakeId(next.approvedTakeId || takeId);
         setRecord((current) => (current ? { ...current, approvedTakeId: next.approvedTakeId || takeId } : current));
-        onMsg("Take approved for Timeline and Lip Sync.");
+        onMsg("Take approved for Timeline.");
       } catch (error: any) {
         onMsg(error?.message || "Take could not be approved.");
       } finally {
@@ -627,32 +638,6 @@ export function VoicePerformanceStudio({
     }
   }, [onMsg, record?.id, timelineNeedsConfirm]);
 
-  const prepareLipsync = useCallback(async () => {
-    if (!record?.id) return;
-    setBusyAction("lipsync");
-    try {
-      const next = await api.voicePerformanceM410.prepareLipsync(record.id, {
-        confirm: lipsyncNeedsConfirm,
-        setSceneAudioAsset: true,
-      });
-      setLipsyncNeedsConfirm(false);
-      setLipsyncResult(next);
-      setRecord((current) =>
-        current ? { ...current, lipsyncLinkage: next.lipsyncLinkage || current.lipsyncLinkage } : current,
-      );
-      onMsg("Approved take prepared for Lip Sync.");
-    } catch (error: any) {
-      const code = String(error?.detail?.code || error?.detail?.error_code || error?.code || "");
-      if (code.toLowerCase().includes("confirm_required")) {
-        setLipsyncNeedsConfirm(true);
-        onMsg("This will replace an existing scene audio link. Press Prepare for Lip Sync again to continue.");
-      } else {
-        onMsg(error?.message || "Lip Sync preparation failed.");
-      }
-    } finally {
-      setBusyAction("");
-    }
-  }, [lipsyncNeedsConfirm, onMsg, record?.id]);
 
   return (
     <section className="panel voice-studio voice-performance-studio" data-testid="voice-performance-studio">
@@ -662,6 +647,16 @@ export function VoicePerformanceStudio({
           tip="Direct dialogue like a professional performance session: shape emotion, delivery, pacing, breath, emphasis, and subtext before generating takes."
           as="h3"
         />
+        <div style={{ margin: "0.5rem 0" }}>
+          <ProviderSourceSelector
+            id="voice-performance"
+            label="Provider"
+            source={voiceProvider.source}
+            onChange={voiceProvider.setSource}
+            health={voiceProvider.health}
+            healthBusy={voiceProvider.healthBusy}
+          />
+        </div>
         <div className="voice-performance-studio__meta">
           <p className="muted">
             {approvedVoiceIdentity
@@ -1084,7 +1079,7 @@ export function VoicePerformanceStudio({
             >
               <PanelHeading
                 title="Takes"
-                tip="Generate up to four takes, compare them side by side, approve one, then send it to Timeline or prepare it for Lip Sync."
+                tip="Generate up to four takes, compare them side by side, approve one, then send it to Timeline."
                 as="h4"
               />
 
@@ -1143,7 +1138,7 @@ export function VoicePerformanceStudio({
                         {take.durationMs ? ` · ${Math.round(take.durationMs / 10) / 100}s` : ""}
                       </span>
                     </div>
-                    {take.audioAssetId ? <audio controls src={api.assetUrl(take.audioAssetId)} /> : null}
+                    {take.audioAssetId ? <audio controls src={api.assetUrl(take.audioAssetId, undefined, projectId)} /> : null}
                     {take.errorMessage ? <p className="muted">{take.errorMessage}</p> : null}
                     <div className="voice-studio-actions">
                       <Button
@@ -1189,25 +1184,11 @@ export function VoicePerformanceStudio({
                 >
                   {timelineNeedsConfirm ? "Replace Existing Dialogue on Timeline" : "Send to Timeline"}
                 </Button>
-                <Button
-                  type="button"
-                  data-testid="vp-prepare-lipsync"
-                  disabled={!approvedTakeId}
-                  loading={busyAction === "lipsync"}
-                  onClick={() => void prepareLipsync()}
-                >
-                  {lipsyncNeedsConfirm ? "Confirm Lip Sync Replacement" : "Prepare for Lip Sync"}
-                </Button>
               </div>
 
               {timelineResult ? (
                 <p className="muted">
                   Timeline ready on track <code>{timelineResult.trackId}</code>.
-                </p>
-              ) : null}
-              {lipsyncResult ? (
-                <p className="muted">
-                  Lip Sync prepared for scene audio asset <code>{lipsyncResult.lipsyncLinkage.audioAssetId || "—"}</code>.
                 </p>
               ) : null}
             </aside>

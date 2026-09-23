@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .loader import split_front_matter
+
 ERS_KB_DIR = Path(__file__).resolve().parent / "environment-reference-sheet"
 ERS_SPEC_NAME = "ERS_SPEC.md"
 ERS_EXEMPLAR_NAMES = ("ERS_REFERENCE_01.png", "ERS_REFERENCE_02.png")
@@ -37,7 +39,9 @@ def load_ers_knowledgebase(*, root: Path | None = None) -> ERSKnowledgebase:
     """Load the on-disk ERS spec and list real exemplar files only."""
     kb_dir = Path(root) if root is not None else ERS_KB_DIR
     spec_path = kb_dir / ERS_SPEC_NAME
-    spec_text = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else ""
+    raw = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else ""
+    _meta, spec_text = split_front_matter(raw)
+    spec_text = spec_text.strip() or raw
     exemplars = tuple(
         path for name in ERS_EXEMPLAR_NAMES if (path := kb_dir / name).is_file()
     )

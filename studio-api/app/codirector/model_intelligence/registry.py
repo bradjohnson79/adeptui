@@ -23,8 +23,8 @@ BINDINGS: dict[str, ModelBinding] = {
     "z_image": ModelBinding(
         "z_image", "zimage", "comfy.local", ("generation.image.queue",), "image"
     ),
-    "ltx_2_3": ModelBinding(
-        "ltx_2_3", "ltx", "comfy.local", ("generation.video.queue",), "video"
+    "minimax_h3": ModelBinding(
+        "minimax_h3", "minimax-h3", "comfy.local", ("generation.video.queue",), "video"
     ),
     "ltx_2_5_full": ModelBinding(
         "ltx_2_5_full", "ltx", "comfy.local", ("generation.video.queue",), "video"
@@ -34,9 +34,6 @@ BINDINGS: dict[str, ModelBinding] = {
     ),
     "ltx_2_5_comfy": ModelBinding(
         "ltx_2_5_comfy", "ltx", "comfy.local", ("generation.video.queue",), "video"
-    ),
-    "wan_2_2": ModelBinding(
-        "wan_2_2", "wan", "comfy.local", ("generation.video.queue",), "video"
     ),
     "fal_seedance": ModelBinding(
         "fal_seedance", "fal_seedance", "fal.api", ("generation.video.queue",), "video"

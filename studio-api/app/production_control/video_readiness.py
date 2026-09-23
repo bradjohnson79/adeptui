@@ -36,8 +36,6 @@ TESTING_UNCERTIFIED = frozenset(
     {
         "ltx-2.5-full",
         "ltx-2.5-comfy",
-        "hunyuan-video-1.5-local",
-        "hunyuan-video-13b-local",
     }
 )
 
@@ -169,44 +167,6 @@ def _comfy_nodes() -> set[str]:
     return names
 
 
-def _wan_topology_ok() -> tuple[bool, str]:
-    try:
-        from ..config import settings
-        from ..video_runtime.certified_registry import get_workflow
-        from ..video_runtime.fingerprints import topology_hash
-        from ..workflows.wan_builder import build_wan_flf_workflow
-
-        leaf = get_workflow("wan.first_last_frame")
-        expected = leaf.fingerprints.topology_hash if leaf else None
-        if not expected:
-            return True, ""
-        graph = build_wan_flf_workflow(
-            high_noise=settings.wan_high_noise,
-            low_noise=settings.wan_low_noise,
-            vae_name=settings.wan_vae,
-            text_encoder=settings.wan_text_encoder,
-            positive="readiness probe",
-            negative="",
-            width=832,
-            height=480,
-            length=33,
-            fps=16,
-            seed=1,
-            start_image="start.png",
-            # Topology probe only — certified WAN is first/last frame, not start-only I2V.
-            end_image="end.png",
-        )
-        actual = topology_hash(graph)
-        if actual != expected:
-            return False, (
-                "Testing — certified WAN graph does not match the current builder "
-                "(will not mark Ready)"
-            )
-        return True, ""
-    except Exception as exc:
-        return False, f"Testing — WAN workflow could not be verified: {exc}"
-
-
 def _adept_h3_ref2v_weights_ok() -> tuple[bool, str]:
     """Adept Comfy :8188 must have the ref2va UNET and H3 CLIP/VAEs."""
     try:
@@ -264,11 +224,38 @@ def _minimax_weights_ok() -> tuple[bool, str]:
 
 
 def _route_a_listener_up() -> bool:
+    """True when something answers on :8192 (including stub8192 placeholders)."""
     try:
         with urllib.request.urlopen("http://127.0.0.1:8192/system_stats", timeout=3) as resp:
             return int(resp.status) == 200
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
         return False
+
+
+def _route_a_vram_resident() -> bool:
+    """True only when MiniMax Route A holds real GPU residency.
+
+    stub8192 answers /system_stats with comfyui_version=stub and devices=[] —
+    that must NOT block Desktop Comfy LTX / LTXVImgToVideo admission.
+    """
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8192/system_stats", timeout=3) as resp:
+            if int(resp.status) != 200:
+                return False
+            raw = resp.read().decode("utf-8", "replace")
+            data = json.loads(raw or "{}")
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    system = data.get("system") if isinstance(data.get("system"), dict) else {}
+    version = str(system.get("comfyui_version") or "").strip().lower()
+    if version == "stub" or version.startswith("stub"):
+        return False
+    devices = data.get("devices")
+    if not isinstance(devices, list) or not devices:
+        return False
+    return True
 
 
 def route_a_runtime_ready() -> bool:
@@ -311,6 +298,13 @@ def _adapter_registered(adapter_id: str | None) -> bool:
 
 def collect_video_facts(model_id: str, *, locality: str, estimated_vram_gb: float | None = None) -> VideoFacts:
     product = canonical_product_id(model_id) or str(model_id or "").strip()
+    if video_registry.is_retired_local_video(product) or video_registry.is_retired_local_video(model_id) or product == "optional-wan":
+        # Retired locals are not products — no probe, no cache, no NOT_INSTALLED row.
+        return VideoFacts(
+            product_id=product,
+            locality="hosted" if locality == "hosted" else "local",
+            details={"retired": True},
+        )
     now = time.monotonic()
     cached = _fact_cache.get(product)
     if cached and now - cached[0] < _FACT_TTL_SEC:
@@ -330,7 +324,7 @@ def collect_video_facts(model_id: str, *, locality: str, estimated_vram_gb: floa
         facts.credentials_ok = _secret_configured(secret)
         if not facts.credentials_ok:
             facts.credentials_reason = "Provider API Key Missing"
-        if product not in {"seedance-2.0", "seedance-2.5"}:
+        if product not in {"seedance-2.0", "seedance-2.0-mini", "seedance-2.5"}:
             facts.live_submit = False
 
     if product.startswith("minimax-h3"):
@@ -352,7 +346,7 @@ def collect_video_facts(model_id: str, *, locality: str, estimated_vram_gb: floa
         facts.checkpoint_ok, facts.checkpoint_reason = _adept_h3_ref2v_weights_ok()
         facts.details["comfy"] = health
         facts.details["h3Mechanism"] = "h3_ref2va"
-    elif facts.locality == "local" and product != "optional-wan":
+    elif facts.locality == "local":
         components = SETUP_COMPONENTS.get(product)
         if components:
             facts.checkpoint_ok, facts.checkpoint_reason = _verify_components(components)
@@ -369,7 +363,7 @@ def collect_video_facts(model_id: str, *, locality: str, estimated_vram_gb: floa
                 facts.nodes_reason = "Workflow Node Missing — Comfy Runtime Offline"
             else:
                 present = _comfy_nodes()
-                missing = [name for name in needed if name not in present]
+                missing = video_registry.missing_required_nodes(product, present)
                 facts.nodes_ok = not missing
                 if missing:
                     facts.nodes_reason = f"Workflow Node Missing — {', '.join(missing)}"
@@ -382,9 +376,7 @@ def collect_video_facts(model_id: str, *, locality: str, estimated_vram_gb: floa
                     f"VRAM insufficient — needs ~{estimated_vram_gb:.0f} GB, GPU has {total_gb:.0f} GB"
                 )
         facts.details["comfy"] = health
-        if product == "wan-local" and facts.checkpoint_ok and facts.nodes_ok and facts.runtime_ok:
-            facts.workflow_ok, facts.workflow_reason = _wan_topology_ok()
-        if facts.runtime_ok and _route_a_listener_up():
+        if facts.runtime_ok and _route_a_vram_resident():
             facts.admission_ok = False
             facts.admission_reason = (
                 "GPU admission — MiniMax Route A is resident; Desktop Comfy generators require handoff"
@@ -402,8 +394,8 @@ def derive_video_readiness(facts: VideoFacts) -> tuple[str, str, bool]:
     load through the existing execution host). Route A uses a separate
     onDemand flag when its isolated process is down but startable.
     """
-    if facts.product_id == "optional-wan":
-        return "Unsupported", "Unsupported — not a Timeline execution path", False
+    if video_registry.is_retired_local_video(facts.product_id) or facts.product_id == "optional-wan" or facts.details.get("retired"):
+        return "Unsupported", "Retired — not a product", False
 
     if facts.locality == "hosted":
         if facts.product_id == "seedance-kie":

@@ -12,8 +12,9 @@ import { RuntimeSourceControls } from "./RuntimeSourceControls";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { VideoMenu } from "./VideoMenu";
 import { DockCollapseArrowIcon, DockLauncherIcon } from "./dockIcons";
-import { truncateDockLabel } from "./dockLabels";
+import { formatAudioStudioProviderPill, truncateDockLabel } from "./dockLabels";
 import { useProductionDock } from "./useProductionDock";
+import { useAudioStudioProviderSource } from "../../audioProvider/useProviderSource";
 import "../../styles/production-dock/production-dock.css";
 
 function ModelsComboMenu({
@@ -26,6 +27,11 @@ function ModelsComboMenu({
   onClose: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const audioStudioProvider = useAudioStudioProviderSource();
+  const audioComboLabel = formatAudioStudioProviderPill(
+    audioStudioProvider.source,
+    audioStudioProvider.health?.displayName,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -46,7 +52,7 @@ function ModelsComboMenu({
     { modality: "llm", label: dock.activeLabels.llm },
     { modality: "video", label: dock.activeLabels.video },
     { modality: "image", label: dock.activeLabels.image },
-    { modality: "audio", label: dock.activeLabels.audio },
+    { modality: "audio", label: audioComboLabel },
   ];
 
   return (
@@ -92,32 +98,41 @@ function ModalityChip({
   active,
   onClick,
   testId,
+  maxSubChars = 14,
 }: {
   label: string;
   sub: string;
   active: boolean;
   onClick: () => void;
   testId?: string;
+  maxSubChars?: number;
 }) {
-  const short = truncateDockLabel(sub, 14);
+  const short = truncateDockLabel(sub, maxSubChars);
   return (
     <button
       type="button"
-      className={`production-dock-chip${active ? " is-active" : ""}`}
-      aria-label={`${label} models: ${sub}`}
+      className={`production-dock-chip${label === "Audio" ? " production-dock-chip--audio" : ""}${active ? " is-active" : ""}`}
+      aria-label={label === "Audio" ? `${label} provider: ${sub}` : `${label} models: ${sub}`}
       title={`${label}: ${sub}`}
       aria-expanded={active}
       data-testid={testId}
       onClick={onClick}
     >
       {label}
-      <span className="production-dock-chip__sub">{short}</span>
+      <span className="production-dock-chip__sub" data-full-label={sub}>
+        {short}
+      </span>
     </button>
   );
 }
 
 export function ProductionControlDock() {
   const dock = useProductionDock();
+  const audioStudioProvider = useAudioStudioProviderSource();
+  const audioChipLabel = formatAudioStudioProviderPill(
+    audioStudioProvider.source,
+    audioStudioProvider.health?.displayName,
+  );
   const shellRef = useRef<HTMLDivElement>(null);
 
   const closeMenu = useCallback(() => dock.setOpenMenu(null), [dock]);
@@ -240,10 +255,11 @@ export function ProductionControlDock() {
             />
             <ModalityChip
               label="Audio"
-              sub={dock.activeLabels.audio}
+              sub={audioChipLabel}
               active={dock.openMenu === "audio"}
               onClick={() => toggleMenu("audio")}
               testId="production-dock-menu-audio"
+              maxSubChars={18}
             />
           </div>
 

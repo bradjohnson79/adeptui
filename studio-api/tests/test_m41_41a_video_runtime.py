@@ -31,16 +31,19 @@ from app.video_runtime.vram_safety import VramSafetyState, estimate_vram
 def test_compatibility_catalog_loads_production_and_deferred():
     entries = catalog_as_dict()
     keys = {e["workflowKey"] for e in entries}
-    assert "wan.first_last_frame" in keys
-    assert "ltx.simple_i2v" in keys
+    # Canonical local video generators are LTX 2.5 and MiniMax H3; retired WAN/old-LTX entries removed.
+    assert "ltx_25.t2v" in keys
+    assert "ltx_25.i2v" in keys
+    assert "wan.first_last_frame" not in keys
+    assert "ltx.simple_i2v" not in keys
     assert "video.upscale" in keys
     assert "video.motion_transfer" in keys
-    wan = get_entry("wan.first_last_frame")
-    assert wan is not None
-    assert wan.min_vram_gb >= 20
-    assert "middle_frame" in wan.unsupported_inputs
+    ltx_i2v = get_entry("ltx_25.i2v")
+    assert ltx_i2v is not None
+    assert ltx_i2v.min_vram_gb >= 12
+    assert "middle_frame" in ltx_i2v.unsupported_inputs
     # M41 4.1B honesty: not production_ready until CERTIFIED with live evidence
-    assert wan.capability_state in {
+    assert ltx_i2v.capability_state in {
         "production_ready",
         "pending_certification",
         "blocked",
@@ -48,10 +51,10 @@ def test_compatibility_catalog_loads_production_and_deferred():
     assert get_entry("video.upscale").capability_state == "deferred"
 
 
-def test_wan_middle_frame_rejected_by_registry():
-    wan = get_entry("wan.first_last_frame")
-    assert wan is not None
-    bad = validate_inputs(wan, ["first_frame", "middle_frame", "prompt"])
+def test_ltx_25_middle_frame_rejected_by_registry():
+    entry = get_entry("ltx_25.i2v")
+    assert entry is not None
+    bad = validate_inputs(entry, ["start_frame", "middle_frame", "prompt"])
     assert "middle_frame" in bad
 
 
@@ -69,10 +72,10 @@ def test_missing_nodes_alias_latentsync():
 
 def test_vram_estimate_states():
     with patch("app.video_runtime.vram_safety._free_vram_gb", return_value=30.0):
-        est = estimate_vram("wan.first_last_frame", width=1280, height=720, frames=81)
+        est = estimate_vram("ltx_25.i2v", width=1280, height=720, frames=81)
         assert est.state == VramSafetyState.SAFE
     with patch("app.video_runtime.vram_safety._free_vram_gb", return_value=8.0):
-        est = estimate_vram("wan.first_last_frame", width=1920, height=1080, frames=241)
+        est = estimate_vram("ltx_25.i2v", width=1920, height=1080, frames=241)
         assert est.state in {
             VramSafetyState.INSUFFICIENT,
             VramSafetyState.HIGH_RISK,
@@ -85,9 +88,9 @@ def test_vram_estimate_states():
 def test_job_contract_roundtrip():
     c = VideoJobContract(
         mode="image_to_video",
-        workflow_key="ltx.simple_i2v",
+        workflow_key="ltx_25.i2v",
         provider_kind=ProviderKindVideo.LOCAL,
-        engine="ltx",
+        engine="ltx-2.5",
         width=1280,
         height=720,
         frames=81,
@@ -95,7 +98,7 @@ def test_job_contract_roundtrip():
     )
     raw = apply_contract_to_job_params({}, c)
     params = json.loads(raw)
-    assert params["videoRuntime"]["workflow_key"] == "ltx.simple_i2v"
+    assert params["videoRuntime"]["workflow_key"] == "ltx_25.i2v"
     assert concurrency_for_workflow("fal.seedance", ProviderKindVideo.EXTERNAL_API).value == "cloud"
 
 

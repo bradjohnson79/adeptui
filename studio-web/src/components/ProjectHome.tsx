@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { api, isAbortError, isNavigationFetchFailure } from "../api";
 import type { Project } from "../types";
 import type { EditorTab } from "../workspacePrefs";
 import { loadLastWorkspace } from "../workspacePrefs";
-import { WORKSPACES } from "../core/workspaces";
+import { isSpatialMapEnabled } from "../core/featureFlags";
+import { WORKSPACES, resolveShelvedCreatorWorkspace } from "../core/workspaces";
 import { dashboardImages, relativeTime } from "../dashboardImages";
 import { CinematicEmptyState } from "./dashboard/CinematicHero";
 import {
@@ -23,13 +24,10 @@ const TAB_LABELS: Partial<Record<EditorTab, string>> = {
   editor: "MAGI Editor",
   audiostudio: "Audio Studio",
   script: "Storyboard",
-  spatial: "Spatial Map",
   imagegen: "Image Generation",
   txt2vid: "Text to Video",
   library: "Library",
-  mastersheet: "Scene Creator",
-  scenecreator: "Scene Creator",
-  avatar: "Avatar Studio",
+  environmentcreator: "Environment Creator",
   home: "Project Home",
 };
 
@@ -69,9 +67,9 @@ export function ProjectHome({
   const coverUrl = dash?.cover_asset_id ? api.assetUrl(dash.cover_asset_id) : null;
   const coverKind = dash?.cover_kind === "video" ? "video" : coverUrl ? "image" : null;
   // Prefer last creative workspace (Setup Wizard is excluded from resume prefs).
-  const lastTab = loadLastWorkspace(project.id) || "timeline";
+  const lastTab = resolveShelvedCreatorWorkspace(loadLastWorkspace(project.id) || "timeline");
   const resumeTab = lastTab === "home" ? "director" : lastTab;
-  const lastLabel = TAB_LABELS[lastTab] || "Timeline Generator";
+  const lastLabel = TAB_LABELS[lastTab] || WORKSPACES[lastTab]?.label || "Timeline Generator";
   const status = project.status_label || "Active";
 
   const suggestionItems = useMemo(() => {
@@ -101,10 +99,11 @@ export function ProjectHome({
     { title: WORKSPACES.timeline.label, description: WORKSPACES.timeline.description, image: dashboardImages.timeline, tab: "timeline", badges: WORKSPACES.timeline.capabilityBadges },
     { title: WORKSPACES.magi.label, description: WORKSPACES.magi.description, image: dashboardImages.magi, tab: "magi", badges: WORKSPACES.magi.capabilityBadges },
     { title: WORKSPACES.script.label, description: WORKSPACES.script.description, image: dashboardImages.script, tab: "script", badges: WORKSPACES.script.capabilityBadges },
-    { title: WORKSPACES.spatial.label, description: WORKSPACES.spatial.description, image: dashboardImages.spatial, tab: "spatial", badges: WORKSPACES.spatial.capabilityBadges },
+    ...(isSpatialMapEnabled()
+      ? [{ title: WORKSPACES.spatial.label, description: WORKSPACES.spatial.description, image: dashboardImages.spatial, tab: "spatial" as const, badges: WORKSPACES.spatial.capabilityBadges }]
+      : []),
     { title: WORKSPACES.imagegen.label, description: WORKSPACES.imagegen.description, image: dashboardImages.imagegen, tab: "imagegen", badges: WORKSPACES.imagegen.capabilityBadges },
     { title: WORKSPACES.txt2vid.label, description: WORKSPACES.txt2vid.description, image: dashboardImages.video, tab: "txt2vid", badges: WORKSPACES.txt2vid.capabilityBadges },
-    { title: WORKSPACES.avatar.label, description: WORKSPACES.avatar.description, image: dashboardImages.avatar, tab: "avatar", badges: WORKSPACES.avatar.capabilityBadges },
     { title: WORKSPACES.library.label, description: WORKSPACES.library.description, image: dashboardImages.library, tab: "library", badges: WORKSPACES.library.capabilityBadges },
   ];
 
@@ -262,15 +261,12 @@ export function ProjectHome({
       <div className="project-dash-grid">
         <ActivityFeed items={activityItems} />
         <section className="dash-card">
-          <h2>Scene Creator</h2>
+          <h2>Environment Creator</h2>
           <p className="muted" style={{ marginBottom: "0.75rem" }}>
-            Turn an Environment Reference Sheet into scene-shot images, then send an approved look to the Timeline.
+            Plan and create the Environment Reference Sheet (ERS) for a location or set — like a CRS for characters or a PRS for props.
           </p>
-          <button type="button" className="primary" onClick={() => onGo("scenecreator")}>
-            Open Scene Creator
-          </button>
-          <button type="button" style={{ marginLeft: "0.4rem" }} onClick={() => onGo("library")}>
-            Browse in Library
+          <button type="button" className="primary" onClick={() => onGo("environmentcreator")}>
+            Open Environment Creator
           </button>
         </section>
       </div>

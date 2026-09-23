@@ -11,6 +11,23 @@
   gap: 6px;
 }
 
+.character-compact__selector-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.character-compact__selector-row label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.character-compact__selector-row .character-compact__actions-button {
+  flex-shrink: 0;
+}
+
 .character-compact__selector label {
   font-size: 0.82rem;
   color: rgba(201, 210, 224, 0.82);
@@ -95,6 +112,18 @@
 
 .character-compact__actions-button.primary:hover:not(:disabled) {
   background: rgba(84, 152, 255, 0.26);
+}
+
+.character-compact__actions-button.danger {
+  background: var(--btn-danger-bg, rgba(127, 29, 29, 0.45));
+  color: var(--btn-danger-fg, #fecaca);
+  border-color: rgba(248, 113, 113, 0.45);
+  font-weight: 600;
+}
+
+.character-compact__actions-button.danger:hover:not(:disabled) {
+  border-color: #f87171;
+  color: #fecaca;
 }
 
 /* ---- Detail layout (single-column form, pane scrolls) ---- */

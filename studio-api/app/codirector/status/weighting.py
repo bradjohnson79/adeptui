@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
-
+from ...readiness.v11_policy import (
+    POLICY_VERSION,
+    SCORE_SEMANTICS,
+    ReadinessClass,
+    classify_status_check,
+    infer_from_criticality,
+    worst_class,
+)
 from .types import (
     HealthCategoryTally,
     HealthCheckResult,
@@ -45,23 +52,40 @@ _BLOCKING = {"blocked", "failed", "offline", "not_installed", "disabled", "not_c
 # Active inference reports as busy — never treat as a warning/Degraded cause.
 _WARNING = {"degraded", "warning", "not_tested", "experimental", "unknown", "timed_out", "slow", "starting"}
 
+_PRODUCTION_CLASSES = {
+    ReadinessClass.PLATFORM_CRITICAL,
+    ReadinessClass.PRODUCTION_CRITICAL,
+}
+
 
 def score_for_status(status: HealthStatus) -> int:
     return _STATUS_SCORES.get(status, 45)
 
 
-def band_for_score(score: int) -> str:
-    if score >= 95:
-        return "Excellent"
-    if score >= 85:
-        return "Strong"
-    if score >= 70:
-        return "Fair"
-    if score >= 40:
-        return "Needs Attention"
-    if score > 0:
+def resolve_readiness_class(result: HealthCheckResult) -> ReadinessClass:
+    raw = getattr(result, "readinessClass", None)
+    if raw:
+        try:
+            return ReadinessClass(str(raw))
+        except ValueError:
+            pass
+    assignment = classify_status_check(result.checkId)
+    if assignment is not None:
+        return assignment.readiness_class
+    return infer_from_criticality(result.criticality)
+
+
+def band_for_score(score: int, indicator: StatusIndicator = "Operational") -> str:
+    """Owner band labels. Numeric 35 / 84 / 95 caps stay in ``summarize_results``."""
+    if indicator == "Blocked" or score <= 35:
         return "Blocked"
-    return "Offline"
+    if indicator == "Degraded":
+        return "Workflow Degraded"
+    if score >= 95:
+        return "Operational"
+    if score >= 85:
+        return "Advisory"
+    return "Fair"
 
 
 def _category_label(category: str) -> str:
@@ -73,7 +97,7 @@ def summarize_results(results: list[HealthCheckResult], mode: StatusMode) -> tup
         summary = HealthRunSummary(
             statusIndicator="Not Checked",
             score=0,
-            band="Offline",
+            band="Blocked",
             mode=mode,
             totalChecks=0,
             healthyChecks=0,
@@ -81,8 +105,10 @@ def summarize_results(results: list[HealthCheckResult], mode: StatusMode) -> tup
             blockedChecks=0,
             checkedAt="",
             scoreExplanation="No status checks have run yet.",
+            scoreSemantics=SCORE_SEMANTICS,
+            readinessPolicyVersion=POLICY_VERSION,
         )
-        return summary, [], HealthExplainability(band="Offline")
+        return summary, [], HealthExplainability(band="Blocked")
 
     weighted_total = 0.0
     weight_sum = 0.0
@@ -94,8 +120,10 @@ def summarize_results(results: list[HealthCheckResult], mode: StatusMode) -> tup
     warning_lines: list[str] = []
     category_counts: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "healthy": 0, "warnings": 0, "blocked": 0})
 
-    critical_blockers = []
-    high_blockers = []
+    production_blockers: list[HealthCheckResult] = []
+    workflow_issues: list[HealthCheckResult] = []
+    advisory_issues: list[HealthCheckResult] = []
+    other_warnings: list[HealthCheckResult] = []
 
     for result in results:
         weight = _CRITICALITY_WEIGHTS[result.criticality]
@@ -103,47 +131,87 @@ def summarize_results(results: list[HealthCheckResult], mode: StatusMode) -> tup
         weighted_total += score * weight
         weight_sum += weight
         category_counts[result.category]["total"] += 1
+        readiness = resolve_readiness_class(result)
 
         # Active chat inference reports as busy — never treat as a Degraded score cause.
-        if result.status == "busy":
+        # Completed-but-slow probes already succeeded; latency is not a production gap.
+        if result.status in {"busy", "slow"}:
             healthy_checks += 1
             category_counts[result.category]["healthy"] += 1
             continue
-        if result.status in _BLOCKING:
-            blocked_checks += 1
-            category_counts[result.category]["blocked"] += 1
+        if result.status in _BLOCKING or result.status in _WARNING:
             line = f"{result.title}: {result.summary}"
-            blocker_lines.append(line)
-            dominant_checks.append(result.checkId)
-            if result.criticality == "critical":
-                critical_blockers.append(result.checkId)
-            elif result.criticality == "high":
-                high_blockers.append(result.checkId)
-        elif result.status in _WARNING:
-            warning_checks += 1
-            category_counts[result.category]["warnings"] += 1
-            line = f"{result.title}: {result.summary}"
-            warning_lines.append(line)
-            if result.criticality in {"critical", "high"}:
+            probe_noise = result.status in {"timed_out", "slow", "starting"}
+            if readiness == ReadinessClass.OPTIONAL:
+                # Optional leftovers (gated IC-LoRA, leftover startup names, dormant
+                # probes, legacy menu-hidden surfaces) stay visible on the run, but
+                # they never own the score: no warningChecks, no blockedChecks, no
+                # advisory/workflow/production issue lists, and no score cap.
+                continue
+            if readiness in _PRODUCTION_CLASSES and result.status in _BLOCKING:
+                blocked_checks += 1
+                category_counts[result.category]["blocked"] += 1
+                production_blockers.append(result)
+                blocker_lines.append(line)
                 dominant_checks.append(result.checkId)
+            elif readiness == ReadinessClass.WORKFLOW_DEGRADED and result.status in _BLOCKING:
+                warning_checks += 1
+                category_counts[result.category]["warnings"] += 1
+                workflow_issues.append(result)
+                warning_lines.append(line)
+                dominant_checks.append(result.checkId)
+            elif readiness == ReadinessClass.ADVISORY_REVIEW_DEGRADED:
+                warning_checks += 1
+                category_counts[result.category]["warnings"] += 1
+                advisory_issues.append(result)
+                warning_lines.append(line)
+            elif probe_noise:
+                # Slow or timed-out production probes are not proof the studio is down.
+                warning_checks += 1
+                category_counts[result.category]["warnings"] += 1
+                advisory_issues.append(result)
+                warning_lines.append(line)
+            elif readiness == ReadinessClass.WORKFLOW_DEGRADED:
+                warning_checks += 1
+                category_counts[result.category]["warnings"] += 1
+                workflow_issues.append(result)
+                warning_lines.append(line)
+                dominant_checks.append(result.checkId)
+            elif result.status in _BLOCKING:
+                warning_checks += 1
+                category_counts[result.category]["warnings"] += 1
+                other_warnings.append(result)
+                warning_lines.append(line)
+            else:
+                warning_checks += 1
+                category_counts[result.category]["warnings"] += 1
+                other_warnings.append(result)
+                warning_lines.append(line)
         else:
             healthy_checks += 1
             category_counts[result.category]["healthy"] += 1
 
     score = int(round(weighted_total / weight_sum)) if weight_sum else 0
-    if critical_blockers:
+    if production_blockers:
         indicator: StatusIndicator = "Blocked"
         score = min(score, 35)
-    elif high_blockers or warning_checks:
+    elif workflow_issues:
         indicator = "Degraded"
         score = min(score, 84)
+    elif other_warnings:
+        indicator = "Degraded"
+        score = min(score, 84)
+    elif advisory_issues:
+        indicator = "Operational"
+        # Excellent is reserved for no open registry/review gaps.
+        score = min(max(score, 85), 94)
     else:
         indicator = "Operational"
 
-    band = band_for_score(score)
+    band = band_for_score(score, indicator)
     checked_at = max(result.checkedAt for result in results)
     score_explanation = (
-        f"{healthy_checks} checks healthy, {warning_checks} warning, {blocked_checks} blocked."
+        f"{SCORE_SEMANTICS}: {healthy_checks} checks healthy, {warning_checks} warning, {blocked_checks} blocked."
         if results
         else "No status checks have run yet."
     )
@@ -158,6 +226,8 @@ def summarize_results(results: list[HealthCheckResult], mode: StatusMode) -> tup
         blockedChecks=blocked_checks,
         checkedAt=checked_at,
         scoreExplanation=score_explanation,
+        scoreSemantics=SCORE_SEMANTICS,
+        readinessPolicyVersion=POLICY_VERSION,
     )
     categories = [
         HealthCategoryTally(
@@ -170,15 +240,19 @@ def summarize_results(results: list[HealthCheckResult], mode: StatusMode) -> tup
         )
         for category, counts in sorted(category_counts.items())
     ]
+    worst = worst_class(resolve_readiness_class(item) for item in production_blockers + workflow_issues + advisory_issues)
     explainability = HealthExplainability(
         band=band,
         dominantChecks=sorted(set(dominant_checks)),
         blockers=blocker_lines[:8],
         warnings=warning_lines[:8],
         reasons=[
-            "Critical and high-severity checks dominate the overall score.",
-            "Optional checks can lower confidence, but they do not block the studio on their own.",
-            "Project binding, provider/runtime readiness, tool execution, proposals, and persistence are treated as blocking when they fail.",
-        ],
+            f"{SCORE_SEMANTICS} ({POLICY_VERSION}).",
+            "Platform and production-critical failures block the studio.",
+            "Workflow-degraded failures lower the score without pretending the platform is down.",
+            "Advisory / review gaps (including Temporal Continuity) stay visible and prevent a perfect 100, but they do not cap the studio at Degraded.",
+            "Optional leftovers do not own the score.",
+        ]
+        + ([f"Worst readiness class this run: {worst.value}."] if worst else []),
     )
     return summary, categories, explainability

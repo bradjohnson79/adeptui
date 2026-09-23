@@ -250,6 +250,7 @@ RETRIEVAL_PARTIAL = "RETRIEVAL_PARTIAL"
 CAPABILITY_NOT_CONFIGURED = "CAPABILITY_NOT_CONFIGURED"
 CAPABILITY_UNAVAILABLE = "CAPABILITY_UNAVAILABLE"
 CAPABILITY_UNKNOWN = "CAPABILITY_UNKNOWN"
+VISION_UNAVAILABLE = "VISION_UNAVAILABLE"
 
 # --------------------------------------------------------------------------
 # M2.4: production intelligence, prompt library, specialist orchestration.
@@ -349,6 +350,7 @@ _STATUS_BY_CODE = {
     RETRIEVAL_PARTIAL: 200,
     CAPABILITY_NOT_CONFIGURED: 409,
     CAPABILITY_UNAVAILABLE: 503,
+    VISION_UNAVAILABLE: 503,
     CAPABILITY_UNKNOWN: 400,
     INTENT_CLASSIFICATION_FAILED: 502,
     PROMPT_NOT_FOUND: 404,
@@ -388,7 +390,7 @@ def classify_httpx_error(exc: BaseException, *, endpoint: str, provider: str = "
     if isinstance(exc, httpx.ConnectError):
         return CoDirectorError(
             CONNECTION_REFUSED,
-            f"Co-Director could not reach Ollama at {endpoint}.",
+            "Co-Director could not reach the Local AI Runtime.",
             details=details,
             recommended_action="retry_or_check_service",
         )
@@ -403,7 +405,7 @@ def classify_httpx_error(exc: BaseException, *, endpoint: str, provider: str = "
     if "Connection refused" in text or "ConnectError" in text:
         return CoDirectorError(
             CONNECTION_REFUSED,
-            f"Co-Director could not reach Ollama at {endpoint}.",
+            "Co-Director could not reach the Local AI Runtime.",
             details=details,
             recommended_action="retry_or_check_service",
         )

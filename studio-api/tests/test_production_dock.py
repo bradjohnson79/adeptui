@@ -69,20 +69,20 @@ def test_contracts_import():
 def test_precedence_project_over_user_over_system(isolated_prefs):
     save_user_preferences(
         UserGlobalPreferences(
-            video={"modality": "video", "activeModelId": "ltx-local", "availableModelIds": []}
+            video={"modality": "video", "activeModelId": "ltx-2.5-distilled", "availableModelIds": []}
         )
     )
     save_project_preferences(
         "proj-1",
-        {"activeVideoModelId": "wan-local"},
+        {"activeVideoModelId": "minimax-h3"},
     )
     resolved = resolve_with_precedence("proj-1", "video")
-    assert resolved.activeModelId == "wan-local"
+    assert resolved.activeModelId == "minimax-h3"
     assert resolved.source == "project"
 
     save_project_preferences("proj-2", {"activeVideoModelId": None})
     resolved_user = resolve_with_precedence("proj-2", "video")
-    assert resolved_user.activeModelId == "ltx-local"
+    assert resolved_user.activeModelId == "ltx-2.5-distilled"
     assert resolved_user.source == "user"
 
 
@@ -134,15 +134,15 @@ def test_runtime_map_image_and_video(isolated_prefs, monkeypatch):
     monkeypatch.setattr(
         "app.production_control.runtime_map.require_executable_route",
         lambda project_id, modality: {
-            "activeModelId": "ltx-local" if modality == "video" else "qwen-image-2512-local",
+            "activeModelId": "ltx-2.5-distilled" if modality == "video" else "qwen-image-2512-local",
             "executable": True,
-            "videoEngine": "ltx",
+            "videoEngine": "ltx-2.5",
             "imageFamily": "qwen2512",
         },
     )
 
     assert image_family_for_dock_model("qwen-image-2512-local") == "qwen2512"
-    assert video_engine_for_dock_model("ltx-local") == "ltx"
+    assert video_engine_for_dock_model("ltx-2.5-distilled") == "ltx-2.5"
 
     save_user_preferences(
         UserGlobalPreferences(
@@ -156,8 +156,8 @@ def test_runtime_map_image_and_video(isolated_prefs, monkeypatch):
             video={
                 "modality": "video",
                 "preference": "local_preferred",
-                "activeModelId": "ltx-local",
-                "availableModelIds": ["ltx-local"],
+                "activeModelId": "ltx-2.5-distilled",
+                "availableModelIds": ["ltx-2.5-distilled"],
                 "allowFallback": False,
             },
         )
@@ -178,8 +178,8 @@ def test_runtime_map_image_and_video(isolated_prefs, monkeypatch):
     assert locked["modelFamilyPreference"] == "zimage"
 
     dock = apply_video_dock_preference("proj-map", engine_hint="auto")
-    assert dock["engine"] == "ltx"
-    assert dock["activeModelId"] == "ltx-local"
+    assert dock["engine"] == "ltx-2.5"
+    assert dock["activeModelId"] == "ltx-2.5-distilled"
 
 
 def test_gate_has_production_dock_go_false_without_artifacts(tmp_path, monkeypatch):
@@ -253,33 +253,17 @@ def test_model_registry_filter_for_action():
     assert ace["actionMatch"] is True
 
 
-def test_video_models_inherit_setup_readiness(monkeypatch):
+def test_retired_video_models_are_not_advertised(monkeypatch):
     from app.production_control.model_registry import filter_for_action
 
-    # _apply_setup_status derives non-image executable/capability from persisted
-    # setup state (load_state) plus the lifecycle certified flag, rather than
-    # build_status — list_models() runs _apply_setup_status on every modality,
-    # and build_status probes slow audio/avatar subprocesses that would hang it.
-    def fake_load_state():
-        return {
-            "status": {
-                "hunyuan_video_15": {"status": "ready"},
-                "hunyuan_video_13b": {"status": "ready"},
-            }
-        }
-
-    def fake_cert(component_id: str):
-        return SimpleNamespace(certified=(component_id == "hunyuan_video_13b"))
-
-    monkeypatch.setattr("app.setup.state.load_state", fake_load_state)
-    monkeypatch.setattr("app.setup.lifecycle.service.get_certification", fake_cert)
     models = filter_for_action("video", "text_to_video")
-
-    by_id = {m["id"]: m for m in models}
-    assert by_id["hunyuan-video-1.5-local"]["capabilityLabel"] == "Available"
-    assert by_id["hunyuan-video-1.5-local"]["executable"] is True
-    assert by_id["hunyuan-video-13b-local"]["capabilityLabel"] == "Certified"
-    assert by_id["hunyuan-video-13b-local"]["executable"] is True
+    ids = {m["id"] for m in models}
+    assert "hunyuan-video-1.5-local" not in ids
+    assert "hunyuan-video-13b-local" not in ids
+    assert "wan-local" not in ids
+    assert "ltx-local" not in ids
+    assert "ltx-2.5-distilled" in ids or "ltx-2.5-full" in ids
+    assert "minimax-h3" in ids
 
 
 # ---------------------------------------------------------------------------

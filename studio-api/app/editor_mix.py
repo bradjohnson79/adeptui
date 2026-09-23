@@ -405,30 +405,11 @@ def _iter_timeline_audio_clips(
     fallback_duration: float,
     fallback_prompt: str,
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Yield (track, normalized_clip) for a scene's audio/sfx clips.
-
-    Reads the legacy DirectorTimeline tracks first, then falls back to / appends
-    BatchBlock audioClips/sfxClips when they are not represented in the legacy
-    tracks. This follows the real W46 shape where either or both may hold
-    clip-level audio state.
-    """
-    from .director_timeline import parse_director_timeline
+    """Yield (track, normalized_clip) from Master audioClips/sfxClips only."""
     from .director_timeline_w46.migration import load_or_migrate_scene_master
 
     out: list[tuple[str, dict[str, Any]]] = []
     seen_ids: set[str] = set()
-
-    tl = parse_director_timeline(
-        scene_director_json,
-        fallback_duration=fallback_duration,
-        fallback_prompt=fallback_prompt,
-    )
-    for clip in tl.audio_clips:
-        seen_ids.add(str(clip.id))
-        out.append(("music", _normalized_clip_fields(clip)))
-    for clip in tl.sfx_clips:
-        seen_ids.add(str(clip.id))
-        out.append(("sfx", _normalized_clip_fields(clip)))
 
     master, _, _ = load_or_migrate_scene_master(
         scene_director_json,
@@ -635,7 +616,7 @@ def default_primary_video(
             .all()
         )
         for scene in scenes:
-            for attr in ("lipsync_output_path", "output_path"):
+            for attr in ("output_path", "lipsync_output_path"):  # output_path first; lipsync demoted
                 p = getattr(scene, attr, None)
                 if p and Path(p).is_file():
                     return Path(p)

@@ -11,16 +11,21 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../../../api";
-import {
-  getCardPreviewUrl,
-  isImageAsset,
-  type LibraryAsset,
-} from "../library/assetModel";
+import { getCardPreviewUrl, type LibraryAsset } from "../library/assetModel";
 import { characterTag, type SlotDef } from "./types";
+import {
+  loadEnvironmentPickerImages,
+  matchEnvironmentPickerQuery,
+} from "./environmentPickerAssets";
+
+import { groupScopeItems, scopeLabel } from "../../../creatorScope";
 
 type CharacterProfileLite = {
   id: string;
   name: string;
+  project_id?: string;
+  isGlobal?: boolean;
+  is_global?: boolean;
 };
 
 type Props =
@@ -94,7 +99,7 @@ export function EntityPicker(props: Props) {
   return createPortal(
     <div className="spatial-map__picker" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-label={ariaLabel}>
       <div className="spatial-map__picker-panel" ref={panelRef} tabIndex={-1}>
-        <button type="button" className="spatial-map__picker-close" aria-label="Close" onClick={onClose}>×</button>
+        <button type="button" className="spatial-map__picker-close" aria-label="Close" data-testid="entity-picker-close" onClick={onClose}>×</button>
         <h3 className="spatial-map__picker-title" id={titleId}>
           {kind === "character" ? "Choose a Character" : title || "Select Spatial Map Image"}
         </h3>
@@ -147,6 +152,7 @@ function CharacterPickerBody({
     void refresh();
   }, [refresh]);
 
+  const grouped = useMemo(() => groupScopeItems(characters, projectId), [characters, projectId]);
   const selectedCharacter = useMemo(
     () => characters.find((c) => c.id === selectedId) || null,
     [characters, selectedId],
@@ -180,7 +186,7 @@ function CharacterPickerBody({
         <p className="spatial-map__hint">No saved characters yet. Create characters in the Character Creator first.</p>
       ) : (
         <div className="spatial-map__picker-grid" role="list">
-          {characters.map((c) => (
+          {grouped.project.map((c) => (
             <button
               key={c.id}
               type="button"
@@ -194,6 +200,25 @@ function CharacterPickerBody({
               <span className="spatial-map__picker-name">{c.name}</span>
             </button>
           ))}
+          {grouped.global.length ? (
+            <>
+              <p className="spatial-map__hint">Global</p>
+              {grouped.global.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`spatial-map__picker-card${selectedId === c.id ? " is-selected" : ""}`}
+                  onClick={() => {
+                    setSelectedId(c.id);
+                    setTypedName("");
+                  }}
+                  aria-pressed={selectedId === c.id}
+                >
+                  <span className="spatial-map__picker-name">{scopeLabel(c.name, c, projectId)}</span>
+                </button>
+              ))}
+            </>
+          ) : null}
         </div>
       )}
       <p className="spatial-map__hint">Or type a character name to validate against saved characters:</p>
@@ -247,34 +272,34 @@ function EnvironmentPickerBody({
   const [error, setError] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<LibraryAsset | null>(null);
   const [query, setQuery] = useState("");
+  const hasLoadedRef = useRef(false);
 
-  const refresh = useCallback(async () => {
-    setBusy(true);
+  const refresh = useCallback(async (search = query) => {
+    if (!hasLoadedRef.current) setBusy(true);
     setError(null);
     try {
-      const payload = await api.library(projectId, {});
-      const items = Array.isArray(payload?.items) ? (payload.items as LibraryAsset[]) : [];
-      setAssets(items.filter(isImageAsset));
+      const items = await loadEnvironmentPickerImages(
+        (id, opts) => api.library(id, opts),
+        projectId,
+        search,
+      );
+      setAssets(items);
+      hasLoadedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [projectId]);
+  }, [projectId, query]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refresh(query);
+  }, [refresh, query]);
 
-  const filteredAssets = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return assets;
-    return assets.filter((a) => {
-      const tag = (a.tag || "").toLowerCase();
-      const filename = (a.filename || "").toLowerCase();
-      return tag.includes(q) || filename.includes(q);
-    });
-  }, [assets, query]);
+  const filteredAssets = useMemo(
+    () => assets.filter((asset) => matchEnvironmentPickerQuery(asset, query)),
+    [assets, query],
+  );
 
   const canConfirm = !!selectedAsset;
 

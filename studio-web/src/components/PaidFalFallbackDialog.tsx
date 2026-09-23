@@ -1,18 +1,16 @@
-/** Explicit paid fal.ai fallback confirmation — never silent. */
+/** Explicit paid fal.ai Text-to-Video approval — never silent. */
 
-export type PaidFalFallbackAction = "cancel" | "generate_local_start_frame" | "approve_paid_fal";
+export type PaidFalFallbackAction = "cancel" | "approve_paid_fal";
 
 export function PaidFalFallbackDialog({
   open,
-  title = "Local path needs a start frame",
+  title = "Approve paid Text-to-Video",
   message,
-  preferredLocalLabel = "Generate local start frame and continue",
   onAction,
 }: {
   open: boolean;
   title?: string;
   message: string;
-  preferredLocalLabel?: string;
   onAction: (action: PaidFalFallbackAction) => void;
 }) {
   if (!open) return null;
@@ -33,24 +31,15 @@ export function PaidFalFallbackDialog({
         <h2 id="paid-fal-fallback-title">{title}</h2>
         <p>{message}</p>
         <p className="muted">
-          Local engines are tried first. fal.ai bills your account and is never submitted without
-          approval.
+          fal.ai bills your account and is never submitted without approval.
         </p>
         <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem", marginTop: "1rem" }}>
-          <button
-            type="button"
-            className="primary"
-            data-testid="generate-local-start-frame"
-            onClick={() => onAction("generate_local_start_frame")}
-          >
-            {preferredLocalLabel}
-          </button>
           <button
             type="button"
             data-testid="approve-paid-fal"
             onClick={() => onAction("approve_paid_fal")}
           >
-            Approve paid fal.ai fallback
+            Approve paid fal.ai submission
           </button>
           <button type="button" data-testid="cancel-fal-fallback" onClick={() => onAction("cancel")}>
             Cancel

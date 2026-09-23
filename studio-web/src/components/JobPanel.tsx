@@ -5,6 +5,12 @@ import { shouldSuspendDependentPolling } from "../runtime/studioApiConnection";
 import { HelpTip, PanelHeading } from "./HelpTip";
 import { Button, EmptyState, StatusBadge } from "./ui";
 import { mapJobStatus } from "../status";
+import { EngineAuthoritySelect } from "./generation/EngineAuthoritySelect";
+import {
+  formatRenderFailedSummary,
+  splitFailureMessage,
+} from "./RenderFailureAlert";
+import { loadDismissedRenderJobIds, saveDismissedRenderJobIds } from "../renderQueueDismiss";
 
 const IMAGE_PIPELINE_STAGES = [
   "Queued",
@@ -80,17 +86,57 @@ function ImageJobStagePipeline({ job }: { job: Job }) {
   );
 }
 
-function formatJobMessage(message: string | null | undefined) {
-  const value = message || "";
-  const traceback = value.includes("Traceback") || (value.match(/File "/g) || []).length > 1 || value.length > 280;
-  if (!traceback) return <>{value}</>;
-  const summary = value.split(/\r?\n/).find((line) => line.trim()) || "Job failed.";
+const TERMINAL_QUEUE_STATUSES = new Set([
+  "done",
+  "complete",
+  "completed",
+  "failed",
+  "error",
+  "cancelled",
+  "canceled",
+]);
+
+const ACTIVE_QUEUE_STATUSES = new Set([
+  "queued",
+  "running",
+  "pending",
+  "in_progress",
+  "processing",
+  "cancelling",
+  "canceling",
+]);
+
+function isTerminalJobStatus(status: string): boolean {
+  return TERMINAL_QUEUE_STATUSES.has(status.trim().toLowerCase());
+}
+
+function isActiveJobStatus(status: string): boolean {
+  return ACTIVE_QUEUE_STATUSES.has(status.trim().toLowerCase());
+}
+
+
+function formatJobMessage(message: string | null | undefined, status?: string) {
+  const failed = (status || "").trim().toLowerCase() === "failed" || (status || "").trim().toLowerCase() === "error";
+  const split = splitFailureMessage(message);
+  const summary = failed ? formatRenderFailedSummary(split.reason) : split.reason;
+  if (!split.technical && !failed) {
+    const value = message || "";
+    if (!value) return null;
+    // Non-failed short messages stay plain
+    if (value.length <= 280 && !value.includes("Traceback")) return <>{value}</>;
+  }
+  if (!split.technical && failed) {
+    return <>{summary}</>;
+  }
+  if (!split.technical) {
+    return <>{summary}</>;
+  }
   return (
     <>
-      {summary.slice(0, 280)}
+      {summary}
       <details>
-        <summary>Show details</summary>
-        <pre>{value}</pre>
+        <summary>Technical Details</summary>
+        <pre>{split.technical}</pre>
       </details>
     </>
   );
@@ -108,9 +154,14 @@ export function JobPanel({
   onViewInDirector?: (sceneId: string, jobId: string) => void;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => loadDismissedRenderJobIds(projectId));
   const seenDoneRef = useRef<Set<string>>(new Set());
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
+
+  useEffect(() => {
+    setDismissedIds(loadDismissedRenderJobIds(projectId));
+  }, [projectId]);
 
   useEffect(() => {
     let alive = true;
@@ -138,14 +189,51 @@ export function JobPanel({
     };
   }, [projectId]);
 
+  const clearRenderQueue = () => {
+    // UI-only dismiss of terminal rows. Never cancel active / queued / running.
+    // Never DELETE Library assets, outputs, or job lineage rows.
+    const next = new Set(dismissedIds);
+    for (const j of jobs) {
+      if (isTerminalJobStatus(j.status) && !isActiveJobStatus(j.status)) {
+        next.add(j.id);
+      }
+    }
+    setDismissedIds(next);
+    saveDismissedRenderJobIds(projectId, next);
+  };
+
+  const visibleJobs = jobs.filter((j) => {
+    if (isActiveJobStatus(j.status)) return true; // never hide active
+    if (!isTerminalJobStatus(j.status)) return true;
+    return !dismissedIds.has(j.id);
+  });
+
+  const clearableCount = jobs.filter(
+    (j) => isTerminalJobStatus(j.status) && !isActiveJobStatus(j.status) && !dismissedIds.has(j.id),
+  ).length;
+
   return (
     <div className="panel ds-surface">
       <PanelHeading
         title="Render queue"
-        tip="Live jobs for scene renders, timeline stitches, lip sync, and image tools. Cancel running work here."
-      />
-      {jobs.length === 0 && <EmptyState kind="first-use" title="No jobs yet" description="Render a scene or run a generation tool to see work here." />}
-      {jobs.slice(0, 8).map((j) => (
+        tip="Live jobs for scene renders, timeline stitches, lip sync, and image tools. Cancel running work here. Clear Render Queue hides completed/failed/cancelled history only."
+      >
+        <Button
+          type="button"
+          variant="secondary"
+          compact
+          disabled={clearableCount === 0}
+          data-testid="clear-render-queue"
+          onClick={(e) => {
+            e.stopPropagation();
+            clearRenderQueue();
+          }}
+        >
+          Clear Render Queue
+        </Button>
+      </PanelHeading>
+      {visibleJobs.length === 0 && <EmptyState kind="first-use" title="No jobs yet" description="Render a scene or run a generation tool to see work here." />}
+      {visibleJobs.slice(0, 8).map((j) => (
         <div
           className="job-item"
           key={j.id}
@@ -160,7 +248,7 @@ export function JobPanel({
             <strong>{j.kind}</strong>
             <StatusBadge kind={mapJobStatus(j.status)} label={j.status} compact />
           </div>
-          <div className="scene-meta">{formatJobMessage(j.message)}</div>
+          <div className="scene-meta">{formatJobMessage(j.message, j.status)}</div>
           <div className="bar">
             <i style={{ width: `${Math.round((j.progress || 0) * 100)}%` }} />
           </div>
@@ -364,28 +452,12 @@ export function AdvancedPanel({ project, onChange }: { project: Project; onChang
         </div>
         <div className="field">
           <label>Default engine</label>
-          <select
+          <EngineAuthoritySelect
             value={project.engine_default}
-            onChange={(e) =>
-              api
-                .updateProject(project.id, { engine_default: e.target.value as Project["engine_default"] })
-                .then(onChange)
+            onChange={(engine) =>
+              void api.updateProject(project.id, { engine_default: engine }).then(onChange)
             }
-          >
-            <optgroup label="Auto">
-              <option value="auto">Auto Select</option>
-            </optgroup>
-            <optgroup label="Local (ComfyUI)">
-              <option value="ltx">LTX 2.5</option>
-              <option value="wan">WAN 2.2</option>
-            </optgroup>
-            <optgroup label="Hosted AI Providers (Kie.ai · WaveSpeed.ai · fal.ai)">
-              <option value="fal_seedance">Seedance 2.0</option>
-              <option value="fal_kling">Kling 2.5 Turbo Pro</option>
-              <option value="fal_veo">Veo 3.1</option>
-              <option value="fal_runway">Runway Gen-3 Turbo</option>
-            </optgroup>
-          </select>
+          />
           {String(project.engine_default).startsWith("fal_") && (
             <p className="scene-meta" style={{ marginTop: 6 }}>
               Hosted cloud engines bill through your connected provider account (Kie.ai, WaveSpeed.ai, or fal.ai).

@@ -80,6 +80,11 @@ def schedule_job_queue_enqueue(job_id: str) -> None:
         except RuntimeError:
             current_loop = None
 
+        if task is None or task.done():
+            raise RuntimeError(
+                "studio job_queue worker is not running (job_queue._task missing or done)"
+            )
+
         if queue_loop is not None and queue_loop.is_running():
             # When the caller is already running on the queue loop, waiting on a
             # thread-safe future deadlocks the request thread and stretches a
@@ -88,7 +93,14 @@ def schedule_job_queue_enqueue(job_id: str) -> None:
                 current_loop.create_task(_put())
                 return
             fut = asyncio.run_coroutine_threadsafe(_put(), queue_loop)
-            fut.result(timeout=2)
+            try:
+                fut.result(timeout=5)
+            except TimeoutError as te:
+                # concurrent.futures.TimeoutError often has empty str(exc).
+                raise RuntimeError(
+                    f"job_queue.enqueue timed out after 5s (job_queue loop busy or stuck; "
+                    f"job_id={job_id})"
+                ) from te
             return
 
         if current_loop is None:
@@ -99,8 +111,17 @@ def schedule_job_queue_enqueue(job_id: str) -> None:
         logger.warning(
             "Could not enqueue imagegen job %s onto job_queue", job_id, exc_info=True
         )
+        detail = str(exc).strip()
+        if not detail:
+            exc_name = type(exc).__name__
+            queue_task = getattr(job_queue, "_task", None)
+            queue_alive = queue_task is not None and not queue_task.done()
+            detail = (
+                f"{exc_name} (empty message); queue_alive={queue_alive}; "
+                "job_queue worker may be blocked or not running"
+            )
         raise RuntimeError(
-            f"Failed to enqueue imagegen job {job_id} onto job_queue: {exc}"
+            f"Failed to enqueue imagegen job {job_id} onto job_queue: {detail}"
         ) from exc
 
 

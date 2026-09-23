@@ -197,52 +197,60 @@ def test_search_fast_preview_hits_schnell(isolated_lifecycle: Path) -> None:
     assert "preview" in reasons["flux1_schnell_local"].lower()
 
 
-def test_search_short_film_hits_hunyuan(isolated_lifecycle: Path) -> None:
+def test_search_short_film_hits_ltx_25_not_retired_video(isolated_lifecycle: Path) -> None:
     ids = _search_ids("Make a short film")
     reasons = _search_reasons("Make a short film")
-    assert "hunyuan_video_15" in ids
-    assert "short-film" in reasons["hunyuan_video_15"].lower()
+    assert "ltx_2_5_checkpoint" in ids
+    assert "short-film" in reasons["ltx_2_5_checkpoint"].lower()
+    assert "hunyuan_video_15" not in ids
+    assert "hunyuan_video_13b" not in ids
+    assert "wan_models" not in ids
+    assert "ltx_checkpoint" not in ids
     assert "fal_key" not in ids
 
 
-def test_search_commercial_hits_wan_not_fal_key(isolated_lifecycle: Path) -> None:
+def test_search_commercial_hits_ltx_25_not_wan(isolated_lifecycle: Path) -> None:
     ids = _search_ids("Make a commercial")
     reasons = _search_reasons("Make a commercial")
-    assert "wan_models" in ids
+    assert "ltx_2_5_checkpoint" in ids
+    assert "wan_models" not in ids
     assert "fal_key" not in ids
-    assert "commercial" in reasons["wan_models"].lower()
+    assert "commercial" in reasons["ltx_2_5_checkpoint"].lower()
     assert "fal_key" not in _search_ids("commercial")
 
 
 def test_search_branded_product_video_differs_from_commercial(isolated_lifecycle: Path) -> None:
     branded = _search_ids("Make a branded product video")
     commercial = _search_ids("Make a commercial")
-    assert "wan_models" in branded
+    assert "wan_models" not in branded
     assert "flux1_dev_local" in branded
     assert "fal_key" not in branded
     assert branded != commercial
 
 
-def test_search_anime_episode_uses_video_and_image_anime(isolated_lifecycle: Path) -> None:
+def test_search_anime_episode_uses_image_anime_not_hunyuan_video(isolated_lifecycle: Path) -> None:
     ids = _search_ids("Make an anime episode")
     assert {"sana_15_local", "qwen_image_2512_models", "zimage_models"} & ids
-    assert "hunyuan_video_15" in ids
+    assert "hunyuan_video_15" not in ids
+    assert "hunyuan_video_13b" not in ids
+    assert "wan_models" not in ids
 
 
-def test_search_talking_presenter_hits_longcat(isolated_lifecycle: Path) -> None:
+def test_search_talking_presenter_omits_retired_video(isolated_lifecycle: Path) -> None:
     ids = _search_ids("Create a talking presenter")
-    reasons = _search_reasons("Create a talking presenter")
-    assert "longcat-video-avatar-1-5-local" in ids
-    assert "talking presenter" in reasons["longcat-video-avatar-1-5-local"].lower()
+    assert "wan_models" not in ids
+    assert "hunyuan_video_15" not in ids
+    assert "ltx_checkpoint" not in ids
 
 
-def test_search_storyboard_uses_existing_previs_ids(isolated_lifecycle: Path) -> None:
+def test_search_storyboard_uses_current_previs_ids(isolated_lifecycle: Path) -> None:
     ids = _search_ids("Make a storyboard")
     reasons = _search_reasons("Make a storyboard")
-    assert {"flux1_dev_local", "pack_essential_cinematic", "ltx_checkpoint"} & ids
+    assert {"flux1_dev_local", "pack_essential_cinematic", "ltx_2_5_checkpoint"} & ids
+    assert "ltx_checkpoint" not in ids
     storyboard_hit = next(
         component_id
-        for component_id in ("flux1_dev_local", "pack_essential_cinematic", "ltx_checkpoint")
+        for component_id in ("flux1_dev_local", "pack_essential_cinematic", "ltx_2_5_checkpoint")
         if component_id in reasons
     )
     assert "storyboard" in reasons[storyboard_hit].lower()
@@ -257,19 +265,24 @@ def test_production_intent_recommendations_differ(isolated_lifecycle: Path) -> N
         "Create a talking presenter",
         "Make a storyboard",
     ]
-    id_sets = [tuple(sorted(_search_ids(query))) for query in queries]
-    assert len(set(id_sets)) == len(queries)
+    for query in queries:
+        ids = _search_ids(query)
+        assert "hunyuan_video_15" not in ids
+        assert "wan_models" not in ids
+        assert "ltx_checkpoint" not in ids
+        assert "ltx23_ic_lora_ingredients" not in ids
     reasons = [_search_reasons(query) for query in queries]
     primary = [
-        reasons[0].get("hunyuan_video_15"),
-        reasons[1].get("wan_models"),
+        reasons[0].get("ltx_2_5_checkpoint"),
+        reasons[1].get("ltx_2_5_checkpoint"),
         reasons[2].get("flux1_dev_local"),
-        reasons[3].get("sana_15_local"),
-        reasons[4].get("longcat-video-avatar-1-5-local"),
-        reasons[5].get("flux1_dev_local") or reasons[5].get("pack_essential_cinematic") or reasons[5].get("ltx_checkpoint"),
+        reasons[3].get("sana_15_local") or reasons[3].get("qwen_image_2512_models"),
+        reasons[5].get("flux1_dev_local")
+        or reasons[5].get("pack_essential_cinematic")
+        or reasons[5].get("ltx_2_5_checkpoint"),
     ]
     assert all(primary)
-    assert len(set(primary)) == len(primary)
+    assert primary[0] != primary[1]
 
 
 def test_search_status_label_comes_from_lifecycle_state(

@@ -54,7 +54,7 @@ function creatorRecommendation(component: SetupComponentStatus, brief: string): 
     return "Best fit for quick creative previews before a final-quality pass.";
   }
   if (
-    ["hunyuan_video_15", "hunyuan_video_13b", "wan_models", "ltx_checkpoint", "ltx_2_5_checkpoint"].includes(component.id)
+    ["ltx_2_5_checkpoint"].includes(component.id)
     && (text.includes("film") || (text.includes("short") && !text.includes("preview")))
     && !text.includes("commercial")
     && !text.includes("branded")
@@ -62,19 +62,19 @@ function creatorRecommendation(component: SetupComponentStatus, brief: string): 
     return "Best fit for short-film and cinematic video generation.";
   }
   if (
-    ["wan_models", "hunyuan_video_15"].includes(component.id)
+    ["ltx_2_5_checkpoint"].includes(component.id)
     && (text.includes("commercial") || text.includes("branded") || (text.includes("product") && text.includes("video")))
   ) {
     return "Best fit for commercial and branded product video.";
   }
   if (
-    ["longcat-video-avatar-1-5-local", "infinitetalk-local", "musetalk-1-5-local", "echomimic-v2-local"].includes(component.id)
+    false /* Avatar Studio runtimes retired from current Adept UI */ && ["longcat-video-avatar-1-5-local", "infinitetalk-local", "musetalk-1-5-local", "echomimic-v2-local"].includes(component.id)
     && (text.includes("talking") || text.includes("presenter") || text.includes("avatar"))
   ) {
     return "Best fit for a talking presenter / avatar performance.";
   }
   if (
-    ["flux1_dev_local", "pack_essential_cinematic", "ltx_checkpoint", "ltx_2_5_checkpoint"].includes(component.id)
+    ["flux1_dev_local", "pack_essential_cinematic", "ltx_2_5_checkpoint"].includes(component.id)
     && (text.includes("storyboard") || text.includes("previz") || text.includes("previs"))
   ) {
     return "Best fit for storyboard frames and motion previs.";
@@ -160,8 +160,8 @@ export function AiGuidedSetupPanel({
         const text = brief.toLowerCase();
         const preferred = (id: string) => {
           if (text.includes("talking") || text.includes("presenter") || text.includes("avatar")) {
-            if (id === "longcat-video-avatar-1-5-local") return 0;
-            if (id === "infinitetalk-local") return 1;
+            if (id === "longcat-video-avatar-1-5-local") return 99; // retired Avatar Studio
+            if (id === "infinitetalk-local") return 99; // retired Avatar Studio
             if (id === "musetalk-1-5-local") return 2;
             if (id === "echomimic-v2-local") return 3;
             return 9;
@@ -169,22 +169,18 @@ export function AiGuidedSetupPanel({
           if (text.includes("storyboard") || text.includes("previz") || text.includes("previs")) {
             if (id === "flux1_dev_local") return 0;
             if (id === "pack_essential_cinematic") return 1;
-            if (id === "ltx_checkpoint") return 2;
-            if (id === "ltx_2_5_checkpoint") return 3;
+            if (id === "ltx_2_5_checkpoint") return 2;
             return 9;
           }
           if (text.includes("commercial") || text.includes("branded") || (text.includes("product") && text.includes("video"))) {
-            if (id === "wan_models") return 0;
-            if (id === "hunyuan_video_15") return 1;
-            if (id === "flux1_dev_local") return 2;
-            if (id === "index_tts2") return 3;
+            if (id === "ltx_2_5_checkpoint") return 0;
+            if (id === "flux1_dev_local") return 1;
+            if (id === "index_tts2") return 2;
             return 9;
           }
           if (text.includes("film") || (text.includes("short") && !text.includes("preview"))) {
-            if (id === "hunyuan_video_15") return 0;
-            if (id === "hunyuan_video_13b") return 1;
-            if (id === "wan_models") return 2;
-            if (id === "ltx_checkpoint") return 3;
+            if (id === "ltx_2_5_checkpoint") return 0;
+            if (id === "flux1_dev_local") return 1;
             return 9;
           }
           if (text.includes("product") && text.includes("mockup")) {
@@ -196,9 +192,8 @@ export function AiGuidedSetupPanel({
           if (id === "sana_15_local") return 1;
           if (id === "qwen_image_2512_models") return 2;
           if (id === "zimage_models") return 3;
-          if (id === "hunyuan_video_15") return 4;
-          if (id === "wan_models") return 5;
-          if (id === "longcat-video-avatar-1-5-local") return 6;
+          if (id === "ltx_2_5_checkpoint") return 4;
+          if (id === "longcat-video-avatar-1-5-local") return 0; // retired — no boost
           return 9;
         };
         return preferred(a.id) - preferred(b.id);

@@ -40,6 +40,48 @@ def _px(norm: float, total: int) -> int:
     return int(round(float(norm) * total))
 
 
+def _draw_image(img: Any, el: dict[str, Any], W: int, H: int, asset_paths: dict[str, str] | None) -> None:
+    """Paste a library image into the overlay box with contain-fit and alpha."""
+    asset_id = el.get("assetId")
+    if not asset_id:
+        return
+    path_str = (asset_paths or {}).get(str(asset_id)) or el.get("_assetPath")
+    if not path_str:
+        return
+    path = Path(path_str)
+    if not path.is_file():
+        return
+
+    Image, _ImageDraw, _ImageFont = _load_pil()
+    try:
+        src = Image.open(path).convert("RGBA")
+    except Exception:
+        return
+
+    x = _px(el.get("x", 0), W)
+    y = _px(el.get("y", 0), H)
+    box_w = max(1, _px(el.get("width", 0.2), W))
+    box_h = max(1, _px(el.get("height", 0.2), H))
+
+    src.thumbnail((box_w, box_h), Image.Resampling.LANCZOS)
+    offset_x = (box_w - src.width) // 2
+    offset_y = (box_h - src.height) // 2
+
+    layer = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
+    layer.paste(src, (offset_x, offset_y), src)
+
+    opacity = float(el.get("opacity") if el.get("opacity") is not None else 1)
+    if opacity < 1:
+        alpha = layer.getchannel("A")
+        layer.putalpha(alpha.point(lambda a: int(a * opacity)))
+
+    rot = float(el.get("rotation") or 0)
+    if abs(rot) > 0.01:
+        layer = layer.rotate(-rot, expand=True, resample=Image.Resampling.BICUBIC)
+
+    img.alpha_composite(layer, (x, y))
+
+
 def _draw_vector(draw: Any, el: dict[str, Any], W: int, H: int) -> None:
     x = _px(el.get("x", 0), W)
     y = _px(el.get("y", 0), H)
@@ -80,14 +122,23 @@ def _draw_vector(draw: Any, el: dict[str, Any], W: int, H: int) -> None:
         )
 
 
-def _draw_text(img: Any, ImageDraw: Any, ImageFont: Any, el: dict[str, Any], W: int, H: int, fonts_used: list) -> None:
+def _draw_text(
+    img: Any,
+    ImageDraw: Any,
+    ImageFont: Any,
+    el: dict[str, Any],
+    W: int,
+    H: int,
+    fonts_used: list,
+    font_scale: float = 1.0,
+) -> None:
     if el.get("visible") is False:
         return
     style = el.get("textStyle") or {}
     text = str(el.get("text") or "")
     size = float(style.get("fontSize") or 32)
-    # fontSize is composition pixels when > 1, else treat as normalized
-    font_px = int(size if size > 3 else size * H)
+    # fontSize is design-canvas pixels when > 1, else treat as normalized
+    font_px = int((size if size > 3 else size * H) * max(font_scale, 0.05))
     font, resolved = _font(ImageFont, style.get("fontFamily") or style.get("fontId"), font_px, int(style.get("fontWeight") or 400))
     fonts_used.append(
         {
@@ -164,7 +215,17 @@ def _draw_text(img: Any, ImageDraw: Any, ImageFont: Any, el: dict[str, Any], W: 
     img.alpha_composite(layer, (x, y))
 
 
-def _walk(img: Any, ImageDraw: Any, ImageFont: Any, els: list[dict[str, Any]], W: int, H: int, fonts_used: list) -> None:
+def _walk(
+    img: Any,
+    ImageDraw: Any,
+    ImageFont: Any,
+    els: list[dict[str, Any]],
+    W: int,
+    H: int,
+    fonts_used: list,
+    asset_paths: dict[str, str] | None,
+    font_scale: float = 1.0,
+) -> None:
     ordered = sorted(els, key=lambda e: int(e.get("zIndex") or 0))
     for el in ordered:
         if el.get("visible") is False or el.get("locked") and False:
@@ -180,9 +241,11 @@ def _walk(img: Any, ImageDraw: Any, ImageFont: Any, els: list[dict[str, Any]], W
             _draw_vector(d, el, W, H)
             img.alpha_composite(layer)
         elif t == "text":
-            _draw_text(img, ImageDraw, ImageFont, el, W, H, fonts_used)
+            _draw_text(img, ImageDraw, ImageFont, el, W, H, fonts_used, font_scale)
+        elif t == "image":
+            _draw_image(img, el, W, H, asset_paths)
         elif t == "group":
-            _walk(img, ImageDraw, ImageFont, list(el.get("children") or []), W, H, fonts_used)
+            _walk(img, ImageDraw, ImageFont, list(el.get("children") or []), W, H, fonts_used, asset_paths, font_scale)
 
 
 def render_composition_to_png(
@@ -190,6 +253,7 @@ def render_composition_to_png(
     source_image_path: str | Path | None,
     composition: dict[str, Any],
     out_path: str | Path,
+    asset_paths: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     Image, ImageDraw, ImageFont = _load_pil()
     W = int(composition.get("canvasWidth") or 1920)
@@ -199,11 +263,19 @@ def render_composition_to_png(
         W, H = base.size
         # keep composition dims for provenance but render at source size
     else:
-        base = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+        # Timed MAGI overlay burn composites this PNG over video. An opaque
+        # canvas would replace the published master. Keep the plate transparent.
+        base = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+
+    merged_asset_paths: dict[str, str] = dict(composition.get("_assetPaths") or {})
+    if asset_paths:
+        merged_asset_paths.update(asset_paths)
 
     fonts_used: list[dict[str, Any]] = []
     overlays = list(composition.get("overlays") or [])
-    _walk(base, ImageDraw, ImageFont, overlays, base.width, base.height, fonts_used)
+    design_w = int(composition.get("designCanvasWidth") or composition.get("canvasWidth") or base.width)
+    font_scale = base.width / max(design_w, 1)
+    _walk(base, ImageDraw, ImageFont, overlays, base.width, base.height, fonts_used, merged_asset_paths, font_scale)
 
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)

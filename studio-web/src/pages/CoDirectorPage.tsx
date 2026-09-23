@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api } from "../api";
+import { api, bindAssetUrlProject } from "../api";
 import { CoDirectorFullScreen } from "../components/CoDirector";
 import { useCoDirectorSession } from "../components/CoDirector/CoDirectorSession";
 import { StudioChrome } from "../components/dashboard/StudioChrome";
-import { resolveWorkspace } from "../core/workspaces";
+import { buildCoDirectorSearch, loadLastSelectedScene, parseSceneIdFromSearch, persistWorkspaceKey } from "../sceneSelection";
+import { buildProjectWorkspaceLocation } from "../navigation/projectWorkspaceNavigation";
 
 export default function CoDirectorPage() {
   const navigate = useNavigate();
@@ -13,11 +14,22 @@ export default function CoDirectorPage() {
   const { bindWorkspace, unbindWorkspace } = useCoDirectorSession();
   const [projectName, setProjectName] = useState<string | undefined>();
   const [primaryProjectType, setPrimaryProjectType] = useState<string | undefined>();
+  const [sceneName, setSceneName] = useState<string | undefined>();
+  const querySceneId = params.get("sceneId") || parseSceneIdFromSearch(`?${params.toString()}`);
+  const workspaceTab = persistWorkspaceKey(params.get("workspace") || "timeline");
+  const persistedSceneId = projectId ? loadLastSelectedScene(projectId, workspaceTab || "timeline") : null;
+  const sceneId = querySceneId || persistedSceneId || undefined;
+
+  useEffect(() => {
+    bindAssetUrlProject(projectId);
+    return () => bindAssetUrlProject(null);
+  }, [projectId]);
 
   useEffect(() => {
     if (!projectId) {
       setProjectName(undefined);
       setPrimaryProjectType(undefined);
+      setSceneName(undefined);
       return;
     }
     let cancelled = false;
@@ -27,18 +39,21 @@ export default function CoDirectorPage() {
         if (!cancelled) {
           setProjectName(p?.name);
           setPrimaryProjectType(p?.primary_project_type || "custom");
+          const scene = (p?.scenes || []).find((row) => row.id === sceneId);
+          setSceneName(scene?.name);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setProjectName(undefined);
           setPrimaryProjectType(undefined);
+          setSceneName(undefined);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, sceneId]);
 
   useEffect(() => {
     const onRenamed = (event: Event) => {
@@ -56,28 +71,30 @@ export default function CoDirectorPage() {
       unbindWorkspace();
       return;
     }
-    bindWorkspace({
+    const generation = bindWorkspace({
       projectId,
       projectName: projectName || "Project",
       primaryProjectType: primaryProjectType || "custom",
+      sceneId: sceneId || undefined,
+      sceneName,
+      workspaceTab: workspaceTab || undefined,
       // Allow embedded Project Building panes (Character Creator, Scriptwriter, etc.)
       // to deep-link into the standalone project workspaces, preserving extra params
       // such as characterId / returnWorkspace. Without this, onGoTab is undefined in
       // fullscreen Co-Director and "Open Full Character Creator" is a no-op.
       onGoTab: (tab: string, extra?: Record<string, string>) => {
-        const resolved = resolveWorkspace(tab) || tab;
-        const params = new URLSearchParams();
-        if (resolved && resolved !== "home") params.set("workspace", resolved);
-        if (extra) {
-          for (const [k, v] of Object.entries(extra)) {
-            if (v) params.set(k, v);
-          }
-        }
-        const search = params.toString() ? `?${params.toString()}` : "";
-        navigate({ pathname: `/project/${projectId}`, search });
+        const location = buildProjectWorkspaceLocation({
+          projectId,
+          tab,
+          sceneId,
+          extra,
+        });
+        if (!location) return;
+        navigate({ pathname: location.pathname, search: location.search });
       },
     });
-  }, [bindWorkspace, unbindWorkspace, navigate, projectId, projectName, primaryProjectType]);
+    return () => unbindWorkspace({ bindGeneration: generation });
+  }, [bindWorkspace, unbindWorkspace, navigate, projectId, projectName, primaryProjectType, sceneId, sceneName, workspaceTab]);
 
   return (
     <div className="app-shell atmosphere app-shell-fixed">
@@ -85,7 +102,17 @@ export default function CoDirectorPage() {
         variant={projectId ? "project" : "home"}
         projectId={projectId || undefined}
         projectName={projectName}
-        onOpenCoDirector={() => navigate("/co-director")}
+        onOpenCoDirector={() =>
+          navigate(
+            projectId
+              ? `/co-director${buildCoDirectorSearch({
+                  projectId,
+                  sceneId,
+                  workspace: workspaceTab,
+                })}`
+              : "/co-director",
+          )
+        }
         breadcrumbs={[
           { label: "Home", onClick: () => navigate("/") },
           ...(projectId

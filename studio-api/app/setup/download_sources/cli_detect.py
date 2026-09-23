@@ -408,14 +408,14 @@ def detect_huggingface_cli() -> CliDetection:
         status = "Ready"
         message = "Hugging Face CLI is ready and authenticated."
     elif authenticated and network_error:
-        status = "Ready"
+        status = "Installed"
         message = (
-            "Hugging Face CLI has local credentials. Online account check failed; "
-            "downloads may still work."
+            "Hugging Face CLI has local credentials. Online account check failed, "
+            "so this is not Ready."
         )
     elif authenticated:
-        status = "Ready"
-        message = "Hugging Face CLI has local credentials configured."
+        status = "Installed"
+        message = "Hugging Face CLI has local credentials, but the online account check did not succeed."
     elif Path(path).exists() or shutil.which(path):
         status = "Installed but not authenticated"
         message = "The CLI is installed, but this source may require you to sign in."

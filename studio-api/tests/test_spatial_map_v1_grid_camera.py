@@ -99,12 +99,16 @@ def test_neutral_density_is_10():
 
 
 def test_grid_scale_range_and_clamp():
+    assert clamp_grid_scale(-8) == -8
+    assert clamp_grid_scale(8) == 8
     assert clamp_grid_scale(-5) == -5
     assert clamp_grid_scale(5) == 5
-    assert clamp_grid_scale(-10) == -5
-    assert clamp_grid_scale(99) == 5
+    assert clamp_grid_scale(-10) == -8
+    assert clamp_grid_scale(99) == 8
+    assert density_for_scale(-8) == 2
     assert density_for_scale(-5) == 5
     assert density_for_scale(5) == 20
+    assert density_for_scale(8) == 26
 
 
 def test_grid_scale_persistence_and_clamping():
@@ -117,11 +121,11 @@ def test_grid_scale_persistence_and_clamping():
         updated = update_document(db, project_id, doc.id, SpatialMapUpdateBody(gridScale=2))
         assert updated.gridScale == 2
         updated2 = update_document(db, project_id, doc.id, SpatialMapUpdateBody(gridScale=10))
-        assert updated2.gridScale == 5
+        assert updated2.gridScale == 8
         updated3 = update_document(db, project_id, doc.id, SpatialMapUpdateBody(gridScale=-10))
-        assert updated3.gridScale == -5
+        assert updated3.gridScale == -8
         reloaded = get_document(db, project_id, doc.id)
-        assert reloaded.gridScale == -5
+        assert reloaded.gridScale == -8
     finally:
         db.close()
 

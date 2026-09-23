@@ -252,6 +252,8 @@ def test_m41_cd_13_failed_runtime_action_not_reported_as_success(client, mock_pr
     assert body["fallbackUsed"] is True
     assert body["providerError"]["code"] == "CONNECTION_REFUSED"
     assert body["providerError"].get("partial_work_created") is False
+    assert "tell me about" not in (body.get("reply") or "").lower()
+    assert "local ai runtime" in (body.get("reply") or "").lower()
 
 
 def test_m41_cd_14_structured_error_envelope_is_returned(client, mock_provider_env, monkeypatch) -> None:

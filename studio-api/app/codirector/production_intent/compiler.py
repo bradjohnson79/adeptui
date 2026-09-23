@@ -110,6 +110,17 @@ def compile_creative_context(
         continuity.update(extra.get("continuity") or {})
         if extra.get("approvedReferences"):
             refs = list(extra["approvedReferences"])
+        # User-locked creative stamps from CIS/CD body extras win over Bible.
+        # (visualStyle / lighting / camera / colorGrade — fill Bible only when absent.)
+        if extra.get("lighting"):
+            lighting = dict(extra.get("lighting") or {})
+        if extra.get("cinematography"):
+            cinematography = dict(extra.get("cinematography") or {})
+        # colorGrade lives under visualLanguage.colorGradePreset when locked on CIS.
+        if extra.get("colorGrade") and not visual.get("colorGradePreset"):
+            visual["colorGradePreset"] = extra["colorGrade"]
+        # visualStyle is stamped on creativeContext (not CreativeContext schema);
+        # callers that need it read extras / generationIntent after compile.
 
     payload = {
         "projectIntent": project_intent,

@@ -16,7 +16,7 @@ _RESOLVER_INTENT: dict[str, Optional[str]] = {
     "video.batch_timeline": "batch_timeline",
     "video.extend": "extend",
     "video.lipsync": "lipsync",
-    "video.three_frame": "wan_three_frame",
+    "video.three_frame": "scene_i2v",
 }
 
 _JOB_KIND: dict[str, Optional[str]] = {
@@ -45,10 +45,6 @@ def to_resolver_request(intent: ProductionIntent) -> dict[str, Any]:
     """Public resolve params — never selects raw Comfy graphs."""
     ri = resolver_intent_for(intent.operation)
     engine = (intent.enginePreference or "minimax-h3").lower()
-    if intent.operation == "video.three_frame":
-        engine = "wan"
-    if intent.workflowPreference and "wan" in intent.workflowPreference.lower():
-        engine = "wan"
     start = intent.sourceAssets[0] if intent.sourceAssets else None
     middle = intent.sourceAssets[1] if len(intent.sourceAssets) > 1 else None
     end = intent.sourceAssets[2] if len(intent.sourceAssets) > 2 else None
@@ -132,7 +128,6 @@ def to_studio_job_params(
     }
     if intent.operation == "video.three_frame":
         params["frame_mode"] = "three_frame"
-        params["engine"] = "wan"
         if len(intent.sourceAssets) >= 3:
             params["start_asset_id"] = intent.sourceAssets[0]
             params["middle_asset_id"] = intent.sourceAssets[1]

@@ -8,36 +8,30 @@ const MANUAL_HANDOFF_ID = "77a4b96c-8e3f-4501-897c-51bab99bedb7";
 const RUN_ID = `EXPLORE-WS-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 
 const EXPECTED_TITLES = [
-  "Timeline",
-  "MAGI Editor",
-  "Brand Studio",
-  "Spatial Map",
-  "PoseCraft",
   "Image Generation",
   "Text to Video",
   "1 Frame",
   "3 Frame",
   "Character Creator",
+  "Prop Creator",
+  "Environment Creator",
+  "Storyboard",
   "Scriptwriter",
-  "Avatar Studio",
   "Voice Studio",
   "Audio Studio",
   "Library",
 ] as const;
 
 const EXPECTED_IDS = [
-  "timeline",
-  "magi",
-  "brandstudio",
-  "spatial",
-  "posecraft",
   "imagegen",
   "txt2vid",
   "one",
   "three",
   "characters",
+  "propcreator",
+  "environmentcreator",
+  "script",
   "scriptwriter",
-  "avatar",
   "voicestudio",
   "audiostudio",
   "library",
@@ -189,10 +183,10 @@ test.describe.serial("Explore workspace roster audit @critical", () => {
     const handoffBefore = await request.get(`${API}/api/projects/${MANUAL_HANDOFF_ID}`);
 
     try {
-      await test.step("Scenario A: Explore roster is exactly the 10 canonical workspaces", async () => {
+      await test.step("Scenario A: Explore roster is the canonical 4×3 workspaces", async () => {
         await gotoHome(page);
         const cards = page.getByTestId("explore-adept-ui").locator("[data-testid^='explore-workspace-']");
-        await expect(cards).toHaveCount(15);
+        await expect(cards).toHaveCount(12);
         for (const id of EXPECTED_IDS) {
           await expect(page.getByTestId(`explore-workspace-${id}`)).toBeVisible();
         }
@@ -201,7 +195,8 @@ test.describe.serial("Explore workspace roster audit @critical", () => {
             EXPECTED_TITLES[i],
           );
         }
-        await expect(page.getByTestId("explore-adept-ui").locator(".ds-workspace-card__title", { hasText: "Storyboard" })).toHaveCount(0);
+        await expect(page.getByTestId("explore-workspace-timeline")).toHaveCount(0);
+        await expect(page.getByTestId("explore-workspace-magi")).toHaveCount(0);
         await page.screenshot({ path: path.join(ARTIFACT_DIR, "scenario-a-roster-1440.png"), fullPage: true });
       });
 
@@ -236,19 +231,17 @@ test.describe.serial("Explore workspace roster audit @critical", () => {
         });
       }
 
-      await test.step("Scenario B: Brand Studio Home card", async () => {
-        await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-brandstudio").click();
-        await assertWorkspaceShell(page, "brandstudio", "brand-studio", active.id);
-        await expect(page.getByTestId("generation-studio-home")).toHaveCount(0);
-        await page.screenshot({ path: path.join(ARTIFACT_DIR, "scenario-b-brand-home-card.png"), fullPage: true });
+      await test.step("Scenario B: Brand Studio is retired from Explore", async () => {
+        await gotoHome(page);
+        await expect(page.getByTestId("explore-workspace-brandstudio")).toHaveCount(0);
+        await page.screenshot({ path: path.join(ARTIFACT_DIR, "scenario-b-brand-retired.png"), fullPage: true });
       });
 
-      await test.step("Scenario C: Brand Studio Production dropdown", async () => {
-        await waitForActiveProjectContext(active);
-        await openProductionItem(page, "brandstudio");
-        await assertWorkspaceShell(page, "brandstudio", "brand-studio", active.id);
-        await expect(page).toHaveURL(new RegExp(active.id));
+      await test.step("Scenario C: Brand Studio is retired from Production", async () => {
+        await gotoHome(page);
+        await page.getByRole("button", { name: /^Production$/ }).click();
+        await expect(page.getByTestId("production-item-brandstudio")).toHaveCount(0);
+        await page.keyboard.press("Escape");
       });
 
       await test.step("Scenario D: Voice Studio card and Production dropdown", async () => {
@@ -282,7 +275,6 @@ test.describe.serial("Explore workspace roster audit @critical", () => {
         }
 
         const workspaces: Array<{ id: (typeof EXPECTED_IDS)[number]; shell: string }> = [
-          { id: "brandstudio", shell: "brand-studio" },
           { id: "voicestudio", shell: "voice-studio-shell" },
           { id: "audiostudio", shell: "audio-studio-workspace" },
         ];
@@ -338,7 +330,7 @@ test.describe.serial("Explore workspace roster audit @critical", () => {
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           await gotoHome(page);
           const grid = page.getByTestId("explore-adept-ui");
-          await expect(grid.locator("[data-testid^='explore-workspace-']")).toHaveCount(15);
+          await expect(grid.locator("[data-testid^='explore-workspace-']")).toHaveCount(12);
           const overflow = await grid.evaluate((el) => {
             const section = el.closest("section") || el;
             return {
@@ -370,21 +362,21 @@ test.describe.serial("Explore workspace roster audit @critical", () => {
 
       await test.step("Scenario H: keyboard and accessibility basics", async () => {
         await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-brandstudio").focus();
-        await expect(page.getByTestId("explore-workspace-brandstudio")).toBeFocused();
+        await page.getByTestId("explore-workspace-voicestudio").focus();
+        await expect(page.getByTestId("explore-workspace-voicestudio")).toBeFocused();
         await page.keyboard.press("Enter");
-        await assertWorkspaceShell(page, "brandstudio", "brand-studio", active.id);
+        await assertWorkspaceShell(page, "voicestudio", "voice-studio-shell", active.id);
 
         await waitForActiveProjectContext(active);
         await page.getByRole("button", { name: /^Production$/ }).focus();
         await page.keyboard.press("Enter");
-        await expect(page.getByTestId("production-item-brandstudio")).toBeVisible();
-        await page.getByTestId("production-item-brandstudio").focus();
+        await expect(page.getByTestId("production-item-voicestudio")).toBeVisible();
+        await page.getByTestId("production-item-voicestudio").focus();
         await page.keyboard.press("Enter");
-        await assertWorkspaceShell(page, "brandstudio", "brand-studio", active.id);
+        await assertWorkspaceShell(page, "voicestudio", "voice-studio-shell", active.id);
 
         await waitForActiveProjectContext(active);
-        for (const id of ["brandstudio", "voicestudio", "audiostudio"] as const) {
+        for (const id of ["voicestudio", "audiostudio"] as const) {
           const alt = await page.getByTestId(`explore-workspace-${id}`).locator("img").getAttribute("alt");
           expect(alt && alt.trim().length > 0).toBeTruthy();
         }
@@ -395,8 +387,8 @@ test.describe.serial("Explore workspace roster audit @critical", () => {
         const consoleErrors: string[] = [];
         await waitForActiveProjectContext(active);
         page.once("pageerror", (err) => consoleErrors.push(err.message));
-        await page.getByTestId("explore-workspace-brandstudio").click();
-        await assertWorkspaceShell(page, "brandstudio", "brand-studio", active.id);
+        await page.getByTestId("explore-workspace-voicestudio").click();
+        await assertWorkspaceShell(page, "voicestudio", "voice-studio-shell", active.id);
         expect(consoleErrors.filter((t) => !noiseAllowed.test(t))).toEqual([]);
       });
     } finally {

@@ -1,4 +1,4 @@
-/** Creator-facing Voice Environment presets (M5.2 frozen catalogs). */
+﻿/** Creator-facing Voice Environment presets (M5.2 frozen catalogs). */
 
 export type PresetOption = {
   id: string;
@@ -15,7 +15,7 @@ export const SPACE_PRESETS: readonly PresetOption[] = [
   { id: "classroom", label: "Classroom", description: "Harder surfaces and a bit more room contribution." },
   { id: "large_hall", label: "Large Hall", description: "Longer reflections and a spacious presence." },
   { id: "warehouse", label: "Warehouse", description: "Industrial volume with delayed reflections." },
-  { id: "cathedral", label: "Cathedral", description: "Grand, lingering reverberation." },
+  { id: "cathedral", label: "Cathedral", description: "Large sacred space with controlled, clear reverb — not a wash." },
   { id: "cavern", label: "Cavern", description: "Deep, dark natural echoes." },
   { id: "tunnel", label: "Tunnel", description: "Focused reflections that stretch along a corridor." },
   { id: "stadium", label: "Stadium", description: "Huge open volume with distant bounce." },

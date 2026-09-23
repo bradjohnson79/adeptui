@@ -2,22 +2,30 @@
  * Cartesian Spatial Map geometry — shared by Characters, Props, and Cameras.
  *
  * Authoritative physical location: normalizedX / normalizedY in [-1, 1]
- * (x: west→east, y: north→south, matching the circular map bitmap).
+ * (x: west→east, y: north→south). The workspace viewport is rectangular;
+ * this square world is unchanged.
  *
  * Derived at the current Placement Precision density:
  *   gridColumn / gridRow of the nearest valid square cell.
  *
  * Changing Placement Precision MUST NOT mutate normalized coordinates.
- * A cell is valid iff its center lies inside the unit circle.
+ * A cell is valid iff its center lies inside the unit circle (world rule,
+ * not a circular clip of the picture).
  */
 
-export const MIN_GRID_SCALE = -5;
-export const MAX_GRID_SCALE = 5;
+export const MIN_GRID_SCALE = -8;
+export const MAX_GRID_SCALE = 8;
 export const DEFAULT_GRID_SCALE = 0;
 
-export type GridScale = -5 | -4 | -3 | -2 | -1 | 0 | 1 | 2 | 3 | 4 | 5;
+export type GridScale =
+  | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1
+  | 0
+  | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export const GRID_DENSITY: Record<GridScale, number> = {
+  [-8]: 2,
+  [-7]: 3,
+  [-6]: 4,
   [-5]: 5,
   [-4]: 6,
   [-3]: 7,
@@ -29,6 +37,9 @@ export const GRID_DENSITY: Record<GridScale, number> = {
   [3]: 16,
   [4]: 18,
   [5]: 20,
+  [6]: 22,
+  [7]: 24,
+  [8]: 26,
 };
 
 export const CARDINAL_LABELS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
@@ -111,6 +122,65 @@ export function normalizedToPixel(x: number, y: number, size: number): { px: num
   };
 }
 
+/**
+ * Map a client pointer onto a square viewBox that is slice-fitted into a
+ * rectangular CSS box (xMidYMid slice). Does not change world coordinates.
+ */
+export function clientToSlicedSquareViewBox(
+  clientX: number,
+  clientY: number,
+  css: { left: number; top: number; width: number; height: number },
+  viewBoxSize: number,
+): { x: number; y: number } | null {
+  if (!(css.width > 0) || !(css.height > 0) || !(viewBoxSize > 0)) return null;
+  const scale = Math.max(css.width / viewBoxSize, css.height / viewBoxSize);
+  if (!(scale > 0)) return null;
+  const dispW = viewBoxSize * scale;
+  const dispH = viewBoxSize * scale;
+  const offX = (css.width - dispW) / 2;
+  const offY = (css.height - dispH) / 2;
+  return {
+    x: (clientX - css.left - offX) / scale,
+    y: (clientY - css.top - offY) / scale,
+  };
+}
+
+/** Inverse of clientToSlicedSquareViewBox, in the element's local CSS box. */
+export function viewBoxToLocalCss(
+  x: number,
+  y: number,
+  cssWidth: number,
+  cssHeight: number,
+  viewBoxSize: number,
+): { x: number; y: number } {
+  if (!(cssWidth > 0) || !(cssHeight > 0) || !(viewBoxSize > 0)) return { x, y };
+  const scale = Math.max(cssWidth / viewBoxSize, cssHeight / viewBoxSize);
+  return {
+    x: (cssWidth - viewBoxSize * scale) / 2 + x * scale,
+    y: (cssHeight - viewBoxSize * scale) / 2 + y * scale,
+  };
+}
+
+/** Visible square-viewBox rectangle after xMidYMid slice into a CSS box. */
+export function slicedVisibleSquare(
+  cssWidth: number,
+  cssHeight: number,
+  viewBoxSize: number,
+): { x: number; y: number; w: number; h: number } {
+  if (!(cssWidth > 0) || !(cssHeight > 0) || !(viewBoxSize > 0)) {
+    return { x: 0, y: 0, w: viewBoxSize, h: viewBoxSize };
+  }
+  const scale = Math.max(cssWidth / viewBoxSize, cssHeight / viewBoxSize);
+  const visW = cssWidth / scale;
+  const visH = cssHeight / scale;
+  return {
+    x: (viewBoxSize - visW) / 2,
+    y: (viewBoxSize - visH) / 2,
+    w: visW,
+    h: visH,
+  };
+}
+
 export function pointerToCell(px: number, py: number, mapSize: number, density: number): GridCell | null {
   const { x, y } = pixelToNormalized(px, py, mapSize);
   const column = Math.floor(((x + 1) / 2) * density);
@@ -177,7 +247,7 @@ export function remapPositionToDensity(x: number, y: number, density: number): G
   return remapDerivedCell(x, y, density);
 }
 
-export const ALL_GRID_SCALES: GridScale[] = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
+export const ALL_GRID_SCALES: GridScale[] = [-8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8];
 
 /**
  * Convert a legacy polar (ring, spoke) coordinate into normalized map space.

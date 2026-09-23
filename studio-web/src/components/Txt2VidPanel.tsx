@@ -1,21 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "../api";
+import { api } from "../api";
 import { shouldSuspendDependentPolling } from "../runtime/studioApiConnection";
-import type { Job, Project } from "../types";
+import type { EngineName, Job, Project } from "../types";
 import {
-  ASPECT_PRESETS,
+  clearPersistedTxt2VidPreviewAssetId,
+  extractTxt2VidOutputAssetId,
+  latestSuccessfulTxt2VidAssetId,
+  persistTxt2VidPreviewAssetId,
+  readPersistedTxt2VidPreviewAssetId,
+  resolveTxt2VidPreviewAsset,
+} from "./txt2vidPreview";
+import {
   FPS_OPTIONS,
   STYLE_PRESETS,
-  resolutionToSize,
   type EditorTab,
 } from "../workspacePrefs";
+import {
+  durationFidelityMessage,
+  inferMinimaxMegapixelTier,
+  inferVideoTier,
+  isMinimaxMegapixelEngine,
+  isMinimaxMegapixelTier,
+  legalCanvasSize,
+  normalizeVideoTier,
+} from "../video/legalCanvas";
 import { JobPanel } from "./JobPanel";
-import { PaidFalFallbackDialog, type PaidFalFallbackAction } from "./PaidFalFallbackDialog";
-import { ReferencesPane } from "./sceneReferences/ReferencesPane";
-import { PromptIntelligencePanel } from "./CoDirector/PromptIntelligencePanel";
-import { SpatialReferenceFieldset } from "./spatial-map/SpatialReferenceFieldset";
-import { buildAiGuidedSetupPath } from "../setup/navigation";
-import { MiniMaxH3PlanPanel } from "./minimax-h3/MiniMaxH3PlanPanel";
+import { GpuVramPanel } from "./GpuVramPanel";
+import {
+  extractRenderFailure,
+  RenderFailureAlert,
+  splitFailureMessage,
+  type RenderFailureInfo,
+} from "./RenderFailureAlert";
+import { LivePreviewMonitor } from "./LivePreviewMonitor";
+import { PaidFalFallbackDialog } from "./PaidFalFallbackDialog";
+import { EngineAuthoritySelect, ENGINE_NAME_TO_PRODUCT } from "./generation/EngineAuthoritySelect";
+import { VideoResolutionSelect } from "./generation/VideoResolutionSelect";
+import { AspectRatioSelect } from "./generation/AspectRatioSelect";
+import { T2V_ENGINE_NAMES } from "./generation/engineSurfacePolicy";
+import { useTimelineVideoGenerators } from "../timelineMaster/useTimelineVideoGenerators";
+import { resolveGeneratorOption } from "../timelineMaster/draftCapabilities";
+
+const FAL_ENGINES = new Set<string>([
+  "seedance-2.0",
+  "seedance-2.5",
+  "fal_seedance",
+  "fal_kling",
+  "fal_veo",
+  "fal_runway",
+]);
+
+const NO_T2V_BLOCKER =
+  "No executable Text-to-Video engine right now. Install LTX 2.5 or MiniMax H3 in Source Manager, or connect a hosted generator in Setup.";
 
 function projectDefaults(project: Project): Record<string, any> {
   try {
@@ -23,25 +59,6 @@ function projectDefaults(project: Project): Record<string, any> {
   } catch {
     return {};
   }
-}
-
-function parseLocalStartFrameBlocker(err: unknown): { code?: string; message: string } | null {
-  const message = err instanceof Error ? err.message : String(err);
-  try {
-    const parsed = JSON.parse(message);
-    if (parsed && typeof parsed === "object" && parsed.code === "LOCAL_START_FRAME_REQUIRED") {
-      return { code: parsed.code, message: String(parsed.message || message) };
-    }
-  } catch {
-    /* not JSON */
-  }
-  if (err instanceof ApiError && err.code === "LOCAL_START_FRAME_REQUIRED") {
-    return { code: err.code, message: err.message };
-  }
-  if (/start frame|LOCAL_START_FRAME_REQUIRED|image-to-video/i.test(message)) {
-    return { code: "LOCAL_START_FRAME_REQUIRED", message };
-  }
-  return null;
 }
 
 export function Txt2VidPanel({
@@ -53,15 +70,6 @@ export function Txt2VidPanel({
   onChange: () => Promise<void>;
   onGo: (tab: EditorTab) => void;
 }) {
-  const openVideoSetup = (componentId?: string) => {
-    window.location.assign(
-      buildAiGuidedSetupPath({
-        projectId: project.id,
-        componentId,
-        source: "video_studio",
-      }),
-    );
-  };
   const d = projectDefaults(project);
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState(project.negative_prompt);
@@ -69,8 +77,17 @@ export function Txt2VidPanel({
   const [aspect, setAspect] = useState(String(d.aspect || "16:9"));
   const [fps, setFps] = useState<string>(String(d.fps ?? "auto"));
   const [duration, setDuration] = useState(5);
-  const [engine, setEngine] = useState(String(d.engine || "auto"));
-  const [resolution, setResolution] = useState(String(d.resolution || "720p"));
+  const [engine, setEngine] = useState<string>(() => {
+    const initial = String(d.engine || "auto");
+    if (initial === "auto" || (T2V_ENGINE_NAMES as readonly string[]).includes(initial)) return initial;
+    return "auto";
+  });
+  const [resolution, setResolution] = useState<string>(() => {
+    const r = String(d.resolution || "720p");
+    // Keep MiniMax megapixel labels as-is; normalize legacy labels for the
+    // 480p/720p/1080p/2K/4K tier dropdown used by other engines.
+    return isMinimaxMegapixelTier(r) ? r : normalizeVideoTier(r);
+  });
   const [history, setHistory] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("adept_txt2vid_history") || "[]");
@@ -81,41 +98,79 @@ export function Txt2VidPanel({
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [tip, setTip] = useState<string | null>(null);
-  const [outputAssetId, setOutputAssetId] = useState<string | null>(null);
+  const [renderFailure, setRenderFailure] = useState<RenderFailureInfo | null>(null);
+  const [outputAssetId, setOutputAssetId] = useState<string | null>(() =>
+    readPersistedTxt2VidPreviewAssetId(project.id),
+  );
   const [fallbackOpen, setFallbackOpen] = useState(false);
   const [fallbackMessage, setFallbackMessage] = useState("");
-  const [spatialMapId, setSpatialMapId] = useState<string | undefined>();
-  const [spatialMapVersion, setSpatialMapVersion] = useState<string | undefined>();
-  const [spatialStartCameraId, setSpatialStartCameraId] = useState<string | undefined>();
-  const [spatialEndCameraId, setSpatialEndCameraId] = useState<string | undefined>();
+  const [fallbackEngine, setFallbackEngine] = useState<string>("");
 
-  const size = useMemo(() => resolutionToSize(resolution, aspect), [resolution, aspect]);
-  const localI2vSelected =
-    engine === "auto" || engine === "ltx" || engine === "wan";
-  const hunyuanSelected = engine === "hunyuan15" || engine === "hunyuan13b";
+  const size = useMemo(
+    () => legalCanvasSize(engine, resolution, aspect),
+    [engine, resolution, aspect],
+  );
+  const previewAsset = useMemo(
+    () => resolveTxt2VidPreviewAsset(project.id, project.assets || [], outputAssetId),
+    [project.id, project.assets, outputAssetId],
+  );
 
+  useEffect(() => {
+    const persisted = readPersistedTxt2VidPreviewAssetId(project.id);
+    setOutputAssetId(persisted);
+    if (persisted) return;
+    let alive = true;
+    api
+      .listJobs(project.id)
+      .then((jobs) => {
+        if (!alive) return;
+        const recovered = latestSuccessfulTxt2VidAssetId(jobs);
+        if (!recovered) return;
+        setOutputAssetId(recovered);
+        persistTxt2VidPreviewAssetId(project.id, recovered);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [project.id]);
+
+  // When the engine switches to/from MiniMax H3, translate the resolution
+  // label between the 480p/720p/… tier set and the MiniMax megapixel set so the
+  // dropdown always shows a valid selected option and `size` stays consistent.
+  useEffect(() => {
+    if (isMinimaxMegapixelEngine(engine)) {
+      if (!isMinimaxMegapixelTier(resolution)) {
+        setResolution(inferMinimaxMegapixelTier(size.width, size.height));
+      }
+    } else if (isMinimaxMegapixelTier(resolution)) {
+      setResolution(inferVideoTier(size.width, size.height));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine]);
+
+  // HONESTY: a real executable T2V engine is one that can generate video from
+  // text alone (no start frame) AND is executable at runtime (credentials ready).
+  const videoOptions = useTimelineVideoGenerators();
+  const executableT2vEngine = (T2V_ENGINE_NAMES as readonly string[]).find((eng) => {
+    const productId = ENGINE_NAME_TO_PRODUCT[eng as EngineName] || "";
+    const opt = resolveGeneratorOption(videoOptions, productId, eng);
+    return Boolean(opt?.executable);
+  });
+  const noExecutableT2v = !executableT2vEngine;
+
+  const fpsNumber = Number(fps) || 24;
+  const durationBlock = durationFidelityMessage(engine, duration, fpsNumber);
   const vramWarn = useMemo(() => {
     const pixels = size.width * size.height;
     if (project.vram_gb < 16 && (resolution === "4K" || duration > 8)) {
-      return "VRAM planner: 4K / long duration may exceed local capacity — prefer a shorter local I2V clip.";
+      return "VRAM planner: 4K / long duration may exceed local capacity — prefer a shorter clip.";
     }
     if (project.vram_gb < 24 && pixels > 1920 * 1080) {
-      return "VRAM planner: oversized combo for local engines — lower resolution or use shorter duration.";
+      return "VRAM planner: oversized combo — lower resolution or use shorter duration.";
     }
     return null;
   }, [size, resolution, duration, project.vram_gb]);
-
-  useEffect(() => {
-    const low = prompt.toLowerCase();
-    if (/\b(character|person|hero|girl|boy|man|woman)\b/.test(low) && !/@/.test(prompt)) {
-      setTip("Tip: create a Character Profile and reference with @profile — never auto-applied.");
-    } else if (/\b(pan|dolly|orbit|crane|tracking)\b/.test(low)) {
-      setTip("Tip: Director Camera Motion can encode intentional moves after promote.");
-    } else {
-      setTip(null);
-    }
-  }, [prompt]);
 
   useEffect(() => {
     if (!job || job.status === "done" || job.status === "failed" || job.status === "cancelled") return;
@@ -124,21 +179,17 @@ export function Txt2VidPanel({
       api.getJob(job.id).then((j) => {
         setJob(j);
         if (j.status === "failed") {
-          const blocker = parseLocalStartFrameBlocker({ message: j.message } as Error);
-          if (blocker || /LOCAL_START_FRAME_REQUIRED|start frame|PAID_FAL_APPROVAL/i.test(j.message || "")) {
-            setFallbackMessage(
-              j.message ||
-                "Local engine requires a start frame. Generate a local still first, or approve a paid Hosted AI Provider path.",
-            );
-            setFallbackOpen(true);
-          }
+          setRenderFailure(splitFailureMessage(j.message || "Generation failed."));
+          setMsg(null);
+        }
+        if (j.status === "cancelled") {
+          setMsg("Render cancelled.");
         }
         if (j.status === "done") {
-          try {
-            const p = JSON.parse(j.params_json || "{}");
-            if (p.output_asset_id) setOutputAssetId(p.output_asset_id);
-          } catch {
-            /* ignore */
+          const assetId = extractTxt2VidOutputAssetId(j);
+          if (assetId) {
+            setOutputAssetId(assetId);
+            persistTxt2VidPreviewAssetId(project.id, assetId);
           }
           onChange();
           api
@@ -165,38 +216,26 @@ export function Txt2VidPanel({
     return () => clearInterval(t);
   }, [job, onChange, project.id, prompt, engine, duration, aspect, resolution]);
 
-  const queueTxt2Vid = async (opts?: { paidFallbackApproved?: boolean }) => {
+  // Resolve the effective T2V engine. AUTO → first executable T2V (never local I2V).
+  const resolveEffectiveEngine = (): string | null => {
+    if (engine !== "auto") {
+      const productId = ENGINE_NAME_TO_PRODUCT[engine as EngineName] || "";
+      const opt = resolveGeneratorOption(videoOptions, productId, engine);
+      return opt?.executable ? engine : null;
+    }
+    return executableT2vEngine ?? null;
+  };
+
+  // Submit a CLEAN TEXT-ONLY payload. No references, no spatial maps, no start
+  // frame, no scene-reference provenance. Text to Video is text-only.
+  const queueTxt2Vid = async (opts: { engine: string; paidFallbackApproved?: boolean }) => {
     setBusy(true);
     setMsg(null);
+    setRenderFailure(null);
     try {
       const nextHist = [prompt, ...history.filter((h) => h !== prompt)].slice(0, 20);
       setHistory(nextHist);
       localStorage.setItem("adept_txt2vid_history", JSON.stringify(nextHist));
-      const sceneId = project.scenes[0]?.id;
-      let referenceProvenance: Record<string, unknown> | undefined;
-      if (sceneId) {
-        try {
-          const pf = await api.sceneReferences.preflight(project.id, {
-            scope_type: "scene",
-            scope_id: sceneId,
-            workflow_key: "text_to_video",
-          });
-          referenceProvenance = (pf.provenance as Record<string, unknown>) || undefined;
-        } catch {
-          referenceProvenance = undefined;
-        }
-      }
-      const spatialReferenceBundle =
-        spatialMapId
-          ? (
-              await api.spatialMap.referenceBundle(
-                project.id,
-                spatialMapId,
-                "video",
-                spatialStartCameraId || undefined
-              )
-            ).bundle
-          : undefined;
       const j = await api.txt2vid(project.id, {
         prompt,
         negative,
@@ -204,63 +243,54 @@ export function Txt2VidPanel({
         aspect,
         fps,
         duration_sec: duration,
-        engine,
+        engine: opts.engine,
         width: size.width,
         height: size.height,
         resolution,
-        providerPreference: "local",
-        paidFallbackApproved: Boolean(opts?.paidFallbackApproved),
-        sceneReferenceProvenance: referenceProvenance,
-        spatialMapId,
-        spatialMapVersion,
-        spatialStartCameraId,
-        spatialEndCameraId,
-        spatialReferenceBundle,
+        providerPreference: FAL_ENGINES.has(opts.engine) ? "fal" : "local",
+        paidFallbackApproved: Boolean(opts.paidFallbackApproved),
       });
       setJob(j as Job);
-    } catch (e: any) {
-      const blocker = parseLocalStartFrameBlocker(e);
-      if (blocker) {
-        setFallbackMessage(blocker.message);
-        setFallbackOpen(true);
-        setMsg(blocker.message);
-      } else {
-        setMsg(e?.message || String(e));
-      }
+    } catch (e: unknown) {
+      setRenderFailure(await extractRenderFailure(e));
+      setMsg(null);
     } finally {
       setBusy(false);
     }
   };
 
   const generate = async () => {
-    // LOCAL-16: local-first without a start frame → explain + preferred local still action.
-    if (localI2vSelected) {
+    if (!prompt.trim()) return;
+    if (!size.available) {
+      setMsg(size.honestyLabel || "This resolution is not legal for the selected generator.");
+      return;
+    }
+    const effective = resolveEffectiveEngine();
+    if (!effective) {
+      // HONEST BLOCKER: no executable T2V path. No submit, no I2V fallback,
+      // no silent fal. Surface the exact runtime/provider blocker.
+      setMsg(NO_T2V_BLOCKER);
+      return;
+    }
+    if (FAL_ENGINES.has(effective)) {
       setFallbackMessage(
-        "The chosen local engine (LTX / WAN) requires a start frame. Generate a local start frame and continue — fal.ai is optional paid fallback only.",
+        `Engine ${effective} bills through fal.ai. This is a true Text-to-Video cloud submission. Approve only if you intend a paid cloud generation.`,
       );
+      setFallbackEngine(effective);
       setFallbackOpen(true);
       return;
     }
-    // Explicit fal engine: still require visible paid approval (never silent).
-    setFallbackMessage(
-      `Engine ${engine} bills through fal.ai. Prefer generating a local start frame + LTX when possible. Approve only if you intend a paid cloud submission.`,
-    );
-    setFallbackOpen(true);
+    await queueTxt2Vid({ engine: effective });
   };
 
-  const onFallbackAction = async (action: PaidFalFallbackAction) => {
+  const onFallbackAction = async (action: "cancel" | "approve_paid_fal") => {
     setFallbackOpen(false);
     if (action === "cancel") {
       setMsg("Cancelled — no fal.ai request submitted.");
       return;
     }
-    if (action === "generate_local_start_frame") {
-      onGo("imagegen");
-      setMsg("Open ImageGen to create a local start frame, then render the scene with LTX.");
-      return;
-    }
     if (action === "approve_paid_fal") {
-      await queueTxt2Vid({ paidFallbackApproved: true });
+      await queueTxt2Vid({ engine: fallbackEngine, paidFallbackApproved: true });
     }
   };
 
@@ -276,104 +306,123 @@ export function Txt2VidPanel({
 
   return (
     <div className="page gen-workspace" data-testid="txt2vid-panel">
-      <h1>Txt2Vid</h1>
+      <h1>Text to Video</h1>
       <p className="muted">
-        Local-first text-to-video. Local LTX/WAN need a start frame — Studio offers local still
-        generation before any paid fal.ai path.
+        Text-to-video. Describe a shot and generate video from words alone — no
+        start picture. Local LTX 2.5 and MiniMax H3 run here. 1 Frame and 3 Frame
+        need a still. Timeline uses character and place references.{" "}
+        {noExecutableT2v
+          ? "Install LTX 2.5 or MiniMax H3, or connect a hosted generator in Setup."
+          : "Local generators run on this computer. Hosted generators need your approval before they bill."}
       </p>
+      {noExecutableT2v && (
+        <p className="pill warn" data-testid="txt2vid-no-t2v">
+          {NO_T2V_BLOCKER}
+        </p>
+      )}
       {vramWarn && <p className="pill warn">{vramWarn}</p>}
-      {tip && <p className="pill">{tip}</p>}
-      {msg && (
+      {renderFailure && (
+        <RenderFailureAlert
+          reason={renderFailure.reason}
+          technical={renderFailure.technical}
+          testId="txt2vid-message"
+        />
+      )}
+      {!renderFailure && msg && (
         <p className="pill warn" data-testid="txt2vid-message">
           {msg}
         </p>
       )}
 
-      <ReferencesPane
-        project={project}
-        sceneId={project.scenes[0]?.id || null}
-        workflowTab="txt2vid"
-        onChange={() => void onChange()}
-      />
+      <div className="txt2vid-layout">
+        <div className="txt2vid-center">
+          <LivePreviewMonitor
+            project={project}
+            inlineActions={false}
+            libraryAsset={previewAsset}
+            idleDetail="Finished videos play here. Generate a shot, then press play."
+            onClearLibraryAsset={
+              previewAsset
+                ? () => {
+                    setOutputAssetId(null);
+                    clearPersistedTxt2VidPreviewAssetId(project.id);
+                  }
+                : undefined
+            }
+          />
+          {job && (job.status === "queued" || job.status === "running" || job.status === "cancelling") ? (
+            <div className="row" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="danger"
+                data-testid="txt2vid-cancel-render"
+                title="Stop the active render"
+                aria-label="Cancel the active render"
+                disabled={job.status === "cancelling"}
+                onClick={async () => {
+                  try {
+                    await api.cancelJob(job.id);
+                    setMsg("Cancel requested — waiting for the runtime to stop.");
+                  } catch (e: unknown) {
+                    setMsg(e instanceof Error ? e.message : "Cancel request failed.");
+                  }
+                }}
+              >
+                {job.status === "cancelling" ? "Cancelling…" : "Cancel Render"}
+              </button>
+            </div>
+          ) : null}
 
-      <SpatialReferenceFieldset
-        projectId={project.id}
-        value={{ spatialMapId, spatialMapVersion, spatialStartCameraId, spatialEndCameraId }}
-        onChange={(patch) => {
-          if ("spatialMapId" in patch) setSpatialMapId(patch.spatialMapId);
-          if ("spatialMapVersion" in patch) setSpatialMapVersion(patch.spatialMapVersion);
-          if ("spatialStartCameraId" in patch) setSpatialStartCameraId(patch.spatialStartCameraId);
-          if ("spatialEndCameraId" in patch) setSpatialEndCameraId(patch.spatialEndCameraId);
-        }}
-        showMotionCameras
-        testIdPrefix="video"
-      />
+          <div className="field">
+            <label htmlFor="txt2vid-prompt">Prompt</label>
+            <textarea
+              id="txt2vid-prompt"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={5}
+              placeholder="Describe the shot — a cinematic text-to-video prompt."
+            />
+          </div>
 
-      <div className="field">
-        <label htmlFor="txt2vid-prompt">Prompt (@profile · #motion)</label>
-        <textarea
-          id="txt2vid-prompt"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={4}
-        />
-      </div>
-      <PromptIntelligencePanel
-        creatorPrompt={prompt}
-        domain="video"
-        engineId={engine}
-        projectId={project.id}
-        negativePrompt={negative}
-        compact
-        onApply={({ finalProviderPrompt }) => setPrompt(finalProviderPrompt)}
-      />
-      <div className="field">
-        <label htmlFor="txt2vid-negative">Negative</label>
-        <textarea
-          id="txt2vid-negative"
-          value={negative}
-          onChange={(e) => setNegative(e.target.value)}
-          rows={2}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="txt2vid-history">History</label>
-        <select
-          id="txt2vid-history"
-          value=""
-          onChange={(e) => {
-            if (e.target.value) setPrompt(e.target.value);
-          }}
-        >
-          <option value="">Load previous…</option>
-          {history.map((h) => (
-            <option key={h} value={h}>
-              {h.slice(0, 80)}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="gen-grid">
+          <div className="gen-grid">
         <div className="field">
-          <label htmlFor="txt2vid-style">Style</label>
-          <select id="txt2vid-style" value={style} onChange={(e) => setStyle(e.target.value)}>
-            {STYLE_PRESETS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+          <label htmlFor="txt2vid-engine">Generator</label>
+          <EngineAuthoritySelect
+            id="txt2vid-engine"
+            value={engine}
+            onChange={(next) => setEngine(next)}
+            requireTextToVideo
+          />
         </div>
         <div className="field">
-          <label htmlFor="txt2vid-aspect">Aspect</label>
-          <select id="txt2vid-aspect" value={aspect} onChange={(e) => setAspect(e.target.value)}>
-            {ASPECT_PRESETS.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
+          <label htmlFor="txt2vid-duration">Duration (s)</label>
+          <input
+            id="txt2vid-duration"
+            type="number"
+            min={2}
+            max={30}
+            value={duration}
+            onChange={(e) => setDuration(Number(e.target.value))}
+          />
+          {durationBlock ? <p className="scene-meta">{durationBlock}</p> : null}
+        </div>
+        <div className="field">
+          <label htmlFor="txt2vid-aspect">Aspect Ratio</label>
+          <AspectRatioSelect
+            id="txt2vid-aspect"
+            value={aspect}
+            onChange={(a) => setAspect(a)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="txt2vid-resolution">Resolution</label>
+          <VideoResolutionSelect
+            id="txt2vid-resolution"
+            engine={engine}
+            aspect={aspect}
+            value={resolution}
+            onChange={(next) => setResolution(next)}
+          />
         </div>
         <div className="field">
           <label htmlFor="txt2vid-fps">FPS</label>
@@ -386,97 +435,52 @@ export function Txt2VidPanel({
           </select>
         </div>
         <div className="field">
-          <label htmlFor="txt2vid-duration">Duration (s)</label>
-          <input
-            id="txt2vid-duration"
-            type="number"
-            min={2}
-            max={30}
-            value={duration}
-            onChange={(e) => setDuration(Number(e.target.value))}
+          <label htmlFor="txt2vid-style">Style</label>
+          <select id="txt2vid-style" value={style} onChange={(e) => setStyle(e.target.value)}>
+            {STYLE_PRESETS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="txt2vid-history">History</label>
+          <select
+            id="txt2vid-history"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) setPrompt(e.target.value);
+            }}
+          >
+            <option value="">Load previous…</option>
+            {history.map((h) => (
+              <option key={h} value={h}>
+                {h.slice(0, 80)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="txt2vid-negative">Negative</label>
+          <textarea
+            id="txt2vid-negative"
+            value={negative}
+            onChange={(e) => setNegative(e.target.value)}
+            rows={2}
           />
         </div>
-        <div className="field">
-          <label htmlFor="txt2vid-engine">Engine</label>
-          <select id="txt2vid-engine" value={engine} onChange={(e) => setEngine(e.target.value)}>
-            {[
-              ["auto", "Auto"],
-              ["minimax-h3", "MiniMax H3 (Default)"],
-              ["ltx", "LTX 2.5"],
-              ["minimax-h3", "MiniMax H3"],
-              ["hunyuan15", "HunyuanVideo 1.5"],
-              ["hunyuan13b", "HunyuanVideo 13B"],
-              ["wan", "WAN 2.2 (Optional)"],
-              ["fal_seedance", "fal_seedance"],
-              ["fal_veo", "fal_veo"],
-              ["fal_kling", "fal_kling"],
-              ["fal_runway", "fal_runway"],
-            ].map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="txt2vid-resolution">Resolution</label>
-          <select
-            id="txt2vid-resolution"
-            value={resolution}
-            onChange={(e) => setResolution(e.target.value)}
-          >
-            {["720p", "1080p", "1440p", "4K"].map((r) => (
-              <option key={r} value={r}>
-                {r} ({resolutionToSize(r, aspect).width}×{resolutionToSize(r, aspect).height})
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
-
-      {localI2vSelected && (
-        <div className="card" style={{ marginTop: "0.75rem" }} data-testid="local-start-frame-hint">
-          <strong>Local-first path</strong>
-          <p className="muted">
-            No start frame yet → generate a local still (preferred), bind it, then render with LTX
-            Video (default). Paid fal.ai is never submitted without approval.
-          </p>
-          <button type="button" onClick={() => onGo("imagegen")}>
-            Open ImageGen
-          </button>
-        </div>
-      )}
-      {hunyuanSelected && (
-        <div className="card" style={{ marginTop: "0.75rem" }} data-testid="hunyuan-t2v-hint">
-          <strong>Hunyuan local path</strong>
-          <p className="muted">
-            True local Text-to-Video is available only after this Hunyuan provider is installed and
-            certified. Until then, use Image-to-Video with a start frame, or keep LTX as default.
-          </p>
-          <button type="button" onClick={() => openVideoSetup("hunyuan_video_13b")}>
-            Open Video Model Library
-          </button>
-        </div>
-      )}
-      {engine === "minimax-h3" ? (
-        <MiniMaxH3PlanPanel
-          projectId={project.id}
-          prompt={prompt}
-          mode="text-to-video"
-          sourceSurface="text-to-video"
-          durationSec={duration}
-        />
-      ) : null}
 
       <div className="row" style={{ marginTop: "1rem" }}>
         <button
           type="button"
           className="primary"
           data-testid="txt2vid-generate"
-          disabled={busy || !prompt.trim()}
+          disabled={busy || !prompt.trim() || Boolean(durationBlock)}
           onClick={generate}
         >
-          {busy ? "Queuing…" : "Generate"}
+          {busy ? "Queuing…" : "Generate Video"}
         </button>
       </div>
 
@@ -545,12 +549,26 @@ export function Txt2VidPanel({
         </div>
       )}
 
-      <div style={{ marginTop: "1.25rem" }}>
-        <JobPanel projectId={project.id} onDone={() => void onChange()} />
+        </div>
+
+        <aside className="txt2vid-sidebar" data-testid="txt2vid-sidebar">
+          <GpuVramPanel
+            project={project}
+            onChange={() => void onChange()}
+            compact
+            engine={engine}
+            surface="t2v"
+            aspect={aspect}
+            durationSec={duration}
+            fps={Number(fps) || project.fps || 24}
+          />
+          <JobPanel projectId={project.id} onDone={() => void onChange()} />
+        </aside>
       </div>
 
       <PaidFalFallbackDialog
         open={fallbackOpen}
+        title="Approve paid Text-to-Video"
         message={fallbackMessage}
         onAction={onFallbackAction}
       />

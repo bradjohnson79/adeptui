@@ -52,7 +52,8 @@ export function CoDirectorRelationshipCard() {
         setOwnership(String(rel.default_ownership || "CO_CREATE"));
       })
       .catch(() => {
-        if (!cancelled) setNeeded(false);
+        // API failure must NOT silently skip onboarding — default to showing it.
+        if (!cancelled) setNeeded(true);
       });
     return () => {
       cancelled = true;

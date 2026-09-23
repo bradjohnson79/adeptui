@@ -81,6 +81,19 @@ def get_sheet(project_id: str, sheet_id: str) -> dict[str, Any] | None:
     return _read_json(path, None)
 
 
+def list_sheets(project_id: str) -> list[dict[str, Any]]:
+    index = _read_json(project_refs_root(project_id) / "sheets_index.json", {"items": []})
+    sheets: list[dict[str, Any]] = []
+    for item in index.get("items") or []:
+        sheet_id = str(item.get("id") or "").strip()
+        if not sheet_id:
+            continue
+        sheet = get_sheet(project_id, sheet_id)
+        if sheet:
+            sheets.append(sheet)
+    return sheets
+
+
 def save_sheet(project_id: str, sheet: dict[str, Any]) -> dict[str, Any]:
     sheet_id = str(sheet.get("id") or uuid.uuid4())
     sheet = {**sheet, "id": sheet_id, "updated_at": _now()}

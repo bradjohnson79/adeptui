@@ -26,6 +26,11 @@ from .media import (
     probe_media,
     run_ffmpeg,
 )
+from .upscale_targets import (
+    UpscaleTargetError,
+    parse_resolution,
+    resolve_apply_target,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,44 +49,50 @@ def _realesrgan_models_dir() -> Path:
 
 
 def _parse_resolution(resolution_str: str) -> tuple[int, int]:
-    resolution_str = (resolution_str or "").strip().upper()
-    preset = {
-        "480P": (854, 480),
-        "720P": (1280, 720),
-        "1080P": (1920, 1080),
-        "1440P": (2560, 1440),
-        "4K": (3840, 2160),
-        "8K": (7680, 4320),
-    }
-    if resolution_str in preset:
-        return preset[resolution_str]
-    if "X" in resolution_str:
-        parts = resolution_str.split("X")
-        try:
-            return int(parts[0]), int(parts[1])
-        except (ValueError, IndexError):
-            pass
-    return (1920, 1080)
+    return parse_resolution(resolution_str)
+
+
+def _gpu_model_ready(model_id: str) -> bool:
+    name, scale = realesrgan_runtime.resolve_model(model_id)
+    return realesrgan_runtime._model_pair_exists(name) or realesrgan_runtime._model_pair_exists(f"{name}-x{scale}")
+
+
+def preferred_gpu_model() -> str:
+    for model_id in ("realesr-animevideov3", "realesrgan-x4plus-anime", "realesrgan-x4plus"):
+        if _gpu_model_ready(model_id):
+            return model_id
+    return "realesrgan-x4plus"
 
 
 def capabilities() -> dict[str, Any]:
     ready = realesrgan_runtime.readiness()
     gpu_ready = bool(ready.get("realesrganReady"))
+    gpu_models = [
+        row
+        for row in (
+            {"id": "realesrgan-x4plus", "label": "General 4x", "scale": 4, "content": "general"},
+            {"id": "realesr-animevideov3", "label": "Anime Video", "scale": 4, "content": "anime"},
+            {"id": "realesrgan-x4plus-anime", "label": "Anime 4x", "scale": 4, "content": "anime"},
+        )
+        if _gpu_model_ready(str(row["id"]))
+    ]
+    if not gpu_models:
+        gpu_models = [{"id": "realesrgan-x4plus", "label": "General 4x", "scale": 4, "content": "general"}]
     return {
         "supportedInCode": True,
         "realesrganReady": gpu_ready,
         "creatorMessage": None if gpu_ready else CREATOR_GPU_UNAVAILABLE,
+        "spatialEnhancementOnly": True,
+        "temporalConsistency": False,
+        "honesty": "Spatial frame enhancement only. Not temporal AI restoration.",
+        "preferredGpuModel": preferred_gpu_model(),
         "engines": [
             {
                 "id": ENGINE_GPU,
                 "label": "Real-ESRGAN (GPU)",
                 "available": gpu_ready,
                 "readyOnThisMachine": gpu_ready,
-                "models": [
-                    {"id": "realesrgan-x4plus", "label": "General 4x", "scale": 4, "content": "general"},
-                    {"id": "realesr-animevideov3", "label": "Anime Video", "scale": 4, "content": "anime"},
-                    {"id": "realesrgan-x4plus-anime", "label": "Anime 4x", "scale": 4, "content": "anime"},
-                ],
+                "models": gpu_models,
             },
             {
                 "id": ENGINE_FFMPEG,
@@ -241,25 +252,28 @@ def _upscale_video_realesrgan(
         )
         dest.parent.mkdir(parents=True, exist_ok=True)
         if probe.get("hasAudio") and not preview_seconds:
-            audio_src = src
-            run_ffmpeg(
-                [
-                    "-i",
-                    str(assembled),
-                    "-i",
-                    str(audio_src),
-                    "-map",
-                    "0:v:0",
-                    "-map",
-                    "1:a:0",
-                    "-c:v",
-                    "copy",
-                    "-c:a",
-                    "aac",
-                    "-shortest",
-                    str(dest),
-                ]
-            )
+            assembled_probe = probe_media(assembled)
+            video_dur = float(assembled_probe.get("duration") or probe.get("duration") or 0)
+            mux = [
+                "-i",
+                str(assembled),
+                "-i",
+                str(src),
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-af",
+                "apad",
+            ]
+            if video_dur > 0:
+                mux.extend(["-t", f"{video_dur:.6f}"])
+            mux.append(str(dest))
+            run_ffmpeg(mux)
         else:
             dest.write_bytes(assembled.read_bytes()) if assembled != dest else None
             if assembled != dest:
@@ -300,8 +314,13 @@ def upscale_asset(
     if chosen_engine == ENGINE_GPU:
         _require_gpu_ready()
 
-    target_w, target_h = _parse_resolution(target_resolution)
     probe = probe_media(source_path)
+    src_w = int(probe.get("width") or 0)
+    src_h = int(probe.get("height") or 0)
+    try:
+        target_w, target_h, _label = resolve_apply_target(src_w, src_h, target_resolution)
+    except UpscaleTargetError:
+        raise
     work = new_temp_dir("upscale_asset")
     dest = work / f"upscaled_{target_w}x{target_h}.mp4"
     try:
@@ -319,11 +338,14 @@ def upscale_asset(
             if preview:
                 args = ["-t", "3", "-i", source_path]
             audio_args = ["-c:a", "copy"] if probe.get("hasAudio") and not preview else ["-an"]
+            fps = float(probe.get("fps") or 0)
+            rate_args = ["-r", f"{fps:.6f}"] if fps > 1 else []
             run_ffmpeg(
                 [
                     *args,
                     "-vf",
                     f"scale={target_w}:{target_h}:flags={model or 'lanczos'}",
+                    *rate_args,
                     "-c:v",
                     "libx264",
                     "-preset",
@@ -394,6 +416,9 @@ def apply_upscale(
     engine: str,
     model: str,
     target_resolution: str,
+    *,
+    scene_id: str = "",
+    persist_scene_publish: bool = False,
 ) -> dict[str, Any]:
     return enqueue_upscale(
         db,
@@ -403,6 +428,8 @@ def apply_upscale(
         model=model,
         target_resolution=target_resolution,
         preview=False,
+        scene_id=scene_id,
+        persist_scene_publish=persist_scene_publish,
     )
 
 
@@ -415,8 +442,23 @@ def enqueue_upscale(
     model: str,
     target_resolution: str,
     preview: bool,
+    scene_id: str = "",
+    persist_scene_publish: bool = False,
 ) -> dict[str, Any]:
-    fingerprint = f"{asset_id}|{engine}|{model}|{target_resolution}|{int(preview)}"
+    source = db.get(Asset, asset_id)
+    if not source or source.project_id != project_id:
+        raise ValueError("Asset is not in this project.")
+    source_path = str(source.path or "")
+    if not source_path or not Path(source_path).is_file():
+        raise ValueError("Asset file is missing.")
+    probe = probe_media(source_path)
+    target_w, target_h, resolved = resolve_apply_target(
+        int(probe.get("width") or 0),
+        int(probe.get("height") or 0),
+        target_resolution,
+    )
+    target_resolution = f"{target_w}x{target_h}"
+    fingerprint = f"{asset_id}|{engine}|{model}|{target_resolution}|{int(preview)}|{scene_id}"
     if engine == ENGINE_GPU:
         _require_gpu_ready()
     existing = magi_jobs.find_active_duplicate(db, project_id, "magi_upscale", fingerprint)
@@ -430,6 +472,7 @@ def enqueue_upscale(
             "stage": existing.stage,
             "engine": engine,
             "preview": preview,
+            "targetResolution": target_resolution,
             "message": "An equivalent upscale is already in progress.",
         }
     params = {
@@ -439,6 +482,11 @@ def enqueue_upscale(
         "targetResolution": target_resolution,
         "preview": preview,
         "fingerprint": fingerprint,
+        "sceneId": scene_id,
+        "persistScenePublish": bool(persist_scene_publish) and not preview,
+        "sourceWidth": int(probe.get("width") or 0),
+        "sourceHeight": int(probe.get("height") or 0),
+        "resolvedLabel": resolved,
     }
     job = magi_jobs.enqueue_job(
         db,
@@ -458,6 +506,7 @@ def enqueue_upscale(
         "stage": job.stage,
         "engine": engine,
         "preview": preview,
+        "targetResolution": target_resolution,
     }
 
 
@@ -474,15 +523,45 @@ def run_upscale_job(db: Session, job: Job) -> dict[str, Any]:
     job.stage = "Rendering"
     job.message = "Upscaling"
     db.commit()
+    preview = bool(params.get("preview"))
     result = upscale_asset(
         db,
         job.project_id,
         str(params.get("assetId")),
         str(params.get("engine") or ENGINE_FFMPEG),
         str(params.get("model") or "lanczos"),
-        str(params.get("targetResolution") or "1920x1080"),
-        preview=bool(params.get("preview")),
+        str(params.get("targetResolution") or ""),
+        preview=preview,
     )
+    if (
+        result.get("ok")
+        and not preview
+        and params.get("persistScenePublish")
+        and str(params.get("sceneId") or "").strip()
+        and result.get("assetId")
+    ):
+        from ..director_timeline_w46.scene_publish import persist_scene_upscaled_asset
+
+        persisted = persist_scene_upscaled_asset(
+            db,
+            job.project_id,
+            str(params.get("sceneId")).strip(),
+            str(result.get("assetId")),
+        )
+        result["scenePublish"] = persisted.get("scenePublish")
+        result["upscaledAssetId"] = result.get("assetId")
+        result["scenePersistOk"] = bool(persisted.get("ok"))
+        if not persisted.get("ok"):
+            result["ok"] = False
+            result["message"] = persisted.get("creatorMessage") or "MAGI could not save the upscaled master on Timeline."
+            return {
+                **result,
+                "outputPath": result.get("assetId"),
+            }
+    if result.get("ok") and not preview and result.get("assetId"):
+        from .finishing import merge_finishing
+
+        merge_finishing(job.project_id, {"visualResultAssetId": str(result.get("assetId"))})
     return {
         **result,
         "message": "Upscale ready" if result.get("ok") else "Upscale failed",

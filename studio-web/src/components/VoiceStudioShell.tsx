@@ -1,20 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { VoicePerformanceRecord } from "../contracts/voicePerformanceM410";
 import type { Project } from "../types";
 import { PanelHeading } from "./HelpTip";
 import { Button } from "./ui";
+import { pickCanonicalVoiceRecord } from "./voiceStudio/canonicalVoiceRecord";
+import { choosePortraitAssetId } from "./voiceStudio/voicePortrait";
+import {
+  clearRememberedCharacter,
+  persistSelectedCharacter,
+  readRememberedCharacter,
+  rememberedCharacterToRestore,
+  resolveVoiceStudioActiveCharacterId,
+  voiceStudioSearchForCharacter,
+} from "./voiceStudio/voiceStudioCharacter";
 import { VoiceStudioWorkspace } from "./VoiceStudioWorkspace";
-
-const SELECTED_CHARACTER_KEY = "adept_selected_character";
-const PORTRAIT_ROLE_PRIORITY = [
-  "hero_identity",
-  "hero_portrait",
-  "neutral_portrait",
-  "closeup_front",
-  "full_body_front",
-] as const;
+import { ProviderSourceSelector } from "./audioProvider/ProviderSourceSelector";
+import { useVoiceStudioProviderSource } from "../audioProvider/useProviderSource";
 
 type VoiceStudioShellProps = {
   project: Project;
@@ -33,30 +36,29 @@ type CharacterVoiceCard = {
   portraitAssetId?: string;
 };
 
-function chooseApprovedVoice(voices: any[] | undefined): any | null {
+function chooseApprovedVoice(voices: any[] | undefined, activeId?: string): any | null {
   const list = Array.isArray(voices) ? voices : [];
+  const isApproved = (voice: any) => String(voice?.approval_status || "").toLowerCase() === "approved";
+  const active = list.find((voice) => voice?.id === activeId);
+  if (active && isApproved(active)) return active;
   const approved = [...list]
-    .filter((voice) => String(voice?.approval_status || "").toLowerCase() === "approved")
+    .filter(isApproved)
     .sort((a, b) =>
       String(b?.approved_at || b?.updated_at || "").localeCompare(String(a?.approved_at || a?.updated_at || "")),
     );
   return approved[0] || null;
 }
 
-function choosePortraitAssetId(refs: any[] | undefined): string | undefined {
-  const list = Array.isArray(refs) ? refs : [];
-  for (const role of PORTRAIT_ROLE_PRIORITY) {
-    const match = list.find((item) => String(item?.reference_role || "") === role && item?.asset_id);
-    if (match?.asset_id) return String(match.asset_id);
-  }
-  return undefined;
-}
 
-function pickPreferredRecord(records: VoicePerformanceRecord[], characterId: string) {
-  const matching = records
-    .filter((record) => record.characterId === characterId)
-    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-  return matching.find((record) => record.approvedTakeId) || matching[0] || null;
+function pickPreferredRecord(
+  records: VoicePerformanceRecord[],
+  characterId: string,
+  voiceIdentityId?: string | null,
+) {
+  return (
+    pickCanonicalVoiceRecord(records, characterId, voiceIdentityId, { requireApprovedTake: true })
+    || pickCanonicalVoiceRecord(records, characterId, voiceIdentityId)
+  );
 }
 
 function summarizeVoiceIdentityState(workspace: any, approvedVoice: any | null) {
@@ -66,34 +68,19 @@ function summarizeVoiceIdentityState(workspace: any, approvedVoice: any | null) 
   return "Voice identity not started";
 }
 
-function persistSelectedCharacter(characterId: string) {
-  try {
-    sessionStorage.setItem(SELECTED_CHARACTER_KEY, characterId);
-    window.dispatchEvent(new CustomEvent("adept:selected-character", { detail: { characterId } }));
-  } catch {
-    /* ignore */
-  }
-}
-
-function readRememberedCharacter(): string {
-  try {
-    return sessionStorage.getItem(SELECTED_CHARACTER_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
 export function VoiceStudioShell({
   project,
   onChange,
-  initialCharacterId,
+  initialCharacterId: _initialCharacterId,
   returnWorkspace,
 }: VoiceStudioShellProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [cards, setCards] = useState<CharacterVoiceCard[]>([]);
-  const [selectedCharacterId, setSelectedCharacterId] = useState("");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const restoredRef = useRef(false);
+  const voiceProvider = useVoiceStudioProviderSource();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,8 +102,11 @@ export function VoiceStudioShell({
             api.listCharacterReferences(project.id, profile.id).catch(() => ({ items: [] })),
             api.getCharacterVoiceWorkspace(project.id, profile.id).catch(() => null),
           ]);
-          const approvedVoice = chooseApprovedVoice(voiceWorkspace?.voices);
-          const preferredRecord = pickPreferredRecord(records, profile.id);
+          const approvedVoice = chooseApprovedVoice(
+            voiceWorkspace?.voices,
+            voiceWorkspace?.activeVoiceProfileId || voiceWorkspace?.active_voice_profile_id,
+          );
+          const preferredRecord = pickPreferredRecord(records, profile.id, approvedVoice?.id);
           const takeCount = preferredRecord?.takes?.length;
           return {
             id: String(profile.id),
@@ -142,21 +132,48 @@ export function VoiceStudioShell({
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!cards.length) return;
-    const preferred = initialCharacterId || readRememberedCharacter();
-    if (preferred && cards.some((card) => card.id === preferred)) {
-      setSelectedCharacterId((current) => current || preferred);
-      return;
-    }
-    if (selectedCharacterId && cards.some((card) => card.id === selectedCharacterId)) return;
-    setSelectedCharacterId("");
-  }, [cards, initialCharacterId, selectedCharacterId]);
+  const urlCharacterId = useMemo(
+    () => new URLSearchParams(location.search).get("characterId") || "",
+    [location.search],
+  );
+
+  const selectedCharacterId = useMemo(
+    () =>
+      resolveVoiceStudioActiveCharacterId({
+        urlCharacterId,
+        knownIds: cards.map((card) => card.id),
+      }),
+    [cards, urlCharacterId],
+  );
+
+  const commitCharacter = useCallback(
+    (characterId: string | null) => {
+      if (characterId) persistSelectedCharacter(characterId);
+      else clearRememberedCharacter();
+      const nextSearch = voiceStudioSearchForCharacter(location.search, characterId);
+      if (nextSearch === (location.search || "") || nextSearch === `?${(location.search || "").replace(/^\?/, "")}`) {
+        return;
+      }
+      navigate({ pathname: location.pathname, search: nextSearch }, { replace: true });
+    },
+    [location.pathname, location.search, navigate],
+  );
 
   useEffect(() => {
-    if (!selectedCharacterId) return;
-    persistSelectedCharacter(selectedCharacterId);
-  }, [selectedCharacterId]);
+    if (restoredRef.current || !cards.length) return;
+    if (selectedCharacterId) {
+      restoredRef.current = true;
+      persistSelectedCharacter(selectedCharacterId);
+      return;
+    }
+    const remembered = rememberedCharacterToRestore({
+      urlCharacterId,
+      rememberedCharacterId: readRememberedCharacter(),
+      knownIds: cards.map((card) => card.id),
+    });
+    restoredRef.current = true;
+    if (remembered) commitCharacter(remembered);
+  }, [cards, commitCharacter, selectedCharacterId, urlCharacterId]);
 
   const selectedCharacter = useMemo(
     () => cards.find((card) => card.id === selectedCharacterId) || null,
@@ -179,11 +196,25 @@ export function VoiceStudioShell({
       <section className="page voice-studio-shell" data-testid="voice-studio-shell">
         <div className="voice-studio-shell__active">
           <div className="voice-studio-shell__active-summary">
+            {selectedCharacter.portraitAssetId ? (
+              <div className="voice-studio-shell__portrait voice-studio-shell__portrait--inline">
+                <img
+                  src={api.assetUrl(selectedCharacter.portraitAssetId, undefined, project.id)}
+                  alt={selectedCharacter.name}
+                />
+              </div>
+            ) : null}
             <div>
               <PanelHeading
                 title={`Voice Studio — ${selectedCharacter.name}`}
                 tip="Choose a character, shape the voice identity, direct performances, build the scene acoustic, and approve the take you want to keep."
               />
+              <span hidden data-testid="voice-studio-active-id">
+                {selectedCharacter.id}
+              </span>
+              <span hidden data-testid="voice-studio-active-name">
+                {selectedCharacter.name}
+              </span>
               <p className="scene-meta">
                 {selectedCharacter.voiceIdentityState}
                 {selectedCharacter.approvedVoiceName ? ` · Approved voice: ${selectedCharacter.approvedVoiceName}` : ""}
@@ -200,7 +231,11 @@ export function VoiceStudioShell({
                   ← Back to Co-Director
                 </Button>
               ) : null}
-              <Button type="button" onClick={() => setSelectedCharacterId("")}>
+              <Button
+                type="button"
+                data-testid="voice-studio-choose-another"
+                onClick={() => commitCharacter(null)}
+              >
                 Choose Another Character
               </Button>
               <Button type="button" onClick={openCreateCharacter}>
@@ -210,8 +245,10 @@ export function VoiceStudioShell({
           </div>
           {message ? <p className="pill">{message}</p> : null}
           <VoiceStudioWorkspace
+            key={selectedCharacter.id}
             projectId={project.id}
             characterId={selectedCharacter.id}
+            characterName={selectedCharacter.name}
             onMsg={setMessage}
             onRefresh={() => {
               void load();
@@ -230,6 +267,16 @@ export function VoiceStudioShell({
           title="Voice Studio"
           tip="Pick a character to build their voice identity, direct dialogue performances, and shape how the line lives inside the scene."
         />
+        <div style={{ margin: "0.75rem 0" }}>
+          <ProviderSourceSelector
+            id="voice-studio-shell"
+            label="Provider"
+            source={voiceProvider.source}
+            onChange={voiceProvider.setSource}
+            health={voiceProvider.health}
+            healthBusy={voiceProvider.healthBusy}
+          />
+        </div>
         <p className="muted">
           Start with a character, then shape the voice, direct the performance, build the scene acoustic, and approve the take you want to carry forward.
         </p>
@@ -274,7 +321,7 @@ export function VoiceStudioShell({
               <article key={card.id} className="voice-studio-candidate-card voice-studio-shell__card">
                 <div className="voice-studio-shell__portrait">
                   {card.portraitAssetId ? (
-                    <img src={api.assetUrl(card.portraitAssetId)} alt={card.name} />
+                    <img src={api.assetUrl(card.portraitAssetId, undefined, project.id)} alt={card.name} />
                   ) : (
                     <div className="voice-studio-shell__portrait-fallback">{card.name.slice(0, 1).toUpperCase()}</div>
                   )}
@@ -304,7 +351,10 @@ export function VoiceStudioShell({
                     type="button"
                     variant="primary"
                     className="voice-studio-primary-cta"
-                    onClick={() => setSelectedCharacterId(card.id)}
+                    data-testid="voice-studio-open-character"
+                    data-character-id={card.id}
+                    data-character-name={card.name}
+                    onClick={() => commitCharacter(card.id)}
                   >
                     Open Voice Studio
                   </Button>

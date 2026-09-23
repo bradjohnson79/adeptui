@@ -136,17 +136,6 @@ TOOL_CATALOG: list[dict[str, Any]] = [
         "codirectorTool": "propose_script_document",
         "workspace": "scriptwriter",
     },
-    {
-        "id": "brand.studio",
-        "label": "Brand Studio",
-        "category": "create",
-        "description": "Generate brand-safe campaign visuals with locked logos, packaging, color palette, wording, and format direction.",
-        "providerHint": "Reference-locked ImageGen (local Comfy)",
-        "cloudPaid": False,
-        "libraryKey": "props.generated",
-        "inputs": ["prompt", "logoAssetIds", "productAssetIds", "brandColors", "requiredWording", "format"],
-        "codirectorTool": "propose_brand_generate",
-    },
 ]
 
 CATEGORIES = [

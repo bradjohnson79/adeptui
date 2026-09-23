@@ -42,6 +42,7 @@ def test_catalog_and_categories(client):
     assert "image.upscale" in ids
     assert "image.delighting" in ids
     assert "scriptwriter" in ids
+    assert "brand.studio" not in ids
 
 
 def test_delighting_blocked(client):
@@ -111,37 +112,14 @@ def test_codirector_generation_tools_bound():
     assert "propose_music_generate" in _MUTATION_HANDLERS
 
 
-def test_brand_studio_persists_campaign_metadata(client):
+def test_brand_studio_is_retired_from_generation_tools(client):
+    catalog = client.get("/api/generation-tools/catalog")
+    assert catalog.status_code == 200, catalog.text
+    ids = [tool["id"] for tool in catalog.json().get("tools", [])]
+    assert "brand.studio" not in ids
     p = _mk_project(client)
     run = client.post(
         f"/api/projects/{p['id']}/generation-tools/run",
-        json={
-            "toolId": "brand.studio",
-            "prompt": "Sparkling citrus hero can with premium splash light",
-            "requiredWording": "Limited summer drop",
-            "brandColors": ["#f97316", "#0f172a"],
-            "campaignName": "Summer Spark",
-            "campaignType": "seasonal",
-            "visualDirection": "hero",
-            "composition": "Centered hero",
-            "background": "Studio sweep",
-            "format": "Story 9:16",
-            "campaignFormats": ["Story 9:16", "Square 1:1"],
-            "typographyTemplate": "Hero headline",
-            "productName": "Spark Cola",
-            "styleNotes": "Premium citrus energy with glossy condensation.",
-            "bibleSummary": "Canon says the brand world is neon, warm, and confident.",
-            "resultLane": "formats",
-        },
+        json={"toolId": "brand.studio", "prompt": "retired"},
     )
-    assert run.status_code == 200, run.text
-    body = run.json()
-    assert body["brandStudio"]["campaignName"] == "Summer Spark"
-    assert body["brandStudio"]["heroFormat"] == "Story 9:16"
-    assert body["brandCheck"]["hasRequiredWording"] is True
-    lib = client.get(f"/api/projects/{p['id']}/library")
-    items = lib.json().get("items", [])
-    brand_asset = next(item for item in items if item["id"] == body["assetId"])
-    meta = brand_asset["prompt_meta_json"]
-    assert "Summer Spark" in meta
-    assert "Story 9:16" in meta
+    assert run.status_code == 410, run.text

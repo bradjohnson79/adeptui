@@ -96,7 +96,9 @@ def test_native_inpaint_disclosed_not_faked():
 
 
 def test_duration_no_silent_truncate():
-    result = validate_duration("ltx-local", 30.0)
+    # ltx-local is retired; current LTX 2.5 generators cap at 20s — 30s must
+    # refuse with a split option, never silently truncate.
+    result = validate_duration("ltx-2.5-distilled", 30.0)
     assert result["ok"] is False
     assert "split" in result["options"]
 

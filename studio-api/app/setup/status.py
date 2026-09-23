@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from ..avatar_runtimes import component_metadata as avatar_component_metadata, is_avatar_runtime_component
-from .catalog import COMPONENTS, ComponentDefinition
+
+# Avatar Studio temporarily retired — avatar runtimes must not affect readiness.
+AVATAR_STUDIO_RETIRED_FROM_READINESS = True
+from .catalog import ComponentDefinition, public_components
 from .diagnostics import Verification, utc_now, verify_component
 from .state import load_state, update_state
 
@@ -183,7 +186,7 @@ def _reported_installed_bytes(
         return _filesystem_bytes(verification.path)
     if not verification.healthy:
         return 0 if definition.verifier in (
-            "ltx_file", "wan_files", "zimage_files", "ic_lora_file"
+            "zimage_files",
         ) else definition.installed_bytes
     return definition.installed_bytes
 
@@ -342,6 +345,12 @@ def _pack_source_fields(definition: ComponentDefinition) -> dict[str, Any]:
 
 
 def _avatar_runtime_fields(definition: ComponentDefinition, verification: Verification) -> dict[str, Any]:
+    if AVATAR_STUDIO_RETIRED_FROM_READINESS and is_avatar_runtime_component(definition.id):
+        return {
+            "retired": True,
+            "readinessExcluded": True,
+            "statusNote": "Avatar Studio retired from current Adept UI — excluded from readiness.",
+        }
     if not is_avatar_runtime_component(definition.id):
         return {}
     meta = avatar_component_metadata(definition.id)
@@ -420,7 +429,7 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
     except Exception:
         jobs_by_component = {}
 
-    for definition in COMPONENTS:
+    for definition in public_components():
         active = registry.active_for_component(definition.id)
         old = previous_status.get(definition.id, {})
         verification = _verify_component_bounded(definition.id, state, old)
@@ -548,9 +557,26 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
         ):
             _record_pack_attempt_cleanup(state, definition.id)
 
-        from .component_kinds import KIND_CREDENTIAL, component_kind
+        from .component_kinds import KIND_CREDENTIAL, KIND_LOCAL_SERVICE, component_kind
 
         kind = component_kind(definition)
+        if kind != KIND_CREDENTIAL:
+            from ..readiness.contract import (
+                READY_REQUIRES_FILESYSTEM_PATH,
+                apply_files_ready_gate,
+            )
+
+            gated = apply_files_ready_gate(canonical, verification.path, kind=kind)
+            if gated != canonical:
+                canonical = gated
+                diagnostic = {
+                    **(diagnostic if isinstance(diagnostic, dict) else {}),
+                    "issue_code": READY_REQUIRES_FILESYSTEM_PATH,
+                    "summary": (
+                        "Ready needs a real folder or file path. "
+                        "A URL or empty path is not an install location."
+                    ),
+                }
         last_verified = utc_now() if verification.healthy else old.get("last_verified_at")
         path_selector = (
             path_selector_mode(definition.id)
@@ -610,6 +636,15 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             "installer": definition.installer,
             "install_kind": definition.installer,
             "component_kind": kind,
+            "readiness": {
+                "installed": kind != KIND_CREDENTIAL
+                and bool(verification.healthy)
+                and bool(verification.path)
+                and "://" not in str(verification.path or ""),
+                "running": bool(verification.healthy) and kind == KIND_LOCAL_SERVICE,
+                "owned": False,
+                "executable": canonical == "ready" and kind != KIND_CREDENTIAL,
+            },
             "path_selector": path_selector,
             "verifier": definition.verifier,
             "show_download_sizes": kind != KIND_CREDENTIAL,
@@ -672,16 +707,27 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
     state["status"] = previous_status
     if persist:
         update_state(lambda latest: latest.__setitem__("status", previous_status))
+    optional = [item for item in components if not item["required"]]
     counts = {
         "ready": sum(item["status"] == "ready" for item in components),
         "not_installed": sum(
-            item["status"] in ("not_installed", "download_unavailable") for item in components
+            item["status"] in ("not_installed", "download_unavailable") for item in required
         ),
-        "needs_attention": sum(item["status"] == "error" for item in components),
+        "needs_attention": sum(item["status"] == "error" for item in required),
         "update_available": sum(item["status"] == "update_available" for item in components),
         "download_unavailable": sum(
             item["status"] == "download_unavailable" for item in components
         ),
+        "required_ready": sum(item["status"] == "ready" for item in required),
+        "required_not_installed": sum(
+            item["status"] in ("not_installed", "download_unavailable") for item in required
+        ),
+        "required_needs_attention": sum(item["status"] == "error" for item in required),
+        "optional_ready": sum(item["status"] == "ready" for item in optional),
+        "optional_not_installed": sum(
+            item["status"] in ("not_installed", "download_unavailable") for item in optional
+        ),
+        "optional_needs_attention": sum(item["status"] == "error" for item in optional),
     }
     payload = {
         "schema_version": 2,
@@ -696,6 +742,17 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
         ),
         "checked_at": utc_now(),
     }
+    try:
+        from ..readiness.contract import discover_model_roots
+
+        payload["model_roots"] = discover_model_roots()
+    except Exception:
+        payload["model_roots"] = {
+            "roots": [],
+            "portable": [],
+            "machineSpecific": [],
+            "machineSpecificCount": 0,
+        }
     has_active_work = bool(payload["active_operation"]) or any(
         item["status"] in ("installing", "checking") for item in components
     )

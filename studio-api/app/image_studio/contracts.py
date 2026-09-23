@@ -51,6 +51,7 @@ class CinematicControls(BaseModel):
     colorGradePreset: Optional[str] = None
     visualEra: Optional[str] = None
     productionStyle: Optional[str] = None
+    visualStyle: Optional[str] = None
     aspectRatio: str = "16:9"
     shotIntent: ShotIntent = "medium"
     customShotIntent: Optional[str] = None
@@ -124,6 +125,7 @@ class CinematicGenerateRequest(BaseModel):
     controls: CinematicControls = Field(default_factory=CinematicControls)
     advanced: Optional[AdvancedDiffusionControls] = None
     referenceAssetIds: list[str] = Field(default_factory=list)
+    authorityReferences: list[dict[str, Any]] = Field(default_factory=list)
     sceneId: Optional[str] = None
     continuitySessionId: Optional[str] = None
     inheritContinuityFromScene: bool = False
@@ -151,10 +153,9 @@ def cinematic_to_image_product_body(req: CinematicGenerateRequest) -> dict[str, 
             "aspectRatio": ctrl.aspectRatio,
         },
     )
-    creative.setdefault(
-        "lighting",
-        {"setup": ctrl.lighting} if ctrl.lighting else {},
-    )
+    # Locked creator lighting — do not setdefault (CD must not override user pick).
+    if ctrl.lighting:
+        creative["lighting"] = {"setup": ctrl.lighting, "presetId": ctrl.lighting}
     from .color_grades import resolve_color_grade_id
 
     grade_id = resolve_color_grade_id(ctrl.colorGradePreset, ctrl.colorTreatment)
@@ -167,10 +168,22 @@ def cinematic_to_image_product_body(req: CinematicGenerateRequest) -> dict[str, 
             "productionStyle": ctrl.productionStyle,
         },
     )
+    # Locked creator scene style (STYLE_REGISTRY key). Prefer visualStyle over unused productionStyle.
+    if ctrl.visualStyle:
+        creative["visualStyle"] = ctrl.visualStyle
     if req.continuitySessionId:
         creative["continuitySessionId"] = req.continuitySessionId
+    auth_refs = [dict(r) for r in (req.authorityReferences or []) if isinstance(r, dict)]
+    if not auth_refs and req.referenceAssetIds:
+        auth_refs = [
+            {"assetId": str(aid), "kind": "other", "name": "", "chip": "", "key": f"other:{aid}"}
+            for aid in req.referenceAssetIds
+            if str(aid or "").strip()
+        ]
     if req.referenceAssetIds:
         creative["reference_image_ids"] = list(req.referenceAssetIds)
+    if auth_refs:
+        creative["authorityReferences"] = auth_refs
 
     body: dict[str, Any] = {
         "prompt": req.prompt,
@@ -187,6 +200,7 @@ def cinematic_to_image_product_body(req: CinematicGenerateRequest) -> dict[str, 
         "continuitySessionId": req.continuitySessionId,
         "continuityId": req.continuitySessionId,
         "referenceAssetIds": list(req.referenceAssetIds),
+        "authorityReferences": auth_refs,
         "runPromptIntelligence": req.runPromptIntelligence,
         "creativeContext": creative,
         "generationMode": req.mode,
@@ -204,8 +218,18 @@ def cinematic_to_image_product_body(req: CinematicGenerateRequest) -> dict[str, 
             "category": ctrl.category,
             "visualEra": ctrl.visualEra,
             "productionStyle": ctrl.productionStyle,
+            "visualStyle": ctrl.visualStyle,
         },
     }
+    if ctrl.visualStyle:
+        body["visualStyle"] = ctrl.visualStyle
+    # Fail-closed honesty stamp: refs selected => IMAGE_I2I (pixel bind required).
+    if body["referenceAssetIds"] or auth_refs:
+        body["taskType"] = "IMAGE_I2I"
+        creative["taskType"] = "IMAGE_I2I"
+        body["creativeContext"] = creative
+        if req.modelFamilyPreference:
+            body["lockModelFamily"] = True
     if req.advanced:
         adv = req.advanced
         if adv.steps is not None:

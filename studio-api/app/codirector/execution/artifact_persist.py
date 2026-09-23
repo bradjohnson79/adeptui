@@ -72,6 +72,21 @@ def ensure_asset_persisted(
         return None
 
 
-def get_asset_url(asset_id: str) -> str:
+def get_asset_url(asset_id: str, project_id: str | None = None) -> str:
     """Build the asset URL for frontend display."""
-    return f"/api/assets/{asset_id}/file"
+    from ...project_security.asset_file import canonical_project_asset_file_url
+
+    pid = str(project_id or "").strip()
+    if not pid:
+        try:
+            from ...db import Asset, SessionLocal
+
+            db = SessionLocal()
+            try:
+                asset = db.get(Asset, asset_id)
+                pid = str(getattr(asset, "project_id", "") or "")
+            finally:
+                db.close()
+        except Exception:
+            pid = ""
+    return canonical_project_asset_file_url(pid, asset_id)

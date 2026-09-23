@@ -195,6 +195,18 @@ def review_catalog_endpoint(row_id: str, body: CatalogReviewBody):
     return {"ok": True, "row": row, "mock": False}
 
 
+
+
+@router.get("/elevenlabs/availability")
+def elevenlabs_availability():
+    """ORDER 15 UX LAW: API — ElevenLabs available when any fal/kie/wavespeed route is eligible.
+
+    FE polls this — do NOT gate on elevenlabs_api_key.
+    """
+    from .elevenlabs_capability import elevenlabs_availability as _avail
+
+    return _avail()
+
 @router.get("/{provider_id}")
 def get_provider(provider_id: str):
     from .registry import PROVIDERS

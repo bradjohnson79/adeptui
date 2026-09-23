@@ -120,11 +120,18 @@ describe("canGenerate matches validate + not-installed", () => {
     expect(blockers.some((item) => item.text.includes("Source video"))).toBe(true);
   });
 
-  it("does not treat Experimental as a fake live-gen success", () => {
+  it("allows Generate planning when Experimental (runtimeReady) without fake live-gen claims", () => {
     const session = scriptSession();
-    const blockers = avatarGenerateBlockers(session, experimental);
-    expect(canGenerateAvatarSession(session, experimental)).toBe(false);
-    expect(blockers.some((item) => item.text.includes("needs repair — Open Runtime Setup"))).toBe(true);
+    // Experimental label means the local runtime is executable (runtimeReady).
+    expect(canGenerateAvatarSession(session, experimental)).toBe(true);
+    expect(avatarGenerateBlockers(session, experimental).length).toBe(0);
+    // Needs Repair still blocks honestly.
+    const repair = { ...experimental, label: "Needs Repair" as const };
+    expect(canGenerateAvatarSession(session, repair)).toBe(false);
+    expect(
+      avatarGenerateBlockers(session, repair).some((item) => item.text.includes("needs repair")),
+    ).toBe(true);
+    // Live section success must still not be claimed from PROVIDER_NOT_CERTIFIED failures.
     expect(
       claimsLiveAvatarVideo({
         status: "failed",

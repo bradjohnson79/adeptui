@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../api";
 import { OVERLAY_PRESETS } from "./presets";
 import {
+  createImageElement,
   createLowerThirdGroup,
   createTextElement,
   createVectorElement,
   emptyComposition,
   flattenOverlayIds,
+  overlayObjectsTrack,
   type MagiOverlayComposition,
   type MagiOverlayElement,
   type MagiVectorShape,
@@ -187,21 +189,118 @@ export function useMagiOverlayState(
     [projectId, selectedOverlayId]
   );
 
-  const addText = () =>
+  const addText = (partial?: Partial<import("./types").MagiTextElement>) => {
+    const el = createTextElement(partial);
     commit("overlay.create", "Add text", (c) => {
-      c.overlays.push(createTextElement());
+      c.overlays.push(el);
       return c;
     });
-  const addLowerThird = (primary?: string, secondary?: string) =>
+    setSelectedOverlayId(el.id);
+    return el.id;
+  };
+  const addLowerThird = (primary?: string, secondary?: string, partial?: Partial<import("./types").MagiOverlayGroup>) => {
+    const el = { ...createLowerThirdGroup(primary, secondary), ...partial };
     commit("overlay.create", "Add lower third", (c) => {
-      c.overlays.push(createLowerThirdGroup(primary, secondary));
+      c.overlays.push(el);
       return c;
     });
-  const addShape = (shape: MagiVectorShape = "rectangle") =>
+    setSelectedOverlayId(el.id);
+    return el.id;
+  };
+  const addShape = (shape: MagiVectorShape = "rectangle", partial?: Partial<import("./types").MagiVectorElement>) => {
+    const el = { ...createVectorElement(shape), ...partial };
     commit("overlay.create", "Add shape", (c) => {
-      c.overlays.push(createVectorElement(shape));
+      c.overlays.push(el);
       return c;
     });
+    setSelectedOverlayId(el.id);
+    return el.id;
+  };
+  const addImage = (assetId: string, partial?: Partial<import("./types").MagiImageElement>) => {
+    const el = createImageElement(assetId, partial);
+    commit("overlay.create", "Add image overlay", (c) => {
+      c.overlays.push(el);
+      return c;
+    });
+    setSelectedOverlayId(el.id);
+    return el.id;
+  };
+  const bringForward = () => {
+    if (!selectedOverlayId) return;
+    commit("overlay.z", "Bring forward", (c) => {
+      const selected = c.overlays.find((el) => el.id === selectedOverlayId);
+      if (!selected) return c;
+      const slot = overlayObjectsTrack(selected);
+      const sorted = c.overlays.filter((el) => overlayObjectsTrack(el) === slot).sort((a, b) => a.zIndex - b.zIndex);
+      const i = sorted.findIndex((el) => el.id === selectedOverlayId);
+      if (i < 0 || i >= sorted.length - 1) return c;
+      const z = sorted[i].zIndex;
+      sorted[i].zIndex = sorted[i + 1].zIndex;
+      sorted[i + 1].zIndex = z;
+      return c;
+    });
+  };
+  const sendBackward = () => {
+    if (!selectedOverlayId) return;
+    commit("overlay.z", "Send backward", (c) => {
+      const selected = c.overlays.find((el) => el.id === selectedOverlayId);
+      if (!selected) return c;
+      const slot = overlayObjectsTrack(selected);
+      const sorted = c.overlays.filter((el) => overlayObjectsTrack(el) === slot).sort((a, b) => a.zIndex - b.zIndex);
+      const i = sorted.findIndex((el) => el.id === selectedOverlayId);
+      if (i <= 0) return c;
+      const z = sorted[i].zIndex;
+      sorted[i].zIndex = sorted[i - 1].zIndex;
+      sorted[i - 1].zIndex = z;
+      return c;
+    });
+  };
+  const bringToFront = () => {
+    if (!selectedOverlayId) return;
+    commit("overlay.z", "Bring to front", (c) => {
+      const selected = c.overlays.find((el) => el.id === selectedOverlayId);
+      if (!selected) return c;
+      const slot = overlayObjectsTrack(selected);
+      const peers = c.overlays.filter((el) => overlayObjectsTrack(el) === slot);
+      const max = peers.reduce((acc, el) => Math.max(acc, el.zIndex), 0);
+      c.overlays = mapDeep(c.overlays, selectedOverlayId, (el) => ({ ...el, zIndex: max + 1 }));
+      return c;
+    });
+  };
+  const sendToBack = () => {
+    if (!selectedOverlayId) return;
+    commit("overlay.z", "Send to back", (c) => {
+      const selected = c.overlays.find((el) => el.id === selectedOverlayId);
+      if (!selected) return c;
+      const slot = overlayObjectsTrack(selected);
+      const peers = c.overlays.filter((el) => overlayObjectsTrack(el) === slot);
+      const min = peers.reduce((acc, el) => Math.min(acc, el.zIndex), 0);
+      c.overlays = mapDeep(c.overlays, selectedOverlayId, (el) => ({ ...el, zIndex: min - 1 }));
+      return c;
+    });
+  };
+  const reassignObjectsTrack = (fromSlot: 1 | 2, toSlot: 1 | 2) => {
+    if (fromSlot === toSlot) return;
+    commit("overlay.objectsTrack", "Move objects", (c) => {
+      c.overlays = c.overlays.map((el) =>
+        overlayObjectsTrack(el) === fromSlot ? { ...el, objectsTrack: toSlot } : el,
+      );
+      return c;
+    });
+  };
+  const reloadFromServer = async () => {
+    if (!sourceAssetId) return;
+    try {
+      const comp = (await api.magi.getOverlayForAsset(projectId, sourceAssetId)) as MagiOverlayComposition;
+      if (comp?.compositionId) {
+        setComposition(comp);
+        setPersistError(null);
+        setSavePending(false);
+      }
+    } catch {
+      /* keep in-memory composition */
+    }
+  };
   const applyPreset = (presetId: string) => {
     const p = OVERLAY_PRESETS.find((x) => x.id === presetId);
     if (!p) return;
@@ -222,13 +321,17 @@ export function useMagiOverlayState(
     });
   };
 
-  const deleteSelected = () => {
-    if (!selectedOverlayId) return;
+  const deleteOverlay = (id: string | null) => {
+    if (!id) return;
     commit("overlay.delete", "Delete overlay", (c) => {
-      c.overlays = filterDeep(c.overlays, selectedOverlayId);
+      c.overlays = filterDeep(c.overlays, id);
       return c;
     });
-    setSelectedOverlayId(null);
+    setSelectedOverlayId((current) => (current === id ? null : current));
+  };
+
+  const deleteSelected = () => {
+    deleteOverlay(selectedOverlayId);
   };
 
   const duplicateSelected = () => {
@@ -309,9 +412,17 @@ export function useMagiOverlayState(
     addText,
     addLowerThird,
     addShape,
+    addImage,
+    bringForward,
+    sendBackward,
+    bringToFront,
+    sendToBack,
+    reassignObjectsTrack,
+    reloadFromServer,
     applyPreset,
     patchElement,
     deleteSelected,
+    deleteOverlay,
     duplicateSelected,
     replaceComposition: (next: MagiOverlayComposition, nextSelectedId?: string | null) => {
       setPersistError(null);

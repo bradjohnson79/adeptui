@@ -24,6 +24,8 @@ class AudioGenerateRequest:
     providerKey: str | None = None
     registryId: str | None = None
     negativePrompt: str | None = None
+    eventCount: int | None = None  # ORDER14: when set, MMAudio must not trim-only to duration
+    cfgStrength: float | None = None
     sampleRate: int = 48000
     channels: int = 1
     format: str = "wav"

@@ -770,6 +770,20 @@ export function avatarGenerateBlockers(
     });
     return issues;
   }
+  if (runtime.label === "Needs Repair") {
+    issues.push({
+      level: "bad",
+      text: `${runtimeName} needs repair — Open Runtime Setup`,
+    });
+    return issues;
+  }
+  // Experimental means inspect healthState experimental / status ready -> runtimeReady.
+  // Do not hard-block Generate on lifecycle certifiedReady that never becomes true for
+  // healthy local avatar providers (infinitetalk-local and peers). Soft flash_attn/triton
+  // notes must not disable planning when the runtime is executable.
+  if (runtime.label === "Experimental" || runtime.certifiedReady === true) {
+    return issues;
+  }
   if (runtime.certifiedReady !== true) {
     issues.push({
       level: "bad",

@@ -37,6 +37,51 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+export async function startReconstruction(projectId: string, sourceAssetId: string, sourceType = "image") {
+  return req<{ jobId: string; status: string; progress: { stage: string; message: string } }>(
+    `/api/posecraft/projects/${projectId}/reconstruct`,
+    { method: "POST", body: JSON.stringify({ sourceAssetId, sourceType, provider: "LOCAL_FIRE3D" }) },
+  );
+}
+
+export async function getReconstruction(projectId: string, jobId: string) {
+  return req<Record<string, unknown>>(`/api/posecraft/projects/${projectId}/reconstruct/${jobId}`);
+}
+
+export async function importReconstruction(projectId: string, body: Record<string, unknown>) {
+  return req<PoseCraftDocument>(`/api/posecraft/projects/${projectId}/import-reconstruction`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function setImageGeneratorHandoff(projectId: string, snapshotId: string, imageAssetId?: string) {
+  return req<PoseCraftDocument>(`/api/posecraft/projects/${projectId}/handoff/image-generator`, {
+    method: "POST",
+    body: JSON.stringify({ snapshotId, imageAssetId }),
+  });
+}
+
+export async function getImageGeneratorHandoff(projectId: string) {
+  return req<{ snapshotId?: string; imageAssetId?: string; name?: string; honestyLabel?: string }>(
+    `/api/posecraft/projects/${projectId}/handoff/image-generator`,
+  );
+}
+
+export async function proposeAutoPreviz(projectId: string, description: string, shotCount = 4) {
+  return req<{ planId: string; shots: Array<{ name: string; focusKind: string }> }>(
+    `/api/posecraft/projects/${projectId}/auto-previz/plan`,
+    { method: "POST", body: JSON.stringify({ description, shotCount }) },
+  );
+}
+
+export async function executeAutoPreviz(projectId: string, planId: string) {
+  return req<PoseCraftDocument>(`/api/posecraft/projects/${projectId}/auto-previz/execute`, {
+    method: "POST",
+    body: JSON.stringify({ planId, approved: true }),
+  });
+}
+
 export async function loadSceneDocument(projectId: string): Promise<PoseCraftDocument> {
   return req<PoseCraftDocument>(`/api/posecraft/projects/${projectId}/scene`);
 }
@@ -235,13 +280,6 @@ export async function loadPoseIntelligence(projectId: string, snapshotId?: strin
 }> {
   const q = snapshotId ? `?snapshotId=${encodeURIComponent(snapshotId)}` : "";
   return req(`/api/posecraft/projects/${projectId}/intelligence${q}`);
-}
-
-export async function handoffPoseToSceneCreator(projectId: string, snapshotId?: string) {
-  return req(`/api/posecraft/projects/${projectId}/intelligence/handoff/scene-creator`, {
-    method: "POST",
-    body: JSON.stringify({ snapshotId: snapshotId || "" }),
-  });
 }
 
 export async function handoffPoseToTimeline(projectId: string, snapshotId?: string) {

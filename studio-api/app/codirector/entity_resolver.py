@@ -44,8 +44,10 @@ from ..spatial_map.ers_persistence import (
 # Allows multi-word capitalized names: "@Agent Shadow", "@Anga'q'uay", "@Mieke-2".
 _CHARACTER_TAG_RE = re.compile(r"@([A-Z][A-Za-z'\-0-9]+(?:\s+[A-Z][A-Za-z'\-0-9]+)*)")
 
-# Amendment #5 — prop #-reference parser. Normalized lowercase tags only.
+# Amendment #5 leftover — Spatial Map still emits #kebab prop tags.
 _PROP_TAG_RE = re.compile(r"#([a-z][a-z0-9\-]*)")
+# Timeline R2V PRS tags: %CoffeeMug
+_PRS_TAG_RE = re.compile(r"%([A-Za-z][A-Za-z0-9_]*)")
 
 # Framing keywords (creator language, not technical jargon).
 _FRAMING_KEYWORDS: tuple[tuple[str, str], ...] = (
@@ -95,13 +97,80 @@ def find_character_names(text: str) -> list[str]:
 
 
 def find_prop_tags(text: str) -> list[str]:
-    """Return all unique ``#prop-tag`` strings (without the leading ``#``)."""
+    """Return unique PRS `%CoffeeMug` tags plus leftover `#kebab` Spatial Map tags."""
     seen: dict[str, None] = {}
+    for match in _PRS_TAG_RE.finditer(text or ""):
+        tag = match.group(1).strip()
+        if tag and tag not in seen:
+            seen[tag] = None
     for match in _PROP_TAG_RE.finditer(text or ""):
         tag = match.group(1).strip()
         if tag and tag not in seen:
             seen[tag] = None
     return list(seen.keys())
+
+
+_ERS_ALIAS_RE = re.compile(r"#([A-Z][A-Za-z0-9_]+)")
+_ASSET_UUID_RE = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+
+
+def _ers_alias_exists(db: Session, project_id: str, alias: str) -> bool:
+    if not alias:
+        return False
+    try:
+        from ..scene_references.models import SceneReferenceBinding
+
+        row = (
+            db.query(SceneReferenceBinding)
+            .filter(
+                SceneReferenceBinding.project_id == project_id,
+                SceneReferenceBinding.alias == alias,
+            )
+            .first()
+        )
+        if row is not None:
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def unresolved_tagged_mentions(db: Session, project_id: str, text: str) -> list[str]:
+    """Creator @ / # / % tags that do not resolve in this project."""
+
+    missing: list[str] = []
+    for name in find_character_names(text):
+        if resolve_character(db, project_id, name) is None:
+            missing.append(f"@{name}")
+    for tag in find_prop_tags(text):
+        if resolve_prop(db, project_id, tag) is None:
+            if re.search(rf"%{re.escape(tag)}\b", text or ""):
+                missing.append(f"%{tag}")
+            else:
+                missing.append(f"#{tag}")
+    for match in _ERS_ALIAS_RE.finditer(text or ""):
+        alias = match.group(1)
+        token = f"#{alias}"
+        if token in missing:
+            continue
+        if resolve_prop(db, project_id, alias) is None and not _ers_alias_exists(db, project_id, alias):
+            missing.append(token)
+    return missing
+
+
+def missing_library_asset_ids(db: Session, project_id: str, text: str) -> list[str]:
+    """UUIDs named in the turn that are not Library assets on this project."""
+
+    from ..db import Asset
+
+    missing: list[str] = []
+    for uid in _ASSET_UUID_RE.findall(text or ""):
+        row = db.get(Asset, uid)
+        if row is None or str(getattr(row, "project_id", "") or "") != project_id:
+            missing.append(uid)
+    return missing
 
 
 def resolve_character(
@@ -135,30 +204,50 @@ def resolve_character(
     except Exception:
         v2 = {}
     lock = v2.get("visualLock") or {}
-    views = v2.get("views") or {}
-    front_id = str((views.get("front") or {}).get("assetId") or "") or None
+    views = v2.get("views") if isinstance(v2.get("views"), dict) else {}
+    front_slot = views.get("front") if isinstance(views.get("front"), dict) else {}
+    front_id = str(front_slot.get("assetId") or "") or None
+    mv = v2.get("multiView") if isinstance(v2.get("multiView"), dict) else {}
+    angles = mv.get("angles") if isinstance(mv.get("angles"), dict) else {}
+    side_id = str((angles.get("side") or {}).get("assetId") or "") or None
+    tq_id = str((angles.get("three_quarter") or {}).get("assetId") or "") or None
+    back_id = str((angles.get("back") or {}).get("assetId") or "") or str(
+        (views.get("back") or {}).get("assetId") or ""
+    ) or None
+    sheet_from_cc = str(v2.get("sheetAssetId") or ((v2.get("sheet") or {}).get("assetId") if isinstance(v2.get("sheet"), dict) else "") or "").strip() or None
+    if sheet_from_cc:
+        sheet_id = sheet_from_cc
+    def _rev(value: Any, default: int = 0) -> int:
+        try:
+            return int(value) if value not in (None, "") else default
+        except (TypeError, ValueError):
+            return default
     result: dict[str, Any] = {
         "character_id": profile.id,
         "name": profile.name,
         "approved_casting_asset_id": front_id or sheet_id,
-        "crs_revision": int(persisted.get("crs_revision") or 0),
+        "crs_revision": _rev(persisted.get("crs_revision"), 0),
         "approved_sheet_asset_id": sheet_id,
         "production_ready": (
             str(lock.get("status") or "") == "ok"
             if bool(
-                (views.get("front") or {}).get("approved")
-                or (views.get("front") or {}).get("jobId")
+                front_slot.get("approved")
+                or front_slot.get("jobId")
                 or str(lock.get("status") or "none") != "none"
             )
             else (profile.approval_status or "").lower() == "approved"
         ),
-        "json_revision": int(v2.get("jsonRevision") or persisted.get("json_revision") or 1),
+        "json_revision": _rev(v2.get("jsonRevision") or persisted.get("json_revision"), 1),
         "visual_lock": lock,
         "visual_reference": front_id,
-        "back_reference": str((views.get("back") or {}).get("assetId") or "") or None,
+        "side_reference": side_id,
+        "three_quarter_reference": tq_id,
+        "back_reference": back_id,
         "closeup_reference": str((views.get("closeup") or {}).get("assetId") or "") or None,
-        "sheet_asset_id": v2.get("sheetAssetId") or None,
+        "sheet_asset_id": sheet_from_cc or v2.get("sheetAssetId") or None,
         "at_tag": f"@{profile.name}" if profile.name else "",
+        "isGlobal": bool(getattr(profile, "is_global", False)),
+        "owningProjectId": getattr(profile, "project_id", "") or "",
     }
     try:
         from ..character_identity.crs_service import get_crs_summary
@@ -175,6 +264,30 @@ def resolve_character(
     return result
 
 
+def character_canon_context_block(db: Session, project_id: str, text: str) -> str:
+    """Compact @Character context listing Front / Side / 3/4 / Back / sheet ids."""
+    names = find_character_names(text)
+    if not names:
+        raw = str(text or "")
+        if "@" in raw:
+            names = [raw.split("@", 1)[-1].strip().rstrip("?.!,")]
+    parts: list[str] = []
+    for name in names or []:
+        resolved = resolve_character(db, project_id, name)
+        if not resolved:
+            continue
+        bits = [
+            f"character_id={resolved.get('character_id')}",
+            f"front={resolved.get('visual_reference')}",
+            f"side={resolved.get('side_reference')}",
+            f"three_quarter={resolved.get('three_quarter_reference')}",
+            f"back={resolved.get('back_reference')}",
+            f"sheet={resolved.get('sheet_asset_id') or resolved.get('approved_sheet_asset_id')}",
+        ]
+        parts.append(" ".join(str(b) for b in bits if b))
+    return "\n".join(parts)
+
+
 def resolve_prop(
     db: Session, project_id: str, tag: str
 ) -> PropEntity | None:
@@ -187,8 +300,21 @@ def resolve_prop(
     """
     if not tag:
         return None
-    normalized = normalize_prop_tag(tag) if not _is_normalized(tag) else tag
-    return load_prop_entity(db, project_id, normalized)
+    raw = tag[1:] if tag[:1] in {"#", "%"} else tag
+    hit = load_prop_entity(db, project_id, raw)
+    if hit:
+        return hit
+    normalized = normalize_prop_tag(raw) if not _is_normalized(raw) else raw
+    hit = load_prop_entity(db, project_id, normalized)
+    if hit:
+        return hit
+    from ..scene_references.sheet_tags import pascal_alias
+
+    wanted = pascal_alias(raw).lower()
+    for prop in list_prop_entities(db, project_id):
+        if pascal_alias(prop.display_label or prop.tag).lower() == wanted:
+            return prop
+    return None
 
 
 def _is_normalized(tag: str) -> bool:

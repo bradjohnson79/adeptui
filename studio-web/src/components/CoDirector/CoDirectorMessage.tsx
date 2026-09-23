@@ -1,9 +1,12 @@
 import { useState } from "react";
+import { api } from "../../api";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import type { CoDirectorMessage as Msg, CoDirectorMessageExecution } from "./types";
 import { renderAssistantMarkdown } from "./assistantMarkdown";
 import GenerationQueueCard from "./GenerationQueueCard";
+import SceneProductionCard from "./SceneProductionCard";
 import { CoDirectorMediaCardGrid, type MediaCardItem } from "./CoDirectorMediaCardGrid";
+import { capabilityActionLabel, normalizeJobStatus } from "./liveExecutionSync";
 
 const MESSAGE_TYPE_LABELS: Record<string, string> = {
   recommendation: "Recommendation",
@@ -13,24 +16,26 @@ const MESSAGE_TYPE_LABELS: Record<string, string> = {
   plan: "Production plan",
   answer: "Answer",
   // Workstream H — execution-aware message kinds.
-  execution_status: "Working",
-  completion: "Done",
-  error: "Error",
+  // NOTE: execution_status label is derived dynamically from the execution
+  // payload status (see typeLabel logic below) — the static entry here is a
+  // fallback only when no execution payload is attached.
+  execution_status: "Queued",
+  completion: "Complete",
+  error: "Failed",
 };
 
 const CHILD_STATUS_LABELS: Record<string, string> = {
   queued: "Queued",
+  preparing: "Preparing",
   running: "Working",
   preview: "Preview",
-  completed: "Done",
+  completed: "Complete",
   failed: "Failed",
-  cancelled: "Stopped",
+  cancelled: "Cancelled",
 };
 
 function capabilityLabel(capability: string | undefined): string {
-  if (!capability) return "Execution";
-  const short = capability.split(".").pop() || capability;
-  return short.charAt(0).toUpperCase() + short.slice(1);
+  return capabilityActionLabel(capability, "Execution");
 }
 
 function progressPercent(progress: number | undefined, completed: number | undefined, total: number | undefined): number {
@@ -41,7 +46,13 @@ function progressPercent(progress: number | undefined, completed: number | undef
   return 0;
 }
 
-function ExecutionSummaryCard({ execution }: { execution: CoDirectorMessageExecution }) {
+function ExecutionSummaryCard({
+  execution,
+  projectId,
+}: {
+  execution: CoDirectorMessageExecution;
+  projectId: string;
+}) {
   const pct = progressPercent(execution.progress, execution.completed, execution.total);
   const completed = execution.completed ?? 0;
   const total = execution.total ?? 0;
@@ -49,7 +60,19 @@ function ExecutionSummaryCard({ execution }: { execution: CoDirectorMessageExecu
   const isDone = status === "completed" || status === "done";
   const isFailed = status === "failed";
   const isCancelled = status === "cancelled";
+  const isActive = !isDone && !isFailed && !isCancelled;
   const children = Array.isArray(execution.child_jobs) ? execution.child_jobs : [];
+  const [cancelling, setCancelling] = useState(false);
+
+  const stopThis = async () => {
+    if (!projectId || !execution.execution_id || cancelling) return;
+    setCancelling(true);
+    try {
+      await api.cancelExecution(projectId, execution.execution_id);
+    } catch {
+      setCancelling(false);
+    }
+  };
 
   return (
     <div className={`codirector-exec-card ${isFailed ? "is-failed" : isCancelled ? "is-cancelled" : isDone ? "is-done" : "is-running"}`}>
@@ -58,6 +81,17 @@ function ExecutionSummaryCard({ execution }: { execution: CoDirectorMessageExecu
         <span className="codirector-exec-counts">
           {completed}/{total || "?"} complete
         </span>
+        {isActive && projectId ? (
+          <button
+            type="button"
+            className="ghost codirector-exec-stop"
+            data-testid="codirector-exec-stop"
+            onClick={() => void stopThis()}
+            disabled={cancelling}
+          >
+            {cancelling ? "Stopping…" : "Stop this"}
+          </button>
+        ) : null}
       </div>
       <div className="codirector-exec-progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
         <div className="codirector-exec-progress-bar" style={{ width: `${pct}%` }} />
@@ -66,9 +100,10 @@ function ExecutionSummaryCard({ execution }: { execution: CoDirectorMessageExecu
         <ul className="codirector-exec-children">
           {children.map((c, i) => {
             const label = c.label || (typeof c.child_index === "number" ? `Frame ${c.child_index + 1}` : `Item ${i + 1}`);
-            const childStatus = CHILD_STATUS_LABELS[(c.status || "").toLowerCase()] || c.status || "Queued";
+            const childKind = normalizeJobStatus(c.status) || "queued";
+            const childStatus = CHILD_STATUS_LABELS[childKind] || childKind || "Queued";
             return (
-              <li key={c.job_id || i} className={`codirector-exec-child child-${(c.status || "queued").toLowerCase()}`}>
+              <li key={c.job_id || i} className={`codirector-exec-child child-${childKind}`}>
                 <span className="codirector-exec-child-label">{label}</span>
                 <span className="codirector-exec-child-status">{childStatus}</span>
               </li>
@@ -89,13 +124,35 @@ export function CoDirectorMessage({
 }) {
   const { uiContext } = useCoDirectorSession();
   const [dismissedQueue, setDismissedQueue] = useState(false);
-  const typeLabel = message.messageType ? MESSAGE_TYPE_LABELS[message.messageType] : null;
+  // Derive label from the execution's actual status when a payload is present,
+  // falling back to the static messageType label. This prevents "Working" from
+  // being shown for a terminal failure.
+  const typeLabel = (() => {
+    if (!message.messageType) return null;
+    const execStatus = message.execution?.status ?? "";
+    if (message.execution?.execution_id && execStatus) {
+      const s = execStatus.toLowerCase();
+      if (s === "completed") return "Complete";
+      if (s === "failed") return "Failed";
+      if (s === "cancelled") return "Cancelled";
+      if (s === "queued" || s === "preparing") return "Preparing";
+      if (s === "preview") return "Preview";
+    }
+    return MESSAGE_TYPE_LABELS[message.messageType] ?? null;
+  })();
   const isAssistant = message.role === "assistant";
   const html = isAssistant ? renderAssistantMarkdown(message.content) : "";
   const isExecutionStatus = message.messageType === "execution_status";
   const isCompletion = message.messageType === "completion";
   const hasExecutionPayload = Boolean(message.execution && message.execution.execution_id);
-  const isPreviewQueue = hasExecutionPayload && message.execution?.status === "preview" && !!message.execution?.plan_data;
+  const planData = (message.execution?.plan_data || {}) as { sceneProduction?: boolean; timelineHandoff?: boolean; outputs?: unknown[] };
+  const isSceneProduction = hasExecutionPayload && Boolean(planData.sceneProduction);
+  const isPreviewQueue =
+    hasExecutionPayload &&
+    message.execution?.status === "preview" &&
+    !!message.execution?.plan_data &&
+    !planData.sceneProduction &&
+    Array.isArray(planData.outputs);
 
   return (
     <article
@@ -109,8 +166,17 @@ export function CoDirectorMessage({
           onClose={() => setDismissedQueue(true)}
         />
       ) : null}
-      {isExecutionStatus && hasExecutionPayload && !isPreviewQueue ? (
-        <ExecutionSummaryCard execution={message.execution as CoDirectorMessageExecution} />
+      {isSceneProduction ? (
+        <SceneProductionCard
+          execution={message.execution as CoDirectorMessageExecution}
+          projectId={uiContext.projectId || ""}
+        />
+      ) : null}
+      {isExecutionStatus && hasExecutionPayload && !isPreviewQueue && !isSceneProduction ? (
+        <ExecutionSummaryCard
+          execution={message.execution as CoDirectorMessageExecution}
+          projectId={uiContext.projectId || ""}
+        />
       ) : null}
       {isAssistant ? (
         <div
@@ -128,7 +194,10 @@ export function CoDirectorMessage({
         </div>
       )}
       {isCompletion && hasExecutionPayload ? (
-        <ExecutionSummaryCard execution={message.execution as CoDirectorMessageExecution} />
+        <ExecutionSummaryCard
+          execution={message.execution as CoDirectorMessageExecution}
+          projectId={uiContext.projectId || ""}
+        />
       ) : null}
       {(isCompletion || isExecutionStatus) && hasExecutionPayload ? (
         <CoDirectorMediaCardGrid
@@ -143,6 +212,18 @@ export function CoDirectorMessage({
       {message.status === "interrupted" && (
         <span className="codirector-msg-status">Interrupted — you can retry</span>
       )}
+      {message.role === "assistant" && message.messageType === "error" && onRetry ? (
+        <div className="codirector-msg-actions" data-testid="codirector-exec-fail-actions">
+          <button
+            type="button"
+            className="ui-btn ui-btn--primary"
+            data-testid="codirector-exec-fail-retry"
+            onClick={onRetry}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
       {message.role === "user" && onRetry ? (
         <div className="codirector-msg-actions">
           <button type="button" className="ghost" onClick={onRetry}>

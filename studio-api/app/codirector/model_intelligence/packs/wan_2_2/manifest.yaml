@@ -5,7 +5,7 @@ engineId: wan
 displayName: WAN 2.2
 modelVersion: '2.2'
 knowledgePackVersion: 1.0.0
-status: ACTIVE
+status: DEPRECATED
 runtimeStatus: not_production_ready
 media:
 - video

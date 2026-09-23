@@ -174,21 +174,26 @@ def test_back_and_closeup_require_front_lock(db):
         "proj-v2",
         CharacterProfileCreate(name="Mira Vale", slug="mira-vale", role="fixture"),
     )
-    for view in ("back", "closeup"):
-        with pytest.raises(HTTPException) as exc:
-            generate_view(db, "proj-v2", profile.id, view)
-        assert exc.value.status_code == 409
-        assert exc.value.detail["code"] == "FRONT_LOCK_REQUIRED"
+    with pytest.raises(HTTPException) as exc:
+        generate_view(db, "proj-v2", profile.id, "back")
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "BACK_RETIRED"
+    with pytest.raises(HTTPException) as exc:
+        generate_view(db, "proj-v2", profile.id, "closeup")
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "FRONT_LOCK_REQUIRED"
 
 
 def test_sheet_compose_requires_revision_2(db):
+    import asyncio
+
     profile = service.create_profile(
         db,
         "proj-v2",
         CharacterProfileCreate(name="Mira Vale", slug="mira-vale-sheet", role="fixture"),
     )
     with pytest.raises(HTTPException) as exc:
-        compose_sheet(db, "proj-v2", profile.id)
+        asyncio.run(compose_sheet(db, "proj-v2", profile.id))
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "SHEET_GATE"
 
@@ -212,6 +217,57 @@ def test_resolver_production_ready_follows_vision_lock(db):
     resolved = resolve_character(db, "proj-v2", "Mira Vale")
     assert resolved is not None
     assert resolved["production_ready"] is False
+
+
+def test_asset_path_rejects_wrong_project(db, tmp_path):
+    from app.character_identity.cc_v2 import _asset_path
+    from app.db import Asset
+
+    front = tmp_path / "front.png"
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(front)
+    db.add(
+        Asset(
+            id="aid-front-1",
+            project_id="proj-v2",
+            tag="front",
+            kind="image",
+            filename="front.png",
+            path=str(front),
+        )
+    )
+    db.commit()
+    assert _asset_path(db, "proj-v2", "aid-front-1") == front
+    with pytest.raises(HTTPException) as exc:
+        _asset_path(db, "other-project", "aid-front-1")
+    assert exc.value.status_code == 404
+    assert exc.value.detail["code"] == "NOT_FOUND"
+
+
+def test_run_vision_persists_provider_message(monkeypatch, tmp_path):
+    import asyncio
+
+    from app.character_identity import cc_v2
+
+    async def _fake_chat_vision(**_kwargs):
+        return {
+            "ok": False,
+            "error": "The API key is not authorized to use this model.",
+            "reason": "The API key is not authorized to use this model.",
+            "httpStatus": 200,
+            "providerCode": 401,
+        }
+
+    monkeypatch.setattr(
+        "app.codirector.vision.vision_review.chat_vision",
+        _fake_chat_vision,
+    )
+    front = tmp_path / "front.png"
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(front)
+    result = asyncio.run(cc_v2._run_vision([front], "describe"))
+    assert result["ok"] is False
+    assert result["error"] == "The API key is not authorized to use this model."
+    assert result["httpStatus"] == 200
+    assert result["providerCode"] == 401
 
 
 def test_resolve_mira_vale_compact_alias(db):

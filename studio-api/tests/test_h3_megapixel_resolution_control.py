@@ -444,3 +444,153 @@ class TestH3ResolutionRouterPatch:
         master = SceneTimelineMaster.model_validate(payload["master"])
         reloaded = next(b for b in master.batchBlocks if b.id == batch_id)
         assert reloaded.h3Resolution == {"mode": "manual", "megapixels": 1.0}
+
+
+
+class TestLtxTimelineQuality:
+    """LTX Timeline QUALITY tier -> legal canvas WxH (no 480p)."""
+
+    def _ltx_batch(self, ltx_quality: str | None = None) -> BatchBlock:
+        return BatchBlock(
+            id="b_ltx",
+            sceneId="s",
+            label="Hero",
+            generatorId="ltx-2.5-distilled",
+            ltxQuality=ltx_quality,
+            duration=DurationState(plannedDuration=5.0),
+            promptSegments=[
+                TimelinePromptSegment(
+                    id="ps1",
+                    start=0,
+                    length=5,
+                    text="wide shot",
+                    role="primary",
+                    strength=1,
+                    anchorIds=[],
+                    executionStrategy="compiled",
+                    versionId="psv1",
+                )
+            ],
+        )
+
+    def test_default_absent_is_720p(self):
+        caps = Ltx25LocalAdapter().capabilities
+        batch = self._ltx_batch(None)
+        assert _resolution_for_request(caps, "16:9", batch, draft_mode=True) == "1280x704"
+
+    def test_720p_tier(self):
+        caps = Ltx25LocalAdapter().capabilities
+        batch = self._ltx_batch("720p")
+        assert _resolution_for_request(caps, "16:9", batch, draft_mode=False) == "1280x704"
+
+    def test_1080p_tier(self):
+        caps = Ltx25LocalAdapter().capabilities
+        batch = self._ltx_batch("1080p")
+        assert _resolution_for_request(caps, "16:9", batch, draft_mode=False) == "1920x1088"
+
+    def test_2k_tier(self):
+        caps = Ltx25LocalAdapter().capabilities
+        batch = self._ltx_batch("2K")
+        assert _resolution_for_request(caps, "16:9", batch, draft_mode=False) == "2560x1440"
+
+    def test_4k_fails_honestly(self):
+        caps = Ltx25LocalAdapter().capabilities
+        batch = self._ltx_batch("4K")
+        with pytest.raises(ValueError, match="UNAVAILABLE|4K|cannot compile"):
+            _resolution_for_request(caps, "16:9", batch, draft_mode=False)
+
+    def test_request_builder_emits_tier_provenance(self):
+        batch = self._ltx_batch("1080p")
+        snap = ExecutionSnapshot(batchBlockId=batch.id, selectedGenerator="ltx-2.5-distilled")
+        req = build_timeline_generation_request(
+            project_id="p",
+            scene_id="s",
+            batch=batch,
+            snapshot=snap,
+            aspect_ratio="16:9",
+            draft_mode=False,
+        )
+        assert req.resolution == "1920x1088"
+        assert req.providerOptions.get("ltxResolvedQuality") == {
+            "tier": "1080p",
+            "resolution": "1920x1088",
+        }
+        assert req.providerOptions.get("h3ResolvedCanvas") is None
+
+
+class TestLtxQualityPersistPath:
+    """ltxQuality survives touch_batch_config and store round-trip."""
+
+    def test_touch_batch_config_persists_ltx_quality(self, db_scene):
+        db, pid, sid = db_scene
+        from app.director_timeline_w46 import service
+
+        ws = service.workspace(db, pid, sid)
+        batch_id = ws["master"]["batchBlocks"][0]["id"]
+        updated = orchestrator.touch_batch_config(db, pid, sid, batch_id, {"ltxQuality": "1080p"})
+        assert updated["ok"] is True
+        assert updated["batch"]["ltxQuality"] == "1080p"
+
+        payload = service.workspace(db, pid, sid)
+        master = SceneTimelineMaster.model_validate(payload["master"])
+        reloaded = next(b for b in master.batchBlocks if b.id == batch_id)
+        assert reloaded.ltxQuality == "1080p"
+
+    def test_patch_batch_persists_ltx_quality(self, db_scene, client):
+        db, pid, sid = db_scene
+        from app.director_timeline_w46 import service
+
+        ws = service.workspace(db, pid, sid)
+        batch_id = ws["master"]["batchBlocks"][0]["id"]
+        url = f"/api/director-timeline/projects/{pid}/scenes/{sid}/batches/{batch_id}"
+        resp = client.patch(url, json={"ltxQuality": "2K"})
+        assert resp.status_code == 200, resp.text
+
+        payload = service.workspace(db, pid, sid)
+        master = SceneTimelineMaster.model_validate(payload["master"])
+        reloaded = next(b for b in master.batchBlocks if b.id == batch_id)
+        assert reloaded.ltxQuality == "2K"
+
+    def test_independent_h3_and_ltx_memory(self, db_scene):
+        db, pid, sid = db_scene
+        from app.director_timeline_w46 import service
+
+        ws = service.workspace(db, pid, sid)
+        batch_id = ws["master"]["batchBlocks"][0]["id"]
+        orchestrator.touch_batch_config(
+            db, pid, sid, batch_id, {"h3Resolution": {"mode": "manual", "megapixels": 1.0}}
+        )
+        orchestrator.touch_batch_config(db, pid, sid, batch_id, {"ltxQuality": "1080p"})
+        payload = service.workspace(db, pid, sid)
+        master = SceneTimelineMaster.model_validate(payload["master"])
+        reloaded = next(b for b in master.batchBlocks if b.id == batch_id)
+        assert reloaded.h3Resolution == {"mode": "manual", "megapixels": 1.0}
+        assert reloaded.ltxQuality == "1080p"
+
+
+class TestMultiBatchQualityInherit:
+    """add_batch inherits prior batch h3Resolution + ltxQuality."""
+
+    def test_add_batch_inherits_h3_and_ltx(self, db_scene):
+        db, pid, sid = db_scene
+        from app.director_timeline_w46 import service
+
+        ws = service.workspace(db, pid, sid)
+        batch_id = ws["master"]["batchBlocks"][0]["id"]
+        orchestrator.touch_batch_config(
+            db,
+            pid,
+            sid,
+            batch_id,
+            {
+                "h3Resolution": {"mode": "manual", "megapixels": 0.98},
+                "ltxQuality": "1080p",
+            },
+        )
+        added = service.add_batch(db, pid, sid, label="Batch 2")
+        assert added["ok"] is True
+        new_batch = BatchBlock.model_validate(added["batch"])
+        assert new_batch.h3Resolution == {"mode": "manual", "megapixels": 0.98}
+        assert new_batch.ltxQuality == "1080p"
+        # Must not silently reset to Auto / absent (Fast Auto would be 864x480).
+        assert new_batch.h3Resolution["mode"] == "manual"

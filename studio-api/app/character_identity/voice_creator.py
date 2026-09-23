@@ -8,17 +8,22 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from . import service
-from .models import VoiceProfileRow
+from .models import CharacterProfileRow, VoiceProfileRow
 from .prompt_package import generate_prompt_package
 from .schemas import DialogueGenerateRequest, VoiceConsentCreate, VoiceProfileCreate
 from .voice import provider_readiness, validate_voice_reference
-from .voice_runtime import run_generate_dialogue, run_voice_clone, run_voice_design
+from .voice_preview import normalize_design_request
+from .voice_runtime import (
+    run_generate_dialogue,
+    run_voice_clone,
+    run_voice_design,
+)
 
 KORRI_DESIGN_BRIEF = {
     "perceivedAge": "Young adult",
@@ -234,6 +239,16 @@ def get_voice_workspace(db: Session, project_id: str, character_id: str) -> dict
     active = None
     if profile.active_voice_profile_id:
         active = next((v for v in voices if v["id"] == profile.active_voice_profile_id), None)
+        if active is None:
+            row = db.get(VoiceProfileRow, profile.active_voice_profile_id)
+            if row is not None and row.character_profile_id == character_id:
+                active = service.voice_to_dict(row, character_name=profile.name)
+    previous_approved = [
+        v
+        for v in voices
+        if str(v.get("approval_status") or "").lower() == "approved"
+        and v.get("id") != profile.active_voice_profile_id
+    ]
     methods = _methods_catalog(readiness)
     design_brief = KORRI_DESIGN_BRIEF if (profile.slug or "").lower() == "korri" else dict(DEFAULT_DESIGN_BRIEF)
     prompt_document = None
@@ -259,6 +274,7 @@ def get_voice_workspace(db: Session, project_id: str, character_id: str) -> dict
         "slug": profile.slug,
         "activeVoiceProfileId": profile.active_voice_profile_id,
         "activeVoice": active,
+        "previousApprovedVoices": previous_approved,
         "voices": voices,
         "providers": readiness,
         "methods": methods,
@@ -422,7 +438,21 @@ def generate_voice_candidates(
     method: str = "design",
     parent_candidate_id: str | None = None,
     append_to_voice_id: str | None = None,
+    request_body: Any | None = None,
+    progress_cb: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
+    if request_body is not None:
+        norm = normalize_design_request(request_body)
+        brief = brief or norm.get("designBrief")
+        if norm.get("candidateCount") is not None:
+            candidate_count = norm.get("candidateCount")
+        test_line = test_line or norm.get("testLine")
+        name = name or norm.get("name")
+        master_prompt = master_prompt or norm.get("masterPrompt")
+        prompt_document = prompt_document or norm.get("promptDocument")
+        method = method or norm.get("method") or "design"
+        parent_candidate_id = parent_candidate_id or norm.get("parentCandidateId")
+        append_to_voice_id = append_to_voice_id or norm.get("appendToVoiceId")
     profile = service.get_profile(db, project_id, character_id)
     is_korri = (profile.slug or "").lower() == "korri"
     b = brief or (KORRI_DESIGN_BRIEF if is_korri else DEFAULT_DESIGN_BRIEF)
@@ -440,7 +470,9 @@ def generate_voice_candidates(
             "language": "en",
         },
     )()
-    result = run_voice_design(db, project_id, character_id, body)
+    if progress_cb:
+        progress_cb({"phase": "preparing", "sampleIndex": 0, "completedSamples": 0})
+    result = run_voice_design(db, project_id, character_id, body, progress_cb=progress_cb)
     produced = db.get(VoiceProfileRow, result["id"])
     assert produced
     row = produced
@@ -556,8 +588,12 @@ def generate_voice_candidates(
         ),
         "compiledPrompt": prompt,
         "capabilityNote": result.get("capabilityNote"),
+        "timings": result.get("timings") or [],
+        "warmWorker": bool(result.get("warmWorker")),
+        "sampleCount": wanted,
         "mock": False,
     }
+
 
 
 def retry_failed_candidate(
@@ -583,19 +619,17 @@ def retry_failed_candidate(
     readiness = provider_readiness()
     if not (readiness.get("qwenVoiceDesign") or {}).get("ready"):
         raise _err("MODEL_NOT_INSTALLED", "Qwen Voice Design not ready.", 503)
-    from .voice_runtime import _register_asset, _try_m210b_generate, _project_audio_dir
-    import shutil
+    from .voice_runtime import _register_asset, generate_voice_design_sample
 
     line = test_line or (KORRI_AUDITION_LINES[2]["text"] if is_korri else DEFAULT_AUDITION_LINES[0]["text"])
     try:
-        src = _try_m210b_generate(
-            registry_id="m2101-voice-design-021",
-            text=line,
+        produced = generate_voice_design_sample(
             project_id=project_id,
-            extra={"voiceDescription": prompt, "seed": abs(hash(candidate_id + _now())) % 10000},
+            text=line,
+            instruct=prompt,
+            seed=abs(hash(candidate_id + _now())) % 10000,
         )
-        dest = _project_audio_dir(project_id) / f"retry_{uuid.uuid4().hex[:10]}.wav"
-        shutil.copy2(src, dest)
+        dest = produced["path"]
         from .voice import validate_generated_wav
 
         validate_generated_wav(dest)
@@ -818,22 +852,19 @@ def refine_candidate(
         f"{brief.get('additionalDirection') or ''} Refinement: {refinement}".strip()
     )
     prompt = compile_design_prompt(brief, character_name=profile.name)
-    from .voice_runtime import _register_asset, _try_m210b_generate, _project_audio_dir
-    import shutil
-    from pathlib import Path
+    from .voice_runtime import _register_asset, generate_voice_design_sample
 
     readiness = provider_readiness()
     if not (readiness.get("qwenVoiceDesign") or {}).get("ready"):
         raise _err("MODEL_NOT_INSTALLED", "Qwen Voice Design not ready.", 503)
     line = test_line or (KORRI_AUDITION_LINES[2]["text"] if is_korri else DEFAULT_AUDITION_LINES[0]["text"])
-    src = _try_m210b_generate(
-        registry_id="m2101-voice-design-021",
-        text=line,
+    produced = generate_voice_design_sample(
         project_id=project_id,
-        extra={"voiceDescription": prompt, "seed": abs(hash(refinement)) % 10000},
+        text=line,
+        instruct=prompt,
+        seed=abs(hash(refinement)) % 10000,
     )
-    dest = _project_audio_dir(project_id) / f"refine_{uuid.uuid4().hex[:10]}.wav"
-    shutil.copy2(src, dest)
+    dest = produced["path"]
     from .voice import validate_generated_wav
 
     validate_generated_wav(dest)
@@ -1012,6 +1043,9 @@ def approve_voice_candidate(
     approved_by: str = "owner",
 ) -> dict[str, Any]:
     row = _voice(db, project_id, character_id, voice_id)
+    already_approved = str(row.approval_status or "").lower() == "approved"
+    profile_row = db.get(CharacterProfileRow, character_id)
+    previous_id = str(getattr(profile_row, "active_voice_profile_id", "") or "") or None
     lineage = _loads(row.lineage_json, {})
     meta = list(lineage.get("candidatesMeta") or [])
     if candidate_id:
@@ -1020,17 +1054,18 @@ def approve_voice_candidate(
             raise _err("NOT_FOUND", "Candidate not found.", 404)
         if cand.get("status") == "rejected":
             raise _err("INVALID_STATUS", "Cannot approve a rejected candidate.")
-        row.approved_preview_asset_id = cand.get("assetId")
-        for c in meta:
-            c["status"] = "approved" if c.get("id") == candidate_id else (
-                "archived" if c.get("status") == "shortlisted" else c.get("status")
-            )
-        lineage["candidatesMeta"] = meta
-        lineage["approvedCandidateId"] = candidate_id
-        lineage["approvedBy"] = approved_by
-        lineage["approvedAt"] = _now()
-        _save_lineage(row, lineage)
-        db.commit()
+        if not already_approved:
+            row.approved_preview_asset_id = cand.get("assetId")
+            for c in meta:
+                c["status"] = "approved" if c.get("id") == candidate_id else (
+                    "archived" if c.get("status") == "shortlisted" else c.get("status")
+                )
+            lineage["candidatesMeta"] = meta
+            lineage["approvedCandidateId"] = candidate_id
+            lineage["approvedBy"] = approved_by
+            lineage["approvedAt"] = _now()
+            _save_lineage(row, lineage)
+            db.commit()
     approved = service.approve_voice_profile(db, project_id, character_id, voice_id)
     # Refresh Prompt Package with voice fields
     profile = service.get_profile(db, project_id, character_id)
@@ -1039,8 +1074,6 @@ def approve_voice_candidate(
         {**profile.model_dump(), "active_voice": service.voice_to_dict(row)},
         character_version_id=profile.active_version_id or "",
     )
-    from .models import CharacterProfileRow
-
     prow = db.get(CharacterProfileRow, character_id)
     if prow:
         prow.prompt_package_json = json.dumps(pkg, ensure_ascii=False)
@@ -1049,6 +1082,9 @@ def approve_voice_candidate(
     return {
         "ok": True,
         "voice": approved,
+        "currentVoiceProfileId": approved.get("id"),
+        "previousVoiceProfileId": previous_id if previous_id and previous_id != approved.get("id") else None,
+        "pointerOnly": already_approved,
         "promptPackageUpdated": True,
         "approvedBy": approved_by,
         "mock": False,
@@ -1060,27 +1096,31 @@ def clone_with_workspace(
     project_id: str,
     character_id: str,
     body: Any,
+    progress_cb: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Clone via existing runtime; enrich lineage for workspace candidates."""
-    result = run_voice_clone(db, project_id, character_id, body)
+    if progress_cb:
+        progress_cb({"phase": "preparing", "sampleIndex": 0, "completedSamples": 0})
+    result = run_voice_clone(db, project_id, character_id, body, progress_cb=progress_cb)
     row = db.get(VoiceProfileRow, result["id"])
     assert row
     lineage = _loads(row.lineage_json, {})
-    preview = result.get("preview_asset_id")
-    meta = []
-    if preview:
-        meta.append(
-            {
-                "id": str(uuid.uuid4()),
-                "name": "Clone preview",
-                "assetId": preview,
-                "status": "ready",
-                "method": "CLONE",
-                "provider": "qwen3-tts",
-                "parentCandidateId": None,
-                "createdAt": _now(),
-            }
-        )
+    asset_ids = list(result.get("candidates") or [])
+    if not asset_ids and result.get("preview_asset_id"):
+        asset_ids = [result["preview_asset_id"]]
+    meta = [
+        {
+            "id": str(uuid.uuid4()),
+            "name": f"Sample {index + 1}",
+            "assetId": asset_id,
+            "status": "ready",
+            "method": "CLONE",
+            "provider": "qwen3-tts",
+            "parentCandidateId": None,
+            "createdAt": _now(),
+        }
+        for index, asset_id in enumerate(asset_ids)
+    ]
     batch = {
         "id": str(uuid.uuid4()),
         "projectId": project_id,
@@ -1095,7 +1135,7 @@ def clone_with_workspace(
     lineage["candidateBatches"] = list(lineage.get("candidateBatches") or []) + ([batch] if meta else [])
     lineage["workspace"] = "voice_studio"
     _save_lineage(row, lineage)
-    row.candidate_asset_ids_json = json.dumps([preview] if preview else [])
+    row.candidate_asset_ids_json = json.dumps(asset_ids)
     db.commit()
     save_voice_studio_draft(
         db,
@@ -1108,13 +1148,11 @@ def clone_with_workspace(
         "candidates": meta,
         "batch": batch if meta else None,
         "validation": result.get("validation"),
+        "warmWorker": bool(result.get("warmWorker")),
+        "sampleCount": len(asset_ids),
         "mock": False,
     }
 
 
 def _voice(db: Session, project_id: str, character_id: str, voice_id: str) -> VoiceProfileRow:
-    service.get_profile(db, project_id, character_id)
-    row = db.get(VoiceProfileRow, voice_id)
-    if not row or row.project_id != project_id or row.character_profile_id != character_id:
-        raise _err("NOT_FOUND", "Voice Profile not found.", 404)
-    return row
+    return service.require_voice_for_character(db, project_id, character_id, voice_id)

@@ -2,6 +2,8 @@
  * Shared Character Profile form — Name / Gender / Profile / Style.
  * Used by both Character Creator Express and the standalone Character Creator.
  */
+import { GlobalScopeField } from "../creator/GlobalScopeField";
+import { readIsGlobal } from "../../creatorScope";
 import type { CharacterProfile } from "./types";
 import { CHARACTER_GENDER_OPTIONS, CHARACTER_STYLE_OPTIONS } from "./types";
 
@@ -29,6 +31,15 @@ export function CharacterProfileForm({ profile, disabled, onChange, autoFocusNam
           onChange={(e) => onChange({ name: e.target.value })}
         />
       </label>
+
+      <div className="character-core__field">
+        <GlobalScopeField
+          testId="character-field-global"
+          checked={readIsGlobal(profile)}
+          disabled={disabled}
+          onChange={(isGlobal) => onChange({ is_global: isGlobal, isGlobal })}
+        />
+      </div>
 
       <label className="character-core__field">
         <span className="character-core__label">Gender</span>

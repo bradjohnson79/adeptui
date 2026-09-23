@@ -562,6 +562,7 @@ def run_omni_continuity_qc(
     master: Any = None,
     force: bool = True,
     timeout_sec: float = 180.0,
+    observed_packet: Any = None,
 ) -> dict[str, Any]:
     """Invoke Adept Omni visual analyze and evaluate vs Narrative continuity authority."""
     prior = prior_batch_for(master, batch) if master is not None else None
@@ -573,7 +574,7 @@ def run_omni_continuity_qc(
     try:
         from app.codirector.video_intelligence.media_analyze import analyze_asset
 
-        packet = analyze_asset(
+        packet = observed_packet if observed_packet is not None else analyze_asset(
             db,
             project_id,
             asset_id,
@@ -584,6 +585,25 @@ def run_omni_continuity_qc(
             persist=True,
             timeout_sec=timeout_sec,
         )
+        # WAVE 6.1: CD VerifiedContinuityMemory after live Omni continuity Perception.
+        # parseOk=false / UNCERTAIN/REJECTED never canon. No Take DB writes.
+        try:
+            from app.codirector.verified_continuity_memory import (
+                continuity_advance_allowed,
+                record_verified_continuity_from_packet,
+            )
+
+            # P6 hygiene: halt VCM while dialogue QC pending/retry/content-fail.
+            if continuity_advance_allowed(batch=batch):
+                record_verified_continuity_from_packet(
+                    packet,
+                    project_id=project_id,
+                    scene_id=scene_id,
+                    batch=batch,
+                    master=master,
+                )
+        except Exception:
+            pass
         observed = extract_continuity_observations(packet)
     except Exception as exc:  # noqa: BLE001
         observed = {

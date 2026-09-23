@@ -118,12 +118,10 @@ def build_matrix_plan(
 
 
 def resolve_live_video_provider() -> dict:
-    """Probe video providers in priority order: Hunyuan 1.5 → WAN → LTX."""
+    """Probe canonical local video providers in priority order: MiniMax H3 → LTX 2.5."""
     order = [
-        "hunyuan-video-1.5-local",
-        "wan-local",
-        "ltx-local",
-        "hunyuan-video-13b-local",
+        "minimax-h3",
+        "ltx-2.5-distilled",
     ]
     results: list[dict] = []
     for pid in order:
@@ -135,47 +133,33 @@ def resolve_live_video_provider() -> dict:
 
 
 def _probe_video_provider(provider_id: str) -> dict:
-    if provider_id.startswith("hunyuan"):
+    if provider_id == "minimax-h3":
         try:
-            from ...video_runtime.hunyuan_install import health_check
+            from ...minimax_h3.route_a_adapter import RouteARuntimeAdapter
 
-            h = health_check(provider_id)
-            cert = (
-                _repo_root()
-                / "artifacts"
-                / "m42"
-                / "hunyuan"
-                / provider_id
-                / "t2v_certified.json"
-            )
-            certified = cert.is_file()
-            ok = bool(h.get("ok")) and certified
+            h = RouteARuntimeAdapter().health()
+            ok = bool(h.get("ok"))
             return {
                 "providerId": provider_id,
                 "healthy": ok,
-                "weightsOk": bool(h.get("ok")),
-                "t2vCertified": certified,
-                "status": "pending" if not ok else "ready",
+                "status": "ready" if ok else "pending",
                 "detail": h,
             }
         except Exception as exc:
             return {"providerId": provider_id, "healthy": False, "status": "pending", "error": str(exc)}
-    if provider_id == "wan-local":
+    if provider_id.startswith("ltx-2.5"):
         try:
-            # Presence of wan config / engine is enough for eligibility probe
-            from ...video_runtime import wan_local  # type: ignore
+            from ...setup.diagnostics import verify_component
 
-            _ = wan_local
-            return {"providerId": provider_id, "healthy": True, "status": "ready"}
-        except Exception:
-            # Still mark optional-ready if directory exists
-            wan_dir = _repo_root() / "models" / "wan"
-            healthy = wan_dir.exists()
+            required = ["ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"]
+            missing = [cid for cid in required if not verify_component(cid).healthy]
+            ok = not missing
             return {
                 "providerId": provider_id,
-                "healthy": healthy,
-                "status": "ready" if healthy else "unavailable",
+                "healthy": ok,
+                "status": "ready" if ok else "pending",
+                "missingComponents": missing,
             }
-    if provider_id == "ltx-local":
-        return {"providerId": provider_id, "healthy": True, "status": "ready", "note": "Adept default production"}
+        except Exception as exc:
+            return {"providerId": provider_id, "healthy": False, "status": "pending", "error": str(exc)}
     return {"providerId": provider_id, "healthy": False, "status": "unknown"}

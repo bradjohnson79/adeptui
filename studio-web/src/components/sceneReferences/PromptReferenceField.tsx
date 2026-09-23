@@ -165,7 +165,7 @@ export function PromptReferenceField({
         value={draft || (caretToken ? `${caretToken.prefix}${caretToken.query}` : "")}
         bindings={bindings}
         track={track}
-        placeholder={placeholder || (track === "camera" ? "@ character  * video" : "@ character  # image  * video")}
+        placeholder={placeholder || (track === "camera" ? "@ CRS  * video" : "@ CRS  # ERS  % PRS  * video")}
         onChange={setDraft}
         onCommit={(binding) => void addBinding(binding, true)}
         onReject={onReject}

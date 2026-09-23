@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from .config import settings
+from .db import get_db
 
 router = APIRouter(tags=["runtime-beta"])
 
@@ -39,3 +41,11 @@ def get_beta_runtime_status() -> dict[str, Any]:
     data["active"] = True
     data["statusPath"] = str(path)
     return data
+
+
+@router.get("/runtime/local-generation")
+def get_local_generation(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Active Local GPU job for the Home attention bar. Hosted API jobs are excluded."""
+    from .runtime.local_generation import active_local_generation
+
+    return active_local_generation(db)

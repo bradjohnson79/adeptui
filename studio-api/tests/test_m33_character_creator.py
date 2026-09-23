@@ -244,6 +244,9 @@ def test_inspect_readiness_includes_category_readiness(db, project_id: str):
     assert "VisualIdentity" in categories
     assert "ProductionReadiness" in categories
     assert readiness.get("score", 1.0) < 1.0
+    assert "sheetGate" in result
+    assert result["sheetReady"] is False
+    assert "Approve Front" in (result.get("nextAction") or "")
 
 
 def test_critical_blockers_cap_score(db, project_id: str):

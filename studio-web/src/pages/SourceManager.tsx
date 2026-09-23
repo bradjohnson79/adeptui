@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { ActiveDownloadsPanel } from "../components/ActiveDownloadsPanel";
-import { AvatarRuntimeInstallPanel } from "../components/AvatarRuntimeInstallPanel";
 import { CapabilityReadinessPanel, useCapabilities } from "../components/CapabilityPanel";
 import { CharacterVoiceModelsPanel } from "../components/CharacterVoiceModelsPanel";
 import { InstallHistoryPanel } from "../components/InstallHistoryPanel";
@@ -336,15 +335,7 @@ export default function SourceManagerPage() {
         </section>
 
         <CharacterVoiceModelsPanel onChanged={() => void refresh()} />
-        <AvatarRuntimeInstallPanel
-          components={setupComponents}
-          installJobsByComponent={installJobsByComponent}
-          onChanged={async () => {
-            await Promise.all([refresh(), refreshSetupComponents(), refreshInstallJobs()]);
-          }}
-        />
-
-        <section className="setup-component-section" aria-labelledby="sm-cli-heading">
+<section className="setup-component-section" aria-labelledby="sm-cli-heading">
           <div className="setup-section-heading">
             <h2 id="sm-cli-heading">CLI Download Sources</h2>
             <p>Same GitHub / Hugging Face cards as Setup Wizard — detect, install, sign in, verify.</p>

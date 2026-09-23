@@ -26,6 +26,32 @@ def stub_env(tmp_path, monkeypatch):
     monkeypatch.setenv(stub_cert.ENV_FLAG, "1")
     monkeypatch.setattr(stub_cert, "_cert_dir", lambda: tmp_path)
     registry_mod._REGISTRY = None
+
+    # Wiring cert: Production Control marks cert-stub executable=False (Gen).
+    # Force Ready only inside this suite so sequential queue proofs can run.
+    import app.director_timeline_w46.capabilities as caps
+
+    real_list = caps.list_generators
+
+    def _list_ready():
+        out = []
+        for gen in real_list():
+            if gen.id == stub_cert.GENERATOR_ID:
+                out.append(
+                    gen.model_copy(
+                        update={
+                            "executable": True,
+                            "readiness": "Ready",
+                            "disabledReason": "",
+                            "capabilityLabel": "Available",
+                        }
+                    )
+                )
+            else:
+                out.append(gen)
+        return out
+
+    monkeypatch.setattr(caps, "list_generators", _list_ready)
     yield tmp_path
     registry_mod._REGISTRY = None
 
@@ -89,6 +115,14 @@ def _make_batches(db, pid, sid, count=3):
             },
         )
         ids.append(bid)
+    # Queue-chain proofs use fake asset ids (no video files). Disable Auto
+    # Continuity so bridge extract failure cannot strand B2..Bn.
+    payload = store.load_master(db, pid, sid)
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    master.continuityPolicy.autoContinuity = False
+    master.continuityPolicy.configuredTailDuration = 0.0
+    master.coDirectorContinuityPolicy.enabled = False
+    store.save_master(db, pid, sid, master, touch_batches=False)
     return ids
 
 
@@ -145,10 +179,36 @@ def test_sequential_generate_stages_then_chains(db_scene, stub_env):
     assert len(sink) == 1
     assert sink[0]["request"]["batchBlockId"] == b1
 
-    # Terminal state on Batch 1 → chain submits Batch 2 with its STAGED snapshot.
+        # SUCCESS (CandidateReady) - not Approve - advances the queue to Batch 2.
+    # Fake cert assets have no files on disk; mock last-frame analyze so the
+    # continuity gate cannot strand the ordered queue (live gens have real paths).
+    def _ready_bridge(db, project_id, master, bridge):
+        bridge.status = "Ready"
+        bridge.error = None
+        state = dict(bridge.continuityState or {})
+        state["sourceAssetId"] = "asset-b1"
+        bridge.continuityState = state
+        return bridge
+
+    def _green_handoff(db, *, project_id, scene_id, asset_id, batch, master, owner=False):
+        from app.codirector.video_intelligence.gpu_lease import handoff_key, note_handoff
+        from app.director_timeline_w46.generation.window_handoff import _take_id
+
+        note_handoff(handoff_key(scene_id, _take_id(master), batch.id), state="ready")
+        return {"ok": True, "readyForNext": True, "continuityQc": None, "equipmentQc": None}
+
     with patch(
         "app.director_timeline_w46.generation.watcher.start_completion_watcher",
         MagicMock(),
+    ), patch(
+        "app.director_timeline_w46.continuity.analyze_bridge",
+        side_effect=_ready_bridge,
+    ), patch(
+        "app.director_timeline_w46.generation.window_handoff.run_completion_reviews",
+        side_effect=_green_handoff,
+    ), patch(
+        "app.codirector.video_intelligence.service.packet_blocks_submit",
+        lambda *_a, **_k: False,
     ):
         done = orchestrator.complete_batch_candidate(
             db, pid, sid, b1,
@@ -156,16 +216,14 @@ def test_sequential_generate_stages_then_chains(db_scene, stub_env):
             generated_duration=5.0,
             execution_snapshot_id=by_id[b1].generationJobs[0].executionSnapshotId,
         )
-        assert done["ok"] is True
-        cand_id = done["candidate"]["id"]
-        approved = orchestrator.approve_candidate(db, pid, sid, b1, cand_id)
-    assert approved["ok"] is True
-    assert approved["sequentialChain"]["submitted"] is True
-    assert approved["sequentialChain"]["batchBlockId"] == b2
+    assert done["ok"] is True
+    assert done.get("sequentialChain", {}).get("submitted") is True
+    assert done["sequentialChain"]["batchBlockId"] == b2
 
     master = _master(db, pid, sid)
     by_id = {b.id: b for b in master.batchBlocks}
-    assert by_id[b1].status == "Approved"
+    assert by_id[b1].status == "CandidateReady"
+    assert by_id[b1].activeTakeId
     assert by_id[b2].status == "Generating"
     assert by_id[b2].pendingSnapshotId is None
     assert by_id[b3].status == "Queued"
@@ -177,7 +235,7 @@ def test_sequential_generate_stages_then_chains(db_scene, stub_env):
     assert sink[1]["request"]["executionSnapshotId"] == snap2
 
 
-def test_failure_frees_sequential_slot(db_scene, stub_env):
+def test_failure_halts_queue_preserves_prior_complete(db_scene, stub_env):
     db, pid, sid = db_scene
     b1, b2, b3 = _make_batches(db, pid, sid)
 
@@ -202,10 +260,12 @@ def test_failure_frees_sequential_slot(db_scene, stub_env):
     master = _master(db, pid, sid)
     by_id = {b.id: b for b in master.batchBlocks}
     assert by_id[b1].status == "Failed"
-    assert by_id[b2].status == "Generating"
-    assert by_id[b3].status == "Queued"
+    # Remaining Queued cancelled — do not skip to B2/B3.
+    assert by_id[b2].status == "Cancelled"
+    assert by_id[b3].status == "Cancelled"
     sink = stub_cert.read_request_sink()
-    assert [r["request"]["batchBlockId"] for r in sink] == [b1, b2]
+    assert [r["request"]["batchBlockId"] for r in sink] == [b1]
+
 
 
 def test_stop_remaining_kills_chain_and_preserves_authoring(db_scene, stub_env):

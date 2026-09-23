@@ -11,7 +11,9 @@ from typing import Any
 
 import pytest
 
-from app.workflows.ltx_25_builder import _snap_ltx_25_spatial, build_ltx_25_i2v, build_ltx_25_t2v
+from app.video_runtime.legal_canvas import SpecFidelityError
+from app.video_runtime.graph_validation import validate_comfy_graph
+from app.workflows.ltx_25_builder import build_ltx_25_i2v, build_ltx_25_t2v
 
 
 class FakeSettings:
@@ -26,9 +28,9 @@ EXEC_ID = "test-exec-001"
 PROMPT = "a cinematic scene of a forest at sunset"
 NEGATIVE = "blurry, low quality"
 WIDTH = 1280
-HEIGHT = 720
+HEIGHT = 704
 SNAPPED_HEIGHT = 704
-DURATION = 5.0
+DURATION = 121 / 24
 FPS = 24
 SEED = 42
 
@@ -49,9 +51,12 @@ def _assert_node_count(wf: dict[str, Any], class_type: str, expected: int) -> No
     assert count == expected, f"Expected {expected} {class_type} nodes, got {count}"
 
 
-def test_snap_720p_to_patch_aligned():
-    assert _snap_ltx_25_spatial(1280, 720) == (1280, 704)
-    assert _snap_ltx_25_spatial(1280, 704) == (1280, 704)
+def test_illegal_720_height_fails_before_graph():
+    with pytest.raises(SpecFidelityError, match="multiples of 32"):
+        build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, width=1280, height=720)
+    wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, width=1280, height=704)
+    cond = next(n for n in wf.values() if n["class_type"] == "LTXVConditioning")
+    assert cond is not None
 
 
 class TestNoInventedNodes:
@@ -202,12 +207,26 @@ class TestT2VTopology:
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, fast_mode=False)
         n = _node(wf, "LTXVScheduler")
         assert n["inputs"]["steps"] == 40
+        assert not any(node.get("class_type") == "EasyCache" for node in wf.values())
+
+    def test_fast_mode_uses_easycache(self):
+        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, fast_mode=True)
+        assert any(node.get("class_type") == "EasyCache" for node in wf.values())
+
+    def test_runtime_steps_ignore_vram_plan_when_flag_is_set(self):
+        from app.workflows.ltx_25_builder import ltx_25_runtime_steps
+
+        assert ltx_25_runtime_steps(fast_mode=True, plan_steps=10) == 8
+        assert ltx_25_runtime_steps(fast_mode=False, plan_steps=10) == 40
+        assert ltx_25_runtime_steps(fast_mode=None, plan_steps=10) == 8
+        assert ltx_25_runtime_steps(fast_mode=None, plan_steps=30) == 40
 
     def test_frame_count_multiple_of_8_plus_1(self):
-        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, length_seconds=5.0, fps=24)
+        with pytest.raises(SpecFidelityError, match="8n\\+1"):
+            build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, length_seconds=5.0, fps=24)
+        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, length_seconds=121 / 24, fps=24)
         n = _node(wf, "LTXVBaseSampler")
         total_frames = n["inputs"]["num_frames"]
-        # 5 * 24 = 120, should round up to 1 + multiple of 8 = 121
         assert total_frames == 121
         assert (total_frames - 1) % 8 == 0
 
@@ -223,19 +242,35 @@ class TestT2VAudio:
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=False)
         _assert_node_count(wf, "VAELoader", 1)  # video VAE only
         assert _node(wf, "LTXVSeparateAVLatent") is None
-
-    def test_audio_on_adds_audio_vae(self):
-        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=True)
-        _assert_node_count(wf, "VAELoader", 2)  # video + audio VAE
-
-    def test_audio_on_adds_audio_vae_loader(self):
-        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=True)
-        _assert_node_count(wf, "VAELoader", 2)
-
-    def test_audio_on_no_separate_decode(self):
-        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=True)
-        assert _node(wf, "LTXVSeparateAVLatent") is None
+        assert _node(wf, "LTXVEmptyLatentAudio") is None
+        assert _node(wf, "LTXVConcatAVLatent") is None
         assert _node(wf, "LTXVAudioVAEDecode") is None
+        assert _node(wf, "SamplerCustomAdvanced") is None
+        assert _node(wf, "LTXVBaseSampler") is not None
+
+    def test_audio_on_wires_empty_concat_separate_decode(self):
+        """Official AV init: EmptyAudio+ConcatAV → SamplerCustomAdvanced → SeparateAV."""
+        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=True)
+        assert _node(wf, "LTXVEmptyLatentAudio") is not None
+        assert _node(wf, "LTXVConcatAVLatent") is not None
+        assert _node(wf, "LTXVSeparateAVLatent") is not None
+        assert _node(wf, "LTXVAudioVAEDecode") is not None
+        assert _node(wf, "EmptyLTXVLatentVideo") is not None
+        assert _node(wf, "SamplerCustomAdvanced") is not None
+        assert _node(wf, "LTXVBaseSampler") is None
+        _assert_node_count(wf, "VAELoader", 2)
+        names = [n["inputs"].get("vae_name", "") for n in wf.values() if n.get("class_type") == "VAELoader"]
+        assert any("audio" in str(n).lower() for n in names)
+        create = _node(wf, "CreateVideo")
+        assert "audio" in create["inputs"]
+        # Concat feeds SamplerCustomAdvanced.latent_image
+        concat_id = [nid for nid, n in wf.items() if n["class_type"] == "LTXVConcatAVLatent"][0]
+        adv = _node(wf, "SamplerCustomAdvanced")
+        assert adv["inputs"]["latent_image"] == [concat_id, 0]
+        # SeparateAV feeds tiled video decode + audio decode
+        sep_id = [nid for nid, n in wf.items() if n["class_type"] == "LTXVSeparateAVLatent"][0]
+        assert _node(wf, "LTXVTiledVAEDecode")["inputs"]["latents"] == [sep_id, 0]
+        assert _node(wf, "LTXVAudioVAEDecode")["inputs"]["samples"] == [sep_id, 1]
 
     def test_audio_off_create_video_no_audio_input(self):
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=False)
@@ -291,17 +326,46 @@ class TestI2VTopology:
         assert n is not None
         assert n["inputs"]["image"] == ""
 
-    def test_i2v_audio_on(self):
+    def test_i2v_audio_on_wires_inplace_empty_concat_separate(self):
         wf = build_ltx_25_i2v(SETTINGS, EXEC_ID, PROMPT,
                               start_image_path=self.START_IMAGE, generate_audio=True)
+        assert _node(wf, "LTXVEmptyLatentAudio") is not None
+        assert _node(wf, "LTXVConcatAVLatent") is not None
+        assert _node(wf, "LTXVSeparateAVLatent") is not None
+        assert _node(wf, "LTXVAudioVAEDecode") is not None
+        assert _node(wf, "LTXVImgToVideoInplace") is not None
+        assert _node(wf, "SamplerCustomAdvanced") is not None
+        assert _node(wf, "LTXVBaseSampler") is None
+        # Start image / ImgToVideo conditioning path still present
+        assert _node(wf, "LoadImage") is not None
+        assert _node(wf, "LTXVImgToVideo") is not None
         _assert_node_count(wf, "VAELoader", 2)
-        assert _node(wf, "LTXVAudioVAEDecode") is None
+        inplace = _node(wf, "LTXVImgToVideoInplace")
+        img_id = [nid for nid, n in wf.items() if n["class_type"] == "LoadImage"][0]
+        assert inplace["inputs"]["image"] == [img_id, 0]
+
+    def test_i2v_first_last_batches_cond_images(self):
+        wf = build_ltx_25_i2v(
+            SETTINGS,
+            EXEC_ID,
+            PROMPT,
+            start_image_path=self.START_IMAGE,
+            end_image_path="last.png",
+        )
+        _assert_node_count(wf, "LoadImage", 2)
+        _assert_node_count(wf, "ImageBatch", 1)
+        sampler = _node(wf, "LTXVBaseSampler")
+        assert sampler["inputs"]["optional_cond_indices"] == "0, 120"
 
     def test_i2v_audio_off(self):
         wf = build_ltx_25_i2v(SETTINGS, EXEC_ID, PROMPT,
                               start_image_path=self.START_IMAGE, generate_audio=False)
         _assert_node_count(wf, "VAELoader", 1)
         assert _node(wf, "LTXVAudioVAEDecode") is None
+        assert _node(wf, "LTXVEmptyLatentAudio") is None
+        assert _node(wf, "LTXVConcatAVLatent") is None
+        assert _node(wf, "LTXVSeparateAVLatent") is None
+        assert _node(wf, "LTXVImgToVideoInplace") is None
 
 
 class TestInt8Persistence:
@@ -383,3 +447,90 @@ class TestStructuralIntegrity:
         assert "LTXDirector" not in source
         assert "build_ltx_scene_workflow" not in source
         assert "build_ltx_simple_i2v" not in source
+
+
+
+
+class TestCertifiedGraphValidation:
+    """Certified registry accepts SamplerCustomAdvanced as LTXVBaseSampler alias."""
+
+    START_IMAGE = "test_input.png"
+
+    def test_i2v_audio_on_sampler_custom_advanced_validates(self):
+        wf = build_ltx_25_i2v(
+            SETTINGS,
+            EXEC_ID,
+            PROMPT,
+            start_image_path=self.START_IMAGE,
+            generate_audio=True,
+        )
+        assert _node(wf, "SamplerCustomAdvanced") is not None
+        assert _node(wf, "LTXVEmptyLatentAudio") is not None
+        assert _node(wf, "LTXVConcatAVLatent") is not None
+        assert _node(wf, "LTXVSeparateAVLatent") is not None
+        assert _node(wf, "LTXVBaseSampler") is None
+        result = validate_comfy_graph(wf, workflow_key="ltx_25.i2v")
+        assert result.valid, result.issues
+
+    def test_i2v_video_only_base_sampler_still_validates(self):
+        wf = build_ltx_25_i2v(
+            SETTINGS,
+            EXEC_ID,
+            PROMPT,
+            start_image_path=self.START_IMAGE,
+            generate_audio=False,
+        )
+        assert _node(wf, "LTXVBaseSampler") is not None
+        assert _node(wf, "SamplerCustomAdvanced") is None
+        result = validate_comfy_graph(wf, workflow_key="ltx_25.i2v")
+        assert result.valid, result.issues
+
+    def test_t2v_audio_on_and_off_both_validate(self):
+        wf_on = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=True)
+        wf_off = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=False)
+        assert _node(wf_on, "SamplerCustomAdvanced") is not None
+        assert _node(wf_off, "LTXVBaseSampler") is not None
+        assert validate_comfy_graph(wf_on, workflow_key="ltx_25.t2v").valid
+        assert validate_comfy_graph(wf_off, workflow_key="ltx_25.t2v").valid
+
+
+class TestTurboLoraGraph:
+    def test_off_keeps_baseline_unet_and_no_lora(self):
+        from app.workflows.ltx_25_builder import LTX_25_TURBO_LORA_NAME
+
+        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, turbo_lora=False)
+        assert _node(wf, "LoraLoaderModelOnly") is None
+        assert _node(wf, "UNETLoader")["inputs"]["unet_name"] == SETTINGS.ltx_2_5_checkpoint
+        assert not any(
+            (node.get("_meta") or {}).get("adeptTurboLora") for node in wf.values()
+        )
+        assert LTX_25_TURBO_LORA_NAME not in json_dumps(wf)
+
+    def test_on_inserts_official_lora_and_full_unet(self):
+        from app.workflows.ltx_25_builder import LTX_25_FULL_UNET_NAME, LTX_25_TURBO_LORA_NAME
+
+        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, turbo_lora=True)
+        lora_id, lora = next(
+            (nid, node) for nid, node in wf.items() if node["class_type"] == "LoraLoaderModelOnly"
+        )
+        assert lora["inputs"]["lora_name"] == LTX_25_TURBO_LORA_NAME
+        assert lora["_meta"]["adeptTurboLora"] is True
+        assert _node(wf, "UNETLoader")["inputs"]["unet_name"] == LTX_25_FULL_UNET_NAME
+        assert _node(wf, "ModelSamplingLTXV")["inputs"]["model"] == [lora_id, 0]
+        pos = [n["inputs"]["text"] for n in wf.values() if n["class_type"] == "CLIPTextEncode"][0]
+        assert pos == PROMPT
+
+    def test_i2v_on_inserts_lora_without_changing_image_path(self):
+        from app.workflows.ltx_25_builder import LTX_25_TURBO_LORA_NAME
+
+        wf = build_ltx_25_i2v(
+            SETTINGS, EXEC_ID, PROMPT, start_image_path="start.png", turbo_lora=True
+        )
+        assert _node(wf, "LoraLoaderModelOnly")["inputs"]["lora_name"] == LTX_25_TURBO_LORA_NAME
+        assert _node(wf, "LoadImage")["inputs"]["image"] == "start.png"
+
+
+def json_dumps(wf: dict[str, Any]) -> str:
+    import json
+
+    return json.dumps(wf)

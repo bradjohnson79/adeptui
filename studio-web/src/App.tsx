@@ -36,6 +36,8 @@ import "./components/ui/menu.css";
 import "./components/ui/dialog.css";
 import "./components/ui/split-pane.css";
 import "./components/ui/workspace-card.css";
+import "./styles/shared-controls.css";
+import "./styles/audio-provider.css";
 import "./components/CoDirector/codirector-cinematic.css";
 import "./components/generationStudio/aurora-landing.css";
 import "./theme/aurora-plates.css";

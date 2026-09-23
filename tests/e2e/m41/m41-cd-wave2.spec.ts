@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { createTempProject, deleteProject, waitForAppReady } from "../helpers/app";
 import { AuditObserver } from "../helpers/observer";
+import { openCoDirectorContentTab } from "../codirector/helpers/audit";
 
 const ARTIFACT_DIR = path.join("artifacts", "m41", "wave2");
 
@@ -135,18 +136,17 @@ test.describe("@m41 @codirector wave2", () => {
     try {
       await page.goto(`/co-director?projectId=${encodeURIComponent(project.id)}`);
       await expect(page.getByTestId("codirector-shell")).toBeVisible({ timeout: 45_000 });
-      await page.getByTestId("codirector-menu-button").click();
-      await expect(page.getByTestId("codirector-nav-drawer")).toBeVisible();
-      await expect(page.getByTestId("codirector-nav-scripts")).toBeVisible();
-      await expect(page.getByTestId("codirector-nav-characters")).toBeVisible();
-      await expect(page.getByTestId("codirector-nav-approvals")).toBeVisible();
+      await expect(page.getByTestId("codirector-menu-button")).toHaveCount(0);
+      await expect(page.getByTestId("codirector-nav-drawer")).toHaveCount(0);
+      await expect(page.getByTestId("codirector-content-tab-scriptwriter")).toBeVisible();
+      await expect(page.getByTestId("codirector-content-tab-characters")).toBeVisible();
+      await expect(page.getByTestId("codirector-content-tab-library")).toBeVisible();
+      await expect(page.getByTestId("codirector-content-group-more")).toHaveCount(0);
+      await expect(page.getByTestId("codirector-content-tab-approvals")).toHaveCount(0);
+      await expect(page.getByTestId("codirector-content-tab-jobs")).toHaveCount(0);
       await expect(page.getByTestId("codirector-nav-storyboards")).toHaveCount(0);
       await expect(page.getByTestId("codirector-nav-props")).toHaveCount(0);
       await expect(page.getByTestId("codirector-nav-exports")).toHaveCount(0);
-      // Wave 3: Jobs nav opens read-only retrieval (still no mutation controls).
-      await expect(page.getByTestId("codirector-nav-jobs")).toBeEnabled();
-      await page.keyboard.press("Escape");
-      await expect(page.getByTestId("codirector-nav-drawer")).toHaveCount(0);
       observer.assertHealthyBrowser();
     } finally {
       await deleteProject(request, project.id);
@@ -162,7 +162,7 @@ test.describe("@m41 @codirector wave2", () => {
     try {
       await page.goto(`/co-director?projectId=${encodeURIComponent(project.id)}`);
       await expect(page.getByTestId("codirector-shell")).toBeVisible({ timeout: 45_000 });
-      await page.getByTestId("codirector-content-tab-approvals").click();
+      await openCoDirectorContentTab(page, "approvals");
       await expect(page.getByTestId("codirector-approvals-empty")).toBeVisible({ timeout: 20_000 });
       await expect(page.getByText("No approvals are waiting.")).toBeVisible();
       await expect(page.getByText("Storyteller handoff")).toHaveCount(0);
@@ -187,9 +187,9 @@ test.describe("@m41 @codirector wave2", () => {
     try {
       await page.goto(`/co-director?projectId=${encodeURIComponent(project.id)}`);
       await expect(page.getByTestId("codirector-shell")).toBeVisible({ timeout: 45_000 });
-      await page.getByTestId("codirector-content-tab-plans").click();
+      await openCoDirectorContentTab(page, "plans");
       await expect(page.getByTestId("codirector-plans-empty")).toBeVisible();
-      await page.getByTestId("codirector-content-tab-production").click();
+      await openCoDirectorContentTab(page, "production");
       await expect(page.getByTestId("codirector-production-empty").or(page.getByTestId("codirector-stage-list"))).toBeVisible({
         timeout: 20_000,
       });
@@ -317,7 +317,7 @@ test.describe("@m41 @codirector wave2", () => {
       await page.goto(`/co-director?projectId=${encodeURIComponent(project.id)}`);
       await expect(page.getByTestId("codirector-shell")).toBeVisible({ timeout: 45_000 });
       await expect(page.getByTestId("codirector-shell")).toHaveAttribute("data-runtime-state", /.+/);
-      await page.getByTestId("codirector-content-tab-approvals").click();
+      await openCoDirectorContentTab(page, "approvals");
       const empty = page.getByTestId("codirector-approvals-empty");
       await expect(empty).toBeVisible();
       const bg = await empty.evaluate((el) => getComputedStyle(el).backgroundColor);

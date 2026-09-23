@@ -13,18 +13,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..director_references.tags import ensure_tags
-from ..director_timeline import (
-    DirectorTimeline,
-    attach_scene_lipsync,
-    dumps_director_timeline,
-    dumps_director_timeline_preserving_embedded,
-    hydrate_prompt_refs,
-    migrate_scene_to_director,
-    parse_director_timeline,
-    sync_legacy_fields_from_director,
-)
+from ..director_timeline import DirectorTimeline
 from ..lipsync_tracks import LipSyncClip, LipSyncTracks, dumps_lipsync_tracks, parse_lipsync_tracks
+from ..director_timeline_w46.creator_lipsync_surface import (
+    CREATOR_LIPSYNC_MUTATION_DISABLED,
+    creator_lipsync_mutation_blocked,
+    owner_lipsync_ux_reintroduce_forbidden,
+)
 from ..performance_retake.contracts import (
     CharacterSheetRef,
     PerformanceRetakeError,
@@ -124,7 +119,7 @@ def _project_out(db: Session, project: Project) -> ProjectOut:
     with_output = sum(1 for s in scenes if getattr(s, "output_path", None))
     render_pct = int(100 * with_output / max(1, len(scenes))) if scenes else 0
     cover = project_service.pick_cover_asset(assets)
-    # Status heuristic for library filters — shared with Co-Director's get_project_status tool.
+    # Status heuristic for library filters â€” shared with Co-Director's get_project_status tool.
     status_label = project_service.status_label(
         archived=bool(getattr(project, "archived", 0)),
         active_jobs=project_service.active_job_count(db, project.id),
@@ -178,7 +173,7 @@ def _project_out(db: Session, project: Project) -> ProjectOut:
 
 
 def _project_list_out(db: Session, project: Project) -> ProjectOut:
-    """Home / project-switcher card. Counts and cover only — not the full Library."""
+    """Home / project-switcher card. Counts and cover only â€” not the full Library."""
     scene_count = (
         db.query(Scene).filter(Scene.project_id == project.id).count()
     )
@@ -274,7 +269,7 @@ def _settings_set(project: Project, key: str, value: Optional[str]) -> None:
 
 
 def _probe_bible_storage() -> str:
-    """Lightweight Production Bible DB reachability — never invents readiness."""
+    """Lightweight Production Bible DB reachability â€” never invents readiness."""
     try:
         from sqlalchemy import inspect, text
 
@@ -288,13 +283,13 @@ def _probe_bible_storage() -> str:
             return "ready"
         finally:
             db.close()
-    except Exception:  # noqa: BLE001 — health probe must not raise
+    except Exception:  # noqa: BLE001 â€” health probe must not raise
         return "unavailable"
 
 
 @router.get("/healthz")
 async def healthz() -> dict:
-    """Lightweight health — no DB, no ComfyUI, no capability check.
+    """Lightweight health â€” no DB, no ComfyUI, no capability check.
     Returns 200 immediately if the uvicorn worker is responsive.
     Used by the frontend health probe for fast ONLINE/OFFLINE detection.
     /health is also liveness-only; Comfy/catalog live on /api/comfy/health."""
@@ -322,7 +317,7 @@ async def health():
         from ..codirector.intelligence.specialist_registry import SpecialistRegistry
 
         specialist_count = len(SpecialistRegistry().all())
-    except Exception:  # noqa: BLE001 — health must not raise
+    except Exception:  # noqa: BLE001 â€” health must not raise
         pass
 
     operator = {
@@ -371,9 +366,9 @@ async def health():
         },
         "packBlockers": [],
         "visualValidationPendingNote": (
-            "M2.5 vision validation enabled — review pending assets in Validation Workspace."
+            "M2.5 vision validation enabled â€” review pending assets in Validation Workspace."
             if feature_flags.vision_validation_v1
-            else "M2.5 — visual validation flag is off (STUDIO_FEATURE_VISION_VALIDATION_V1)."
+            else "M2.5 â€” visual validation flag is off (STUDIO_FEATURE_VISION_VALIDATION_V1)."
         ),
         "partialErrors": [],
     }
@@ -595,7 +590,7 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
         settings_json=json.dumps(settings) if settings else "{}",
     )
     db.add(project)
-    # default first scene — duration seeded by engine law (H3/blank/auto -> 15s)
+    # default first scene â€” duration seeded by engine law (H3/blank/auto -> 15s)
     from ..video_runtime.legal_canvas import seed_new_scene_duration_sec
 
     scene = Scene(
@@ -772,8 +767,8 @@ def get_execution_plan(
         else ""
     )
     live = (
-        f"Live execution plan: {width}×{height} @{fps}fps · aspect {aspect} · fps_mode {fps_mode} · "
-        f"{plan.steps} steps · max {plan.max_frames} frames (~{plan.max_duration_sec}s) · "
+        f"Live execution plan: {width}Ã—{height} @{fps}fps Â· aspect {aspect} Â· fps_mode {fps_mode} Â· "
+        f"{plan.steps} steps Â· max {plan.max_frames} frames (~{plan.max_duration_sec}s) Â· "
         f"{plan.label} VRAM."
         f"{(' ' + plan.notes) if plan.notes else ''}"
         f"{chunk}"
@@ -845,7 +840,7 @@ async def propose_timeline(
 
     system = (
         "You are Adept UI Video Studio's timeline planner. "
-        "Given a short brief/script, propose 2–8 scenes for a video timeline. "
+        "Given a short brief/script, propose 2â€“8 scenes for a video timeline. "
         "Reply with a short prose summary, then a fenced JSON block:\n"
         "```timeline_proposal\n"
         '{"summary":"...","scenes":[{"name":"...","prompt":"...","duration_sec":5,'
@@ -875,7 +870,7 @@ async def propose_timeline(
         except Exception as exc:
             warnings.append(f"Ollama propose failed: {exc}")
     else:
-        warnings.append("Ollama unreachable — used heuristic split")
+        warnings.append("Ollama unreachable â€” used heuristic split")
 
     if not scenes:
         # Heuristic: split by blank lines or sentences into up to 6 beats
@@ -903,7 +898,7 @@ async def propose_timeline(
 async def apply_timeline(
     project_id: str, body: TimelineApplyRequest, db: Session = Depends(get_db)
 ):
-    """Apply a reviewed scene list. Requires explicit call — never auto-overwrite."""
+    """Apply a reviewed scene list. Requires explicit call â€” never auto-overwrite."""
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
@@ -959,7 +954,7 @@ def update_project(project_id: str, body: ProjectUpdate, db: Session = Depends(g
         raise HTTPException(404, "Project not found")
     data = body.model_dump(exclude_unset=True)
     apply_vram = bool(data.pop("apply_vram_profile", False))
-    # Phase CK — storyboard/video generator stored in settings_json, not direct columns
+    # Phase CK â€” storyboard/video generator stored in settings_json, not direct columns
     for settings_field, settings_key in [("storyboard_style", "storyboardStyle"), ("preferred_video_generator", "preferredVideoGenerator")]:
         if settings_field in data:
             _settings_set(project, settings_key, data.pop(settings_field))
@@ -1011,97 +1006,34 @@ def update_scene(project_id: str, scene_id: str, body: SceneIn, db: Session = De
     return SceneOut.model_validate(scene)
 
 
-def _scene_director(scene: Scene, db: Session | None = None) -> DirectorTimeline:
-    if scene.director_json and scene.director_json.strip():
-        tl = parse_director_timeline(
-            scene.director_json,
-            fallback_duration=scene.duration_sec,
-            fallback_prompt=scene.prompt,
-        )
-        tl = attach_scene_lipsync(tl, scene.lipsync_tracks_json)
-    else:
-        tl = migrate_scene_to_director(
-            duration_sec=scene.duration_sec,
-            prompt=scene.prompt,
-            start_asset_id=scene.start_asset_id,
-            middle_asset_id=scene.middle_asset_id,
-            end_asset_id=scene.end_asset_id,
-            audio_asset_id=scene.audio_asset_id,
-            lipsync_tracks_json=scene.lipsync_tracks_json,
-        )
-    if db is not None:
-        from ..director_timeline_w46.generation.prompt_token_bindings import (
-            hydrate_timeline_prompt_tokens,
-            load_scene_reference_catalog,
-        )
-
-        catalog = load_scene_reference_catalog(db, scene.project_id, scene.id)
-        if hydrate_timeline_prompt_tokens(tl, catalog, db=db, project_id=scene.project_id) and scene.director_json:
-            scene.director_json = dumps_director_timeline_preserving_embedded(tl, scene.director_json)
-            db.add(scene)
-            db.commit()
-    return ensure_tags(tl)
-
-
-@router.get("/projects/{project_id}/scenes/{scene_id}/director", response_model=DirectorTimeline)
-def get_director(project_id: str, scene_id: str, db: Session = Depends(get_db)):
-    scene = db.get(Scene, scene_id)
-    if not scene or scene.project_id != project_id:
-        raise HTTPException(404, "Scene not found")
-    return _scene_director(scene, db)
-
-
 @router.put("/projects/{project_id}/scenes/{scene_id}/director", response_model=DirectorTimeline)
 def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Session = Depends(get_db)):
-    scene = db.get(Scene, scene_id)
-    if not scene or scene.project_id != project_id:
-        raise HTTPException(404, "Scene not found")
-    from ..director_timeline_w46.same_track_no_overlap import (
-        SameTrackOverlapError,
-        assert_track_array_no_overlap,
+    """RETIRED — Timeline / Co-Director dual stack removed.
+
+    SceneTimelineMaster (director_json.timelineMaster) is the sole live SoT for
+    Timed Prompts, batch clips, and generate input. This legacy Director 2.0
+    persist endpoint is no longer a product write path. Use Master APIs:
+    PATCH scene duration, rematerialize execution windows, patch_batch, and
+    Master clip/prompt APIs.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "PUT /director is retired. SceneTimelineMaster is the sole Timeline "
+            "authority. Use Master APIs (patch_batch / rematerialize / scene "
+            "duration) instead of legacy prompt_segments / track persist."
+        ),
     )
 
-    try:
-        assert_track_array_no_overlap(body.audio_clips, "audio")
-        assert_track_array_no_overlap(body.sfx_clips, "sfx")
-        assert_track_array_no_overlap(getattr(body, "video_clips", None), "video")
-        assert_track_array_no_overlap(getattr(body, "image_clips", None), "image")
-        assert_track_array_no_overlap(getattr(body, "camera_clips", None), "camera")
-        lipsync = getattr(body, "lipsync", None)
-        for track in getattr(lipsync, "tracks", None) or []:
-            assert_track_array_no_overlap(getattr(track, "clips", None), "lipsync")
-    except SameTrackOverlapError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    body = hydrate_prompt_refs(ensure_tags(body))
-    from ..director_timeline_w46.generation.prompt_token_bindings import (
-        hydrate_timeline_prompt_tokens,
-        load_scene_reference_catalog,
-    )
 
-    hydrate_timeline_prompt_tokens(
-        body,
-        load_scene_reference_catalog(db, project_id, scene_id),
-        db=db,
-        project_id=project_id,
-    )
-    # PUT_DIRECTOR_PRESERVES_MASTER: never replace the entire director_json
-    # blob. Merge the incoming DirectorTimeline fields over the existing blob
-    # so embedded timelineMaster / timelineWorkspace (W46 batch state) and
-    # other non-DirectorTimeline keys survive a legacy track update. Without
-    # this, every Visual-track / Inspector / undo-redo save erased
-    # timelineMaster and load_master re-migrated to a single Batch 1,
-    # destroying all other batches.
-    scene.director_json = dumps_director_timeline_preserving_embedded(body, scene.director_json)
-    # WAVE5: put_director saves legacy DirectorTimeline tracks only (migrate-only blob).
-    # It does NOT reconcile into timelineMaster / Master writeback.
-    # Master edits: patch_batch / Timeline Master APIs. Generate reads batch.promptSegments.
-    # dumps_director_timeline_preserving_embedded above keeps timelineMaster intact.
-    legacy = sync_legacy_fields_from_director(body)
-    for k, v in legacy.items():
-        setattr(scene, k, v)
-    db.commit()
-    return body
 
+def _raise_creator_lipsync_mutation_disabled(reason: str) -> None:
+    """HTTP 403 Owner-law gate for Timeline creator Lip Sync mutations."""
+    if not owner_lipsync_ux_reintroduce_forbidden():
+        return
+    blocked = creator_lipsync_mutation_blocked(reason)
+    assert blocked.get("error") == CREATOR_LIPSYNC_MUTATION_DISABLED
+    raise HTTPException(status_code=403, detail=blocked)
 
 
 @router.get("/projects/{project_id}/scenes/{scene_id}/lipsync-tracks", response_model=LipSyncTracks)
@@ -1114,6 +1046,7 @@ def get_lipsync_tracks(project_id: str, scene_id: str, db: Session = Depends(get
 
 @router.put("/projects/{project_id}/scenes/{scene_id}/lipsync-tracks", response_model=LipSyncTracks)
 def put_lipsync_tracks(project_id: str, scene_id: str, body: LipSyncTracks, db: Session = Depends(get_db)):
+    _raise_creator_lipsync_mutation_disabled("PUT lipsync-tracks")
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
@@ -1133,6 +1066,7 @@ def put_lipsync_tracks(project_id: str, scene_id: str, body: LipSyncTracks, db: 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/lipsync-tracks/bake")
 def bake_lipsync_tracks(project_id: str, scene_id: str, db: Session = Depends(get_db)):
+    _raise_creator_lipsync_mutation_disabled("POST lipsync-tracks/bake")
     """Bake sticky mouth paths for enabled tracks from the scene render video."""
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
@@ -1141,21 +1075,14 @@ def bake_lipsync_tracks(project_id: str, scene_id: str, db: Session = Depends(ge
     if not video or not Path(video).exists():
         raise HTTPException(400, "Render the scene first so mouth tracking has a video to follow")
 
-    from ..director_timeline import parse_director_timeline as _parse_director
     from ..director_timeline_w46.generation.speech_compile import (
         LIPSYNC_SPEAKER_REQUIRED,
         lipsync_speaker_errors,
     )
 
-    director = _parse_director(
-        scene.director_json,
-        fallback_duration=float(scene.duration_sec or 5.0),
-        fallback_prompt=scene.prompt or "",
-    )
-    if lipsync_speaker_errors(director):
-        raise HTTPException(400, LIPSYNC_SPEAKER_REQUIRED)
-
     tracks = parse_lipsync_tracks(scene.lipsync_tracks_json)
+    if lipsync_speaker_errors(tracks):
+        raise HTTPException(400, LIPSYNC_SPEAKER_REQUIRED)
     preview_dir = settings.data_dir / "projects" / project_id / "lipsync_preview"
     preview_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1355,6 +1282,7 @@ async def apply_dual_lipsync(
     body: ApplyLipSyncBody | None = None,
     db: Session = Depends(get_db),
 ):
+    _raise_creator_lipsync_mutation_disabled("POST lipsync-tracks/apply")
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
@@ -1365,20 +1293,12 @@ async def apply_dual_lipsync(
     enabled = [t for t in tracks.tracks if t.enabled]
     if not enabled:
         raise HTTPException(400, "Enable at least one lip-sync track")
-    from ..director_timeline import parse_director_timeline as _parse_director
     from ..director_timeline_w46.generation.speech_compile import (
         LIPSYNC_SPEAKER_REQUIRED,
         lipsync_speaker_errors,
     )
 
-    director = _parse_director(
-        scene.director_json,
-        fallback_duration=float(scene.duration_sec or 5.0),
-        fallback_prompt=scene.prompt or "",
-    )
-    # Merge scene-column lip-sync tracks so the speaker gate sees real audio.
-    director = attach_scene_lipsync(director, scene.lipsync_tracks_json)
-    if lipsync_speaker_errors(director):
+    if lipsync_speaker_errors(tracks):
         raise HTTPException(400, LIPSYNC_SPEAKER_REQUIRED)
     for t in enabled:
         if not t.audio_asset_id:
@@ -1753,11 +1673,11 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
     """Queue a project render.
 
     Body ``kind``:
-      - ``scene`` → job ``render_scene`` (requires ``scene_id``)
-      - ``shot`` → job ``render_shot`` (requires ``scene_id``; certified shot render)
-      - ``timeline`` → job ``render_timeline`` (reuse scene outputs when present, stitch)
-      - ``batch_timeline`` → job ``batch_timeline`` (regenerate all scenes, stitch)
-      - ``editor_mix`` → **DEPRECATED (P0)**: refused with 409. Use MAGI
+      - ``scene`` â†’ job ``render_scene`` (requires ``scene_id``)
+      - ``shot`` â†’ job ``render_shot`` (requires ``scene_id``; certified shot render)
+      - ``timeline`` â†’ job ``render_timeline`` (reuse scene outputs when present, stitch)
+      - ``batch_timeline`` â†’ job ``batch_timeline`` (regenerate all scenes, stitch)
+      - ``editor_mix`` â†’ **DEPRECATED (P0)**: refused with 409. Use MAGI
         ``POST /api/magi/projects/{id}/renders``; mix authority is
         sequence finishing.audio, not legacy Editor tracks.
     """
@@ -1812,7 +1732,7 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
         params["generate_audio"] = bool(body.generate_audio)
     if body.primary_video_path:
         params["primary_video_path"] = body.primary_video_path
-    # Production Dock → video resolver (scene/shot renders consume active engine).
+    # Production Dock â†’ video resolver (scene/shot renders consume active engine).
     if kind in {"render_scene", "render_shot", "batch_timeline"}:
         try:
             from ..production_control.runtime_map import apply_video_dock_preference
@@ -1828,7 +1748,7 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
             pass
 
     # Smart Production Gates (SMART_PRODUCTION_GATES): final scene/shot
-    # generation is blocked on PRODUCTION_LOCK. Editing remains available —
+    # generation is blocked on PRODUCTION_LOCK. Editing remains available â€”
     # only the generation job is refused with a creator-readable reason.
     if kind in {"render_scene", "render_shot"} and body.scene_id:
         try:
@@ -1854,7 +1774,7 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
         except HTTPException:
             raise
         except Exception:
-            # Gate evaluation must never hard-block on internal failure —
+            # Gate evaluation must never hard-block on internal failure â€”
             # allow generation and record the diagnostic.
             params["smartGate"] = {"level": "EXPLORATION", "decision": "ALLOW", "reason": "Gate unavailable"}
     job = Job(
@@ -1875,6 +1795,7 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
 
 @router.post("/projects/{project_id}/lipsync", response_model=JobOut)
 async def lipsync(project_id: str, body: LipSyncRequest, db: Session = Depends(get_db)):
+    _raise_creator_lipsync_mutation_disabled("POST lipsync")
     scene = db.get(Scene, body.scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
@@ -1980,7 +1901,7 @@ async def cancel_job(job_id: str, request: Request, db: Session = Depends(get_db
     if not job:
         raise HTTPException(404, "Job not found")
     # Deep cancel: enter cancelling, interrupt+delete, confirm prompt stopped, then cancelled.
-    # Does NOT mark cancelled until Comfy confirms the prompt is inactive (or timeout → cancel_failed).
+    # Does NOT mark cancelled until Comfy confirms the prompt is inactive (or timeout â†’ cancel_failed).
     # CANCEL_PROVENANCE_HTTP
     try:
         from fastapi import Request as _Unused  # noqa: F401
@@ -2064,7 +1985,7 @@ def assistant_apply_setup(body: AssistantApplySetupRequest, db: Session = Depend
         for a in assets
     ]
     setup = SceneSetupProposal.model_validate(body.setup.model_dump())
-    result = apply_scene_setup(project=project, scene=scene, setup=setup, assets=asset_dicts)
+    result = apply_scene_setup(project=project, scene=scene, setup=setup, assets=asset_dicts, db=db)
     project.updated_at = datetime.utcnow()
     db.commit()
     return AssistantApplySetupResponse(

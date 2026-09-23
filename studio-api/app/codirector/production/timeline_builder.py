@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .contracts import ResolvedReference, SceneProductionSpec
 from .errors import TimelineShotCreationError
 from .generator_validator import normalize_generator_config, normalize_generator_id
+from .timed_regions import parse_explicit_timed_regions
 
 _NAMED_SCENE_RE = re.compile(r"\bnamed\s+([^.,\n]+)", re.I)
 _TECHNICAL_SCENE_NAME_RE = re.compile(
@@ -307,6 +308,9 @@ def create_or_update_shot_from_spec(
     compiled_prompt: str,
     batch_prompts: list[str] | None = None,
 ) -> tuple[str, str, int, str]:
+    # OWNER-PROTECTED (Timeline Batch Architecture Guard). Each batch gets its
+    # OWN window-sized segment (batch-local start: 0.0) — never stretch Batch 1
+    # across the full scene or wipe later segments (Take N regression).
     from ...db import Project
     from ...director_timeline_w46 import service as timeline_service
     from ...director_timeline_w46 import store
@@ -369,6 +373,9 @@ def create_or_update_shot_from_spec(
         )
     wanted_name = _scene_name(spec)
     rename = {"name": wanted_name} if is_technical_scene_name(getattr(scene, "name", "")) else {}
+    # WAVE2: scene.prompt is NON-GENERATION metadata (Library/display only).
+    # Sole generate authority = batch.promptSegments (per-window batch_prompts).
+    # Generation must never read scene.prompt as Timed Prompt authority.
     scene = update_scene_fields(
         db,
         scene,
@@ -388,10 +395,48 @@ def create_or_update_shot_from_spec(
     store.save_master(db, spec.project_id, scene.id, master, touch_batches=False)
 
     batch_count = max(int(spec.batch_count or 1), 1)
-    per_batch = float(spec.duration_seconds) / batch_count
-    prompts = list(batch_prompts or []) or [compiled_prompt]
-    while len(prompts) < batch_count:
-        prompts.append(prompts[-1] if prompts else compiled_prompt)
+    scene_duration = float(spec.duration_seconds)
+    planned_windows = [
+        (float(w.get("start", 0.0)), float(w.get("end", 0.0)))
+        for w in (spec.batchWindows or [])
+    ]
+    if len(planned_windows) >= batch_count and planned_windows:
+        # Capability-driven plan (full windows, partial final): each batch's
+        # duration is its OWN window length, not a uniform split. The final
+        # 37s MiniMax batch is 7s, not a padded 15s.
+        planned_windows = planned_windows[:batch_count]
+    elif batch_count > 1:
+        # REBUILD LAW: a multi-batch scene without a capability plan is a
+        # planner/compile contract violation — refuse rather than even-split
+        # fabricating windows the generator may not support.
+        raise TimelineShotCreationError(
+            f"Multi-batch scene ({batch_count} batches) has no capability-driven "
+            "batch windows — run the generator capability planner first."
+        )
+    else:
+        planned_windows = []
+    # Single-batch window = the whole scene duration (one execution prompt).
+    per_batch = scene_duration
+    # One-scene / one-prompt: a SINGLE-batch scene's batch count never
+    # subdivides the Timed Prompt; explicit temporal sections (0–10: …) are
+    # the only source of extra regions. MULTI-batch scenes receive one
+    # complete execution prompt per batch from the capability-driven compiler
+    # (long-scene law) — batch_prompts replaces the full-prompt-per-batch
+    # replay that caused the Timeline extension duplication regression.
+    explicit_regions = (
+        parse_explicit_timed_regions(spec.source_user_prompt or "")
+        if batch_count <= 1
+        else []
+    )
+    batch_prompts = list(batch_prompts or [])
+    if batch_count > 1 and len(batch_prompts) < batch_count:
+        # Planner/compile contract violation — refuse rather than silently
+        # minting batches that would inherit the full scene prompt.
+        raise TimelineShotCreationError(
+            f"Multi-batch scene planned with {batch_count} batches but only "
+            f"{len(batch_prompts)} batch prompts compiled — generator capability "
+            "planning did not run."
+        )
 
     bindings: list[dict[str, Any]] = []
     binding_ids: list[str] = []
@@ -416,10 +461,29 @@ def create_or_update_shot_from_spec(
     first_label = ""
     written_batch_ids: set[str] = set()
     for batch_index in range(batch_count):
+        # Capability plan: each batch's duration is its own window length.
+        if planned_windows:
+            ws, we = planned_windows[batch_index]
+            window_len = max(we - ws, 0.1)
+        else:
+            ws, we = batch_index * per_batch, (batch_index + 1) * per_batch
+            window_len = per_batch
         master = SceneTimelineMaster.model_validate(store.load_master(db, spec.project_id, scene.id)["master"])
         batch = _find_existing_batch(master, spec.production_request_id, batch_index)
         if batch is None and batch_index == 0 and spec.shot_id:
             batch = next((item for item in master.batchBlocks if item.id == spec.shot_id), None)
+        # REVISION AUTHORITY: refuse to re-prepare a batch that is actively
+        # generating. Mutating its prompt/refs mid-flight would let the old
+        # job's output become the new revision's current take (frozen job
+        # payload wearing the new revision's identity). The creator finishes
+        # or cancels the render first.
+        if batch is not None and (
+            str(getattr(batch, "status", "") or "") == "Generating" or getattr(batch, "activeJobId", None)
+        ):
+            raise TimelineShotCreationError(
+                f"Batch {batch_index + 1} is currently generating — finish or cancel "
+                "the active render before re-preparing this scene."
+            )
         if batch is None:
             # Retry law: a follow-up revision supersedes this scene's earlier
             # CD-production batches. Adopt them (preferring the same batch
@@ -468,7 +532,7 @@ def create_or_update_shot_from_spec(
                         if batch_count > 1
                         else _scene_name(spec)
                     ),
-                    planned_duration=per_batch,
+                    planned_duration=window_len,
                     generator_id=generator_id,
                 )
                 if not created.get("ok"):
@@ -480,22 +544,63 @@ def create_or_update_shot_from_spec(
         if not batch_id:
             raise TimelineShotCreationError("Timeline batch id was missing after create.")
 
-        batch_prompt = prompts[batch_index]
-        patch = {
-            "generatorId": generator_id,
-            "plannedDuration": per_batch,
-            "h3Resolution": config.get("h3Resolution"),
-            "promptSegments": [
+        if batch_index == 0:
+            if explicit_regions:
+                scene_segments = [
+                    {
+                        "start": region.start,
+                        "length": region.length,
+                        "text": region.text,
+                        "userDirection": spec.source_user_prompt,
+                        "productionPrompt": compiled_prompt,
+                        "referenceBindingIds": binding_ids,
+                        "referenceNameBindings": bindings,
+                    }
+                    for region in explicit_regions
+                ]
+            else:
+                # 12B working-Timeline shape: the root batch owns a window-sized
+                # segment (0..window), NOT the full scene recipe. A 0-30
+                # segment on a 15s H3 batch compressed the whole story arc into
+                # the first window (Take N regression).
+                scene_segments = [
+                    {
+                        "start": 0.0,
+                        "length": window_len,
+                        "text": batch_prompts[0] if batch_prompts else compiled_prompt,
+                        "userDirection": spec.source_user_prompt,
+                        "productionPrompt": batch_prompts[0] if batch_prompts else compiled_prompt,
+                        "referenceBindingIds": binding_ids,
+                        "referenceNameBindings": bindings,
+                    }
+                ]
+        elif batch_prompts:
+            # Long-scene law: each continuation batch carries its OWN complete
+            # execution prompt scoped to its temporal window. It is never left
+            # empty to inherit the full scene prompt at runtime (that is the
+            # extension-duplication defect this replaces).
+            # promptSegments.start is BATCH-LOCAL (12B shape: both batches own
+            # start 0.0 / length window). reconcile projects absolute time as
+            # window_start + seg.start — an absolute start here would double-
+            # count the window offset in the visible Timed Prompt lane.
+            scene_segments = [
                 {
                     "start": 0.0,
-                    "length": per_batch,
-                    "text": batch_prompt,
+                    "length": window_len,
+                    "text": batch_prompts[batch_index],
                     "userDirection": spec.source_user_prompt,
-                    "productionPrompt": batch_prompt,
+                    "productionPrompt": batch_prompts[batch_index],
                     "referenceBindingIds": binding_ids,
                     "referenceNameBindings": bindings,
                 }
-            ],
+            ]
+        else:
+            scene_segments = []
+        patch = {
+            "generatorId": generator_id,
+            "plannedDuration": window_len,
+            "h3Resolution": config.get("h3Resolution"),
+            "promptSegments": scene_segments,
         }
         patched = timeline_service.patch_batch(db, spec.project_id, scene.id, batch_id, patch)
         if not patched.get("ok"):
@@ -543,6 +648,12 @@ def create_or_update_shot_from_spec(
         and not getattr(item, "candidateVersions", None)
         and item.id not in history_ids
     ]
+    # 12B working-Timeline shape: each batch keeps the window-scoped segment the
+    # per-batch loop above just wrote. Later batches are NOT empty "render
+    # windows" — they own their own complete execution prompt (long-scene law),
+    # and the root batch owns a window-sized segment, never the full-scene
+    # recipe (the 0-30 stretch that made H3 compress the whole story arc into
+    # the first 15 seconds — Take N regression).
     if surplus:
         surplus_ids = {item.id for item in surplus}
         master.batchBlocks = [
@@ -555,6 +666,16 @@ def create_or_update_shot_from_spec(
             for snap_id, snap in (master.executionSnapshots or {}).items()
             if str(getattr(snap, "batchBlockId", "") or "") not in surplus_ids
         }
-        store.save_master(db, spec.project_id, scene.id, master)
+    # REBUILD LAW (Timeline source rebuild): there is exactly ONE master→legacy
+    # projection writer — the per-batch `patch_batch` calls above route through
+    # `touch_batch_config`, which projects each batch's own window-scoped
+    # segment into the visible Timed Prompt lane. This builder must NOT
+    # post-process the lane: the former trailing block rewrote projected[0] to
+    # (0.0, scene_duration, compiled_prompt) — the "one scene / one prompt"
+    # rewrite — and the next legacy→master reconcile then re-stretched Batch 1
+    # to the full scene duration in the MASTER (Take N regression). Batch N
+    # owns BatchPrompt[N]; the lane is a derived projection, never rewritten
+    # out-of-band.
+    store.save_master(db, spec.project_id, scene.id, master)
 
     return scene.id, first_batch_id, int(getattr(scene, "index", 0) or 0), first_label

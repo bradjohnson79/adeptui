@@ -42,6 +42,39 @@ def _model_dirs() -> list[Path]:
     return [p for p in root.iterdir() if p.is_dir()]
 
 
+_STALE_T2V_MODEL_IDS = frozenset({"wan_2_2", "ltx_2_3"})
+_STALE_T2V_NOTES = {
+    "wan_2_2": (
+        "Superseded text-to-video advertisement. "
+        "Production Control: WAN 2.2 is first-and-last-frame only."
+    ),
+    "ltx_2_3": (
+        "Superseded text-to-video advertisement. "
+        "Production Control: LTX 2.3 is Ingredients Reference-to-Video, not text-to-video."
+    ),
+}
+
+
+def _apply_production_t2v_honesty(data: dict[str, Any]) -> dict[str, Any]:
+    """Overflow catalog must not advertise WAN/LTX as text-to-video."""
+    if not isinstance(data, dict):
+        return data
+    mid = str(data.get("id") or "")
+    if mid not in _STALE_T2V_MODEL_IDS:
+        return data
+    out = dict(data)
+    caps = dict(out.get("capabilities") or {})
+    caps["text_to_video"] = False
+    out["capabilities"] = caps
+    supports = out.get("supports")
+    if isinstance(supports, dict):
+        supports = dict(supports)
+        supports["text_to_video"] = False
+        out["supports"] = supports
+    out["superseded"] = _STALE_T2V_NOTES.get(mid, "Superseded text-to-video advertisement.")
+    return out
+
+
 @router.get("/knowledgebase/generation/models")
 def list_models():
     models = []
@@ -50,7 +83,7 @@ def list_models():
         if mf.exists():
             try:
                 data = json.loads(mf.read_text(encoding="utf-8"))
-                models.append(data)
+                models.append(_apply_production_t2v_honesty(data))
                 continue
             except Exception:
                 pass
@@ -63,7 +96,7 @@ def get_model(model_id: str):
     mf = KB_ROOT / "video_models" / model_id / "model.json"
     if not mf.exists():
         raise HTTPException(404, "Model not found")
-    return json.loads(mf.read_text(encoding="utf-8"))
+    return _apply_production_t2v_honesty(json.loads(mf.read_text(encoding="utf-8")))
 
 
 @router.get("/knowledgebase/generation/doc")
@@ -122,13 +155,12 @@ def _retrieve(model_id: str, mode: str, task: str | None) -> list[tuple[str, str
         wf = KB_ROOT / "workflows" / f"{task}.md"
         if wf.exists():
             cites.append((f"workflows/{task}.md", _read(wf)[:1500]))
-    # Avatar Studio knowledge
+    # Avatar Studio knowledge — shelved; cite retirement overview only (no current-product routing docs).
     if task and ("avatar" in task or "talking" in task or "lip" in task):
         av = KB_ROOT / "avatar"
-        for name in ("overview.md", "talking_portrait.md", "lip_sync.md", "mouth_masking.md", "failure_modes.md"):
-            p = av / name
-            if p.exists():
-                cites.append((f"avatar/{name}", _read(p)[:1800]))
+        overview = av / "overview.md"
+        if overview.exists():
+            cites.append(("avatar/overview.md", _read(overview)[:1800]))
     # Production / Editor knowledge
     if task and any(k in task for k in ("editor", "assemble", "mix", "edit", "pacing", "continuity", "export")):
         prod_picks = [
@@ -206,8 +238,6 @@ def _compile_prompt(
         explain.append("LTX: prefer concrete final-scene language; ingredients are visual material, not collage")
         if "ingredients" in kb_text.lower():
             explain.append("Cited LTX ingredients_workflow")
-    elif model_id.startswith("wan"):
-        explain.append("WAN: emphasize motion clarity and temporal consistency")
     elif model_id in ("seedance", "kling", "veo", "runway"):
         explain.append("fal cloud model: keep prompts concise; respect API duration limits")
 

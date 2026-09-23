@@ -287,6 +287,72 @@ def test_resolver_ers_purpose_with_plate_uses_qwen_ref() -> None:
     assert cap["intent"]["operation"] == "image.generate"
 
 
+def test_resolver_codirector_flux_visual_ref_uses_certified_img2img() -> None:
+    """Explicit Flux + attached pixels must use certified flux.img2img, not flux.reference."""
+    from app.image_product.compile import compile_image_request
+    from app.image_product.resolve import resolve_image_capability
+
+    ref_id = "5567e90b-8038-4484-a394-ec5b3b9ac2eb"
+    body = {
+        "prompt": "Make it more like this with Flux.",
+        "purpose": "codirector_image_generate",
+        "source": "local",
+        "model": "flux",
+        "modelFamilyPreference": "flux",
+        "lockModelFamily": True,
+        "operation": "image.generate",
+        "referenceImage": ref_id,
+        "referenceAssetIds": [ref_id],
+        "width": 1920,
+        "height": 824,
+    }
+    cap = resolve_image_capability(body)
+    compiled = compile_image_request("proj-cd-flux-ref", body)
+    key = str(
+        (compiled.get("imageRuntime") or {}).get("workflowKey")
+        or cap.get("workflowKey")
+        or ""
+    )
+    assert cap["canExecute"] is True
+    assert key == "flux.img2img"
+    assert "flux.reference" not in key
+    assert compiled["imageIntent"].get("sourceAssetId") == ref_id
+
+
+def test_resolver_codirector_visual_ref_uses_qwen_ref_not_txt2img() -> None:
+    """Co-Director 'make it more like this' must consume attached pixels."""
+    from app.image_product.compile import compile_image_request
+    from app.image_product.resolve import resolve_image_capability
+
+    ref_id = "5567e90b-8038-4484-a394-ec5b3b9ac2eb"
+    body = {
+        "prompt": "Make it more like this.",
+        "purpose": "codirector_image_generate",
+        "source": "local",
+        "model": "qwen2512",
+        "modelFamilyPreference": "qwen2512",
+        "lockModelFamily": True,
+        "operation": "image.generate",
+        "referenceImage": ref_id,
+        "referenceAssetIds": [ref_id],
+        "width": 1920,
+        "height": 824,
+    }
+    cap = resolve_image_capability(body)
+    assert cap["canExecute"] is True
+    assert cap["workflowKey"] == "qwen2512.ref"
+    assert "txt2img" not in str(cap.get("workflowKey") or "")
+    compiled = compile_image_request("proj-cd-ref", body)
+    assert compiled["imageIntent"]["operation"] == "image.generate"
+    assert compiled["imageIntent"].get("sourceAssetId") == ref_id
+    key = str(
+        (compiled.get("imageRuntime") or {}).get("workflowKey")
+        or (compiled.get("contract") or {}).get("workflow_key")
+        or ""
+    )
+    assert key == "qwen2512.ref"
+
+
 def test_resolver_ers_without_source_cannot_execute_t2i() -> None:
     from app.image_product.resolve import resolve_image_capability
 

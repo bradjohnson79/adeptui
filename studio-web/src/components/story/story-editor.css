@@ -183,7 +183,7 @@
   letter-spacing: 0.05em;
 }
 .story-entry__field input,
-.story-entry__field select {
+.story-entry__field select:not(.adept-select) {
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border-color, #333);
   border-radius: 4px;
@@ -243,4 +243,29 @@
   font-size: 0.8rem;
   color: #86efac;
   font-weight: 600;
+}
+
+.story-editor .story-rich-body {
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.story-editor .sw-richtext-toolbar {
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.story-editor .sw-rt-btn {
+  color: inherit;
+}
+.story-editor .sw-rt-btn.is-active {
+  background: rgba(139, 92, 246, 0.25);
+  border-color: rgba(139, 92, 246, 0.55);
+  color: #e9d5ff;
+}
+.story-editor .sw-rt-sep {
+  background: rgba(255, 255, 255, 0.18);
+}
+.story-editor .story-rich-body .ProseMirror {
+  padding: 0.5rem;
+  color: inherit;
 }

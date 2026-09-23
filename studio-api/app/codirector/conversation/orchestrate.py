@@ -148,14 +148,79 @@ def _timed_step(timings: dict[str, float], key: str, started_at: float) -> None:
 
 def _truncate_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     trimmed: list[dict[str, Any]] = []
-    for message in messages[-12:]:
+    for message in messages[-16:]:
         if not isinstance(message, dict):
             continue
         content = str(message.get("content") or "").strip()
-        if len(content) > 280:
-            content = content[:277].rstrip() + "..."
+        if len(content) > 1200:
+            content = content[:1197].rstrip() + "..."
         trimmed.append({"role": str(message.get("role") or "user"), "content": content})
     return trimmed
+
+
+def _server_conversation_window(
+    db: Any,
+    project_id: str | None,
+    client_messages: list[dict] | None,
+) -> list[dict[str, str]]:
+    """Server-authoritative LLM-visible conversation window (Intelligence Law).
+
+    The durable event log — filtered to conversational turns via
+    ``fold_events_for_llm`` — is the memory of record. Execution status,
+    tool traffic, and operator rows never enter this window, so machine state
+    cannot masquerade as the assistant's prior conversational thought. The
+    client payload is only a fallback for projects without an event log (and
+    the no-project case).
+    """
+
+    window: list[dict[str, str]] = []
+    if project_id:
+        try:
+            from ..conversation_events import fold_events_for_llm
+
+            window = [
+                {
+                    "role": str(m.get("role") or "user"),
+                    "content": str(m.get("content") or ""),
+                }
+                for m in fold_events_for_llm(db, project_id)
+                if str(m.get("content") or "").strip()
+            ]
+        except Exception:  # noqa: BLE001
+            window = []
+    if not window:
+        window = [
+            {
+                "role": str(m.get("role") or "user"),
+                "content": str(m.get("content") or ""),
+            }
+            for m in (client_messages or [])
+            if isinstance(m, dict) and str(m.get("content") or "").strip()
+        ]
+    return window
+
+
+_FORGET_TARGET_RE = re.compile(
+    r"\bforget\s+(?:about\s+|the\s+|that\s+)?([a-z][a-z0-9 _'-]{0,30}?)(?:\s+for\s+(?:a\s+|one\s+)?(?:second|sec|moment|minute|now|bit))?\b"
+    r"|\bset\s+(?:the\s+)?([a-z][a-z0-9 _'-]{0,30}?)\s+aside\b"
+    r"|\b(?:leave|park)\s+(?:the\s+)?([a-z][a-z0-9 _'-]{0,30}?)\s+(?:aside|alone|for now)\b",
+    re.I,
+)
+
+_SWITCH_MARKERS = [
+    "actually",
+    "instead",
+    "forget that",
+    "never mind",
+    "change of plan",
+    "let's try",
+    "forget about",
+    "forget the",
+    "set it aside",
+    "set that aside",
+    "different topic",
+    "moving on",
+]
 
 
 def _update_conversation_goal(
@@ -166,9 +231,14 @@ def _update_conversation_goal(
 ) -> str | None:
     text = (user_message or "").strip().lower()
 
-    switch_markers = ["actually", "instead", "forget that", "never mind", "change of plan", "let's try"]
-    if any(m in text for m in switch_markers):
-        return _infer_goal_from_message(user_message)
+    # A dismissed target ("Forget Timeline for a second. I want to talk about
+    # Korri's dialogue.") must never re-anchor the goal to the dismissed name:
+    # derive the goal from what remains after the dismissal.
+    dismissed = _FORGET_TARGET_RE.search(text)
+    switched = dismissed is not None or any(m in text for m in _SWITCH_MARKERS)
+    if switched:
+        remainder = _FORGET_TARGET_RE.sub(" ", user_message or "")
+        return _infer_goal_from_message(remainder) or _infer_goal_from_message(user_message) or None
 
     if route_decision_action:
         action = route_decision_action.lower()
@@ -180,11 +250,14 @@ def _update_conversation_goal(
         return None
 
     if current_goal:
-        goal_lower = current_goal.lower()
-        goal_tokens = set(goal_lower.split())
+        goal_tokens = set(current_goal.lower().split())
         message_tokens = set(text.split())
         overlap = goal_tokens & message_tokens
-        if len(overlap) >= 1 or _is_continuation(text):
+        # Continuation of the current goal needs meaningful lexical overlap
+        # (>=2 tokens) or an explicit continuation. A single shared word —
+        # "Timeline" appearing inside a message that is actually about
+        # something else — must not by itself re-anchor the goal.
+        if len(overlap) >= 2 or (overlap and _is_continuation(text)):
             return current_goal
 
     return _infer_goal_from_message(user_message) or current_goal
@@ -461,6 +534,9 @@ def run_conversation_core_turn(
         warm_project_cache(db, project_id, force=False, persist=False)
     except Exception:  # noqa: BLE001
         pass
+    # Server-authoritative conversational window (execution/tool/operator rows
+    # excluded) — the LLM's memory of record for this turn.
+    conversation_window = _server_conversation_window(db, project_id, messages)
     snapshot_before = build_tier1_snapshot(db, project_id, messages)
     _timed_step(timings, "build_snapshot", started)
 
@@ -1115,7 +1191,7 @@ def run_conversation_core_turn(
             state=state,
             intent=intent,
             plan=dialogue,
-            recent_messages=list(messages),
+            recent_messages=conversation_window,
         )
     else:
         context_block = assemble_companion_context(
@@ -1127,38 +1203,57 @@ def run_conversation_core_turn(
             deviation=deviation if deviation.triggered else None,
             block=block,
             bundle=companion_bundle,
-            recent_messages=list(messages),
+            recent_messages=conversation_window,
+            snapshot=snapshot_after,
         )
-    context_block = (
-        personality_guidance_for_mode(asm_mode, support.support_needed.value)
-        + "\n\n"
-        + role_guidance_text(relationship)
-        + "\n\n"
-        + onboarding_prompt_block(relationship)
-        + "\n\n"
-        + intrigue_guidance(intrigue)
-        + "\n\n"
-        + discovery_composition_guidance(
-            temperature=temperature,
-            intrigue=intrigue,
-            documentation=documentation,
-            questions=discovery_questions,
-            relationship=relationship,
-            research_hint=research_hint,
+    # Final-closure mission 2026-09-19 (Blockers 1+2): on exact scene-state
+    # recall/summary turns, the recall DialoguePlan governs. The discovery
+    # composition's "include at least TWO of intrigue, reflection…" evidence
+    # requirement directly contradicts "don't add anything" — skip it (and the
+    # intrigue guidance) so recall fidelity is not undermined. Frozen behaviors
+    # are untouched: this gate fires only for RECALL_SCENE intents.
+    _is_recall_turn = intent.primary_intent == IntentType.RECALL_SCENE
+    if _is_recall_turn:
+        context_block = (
+            personality_guidance_for_mode(asm_mode, support.support_needed.value)
+            + "\n\n"
+            + role_guidance_text(relationship)
+            + "\n\n"
+            + onboarding_prompt_block(relationship)
+            + "\n\n"
+            + context_block
         )
-        + "\n\n"
-        + partnership_composition_guidance(
-            readiness=readiness_list,
-            preview=active_preview,
-            vision=partnership_bundle.vision,
-            pitch=active_pitch or (partnership_bundle.pitches[-1] if partnership_bundle.pitches else None),
-            marketing=partnership_bundle.marketing,
-            questions=partnership_questions,
-            personal_destination=personal_dest,
+    else:
+        context_block = (
+            personality_guidance_for_mode(asm_mode, support.support_needed.value)
+            + "\n\n"
+            + role_guidance_text(relationship)
+            + "\n\n"
+            + onboarding_prompt_block(relationship)
+            + "\n\n"
+            + intrigue_guidance(intrigue)
+            + "\n\n"
+            + discovery_composition_guidance(
+                temperature=temperature,
+                intrigue=intrigue,
+                documentation=documentation,
+                questions=discovery_questions,
+                relationship=relationship,
+                research_hint=research_hint,
+            )
+            + "\n\n"
+            + partnership_composition_guidance(
+                readiness=readiness_list,
+                preview=active_preview,
+                vision=partnership_bundle.vision,
+                pitch=active_pitch or (partnership_bundle.pitches[-1] if partnership_bundle.pitches else None),
+                marketing=partnership_bundle.marketing,
+                questions=partnership_questions,
+                personal_destination=personal_dest,
+            )
+            + "\n\n"
+            + context_block
         )
-        + "\n\n"
-        + context_block
-    )
 
     # Compact momentum / confidence / cache / creative operating — never full Wiki dumps on the hot path.
     try:
@@ -1218,10 +1313,31 @@ def run_conversation_core_turn(
             lifecycle_stage=str(life_stage) if life_stage else None,
             specialists_for_stage=specialists,
         )
-        if coi_block:
+        if coi_block and not _is_recall_turn:
+            # Recall turns: the coi "Specific observations to weave in" line is
+            # invention pressure against "don't add anything" — skipped.
             context_block = COACHING_DOCTRINE + "\n\n" + coi_block + "\n\n" + context_block
     except Exception:  # noqa: BLE001
         pass
+
+    # Corrections carry supersession authority: the latest correction replaces
+    # earlier statements on the same subject (Intelligence Law — an obsolete
+    # instruction must not resurrect merely because it appeared earlier in chat).
+    try:
+        _recent_corrections = [
+            str(c).strip()
+            for c in (getattr(snapshot_after, "recentCorrections", None) or [])
+            if str(c or "").strip()
+        ]
+    except Exception:  # noqa: BLE001
+        _recent_corrections = []
+    if _recent_corrections:
+        context_block = (
+            "=== Recent corrections (LATEST WINS — supersede earlier statements on the same subject) ===\n"
+            + "\n".join(f"- {c}" for c in _recent_corrections[:6])
+            + "\n\n"
+            + context_block
+        )
 
     processing_stages.append(CoDirectorProcessingStage.RESPONSE_GENERATION.value)
     generation_messages = build_generation_messages(
@@ -1231,7 +1347,7 @@ def run_conversation_core_turn(
         state=state,
         context_block=context_block,
         project_title=snapshot_after.title or "Untitled Project",
-        recent_messages=list(messages),
+        recent_messages=conversation_window,
         max_context_tokens=budget.max_context_tokens,
         curated_tool_ids=curated_tool_ids,
     )

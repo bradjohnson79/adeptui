@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..contracts import _nid, _now
 
@@ -24,6 +24,7 @@ JobLifecycleStatus = Literal[
     "blocked",
 ]
 DraftPathway = Literal["none", "local_live", "cheap_preview", "native_api_draft"]
+QualityControlKind = Literal["h3_megapixels", "ltx_quality"]
 
 
 class VideoGeneratorCapabilities(BaseModel):
@@ -34,13 +35,16 @@ class VideoGeneratorCapabilities(BaseModel):
     supportsImageToVideo: bool = False
     supportsStartFrame: bool = False
     supportsEndFrame: bool = False
+    requiresLastFrame: bool = False
     supportsMultipleImageReferences: bool = False
+    supportsReferenceToVideo: bool = False
     supportsVideoReferences: bool = False
     supportsAudioReferences: bool = False
     maximumReferenceImages: int = 0
     maximumReferenceVideos: int = 0
     maximumReferenceAudio: int = 0
     supportedDurations: list[float] = Field(default_factory=list)
+    maxDurationSec: Optional[float] = None
     supportedResolutions: list[str] = Field(default_factory=list)
     supportedAspectRatios: list[str] = Field(default_factory=list)
     supportedFps: list[int] = Field(default_factory=list)
@@ -49,6 +53,7 @@ class VideoGeneratorCapabilities(BaseModel):
     supportsCameraControls: bool = False
     native_multishot: bool = False
     audio_generation: bool = False
+    qualityControl: Optional[QualityControlKind] = None
     auto_duration: bool = False
     fast_generation: bool = False
     audio: dict[str, Any] = Field(default_factory=dict)
@@ -57,12 +62,26 @@ class VideoGeneratorCapabilities(BaseModel):
     draftPathway: DraftPathway = "none"
     supportsQueuedCancel: bool = False
     supportsRunningCancel: bool = False
+    supportsLivePreview: bool = False
+    supportsHonestProgress: bool = False
+    supportsIntermediateFrames: bool = False
+    remoteCancelCostNote: Optional[str] = None
     finalRequiresNewGeneration: bool = True
     draftResolution: Optional[str] = None
     finalResolution: Optional[str] = None
     supportsImageAndVideoTogether: bool = False
     supportsPromptContinuation: bool = True
     supportsTemporalConditioning: bool = False
+
+    @model_validator(mode="after")
+    def _local_live_implies_preview(self):
+        if self.draftPathway == "local_live" and not (
+            self.supportsLivePreview or self.supportsHonestProgress or self.supportsIntermediateFrames
+        ):
+            self.supportsLivePreview = True
+            self.supportsHonestProgress = True
+            self.supportsIntermediateFrames = True
+        return self
 
 
 class TimelineGenerationRequest(BaseModel):

@@ -1,90 +1,114 @@
+import { useMemo, useState } from "react";
 import { HelpTip } from "../HelpTip";
 import { Button } from "../ui";
+import { AudioRow } from "./AudioRow";
+import { classifyLibraryAudio } from "./audioStudioCandidates";
 import type { AudioLibraryAsset } from "./types";
+
+type FilterId = "all" | "music" | "sfx" | "ambience" | "voice";
 
 type ProjectAudioPanelProps = {
   assets: AudioLibraryAsset[];
   busy: boolean;
-  previewAssetId?: string | null;
   approvedAssetIds: Record<string, boolean>;
-  onPreview: (asset: AudioLibraryAsset) => void;
-  onApprove: (asset: AudioLibraryAsset) => Promise<void> | void;
   onAddToTimeline: (asset: AudioLibraryAsset) => Promise<void> | void;
   onGoLibrary: () => void;
   onGoTimeline: () => void;
-  onGoMixer: () => void;
 };
+
+const FILTERS: { id: FilterId; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "music", label: "Music" },
+  { id: "sfx", label: "SFX" },
+  { id: "ambience", label: "Ambience" },
+  { id: "voice", label: "Voice" },
+];
 
 export function ProjectAudioPanel({
   assets,
   busy,
-  previewAssetId,
   approvedAssetIds,
-  onPreview,
-  onApprove,
   onAddToTimeline,
   onGoLibrary,
   onGoTimeline,
-  onGoMixer,
 }: ProjectAudioPanelProps) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<FilterId>("all");
+
+  const rows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return assets.filter((asset) => {
+      const kind = classifyLibraryAudio(asset);
+      if (filter !== "all" && kind !== filter) return false;
+      if (!needle) return true;
+      const haystack = [asset.title, asset.tag, asset.filename, asset.id].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [assets, filter, query]);
+
   return (
-    <section className="audio-studio-panel">
+    <section className="audio-studio-panel" data-testid="audio-library-panel">
       <div className="audio-studio-panel__hero">
         <div>
-          <p className="audio-studio-panel__eyebrow">Project audio</p>
-          <h3>Everything you have already saved for this project.</h3>
-          <p className="muted">Use this shelf for music, scene beds, and sound details you want to reuse.</p>
+          <h3>Project Audio</h3>
+          <p className="muted">This project’s shelf. Nothing new is generated here.</p>
         </div>
         <div className="audio-studio-panel__hero-actions">
-          <Button variant="ghost" onClick={onGoLibrary}>
-            Open Library
-          </Button>
-          <Button variant="secondary" onClick={onGoTimeline}>
-            Open Timeline
-          </Button>
+          <Button variant="ghost" onClick={onGoLibrary}>Open Library</Button>
+          <Button variant="secondary" onClick={onGoTimeline}>Open Timeline</Button>
         </div>
       </div>
 
-      <div className="audio-inline-note">
-        <HelpTip text="Approving marks the take you want to keep moving forward with. Add to Timeline places it on an audio track." />
-        <span>Keep only the strongest takes in motion.</span>
+      <div className="audio-library-toolbar">
+        <label className="audio-field audio-field--grow">
+          <span className="audio-field__label">
+            Search
+            <HelpTip text="Find music, effects, beds, or voice already saved to this project." />
+          </span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search this project"
+            data-testid="audio-library-search"
+          />
+        </label>
+        <div className="audio-chip-row" data-testid="audio-library-filters">
+          {FILTERS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`audio-chip${filter === item.id ? " is-selected" : ""}`}
+              onClick={() => setFilter(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {assets.length ? (
+      {rows.length ? (
         <div className="audio-library-list">
-          {assets.map((asset) => {
-            const label = asset.tag || asset.title || asset.filename || "Audio asset";
+          {rows.map((asset) => {
+            const label = asset.title || asset.tag || asset.filename || "Audio";
+            const kind = classifyLibraryAudio(asset);
             const duration = asset.durationSec ?? asset.duration_sec;
             return (
-              <article key={asset.id} className="audio-library-card">
+              <article key={asset.id} className="audio-library-card" data-testid={`audio-library-row-${asset.id}`}>
                 <div className="audio-library-card__meta">
                   <div>
                     <h4>{label}</h4>
-                    <p className="muted">{asset.filename || asset.id}</p>
+                    <p className="muted">{kind === "audio" ? "Audio" : kind}</p>
                   </div>
                   <div className="audio-candidate-card__chips">
-                    {typeof duration === "number" ? <span className="audio-chip audio-chip--subtle">{duration}s</span> : null}
+                    {typeof duration === "number" ? <span className="audio-chip">{duration}s</span> : null}
                     {approvedAssetIds[asset.id] || asset.approved ? (
                       <span className="audio-chip audio-chip--success">Approved</span>
                     ) : null}
                   </div>
                 </div>
-
-                {previewAssetId === asset.id && asset.url ? (
-                  <audio controls autoPlay src={asset.url} className="audio-candidate-card__player" />
-                ) : null}
-
+                <AudioRow audioUrl={asset.url} label={label} testId={`audio-library-player-${asset.id}`} />
                 <div className="audio-candidate-card__actions">
-                  <Button variant="ghost" onClick={() => onPreview(asset)}>
-                    {previewAssetId === asset.id ? "Playing" : "Play"}
-                  </Button>
-                  <Button
-                    variant="primary"
-                    disabled={busy || approvedAssetIds[asset.id] || asset.approved}
-                    onClick={() => void onApprove(asset)}
-                  >
-                    {approvedAssetIds[asset.id] || asset.approved ? "Approved" : "Approve"}
-                  </Button>
                   <Button variant="secondary" disabled={busy} onClick={() => void onAddToTimeline(asset)}>
                     Add to Timeline
                   </Button>
@@ -95,20 +119,10 @@ export function ProjectAudioPanel({
         </div>
       ) : (
         <div className="audio-empty-state">
-          <strong>No project audio yet.</strong>
-          <p className="muted">Generated tracks and uploaded clips will show up here once they are saved to the project library.</p>
+          <strong>{assets.length ? "Nothing matches that search." : "No project audio yet."}</strong>
+          <p className="muted">Generate music, a sound, or a bed, then it will live here with the rest of this project.</p>
         </div>
       )}
-
-      <div className="audio-studio-panel__footer">
-        <div>
-          <strong>Ready to balance the mix?</strong>
-          <p className="muted">Place clips on the timeline, then open Audio Mixer in Editor for levels, pans, fades, and real stem controls.</p>
-        </div>
-        <Button variant="secondary" onClick={onGoMixer}>
-          Open Audio Mixer
-        </Button>
-      </div>
     </section>
   );
 }

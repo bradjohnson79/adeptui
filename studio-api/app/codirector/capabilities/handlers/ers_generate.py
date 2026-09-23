@@ -128,18 +128,21 @@ def build_ers_image_body(
     operation: str = "image.generate",
     source_asset_id: str | None = None,
     selected: dict[str, Any] | None = None,
+    aspect_ratio: str = "16:9",
 ) -> dict[str, Any]:
     """Image-product body. Creator-selected model is requested=resolved=executed."""
     selected = dict(selected or {})
+    aspect = (aspect_ratio or "16:9").strip() or "16:9"
+    w, h = ers_2k_pixels(aspect)
     body: dict[str, Any] = {
         "prompt": prompt,
         "negative_prompt": "",
-        "width": ers_2k_pixels("16:9")[0],
-        "height": ers_2k_pixels("16:9")[1],
+        "width": w,
+        "height": h,
         "tag": f"codirector_ers_{execution_id[:8]}_{direction}",
         "purpose": _ERS_PURPOSE,
         "operation": operation,
-        "aspectRatio": "16:9",
+        "aspectRatio": aspect,
         "batchCount": 1,
         "creativeContext": {
             "objective": _ERS_PURPOSE,
@@ -176,8 +179,13 @@ def _spatial_map_reference_id(plan: Any, spatial_document: Any) -> str:
     return str(raw).strip() if raw else ""
 
 def _gpt_i2i_official_id() -> str:
-    """Canonical Kie Market id for GPT Image 2 image-to-image. Never T2I."""
+    """Canonical Kie Market id for GPT Image 2 image-to-image."""
     return "gpt-image-2-image-to-image"
+
+
+def _gpt_t2i_official_id() -> str:
+    """Canonical Kie Market id for GPT Image 2 text-to-image (prompt-only ERS)."""
+    return "gpt-image-2-text-to-image"
 
 def _pin_resolved_capability(body: dict[str, Any]) -> dict[str, Any]:
     """Resolve through image-product. Refuse instead of silently substituting."""
@@ -323,6 +331,19 @@ def persist_ers_composite_asset(
     if current_sheet is None and sheet_id:
         current_sheet = load_sheet(project_id, sheet_id)
     if current_sheet is not None:
+        try:
+            from ....environment_reference_sheet.versioning import sheet_is_frozen_for_inplace_persist
+            if sheet_is_frozen_for_inplace_persist(current_sheet):
+                return {
+                    "ok": False,
+                    "skipped": True,
+                    "reason": "approved_or_canonical_sheet_frozen",
+                    "sheetId": str(getattr(current_sheet, "sheetId", "") or sheet_id),
+                    "assetId": asset_id,
+                    "hint": "Create a new ERS version via POST .../versions instead of in-place persist.",
+                }
+        except Exception:
+            pass
         current_sheet.ers_composite_asset_id = asset_id
         composition = getattr(current_sheet, "composition", None)
         if composition is not None:
@@ -420,7 +441,9 @@ def _character_identity_text(db: Session | None, project_id: str, character_id: 
         from ....character_identity.service import resolve_approved_reference
 
         row = db.get(CharacterProfileRow, character_id)
-        if row is None or str(row.project_id) != str(project_id):
+        same_project = row is not None and str(row.project_id) == str(project_id)
+        global_visible = row is not None and bool(getattr(row, "is_global", False))
+        if row is None or not (same_project or global_visible):
             return result
         result["name"] = str(row.name or "").strip()
         facts: list[str] = []
@@ -463,10 +486,19 @@ def _prop_identity_text(db: Session | None, project_id: str, prop_id: str) -> di
     if db is None or not prop_id:
         return result
     try:
-        from ....spatial_map.ers_persistence import load_prop_entity_by_id
+        from ....spatial_map.ers_persistence import (
+            load_prop_entity_anywhere,
+            load_prop_entity_by_id,
+        )
 
         entity = load_prop_entity_by_id(db, project_id, prop_id)
         if entity is None:
+            entity = load_prop_entity_anywhere(db, prop_id)
+        if entity is None:
+            return result
+        same_project = str(getattr(entity, "project_id", "") or "") == str(project_id)
+        global_visible = bool(getattr(entity, "is_global", False) or getattr(entity, "isGlobal", False))
+        if not same_project and not global_visible:
             return result
         result["name"] = str(entity.display_label or entity.tag or "").strip()
         facts: list[str] = []
@@ -634,10 +666,105 @@ def _resolve_ers_grounding(
         "blocking": blocking,
     }
 
-def _public_asset_url(asset_id: str) -> str:
+def _merge_creator_plan_subjects(
+    grounding: dict[str, Any],
+    db: Session | None,
+    project_id: str,
+    characters: list | None,
+    props: list | None,
+) -> dict[str, Any]:
+    """Fold Environment Creator plan rows into the existing ERS grounding.
+
+    Spatial Map placements stay first. Plan rows fill the gap when the map is
+    absent (Adept UI v1.1). Identity stays text — approved asset ids are stamped,
+    not sent as pixel input on prompt-only GPT.
+    """
+    out = dict(grounding or {})
+    character_ids = list(out.get("character_ids") or [])
+    prop_ids = list(out.get("prop_ids") or [])
+    char_names = list(out.get("characters") or [])
+    prop_names = list(out.get("props") or [])
+    subjects = list(out.get("contextual_subjects") or [])
+    approved_characters = list(out.get("approved_character_asset_ids") or [])
+    approved_props = list(out.get("approved_prop_asset_ids") or [])
+
+    for raw in characters or []:
+        if not isinstance(raw, dict):
+            continue
+        cid = str(raw.get("characterId") or raw.get("character_id") or "").strip()
+        if not cid or cid in character_ids:
+            continue
+        identity = _character_identity_text(db, project_id, cid)
+        name = str(identity.get("name") or raw.get("name") or "").strip()
+        character_ids.append(cid)
+        if name and name not in char_names:
+            char_names.append(name)
+        approved = str(identity.get("approvedAssetId") or "").strip()
+        if approved and approved not in approved_characters:
+            approved_characters.append(approved)
+        fact_text = "; ".join(str(f) for f in (identity.get("facts") or []) if f)
+        line = f"Character {name or cid}"
+        if fact_text:
+            line += f" — {fact_text}"
+        if line not in subjects:
+            subjects.append(line)
+
+    for raw in props or []:
+        if not isinstance(raw, dict):
+            continue
+        pid = str(raw.get("propId") or raw.get("prop_id") or "").strip()
+        if not pid or pid in prop_ids:
+            continue
+        identity = _prop_identity_text(db, project_id, pid)
+        name = str(identity.get("name") or raw.get("name") or "").strip()
+        prop_ids.append(pid)
+        if name and name not in prop_names:
+            prop_names.append(name)
+        approved = str(identity.get("approvedAssetId") or "").strip()
+        if approved and approved not in approved_props:
+            approved_props.append(approved)
+        fact_text = "; ".join(str(f) for f in (identity.get("facts") or []) if f)
+        line = f"Prop {name or pid}"
+        if fact_text:
+            line += f" — {fact_text}"
+        assignment = str(raw.get("assignment") or "").strip()
+        if assignment == "used_by":
+            owner = str(raw.get("characterId") or raw.get("character_id") or "").strip()
+            if owner:
+                line += f". Used by {owner}"
+        if line not in subjects:
+            subjects.append(line)
+
+    out["character_ids"] = character_ids
+    out["prop_ids"] = prop_ids
+    out["characters"] = char_names
+    out["props"] = prop_names
+    out["contextual_subjects"] = subjects
+    out["approved_character_asset_ids"] = approved_characters
+    out["approved_prop_asset_ids"] = approved_props
+    return out
+
+def _public_asset_url(asset_id: str, project_id: str | None = None) -> str:
     """Public URL a hosted provider (Kie/fal) can fetch for pixel grounding."""
+    from ....project_security.asset_file import canonical_project_asset_file_url
+
     asset_id = str(asset_id or "").strip()
     if not asset_id:
+        return ""
+    pid = str(project_id or "").strip()
+    if not pid:
+        try:
+            from ....db import Asset, SessionLocal
+
+            db = SessionLocal()
+            try:
+                asset = db.get(Asset, asset_id)
+                pid = str(getattr(asset, "project_id", "") or "")
+            finally:
+                db.close()
+        except Exception:
+            pid = ""
+    if not pid:
         return ""
     try:
         from ....config import settings
@@ -647,7 +774,8 @@ def _public_asset_url(asset_id: str) -> str:
         base = ""
     if not base:
         return ""
-    return f"{base}/api/assets/{asset_id}/file"
+    rel = canonical_project_asset_file_url(pid, asset_id)
+    return f"{base}{rel}" if rel else ""
 
 def _ers_sheet_prompt(
     sheet: Any,
@@ -752,7 +880,9 @@ def handle(
     project_id: str,
     execution_id: str,
     *,
-    spatial_map_id: str,
+    spatial_map_id: str = "",
+    sheet_id: str = "",
+    sheetId: str = "",
     scene_id: str = "",
     visual_style: str = "",
     name: str = "",
@@ -775,6 +905,30 @@ def handle(
     visual_canon_corrections: dict[str, Any] | None = None,
     panel_task: str = "",
     panelTask: str = "",
+    source_asset_id: str = "",
+    sourceAssetId: str = "",
+    reference_asset_id: str = "",
+    referenceAssetId: str = "",
+    reference_image: str = "",
+    referenceImage: str = "",
+    authoritative_source_asset_id: str = "",
+    authoritativeSourceAssetId: str = "",
+    forceFull: bool = False,
+    force_full: bool = False,
+    ers_force_full: bool = False,
+    ers_pipeline: str = "",
+    generationMode: str = "",
+    templateId: str = "",
+    collageTemplate: str = "",
+    environmentPrompt: str = "",
+    prompt: str = "",
+    storyTheme: str = "",
+    aspectRatio: str = "",
+    aspect_ratio: str = "",
+    characters: list | None = None,
+    props: list | None = None,
+    isGlobal: bool = False,
+    is_global: bool = False,
 ) -> dict[str, Any]:
     """Enqueue ONE Image Core job (purpose=environment_reference_sheet) and persist the asset.
 
@@ -792,18 +946,37 @@ def handle(
     from ....spatial_map.ers_projection import project_document_placements
     from ....spatial_map.service import get_document
 
+    map_id = str(spatial_map_id or "").strip()
+    wanted_sheet_id = str(sheet_id or sheetId or "").strip()
     existing_sheets = list_sheets(project_id)
-    sheet = next(
-        (
-            s
-            for s in existing_sheets
-            if s.spatialMap and s.spatialMap.mapId == spatial_map_id
-        ),
-        None,
-    )
+    sheet = None
+    if wanted_sheet_id:
+        sheet = next(
+            (s for s in existing_sheets if str(getattr(s, "sheetId", "") or "") == wanted_sheet_id),
+            None,
+        )
+    if sheet is None and map_id:
+        sheet = next(
+            (
+                s
+                for s in existing_sheets
+                if s.spatialMap and s.spatialMap.mapId == map_id
+            ),
+            None,
+        )
 
-    spatial_document = get_document(db, project_id, spatial_map_id)
-    grounding = _resolve_ers_grounding(db, project_id, spatial_document)
+    # Spatial Map is optional enrichment (shelved in Adept UI v1.1). ERS remains
+    # the environment authority and can proceed without a map document.
+    spatial_document = None
+    if map_id:
+        spatial_document = get_document(db, project_id, map_id)
+    grounding = _merge_creator_plan_subjects(
+        _resolve_ers_grounding(db, project_id, spatial_document),
+        db,
+        project_id,
+        characters=characters,
+        props=props,
+    )
     scene_intent = grounding.get("intent")
 
     if sheet is None:
@@ -814,14 +987,33 @@ def handle(
         )
         sheet_description = (
             (description or "").strip()
+            or (environmentPrompt or "").strip()
+            or (prompt or "").strip()
             or (str(scene_intent.summary).strip() if scene_intent is not None else "")
             or _GENERIC_SHEET_DESCRIPTION
         )
+        from ....creator_scope.contract import normalize_is_global
+        from ....environment_reference_sheet.store import (
+            check_environment_tag_collision,
+            sync_environment_scope,
+        )
+
+        next_global = normalize_is_global(isGlobal if isGlobal else is_global)
+        try:
+            check_environment_tag_collision(
+                db,
+                project_id=project_id,
+                name=sheet_name,
+                making_global=next_global,
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
         sheet = create_sheet(
             project_id=project_id,
             name=sheet_name,
             description=sheet_description,
             scene_id=scene_id or None,
+            is_global=next_global,
         )
 
     # Populate the EnvironmentProfile from the Scene Intent when the profile
@@ -836,7 +1028,8 @@ def handle(
             ) == "Environment reference sheet":
                 profile.storyPurpose = scene_intent.productionIntent or profile.storyPurpose
 
-    sheet = attach_spatial_map(db, sheet, spatial_map_id=spatial_map_id)
+    if map_id and spatial_document is not None:
+        sheet = attach_spatial_map(db, sheet, spatial_map_id=map_id)
     sheet = compose_sheet_metadata(sheet)
     creator_model = _creator_model_body(
         hosted_model_id=hosted_model_id or hostedModelId,
@@ -850,49 +1043,90 @@ def handle(
         lock_model_family=bool(lockModelFamily),
     )
 
-    reference_id = _spatial_map_reference_id(None, spatial_document)
+    reference_id = _spatial_map_reference_id(None, spatial_document) if spatial_document is not None else ""
+    context_source = str(
+        authoritative_source_asset_id
+        or authoritativeSourceAssetId
+        or source_asset_id
+        or sourceAssetId
+        or reference_asset_id
+        or referenceAssetId
+        or reference_image
+        or referenceImage
+        or ""
+    ).strip()
     grounding_ids = [
         gid
         for gid in (
             grounding.get("original_environment_reference_asset_id"),
             grounding.get("atlas_asset_id"),
+            context_source,
         )
         if gid
     ]
     grounding_ids = list(dict.fromkeys(grounding_ids))
     source_pixels = grounding_ids[0] if grounding_ids else ""
-    # ERS requires an image-to-image-capable generator (binding law).
-    qwen_selected = _is_qwen2512_selection(creator_model) or not any(creator_model.values())
+    if context_source and not grounding.get("original_environment_reference_asset_id") and not grounding.get("atlas_asset_id"):
+        grounding = {
+            **grounding,
+            "original_environment_reference_asset_id": context_source,
+            "atlas_asset_id": context_source,
+        }
+    planning_prompt = str(
+        environmentPrompt or prompt or name or description or ""
+    ).strip()
+    # ERS = GPT Image 2 API exclusively. Qwen local is not an ERS path.
+    qwen_selected = _is_qwen2512_selection(creator_model)
     gpt_selected = _is_explicit_gpt_image_2(creator_model)
-    qwen_i2i = qwen_selected and (not gpt_selected) and bool(_ers_i2i_workflow_key())
-    gpt_i2i = gpt_selected
-    if not source_pixels:
+    unspecified = not qwen_selected and not gpt_selected and not any(
+        str(creator_model.get(k) or "").strip()
+        for k in ("model", "modelFamilyPreference", "hostedModelId", "kieImageModelId", "falImageModelId")
+    )
+    qwen_i2i = False
+    gpt_i2i = False
+    gpt_t2i = False
+    if not source_pixels and not planning_prompt:
         raise RuntimeError(
-            "ERS requires an authoritative environment image. Attach an Atlas Shot "
-            "to this Spatial Map first."
+            "ERS requires an authoritative environment image or an environment prompt. "
+            "Provide a source/reference environment asset, or describe the environment in text. "
+            "Spatial Map is optional."
         )
-    if qwen_selected and not gpt_selected and not _ers_i2i_workflow_key():
+    if qwen_selected:
         raise RuntimeError(
-            "Qwen Image image-to-image is not available for ERS. "
-            "Environment Reference Sheets require a generator that consumes the "
-            "source environment image. Choose GPT Image 2 or repair the local I2I workflow."
+            "Environment Reference Sheets use GPT Image 2 API only. "
+            "Qwen local cannot generate an ERS. Configure GPT Image 2 to continue."
         )
-    if gpt_selected:
-        try:
-            from ....hosted_providers.adapters.kie_adapter import kie_image_supports_i2i
+    if gpt_selected or unspecified:
+        creator_model = {
+            **creator_model,
+            "hostedModelId": "gpt-image-2-kie",
+            "source": "api",
+            "providerKind": "api",
+        }
+        if source_pixels:
+            # Source present → keep GPT I2I path (existing).
+            gpt_i2i = True
+            creator_model["kieImageModelId"] = _gpt_i2i_official_id()
+            try:
+                from ....hosted_providers.adapters.kie_adapter import kie_image_supports_i2i
 
-            gpt_i2i_ok = kie_image_supports_i2i("gpt-image-2-kie")
-        except Exception:
-            gpt_i2i_ok = False
-        if not gpt_i2i_ok:
-            raise RuntimeError(
-                "GPT Image 2 image-to-image is not available for ERS. "
-                "Text-to-image cannot be used for Environment Reference Sheets."
-            )
-    if not qwen_i2i and not gpt_i2i:
+                gpt_i2i_ok = kie_image_supports_i2i("gpt-image-2-kie")
+            except Exception:
+                gpt_i2i_ok = False
+            if not gpt_i2i_ok:
+                raise RuntimeError(
+                    "GPT Image 2 — Requires Setup. Environment Reference Sheets use "
+                    "GPT Image 2 image-to-image when a source image is attached."
+                )
+        else:
+            # No source_pixels but environmentPrompt (or name/description/prompt) → GPT T2I.
+            gpt_t2i = True
+            creator_model["kieImageModelId"] = _gpt_t2i_official_id()
+    if not gpt_i2i and not gpt_t2i:
         raise RuntimeError(
-            "Environment Reference Sheets require an image-to-image-capable generator. "
-            "Select Qwen Image (image-to-image) or GPT Image 2 for ERS."
+            "Environment Reference Sheets use GPT Image 2 API only. "
+            "This generator is not authorized for ERS. Configure GPT Image 2 image-to-image "
+            "(or provide an environment prompt for text-to-image)."
         )
     # Environment Visual Canon (Co-Director Vision) + creator corrections.
     from ...vision.visual_canon import (
@@ -902,8 +1136,8 @@ def handle(
     )
 
     canon = None
-    if db is not None:
-        canon = load_visual_canon(db, project_id, spatial_map_id)
+    if db is not None and map_id:
+        canon = load_visual_canon(db, project_id, map_id)
         if canon is not None and canon_is_stale(canon, grounding.get("fingerprint") or ""):
             canon = None  # stale canon is not authoritative; regenerate via CD Vision
     creator_corrections = visual_canon_corrections if isinstance(visual_canon_corrections, dict) else None
@@ -913,12 +1147,13 @@ def handle(
     from ...knowledgebase.multimodal_continuity.provenance import stamp_continuity_packet
 
     requested_panel = str(panel_task or panelTask or "whole_sheet").strip() or "whole_sheet"
-    provider_name = "qwen" if qwen_i2i else ("gpt-image-2" if gpt_i2i else "")
+    provider_name = "qwen" if qwen_i2i else ("gpt-image-2" if (gpt_i2i or gpt_t2i) else "")
     scene_title = ""
     location_type = ""
     if scene_intent is not None:
         scene_title = str(scene_intent.sceneTitle or "")
         location_type = str(scene_intent.locationType or "")
+    continuity_packet = None
     try:
         continuity_packet = compile_packet(
             scene_title=scene_title or str(getattr(sheet, "name", "") or ""),
@@ -939,7 +1174,12 @@ def handle(
             provider=provider_name,
         )
     except ContinuityCompileError as exc:
-        raise RuntimeError(str(exc)) from exc
+        # Map-less prompt-only ERS: continuity is enrichment, not a hard gate.
+        if gpt_t2i and not map_id and planning_prompt:
+            logger.info("ERS prompt-only skipped continuity compile: %s", exc)
+            continuity_packet = None
+        else:
+            raise RuntimeError(str(exc)) from exc
 
     seed_prompt = _ers_sheet_prompt(
         sheet,
@@ -951,13 +1191,17 @@ def handle(
         else None,
         continuity_packet=continuity_packet,
     )
+    if planning_prompt:
+        # Prompt-only / Express planning: prefer creator environmentPrompt.
+        seed_prompt = planning_prompt if not seed_prompt else f"{planning_prompt}\n\n{seed_prompt}"
     prompt_text = image_core_prompt(
         SimpleNamespace(
             shotIntent=SimpleNamespace(prompt=seed_prompt),
-            request=SimpleNamespace(prompt=str(getattr(sheet, "description", None) or "")),
+            request=SimpleNamespace(prompt=str(getattr(sheet, "description", None) or planning_prompt or "")),
         ),
-        fallback=seed_prompt,
+        fallback=seed_prompt or planning_prompt,
     )
+    resolved_aspect = str(aspectRatio or aspect_ratio or "16:9").strip() or "16:9"
     body = build_ers_image_body(
         prompt=prompt_text,
         direction="sheet",
@@ -969,12 +1213,27 @@ def handle(
             sheet.spatialMap.northLockDirection if sheet.spatialMap else "north"
         ),
         selected=creator_model,
-        source_asset_id=source_pixels,
+        source_asset_id=source_pixels or None,
+        aspect_ratio=resolved_aspect,
     )
     body["creativeContext"]["operationIntent"] = (
         "image_to_image_reference" if qwen_i2i else "image.generate"
     )
     body["creativeContext"]["authoritativeSourceAssetId"] = source_pixels
+    # Prefer full_sheet / full_sheet_api / ers.original.v1 / forceFull for Env Creator regenerate.
+    pipeline = str(ers_pipeline or "full_sheet").strip() or "full_sheet"
+    gen_mode = str(generationMode or "full_sheet_api").strip() or "full_sheet_api"
+    template = str(templateId or collageTemplate or "ers.original.v1").strip() or "ers.original.v1"
+    body["creativeContext"]["forceFull"] = True
+    body["creativeContext"]["force_full"] = True
+    body["creativeContext"]["ers_force_full"] = True
+    body["creativeContext"]["ers_pipeline"] = pipeline
+    body["creativeContext"]["generationMode"] = gen_mode
+    body["creativeContext"]["templateId"] = template
+    body["creativeContext"]["collageTemplate"] = template
+    body["forceFull"] = True
+    body["ers_pipeline"] = pipeline
+    body["generationMode"] = gen_mode
     if qwen_i2i:
         body["forceWorkflowKey"] = _ers_i2i_workflow_key()
         body["allow_force_workflow_key"] = True
@@ -990,6 +1249,16 @@ def handle(
         body["kieImageModelId"] = _gpt_i2i_official_id()
         body["lockModelFamily"] = True
         body.pop("forceWorkflowKey", None)
+    elif gpt_t2i:
+        body["hostedModelId"] = "gpt-image-2-kie"
+        body["kieImageModelId"] = _gpt_t2i_official_id()
+        body["lockModelFamily"] = True
+        body.pop("forceWorkflowKey", None)
+        body.pop("sourceAssetId", None)
+        body.pop("source_asset_id", None)
+        body.pop("referenceImage", None)
+        body.pop("reference_image", None)
+        body.pop("input_urls", None)
 
     # Lineage into creativeContext: durable on job params for the worker commit
     # hook (edges + prompt_meta) regardless of which generator executes.
@@ -1011,6 +1280,16 @@ def handle(
     if grounding_ids:
         ctx["groundingAssetIds"] = grounding_ids
     ctx["authoritativeSourceAssetId"] = source_pixels
+    if planning_prompt:
+        ctx["environmentPrompt"] = planning_prompt
+    if storyTheme:
+        ctx["storyTheme"] = str(storyTheme).strip()
+    if resolved_aspect:
+        ctx["aspectRatio"] = resolved_aspect
+    if isinstance(characters, list) and characters:
+        ctx["characters"] = characters
+    if isinstance(props, list) and props:
+        ctx["props"] = props
     ctx["groundingFingerprint"] = grounding.get("fingerprint") or ""
     ctx["characterIds"] = list(grounding.get("character_ids") or [])
     ctx["propIds"] = list(grounding.get("prop_ids") or [])
@@ -1029,10 +1308,11 @@ def handle(
             "provenance": canon.provenance,
             "unavailableReason": canon.unavailableReason,
         }
-    stamp_continuity_packet(body, continuity_packet)
+    if continuity_packet is not None:
+        stamp_continuity_packet(body, continuity_packet)
 
-    # GPT Image 2: pixels must reach Kie as input_urls. Never T2I. Never
-    # append "not pixel image-to-image" while attaching URLs (CDX-035).
+    # GPT Image 2 I2I: pixels must reach Kie as input_urls (CDX-035).
+    # Prompt-only ERS uses hosted T2I (gpt-image-2-text-to-image) — no input_urls.
     if gpt_i2i:
         urls = [u for u in (_public_asset_url(source_pixels),) if u]
         if not urls:
@@ -1040,7 +1320,7 @@ def handle(
         if not urls:
             raise RuntimeError(
                 "GPT Image 2 cannot run this Environment Reference Sheet without a "
-                "public URL for the source environment image. Text-to-image is not allowed."
+                "public URL for the source environment image when a source is attached."
             )
         body["input_urls"] = urls
         ctx["operationIntent"] = "image.generate"
@@ -1058,6 +1338,14 @@ def handle(
                 f"(asset {reference_id}); not pixel image-to-image.",
                 "",
             ).strip()
+    elif gpt_t2i:
+        body.pop("input_urls", None)
+        ctx["operationIntent"] = "image.generate"
+        ctx["referenceGrounding"] = {
+            "mode": "text",
+            "workflow": _gpt_t2i_official_id(),
+        }
+        body["kieImageModelId"] = _gpt_t2i_official_id()
     try:
         from ....image_product.compile import compile_image_request
 
@@ -1077,14 +1365,22 @@ def handle(
         )
         if "text-to-image" in official:
             raise RuntimeError(
-                "GPT Image 2 resolved to text-to-image for ERS. "
-                "Environment Reference Sheets require gpt-image-2-image-to-image."
+                "GPT Image 2 resolved to text-to-image for ERS with a source image. "
+                "Source-backed Environment Reference Sheets require gpt-image-2-image-to-image."
             )
         body["kieImageModelId"] = _gpt_i2i_official_id()
+    elif gpt_t2i:
+        body["kieImageModelId"] = _gpt_t2i_official_id()
+        official = str(
+            (body.get("creativeContext") or {}).get("resolvedOfficialModelId") or ""
+        )
+        # Prefer T2I Market id for prompt-only; do not invent new persist schema.
+        if official and "image-to-image" in official and "text-to-image" not in official:
+            body["kieImageModelId"] = _gpt_t2i_official_id()
 
     package = EnvironmentReferencePackage(
         project_id=project_id,
-        scene_layout_id=spatial_map_id,
+        scene_layout_id=map_id or "",
         atlas_asset_id=getattr(spatial_document, "backgroundAssetId", None),
         placements=project_document_placements(spatial_document),
         style_context={"visual_style": visual_style or ""},
@@ -1161,7 +1457,16 @@ def handle(
             }
         provenance.details = details
     save_ers_package(db, project_id, package)
+    from ....creator_scope.contract import normalize_is_global
+    from ....environment_reference_sheet.store import sync_environment_scope
+
+    if isGlobal or is_global:
+        sheet.isGlobal = normalize_is_global(isGlobal if isGlobal else is_global)
     save_sheet(sheet)
+    try:
+        sync_environment_scope(db, sheet)
+    except Exception:
+        pass
 
     try:
         from ....production_events import ACTOR_CODIRECTOR, record_production_event
@@ -1204,13 +1509,13 @@ def handle(
                     ),
                     "ers_package_id": package.id,
                     "sheet_id": sheet.sheetId,
-                    "spatial_map_id": spatial_map_id,
+                    "spatial_map_id": map_id or None,
                 },
             }
         ],
         "surface_type": "ers_generation",
         "ers_package_id": package.id,
         "sheet_id": sheet.sheetId,
-        "spatial_map_id": spatial_map_id,
+        "spatial_map_id": map_id or None,
         "purpose": _ERS_PURPOSE,
     }

@@ -5,7 +5,7 @@ from app.minimax_h3.contracts import AdeptMiniMaxH3Request, H3ReferenceAssignmen
 from app.minimax_h3.planner import build_plan
 from app.minimax_h3.preflight import evaluate_request
 from app.minimax_h3.service import create_job_or_block, prepare_plan
-from app.minimax_h3.three_frame import build_segmented_plan
+from app.minimax_h3.three_frame import build_add_guide_plan, build_segmented_plan
 from app.minimax_h3 import store
 
 
@@ -51,9 +51,10 @@ def test_ca_local_not_license_blocked() -> None:
     assert any("not certified" in blocker for blocker in result.blockers)
 
 
-def test_three_frame_native_is_false() -> None:
+def test_three_frame_native_is_true() -> None:
     snapshot = capability_snapshot(territory="CA", deployment="api")
-    assert snapshot["threeFrameNative"] is False
+    assert snapshot["threeFrameNative"] is True
+    assert snapshot["threeFrameStrategyDefault"] == "middle-guidance-b"
 
 
 def test_segmented_strategy_produces_two_intervals() -> None:
@@ -64,7 +65,7 @@ def test_segmented_strategy_produces_two_intervals() -> None:
 def test_ltx_fallback_offer_present_when_blocked() -> None:
     result = evaluate_request(_three_frame_request(territory="US"))
     assert result.fallbackOffer is not None
-    assert result.fallbackOffer.providerId == "ltx-local"
+    assert result.fallbackOffer.providerId == "ltx-2.5-distilled"
 
 
 def test_no_silent_api_without_approval(tmp_path, monkeypatch) -> None:
@@ -158,7 +159,7 @@ def test_private_readiness_ready_when_runtime_up(monkeypatch) -> None:
                 "width": 480,
                 "height": 256,
                 "length": 5,
-                "steps": 4,
+                "steps": 20,
                 "nativeAudio": True,
             },
             "missingFiles": [],
@@ -219,13 +220,22 @@ def test_private_one_frame_blocked_without_start(monkeypatch) -> None:
     assert any("starting frame" in b.lower() for b in result.blockers)
 
 
-def test_private_non_t2va_modes_blocked_with_ltx_offer(monkeypatch) -> None:
+def test_private_three_frame_ready_on_addguide_path(monkeypatch) -> None:
     _enable_private_local(monkeypatch)
     result = evaluate_request(_three_frame_request())
+    assert result.status == "ready"
+    assert result.fallbackOffer is None
+    assert result.blockers == []
+
+
+def test_private_reference_mode_still_blocked_with_ltx_offer(monkeypatch) -> None:
+    _enable_private_local(monkeypatch)
+    req = _three_frame_request()
+    req.mode = "reference"
+    result = evaluate_request(req)
     assert result.status == "blocked"
     assert result.fallbackOffer is not None
-    assert result.fallbackOffer.providerId == "ltx-local"
-    assert any("not available yet" in b.lower() or "three frame" in b.lower() for b in result.blockers)
+    assert result.fallbackOffer.providerId == "ltx-2.5-distilled"
 
 
 def test_private_duration_blocker_skipped_for_t2va(monkeypatch) -> None:
@@ -234,10 +244,11 @@ def test_private_duration_blocker_skipped_for_t2va(monkeypatch) -> None:
     req.durationSec = 1.0
     result = evaluate_request(req)
     assert result.status == "ready"
-    assert not any("4 and 15" in b for b in result.blockers)
+    assert not any("4 and 15 seconds" in b for b in result.blockers)
+    assert not any("15-second" in b.lower() and "need a duration" in b.lower() for b in result.blockers)
 
 
-def test_private_blocked_when_runtime_down_offers_ltx(monkeypatch) -> None:
+def test_private_on_demand_when_runtime_down(monkeypatch) -> None:
     from app.minimax_h3 import capability, preflight, private_access, service
 
     monkeypatch.setattr(private_access, "private_local_enabled", lambda: True)
@@ -257,9 +268,9 @@ def test_private_blocked_when_runtime_down_offers_ltx(monkeypatch) -> None:
         monkeypatch.setattr(mod, "general_routing_enabled", lambda: False)
     monkeypatch.setattr(preflight, "_route_a_ready", lambda: False)
     result = evaluate_request(_t2va_request())
-    assert result.status == "blocked"
-    assert result.fallbackOffer is not None
-    assert result.fallbackOffer.providerId == "ltx-local"
+    assert result.status == "ready"
+    assert result.blockers == []
+    assert any("start automatically" in warning.lower() for warning in result.warnings)
 
 
 def test_private_duplicate_submit_prevented(monkeypatch, tmp_path) -> None:
@@ -377,7 +388,7 @@ def test_private_capability_disables_public_best_match_routing(monkeypatch) -> N
     assert snap["supportsNativeAudio"] is True
     assert snap["supportsImageToVideo"] is True
     assert snap["supportsStartFrame"] is True
-    assert snap["supportsStartEndFrame"] is False
+    assert snap["supportsStartEndFrame"] is True
 
 
 def test_private_provenance_no_api_or_ltx_mislabel(monkeypatch, tmp_path) -> None:
@@ -419,3 +430,12 @@ def test_private_provenance_no_api_or_ltx_mislabel(monkeypatch, tmp_path) -> Non
     assert prov["apiUsed"] is False
     assert prov["ltxUsed"] is False
     service._RUNNING_JOBS.clear()
+
+
+def test_add_guide_plan_optional_middle() -> None:
+    req = _three_frame_request()
+    # drop middle role
+    req.referenceAssignments = [a for a in req.referenceAssignments if a.role != "middle"]
+    plan = build_add_guide_plan(req)
+    assert plan.nativeSupported is True
+    assert plan.strategy == "middle-guidance-b"
