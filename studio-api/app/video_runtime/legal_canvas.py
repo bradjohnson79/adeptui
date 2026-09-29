@@ -6,6 +6,7 @@ clamps, or pads. Illegal requests fail before GPU/API spend.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -645,8 +646,11 @@ def preflight_spec(
     }
 
 
-#: Canonical MiniMax H3 megapixel → pixel grid for 16:9 /32 canvases.
-#: Width and height are multiples of 32 (VAE /16 then DiT patch 2).
+#: Canonical MiniMax H3 megapixel tiers (Size Settings Reference values).
+#: Pixel dims for any supported aspect come from ResolutionSelector (D1), not a
+#: hardcoded per-aspect table. The 16:9 column below matches ResolutionSelector
+#: (aspect=16:9, megapixels, multiple=32) exactly — kept as the published
+#: Size Settings honesty grid and as the megapixel-tier catalog.
 H3_MEGAPIXEL_GRID: tuple[tuple[float, tuple[int, int]], ...] = (
     (0.2, (608, 352)),
     (0.3, (736, 416)),
@@ -665,6 +669,15 @@ H3_MEGAPIXEL_GRID: tuple[tuple[float, tuple[int, int]], ...] = (
 )
 
 _H3_MEGAPIXEL_BY_VALUE: dict[float, tuple[int, int]] = dict(H3_MEGAPIXEL_GRID)
+H3_MEGAPIXEL_VALUES: tuple[float, ...] = tuple(mp for mp, _ in H3_MEGAPIXEL_GRID)
+
+#: Comfy ResolutionSelector aspect combo (node contract). multiple=32 for H3.
+H3_RESOLUTION_SELECTOR_ASPECTS: frozenset[str] = frozenset(
+    {"1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"}
+)
+
+#: Soft aliases that normalize to 16:9 (display tokens from older caps).
+H3_ASPECT_ALIASES: frozenset[str] = frozenset({"≈16:9", "~16:9"})
 
 
 def _format_h3_megapixels(value: float) -> str:
@@ -676,22 +689,67 @@ def _format_h3_megapixels(value: float) -> str:
 
 H3_MEGAPIXEL_LABELS: list[str] = [_format_h3_megapixels(mp) for mp, _ in H3_MEGAPIXEL_GRID]
 
-
-#: Auto Fast = 0.4 MP (864×480) — the certified Scene5 release-gate H3
-#: template canvas. ``docs/release-gate/minimax-h3-comfy-parity/Scene5_H3_CanonicalTemplate_API.json``
-#: used megapixels 0.4.
+#: Auto Fast = 0.4 MP (864x480 @16:9) — certified Scene5 release-gate H3 template.
 H3_AUTO_MEGAPIXEL_FAST = 0.4
 
-#: Auto Quality = 0.7 MP (1152×640) — the FM4/FM5 certified Timeline default
-#: (adapter ``finalResolution``). This preserves today's default behavior.
+#: Auto Quality = 0.7 MP (1152x640 @16:9) — FM4/FM5 certified Timeline default.
 H3_AUTO_MEGAPIXEL_QUALITY = 0.7
 
 
-def resolve_h3_megapixel_canvas(mp: float | int | str) -> tuple[str, int, int]:
-    """Return (label, width, height) for a canonical H3 megapixel value.
+def resolve_h3_resolution_selector(
+    aspect: str,
+    megapixels: float | int | str,
+    *,
+    multiple: int = 32,
+) -> tuple[int, int]:
+    """Comfy ResolutionSelector(aspect, megapixels, multiple=32) — Adept D1 authority.
 
-    Unknown or unsupported MP raises :class:`SpecFidelityError` with honest
-    suggestions. Never snaps to a nearest value.
+    Independently rounds width and height from megapixel budget x aspect ratio
+    onto ``multiple``. Matches published MiniMax Size Settings 16:9 rows exactly.
+    Does NOT use Scene / production canvas pixels.
+    """
+    aspect_key = str(aspect or "").strip() or "16:9"
+    if aspect_key in H3_ASPECT_ALIASES:
+        aspect_key = "16:9"
+    if aspect_key not in ASPECT_RATIOS:
+        raise SpecFidelityError(
+            f"Aspect {aspect_key} is not a known Adept video aspect.",
+            suggestions=sorted(H3_RESOLUTION_SELECTOR_ASPECTS),
+            code="UNKNOWN_ASPECT",
+        )
+    if aspect_key not in H3_RESOLUTION_SELECTOR_ASPECTS:
+        raise SpecFidelityError(
+            f"Aspect {aspect_key} is not a MiniMax H3 ResolutionSelector shape.",
+            suggestions=sorted(H3_RESOLUTION_SELECTOR_ASPECTS),
+            code="H3_ASPECT_UNSUPPORTED",
+        )
+    try:
+        mp_val = float(megapixels)
+    except (TypeError, ValueError) as exc:
+        raise SpecFidelityError(
+            f"MiniMax H3 megapixels must be a number (got {megapixels!r}).",
+            suggestions=H3_MEGAPIXEL_LABELS,
+            code="H3_ILLEGAL_MEGAPIXELS",
+        ) from exc
+    a, b = ASPECT_RATIOS[aspect_key]
+    total = float(mp_val) * 1024.0 * 1024.0
+    mult = max(1, int(multiple))
+    width = int(round(math.sqrt(total * a / b) / mult)) * mult
+    height = int(round(math.sqrt(total * b / a) / mult)) * mult
+    width = max(mult, width)
+    height = max(mult, height)
+    return width, height
+
+
+def resolve_h3_megapixel_canvas(
+    mp: float | int | str,
+    *,
+    aspect: str = "16:9",
+) -> tuple[str, int, int]:
+    """Return (label, width, height) for a canonical H3 megapixel x aspect.
+
+    Megapixel must be an exact published tier. Dims come from D1 ResolutionSelector.
+    Never snaps to a nearest megapixel value.
     """
     try:
         mp_val = float(mp)
@@ -702,27 +760,27 @@ def resolve_h3_megapixel_canvas(mp: float | int | str) -> tuple[str, int, int]:
             code="H3_ILLEGAL_MEGAPIXELS",
         )
     key = round(mp_val, 2)
-    dims = _H3_MEGAPIXEL_BY_VALUE.get(key)
-    if dims is None:
+    if key not in _H3_MEGAPIXEL_BY_VALUE:
         raise SpecFidelityError(
             f"{mp_val} MP is not a supported MiniMax H3 canvas.",
             suggestions=H3_MEGAPIXEL_LABELS,
             code="H3_ILLEGAL_MEGAPIXELS",
         )
-    return _format_h3_megapixels(mp_val), dims[0], dims[1]
+    width, height = resolve_h3_resolution_selector(aspect, key, multiple=32)
+    return _format_h3_megapixels(mp_val), width, height
 
 
 def resolve_h3_timeline_canvas(
     batch_h3_resolution: dict[str, Any] | None,
     *,
     draft_mode: bool,
+    aspect: str = "16:9",
 ) -> dict[str, Any]:
     """Resolve a BatchBlock's H3 resolution intent to a canonical canvas.
 
     Manual mode always uses the stored megapixel value. Auto or absent uses
-    the policy constant by draft_mode. Returns a provenance dict carrying
-    the resolved mode, megapixels, label, width, height, and whether the
-    choice was auto-derived.
+    the policy constant by draft_mode. Dims are D1 ResolutionSelector outputs
+    for the requested creative aspect (never Scene canvas).
     """
     mode = "auto"
     auto = True
@@ -742,7 +800,7 @@ def resolve_h3_timeline_canvas(
             mp = float(stored_mp)
             auto = False
 
-    label, width, height = resolve_h3_megapixel_canvas(mp)
+    label, width, height = resolve_h3_megapixel_canvas(mp, aspect=aspect)
     return {
         "mode": mode,
         "megapixels": mp,
@@ -750,4 +808,321 @@ def resolve_h3_timeline_canvas(
         "width": width,
         "height": height,
         "auto": auto,
+        "aspect": aspect if aspect not in H3_ASPECT_ALIASES else "16:9",
     }
+
+
+def _build_h3_legal_pixels() -> frozenset[tuple[int, int]]:
+    """All D1 ResolutionSelector outputs for production intersect selector aspects x MP tiers."""
+    shapes = ("1:1", "4:3", "16:9", "9:16", "21:9")
+    pixels: set[tuple[int, int]] = set()
+    for aspect in shapes:
+        for mp in H3_MEGAPIXEL_VALUES:
+            pixels.add(resolve_h3_resolution_selector(aspect, mp, multiple=32))
+    return frozenset(pixels)
+
+
+#: Exact legal (width, height) pairs from D1 ResolutionSelector over H3 shapes x MP.
+H3_LEGAL_PIXELS: frozenset[tuple[int, int]] = _build_h3_legal_pixels()
+
+H3_LEGAL_RESOLUTION_LABELS: list[str] = sorted(
+    f"{w}x{h}" for w, h in H3_LEGAL_PIXELS
+)
+
+
+def h3_megapixels_for_dims(width: int, height: int) -> float | None:
+    """Return the megapixel tier that produces (width, height) for some supported shape, else None."""
+    target = (int(width), int(height))
+    shapes = ("1:1", "4:3", "16:9", "9:16", "21:9")
+    for mp in H3_MEGAPIXEL_VALUES:
+        for aspect in shapes:
+            if resolve_h3_resolution_selector(aspect, mp, multiple=32) == target:
+                return float(mp)
+    return None
+
+
+def is_h3_legal_pixels(width: int, height: int) -> bool:
+    """True only when (width, height) is an exact D1 ResolutionSelector H3 output."""
+    return (int(width), int(height)) in H3_LEGAL_PIXELS
+
+
+def check_h3_resolution(width: int, height: int) -> CanvasCheck:
+    """Authoritative MiniMax H3 canvas check — D1 legal membership, not /32 alone."""
+    w, h = int(width or 0), int(height or 0)
+    if w <= 0 or h <= 0:
+        return CanvasCheck(False, w, h, 32, "Width and height must be positive.", H3_LEGAL_RESOLUTION_LABELS[:6])
+    if (w, h) in H3_LEGAL_PIXELS:
+        return CanvasCheck(True, w, h, 32, "", [])
+    sample = ", ".join(H3_LEGAL_RESOLUTION_LABELS[:8])
+    return CanvasCheck(
+        False,
+        w,
+        h,
+        32,
+        (
+            f"MiniMax H3 does not support {w}x{h}. "
+            f"Use a legal H3 ResolutionSelector canvas only (not the Scene canvas). "
+            f"Examples: {sample}."
+        ),
+        list(H3_LEGAL_RESOLUTION_LABELS[:14]),
+    )
+
+
+def assert_h3_legal_resolution(width: int, height: int) -> tuple[int, int]:
+    checked = check_h3_resolution(width, height)
+    if not checked.ok:
+        raise SpecFidelityError(
+            checked.message,
+            suggestions=list(checked.suggestions),
+            code="H3_RESOLUTION_UNSUPPORTED",
+        )
+    return checked.width, checked.height
+
+
+
+# Timeline production Picture Shape contract (Scene Creator + Timeline Generator).
+# Soft normalize_production_aspect (display) lives in aspect_fps — generate uses these.
+TIMELINE_PRODUCTION_ASPECTS: tuple[str, ...] = ("1:1", "4:3", "16:9", "9:16", "21:9")
+
+#: ONE H3 creative-shape capability = Adept production intersect ResolutionSelector aspects.
+#: Do not invent shapes outside this intersection (no 3:2 / 2:3 / 3:4 on Timeline H3
+#: until they are first-class PRODUCTION_ASPECTS).
+H3_SUPPORTED_ASPECTS: tuple[str, ...] = tuple(
+    a for a in TIMELINE_PRODUCTION_ASPECTS if a in H3_RESOLUTION_SELECTOR_ASPECTS
+)
+
+#: Adapter / authority capability list — single owner reference (not cloned tables).
+#: Includes soft 16:9 aliases for older UI tokens; canonical shapes are H3_SUPPORTED_ASPECTS.
+H3_CAPABILITY_ASPECT_RATIOS: list[str] = ["≈16:9", *H3_SUPPORTED_ASPECTS]
+
+#: Backward-compat alias (normalize display tokens to 16:9). Prefer H3_SUPPORTED_ASPECTS.
+H3_TIMELINE_ASPECTS: frozenset[str] = frozenset({"16:9"}) | H3_ASPECT_ALIASES
+
+
+def require_timeline_aspect(raw: str | None) -> str:
+    """Timeline generate path: refuse empty / custom / unknown. Never silent to 16:9."""
+    aspect = (raw or "").strip()
+    if not aspect:
+        raise SpecFidelityError(
+            "Timeline generate requires a picture shape (aspect ratio).",
+            suggestions=list(TIMELINE_PRODUCTION_ASPECTS),
+            code="ASPECT_REQUIRED",
+        )
+    if aspect in H3_ASPECT_ALIASES:
+        aspect = "16:9"
+    if aspect == "custom":
+        raise SpecFidelityError(
+            "Custom aspect is not allowed on Timeline generate. Choose a production picture shape.",
+            suggestions=list(TIMELINE_PRODUCTION_ASPECTS),
+            code="ASPECT_CUSTOM_REFUSED",
+        )
+    if aspect not in TIMELINE_PRODUCTION_ASPECTS:
+        raise SpecFidelityError(
+            f"Aspect {aspect} is not a Timeline production picture shape.",
+            suggestions=list(TIMELINE_PRODUCTION_ASPECTS),
+            code="UNKNOWN_ASPECT",
+        )
+    return aspect
+
+
+def require_h3_timeline_aspect(raw: str | None) -> str:
+    """MiniMax H3 Timeline/Director: aspect must be in H3_SUPPORTED_ASPECTS (D1 unify).
+
+    Soft aliases normalize to 16:9. Unsupported shapes hard-refuse.
+    Does not map creative shape onto Scene canvas dims.
+    """
+    token = (raw or "").strip()
+    if not token:
+        raise SpecFidelityError(
+            "MiniMax H3 requires a picture shape "
+            f"({', '.join(H3_SUPPORTED_ASPECTS)}).",
+            suggestions=list(H3_SUPPORTED_ASPECTS),
+            code="H3_ASPECT_REQUIRED",
+        )
+    if token in H3_ASPECT_ALIASES:
+        return "16:9"
+    try:
+        aspect = require_timeline_aspect(token)
+    except SpecFidelityError:
+        aspect = token
+    if aspect not in H3_SUPPORTED_ASPECTS:
+        raise SpecFidelityError(
+            f"MiniMax H3 does not support picture shape {aspect}. "
+            f"Supported: {', '.join(H3_SUPPORTED_ASPECTS)}.",
+            suggestions=list(H3_SUPPORTED_ASPECTS),
+            code="H3_ASPECT_UNSUPPORTED",
+        )
+    return aspect
+
+
+
+def compile_timeline_canvas(
+    generator_id: str,
+    *,
+    aspect_ratio: str | None,
+    h3_resolution: dict | None = None,
+    ltx_quality: str | None = None,
+    seedance_resolution: str | None = None,
+    draft_mode: bool = False,
+) -> dict:
+    """Single Timeline compile entry to dims dict for resolvedGeneration stamping.
+
+    Raises SpecFidelityError on illegal aspect / canvas. Does not use production_pixels.
+    """
+    product = _canonical_product(generator_id)
+    token = (product or "").lower()
+    is_h3 = product in {"minimax-h3", "minimax-h3-i2v-local"} or token.startswith("minimax-h3")
+    aspect = require_timeline_aspect(aspect_ratio)
+
+    if is_h3:
+        h3_aspect = require_h3_timeline_aspect(aspect)
+        canvas = resolve_h3_timeline_canvas(
+            h3_resolution, draft_mode=bool(draft_mode), aspect=h3_aspect
+        )
+        return {
+            "productId": "minimax-h3",
+            "width": int(canvas["width"]),
+            "height": int(canvas["height"]),
+            "megapixels": canvas.get("megapixels"),
+            "label": canvas.get("label"),
+            "aspect": h3_aspect,
+            "source": "h3_timeline_canvas",
+            "tier": None,
+            "projectCanvasIgnored": None,
+        }
+
+    from .workflow_resolver import is_ltx_25_generator
+
+    if is_ltx_25_generator(generator_id) or is_ltx_25_generator(product):
+        raw_tier = (ltx_quality or "720p").strip()
+        aliases = {"720p": "720p", "1080p": "1080p", "2k": "2K", "4k": "4K"}
+        tier = aliases.get(raw_tier.lower(), raw_tier if raw_tier in {"720p", "1080p", "2K", "4K"} else "720p")
+        legal = resolve_legal_canvas(product or generator_id, tier=tier, aspect=aspect)
+        return {
+            "productId": product or generator_id,
+            "width": int(legal.width),
+            "height": int(legal.height),
+            "megapixels": None,
+            "label": legal.honesty_label,
+            "aspect": legal.aspect,
+            "source": "ltx_quality",
+            "tier": tier,
+            "projectCanvasIgnored": None,
+        }
+
+    tier_token = str(seedance_resolution or ltx_quality or "720p").strip() or "720p"
+    aliases = {"720p": "720p", "1080p": "1080p", "2k": "2K", "4k": "4K", "480p": "480p"}
+    tier = aliases.get(tier_token.lower(), "720p")
+    legal = resolve_legal_canvas(product or generator_id, tier=tier, aspect=aspect)
+    return {
+        "productId": product or generator_id,
+        "width": int(legal.width),
+        "height": int(legal.height),
+        "megapixels": None,
+        "label": legal.honesty_label,
+        "aspect": legal.aspect,
+        "source": "legal_canvas",
+        "tier": legal.tier,
+        "projectCanvasIgnored": None,
+    }
+
+
+def resolve_generation_dimensions(
+    *,
+    model: str,
+    requested_quality: str | float | None = None,
+    requested_aspect: str | None = "16:9",
+    project_canvas: tuple[int, int] | None = None,
+    draft_mode: bool = False,
+) -> dict[str, Any]:
+    """One authoritative resolver for generation output size.
+
+    MiniMax H3 returns ONLY an H3 megapixel-table entry. Scene / project canvas
+    is never used as the video output size. LTX and hosted APIs keep their own
+    legal tables via resolve_legal_canvas.
+    """
+    product = _canonical_product(model)
+    token = (product or "").lower()
+    is_h3 = product in {"minimax-h3", "minimax-h3-i2v-local"} or token.startswith("minimax-h3")
+
+    if requested_aspect is None:
+        aspect_raw = "16:9"
+    else:
+        aspect_raw = str(requested_aspect)
+
+    if is_h3:
+        aspect = require_h3_timeline_aspect(aspect_raw)
+        if requested_quality is not None and str(requested_quality).strip():
+            q = str(requested_quality).strip().lower()
+            if "x" in q:
+                try:
+                    w_s, h_s = q.split("x", 1)
+                    w, h = int(w_s), int(h_s)
+                except ValueError as exc:
+                    raise SpecFidelityError(
+                        f"MiniMax H3 resolution {requested_quality!r} is not a WxH pair.",
+                        suggestions=H3_LEGAL_RESOLUTION_LABELS[:14],
+                        code="H3_RESOLUTION_UNSUPPORTED",
+                    ) from exc
+                # Raw WxH (often adapter finalResolution 16:9 honesty label) is NOT
+                # aspect-blind authority. Infer megapixels, then re-resolve through D1
+                # ResolutionSelector for the creative aspect so 21:9 never ships 1152x640.
+                assert_h3_legal_resolution(w, h)
+                mp = h3_megapixels_for_dims(w, h)
+                if mp is None:
+                    raise SpecFidelityError(
+                        f"MiniMax H3 resolution {w}x{h} is legal-shaped but not a published megapixel tier.",
+                        suggestions=H3_MEGAPIXEL_LABELS,
+                        code="H3_RESOLUTION_UNSUPPORTED",
+                    )
+                label, rw, rh = resolve_h3_megapixel_canvas(mp, aspect=aspect)
+                return {
+                    "productId": "minimax-h3",
+                    "width": rw,
+                    "height": rh,
+                    "megapixels": mp,
+                    "label": label,
+                    "aspect": aspect,
+                    "source": "requested_wxh_reselected",
+                    "projectCanvasIgnored": list(project_canvas) if project_canvas else None,
+                    "requestedWxH": [w, h],
+                }
+            label, w, h = resolve_h3_megapixel_canvas(requested_quality, aspect=aspect)
+            return {
+                "productId": "minimax-h3",
+                "width": w,
+                "height": h,
+                "megapixels": float(requested_quality),
+                "label": label,
+                "aspect": aspect,
+                "source": "requested_megapixels",
+                "projectCanvasIgnored": list(project_canvas) if project_canvas else None,
+            }
+        canvas = resolve_h3_timeline_canvas(None, draft_mode=bool(draft_mode), aspect=aspect)
+        return {
+            "productId": "minimax-h3",
+            "width": int(canvas["width"]),
+            "height": int(canvas["height"]),
+            "megapixels": canvas["megapixels"],
+            "label": canvas["label"],
+            "aspect": aspect,
+            "source": "h3_auto_policy",
+            "projectCanvasIgnored": list(project_canvas) if project_canvas else None,
+        }
+
+    aspect = require_timeline_aspect(aspect_raw)
+    tier = str(requested_quality or "720p").strip() or "720p"
+    if tier.endswith(" mp") or tier.replace(".", "", 1).isdigit():
+        tier = "720p"
+    legal = resolve_legal_canvas(product, tier=tier, aspect=aspect, surface="i2v")
+    return {
+        "productId": product,
+        "width": int(legal.width),
+        "height": int(legal.height),
+        "megapixels": None,
+        "label": legal.honesty_label,
+        "aspect": legal.aspect,
+        "source": "legal_canvas",
+        "projectCanvasIgnored": list(project_canvas) if project_canvas else None,
+    }
+

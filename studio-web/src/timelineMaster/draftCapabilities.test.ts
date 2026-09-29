@@ -21,8 +21,10 @@ const payload = {
       id: "minimax-h3",
       label: "MiniMax H3",
       aliases: ["minimax-h3-local", "minimax-h3-t2v-local"],
-      supportsVideoReferences: false,
-      maximumReferenceVideos: 0,
+      supportsVideoReferences: true,
+      supportsAudioReferences: true,
+      maximumReferenceVideos: 3,
+      maximumReferenceAudio: 3,
     },
     {
       id: "ltx-2.5-distilled",
@@ -65,7 +67,9 @@ describe("draftCapabilities", () => {
     const options = generatorOptionsFromPayload(payload);
     const minimax = resolveGeneratorOption(options, "minimax-h3-t2v-local");
     expect(minimax?.id).toBe("minimax-h3");
-    expect(supportsVideoMotionReferences(minimax)).toBe(false);
+    expect(supportsVideoMotionReferences(minimax)).toBe(true);
+    expect(minimax?.maximumReferenceVideos).toBe(3);
+    expect(minimax?.maximumReferenceAudio).toBe(3);
     const seedanceFal = resolveGeneratorOption(options, undefined, "seedance-api");
     expect(seedanceFal?.id).toBe("seedance-2.0");
     const seedanceKie = resolveGeneratorOption(options, "seedance-kie");
@@ -261,6 +265,23 @@ describe("draftCapabilities", () => {
     expect(resolveNativeAudioState(h3, "ready").label).toBe("SUPPORTED");
     expect(resolveNativeAudioState(ltx, "ready").status).toBe("supported");
     expect(resolveNativeAudioState(seedance, "ready").status).toBe("not_supported");
+    const seedanceReady = joinProductionControlVideoOptions(null, {
+      generators: [
+        { id: "seedance-2.0", label: "Seedance 2.0", executable: true, readiness: "Ready" },
+      ],
+      timelineAdapters: [
+        {
+          id: "seedance-2.0",
+          audio_generation: true,
+          qualityControl: "seedance_resolution",
+          supportedResolutions: ["480p", "720p", "1080p", "4k"],
+        },
+      ],
+    }).find((row) => row.id === "seedance-2.0");
+    expect(generatorQualityControl(seedanceReady)).toBe("seedance_resolution");
+    expect(seedanceReady?.supportedResolutions).toEqual(["480p", "720p", "1080p", "4k"]);
+    expect(resolveNativeAudioState(seedanceReady, "ready").status).toBe("supported");
+    expect(resolveNativeAudioState(seedanceReady, "ready").detail).toContain("produces synchronized native audio");
     expect(resolveNativeAudioState(seedance, "ready").detail).toContain("does not provide native audio");
     expect(resolveNativeAudioState(h3, "loading").status).toBe("checking");
     expect(

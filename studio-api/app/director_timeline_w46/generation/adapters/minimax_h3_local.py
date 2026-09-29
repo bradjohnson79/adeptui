@@ -18,6 +18,20 @@ ALIASES = frozenset({"minimax-h3-t2v-local", "minimax-h3-local", "minimax-h3"})
 ENGINE = "minimax-h3"
 
 
+def _h3_canonical_resolution_labels() -> list[str]:
+    """Derive H3 WxH labels from the single D1 legal-pixel set."""
+    from app.video_runtime.legal_canvas import H3_LEGAL_RESOLUTION_LABELS
+
+    return list(H3_LEGAL_RESOLUTION_LABELS)
+
+
+
+def _h3_capability_aspect_ratios() -> list[str]:
+    """ONE owner: legal_canvas.H3_CAPABILITY_ASPECT_RATIOS (no cloned AR table)."""
+    from app.video_runtime.legal_canvas import H3_CAPABILITY_ASPECT_RATIOS
+
+    return list(H3_CAPABILITY_ASPECT_RATIOS)
+
 def _capabilities() -> VideoGeneratorCapabilities:
     return VideoGeneratorCapabilities(
         id=GENERATOR_ID,
@@ -29,15 +43,15 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportsEndFrame=False,
         supportsMultipleImageReferences=True,
         supportsReferenceToVideo=True,
-        supportsVideoReferences=False,
+        supportsVideoReferences=True,
         supportsAudioReferences=True,
         maximumReferenceImages=9,
-        maximumReferenceVideos=0,
-        maximumReferenceAudio=9,
-        supportedDurations=[],
+        maximumReferenceVideos=3,
+        maximumReferenceAudio=3,
+        supportedDurations=[float(s) for s in range(3, 16)],
         maxDurationSec=15.0,
-        supportedResolutions=["1152x640", "864x480", "832x480", "1280x704", "1920x1088", "2560x1440", "768x448", "480x832", "704x1248", "1088x1920"],
-        supportedAspectRatios=["≈16:9", "16:9", "21:9", "9:16"],
+        supportedResolutions=_h3_canonical_resolution_labels(),
+        supportedAspectRatios=_h3_capability_aspect_ratios(),
         supportsSeed=True,
         supportsNegativePrompt=False,
         supportsCameraControls=False,
@@ -63,7 +77,7 @@ def _capabilities() -> VideoGeneratorCapabilities:
         finalRequiresNewGeneration=True,
         draftResolution=None,
         finalResolution="1152x640",
-        supportsImageAndVideoTogether=False,
+        supportsImageAndVideoTogether=True,
     )
 
 

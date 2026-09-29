@@ -49,6 +49,7 @@ import {
   supportsTurboLora,
   supportsVideoMotionReferences,
   type TimelineGeneratorOption,
+  allowedProductionAspects,
 } from "../../timelineMaster/draftCapabilities";
 import { loadTimelineVideoGenerators } from "../../timelineMaster/useTimelineVideoGenerators";
 import { applyTimelineSceneGenerator, applyTimelineTurboLora } from "../../timelineMaster/applySceneGenerator";
@@ -911,8 +912,12 @@ export function TimelineInspector({
           </label>
           <GeneratorQualityControls
             option={selectedGenerator}
+            aspectRatio={scene.aspect_ratio}
             h3Resolution={master?.batchBlocks[0]?.h3Resolution || selectedBatch?.h3Resolution}
             ltxQuality={master?.batchBlocks[0]?.ltxQuality || selectedBatch?.ltxQuality}
+            seedanceResolution={
+              master?.batchBlocks[0]?.seedanceResolution || selectedBatch?.seedanceResolution
+            }
             draftMode={draftMode}
             megapixelsTestId="timeline-inspector-megapixels"
             megapixelsSelectTestId="timeline-inspector-megapixels-select"
@@ -925,6 +930,7 @@ export function TimelineInspector({
             qualityTip={t("qualityTip")}
             onH3Change={(next) => void persistSceneQuality({ h3Resolution: next })}
             onLtxChange={(tier) => void persistSceneQuality({ ltxQuality: tier })}
+            onSeedanceChange={(resolution) => void persistSceneQuality({ seedanceResolution: resolution })}
           />
           <NativeAudioCapability
             option={selectedGenerator}
@@ -989,18 +995,49 @@ export function TimelineInspector({
           ) : null}
           <label className="field">
             <span>Picture Shape</span>
-            <select
-              data-testid="timeline-scene-aspect"
-              value={normalizeProductionAspect(scene.aspect_ratio)}
-              onChange={(e) => void updateScene({ aspect_ratio: e.target.value })}
-            >
-              {PRODUCTION_ASPECTS.map((ratio) => (
-                <option key={ratio} value={ratio}>
-                  {ratio}
-                </option>
-              ))}
-            </select>
-            <HelpTip text="How wide the picture is. 16:9 is standard landscape. 9:16 is vertical. 21:9 is extra wide. Changing this updates the Viewer immediately." />
+            {(() => {
+              const aspectOptions = allowedProductionAspects(
+                PRODUCTION_ASPECTS,
+                selectedGenerator?.supportedAspectRatios,
+              );
+              const current = normalizeProductionAspect(scene.aspect_ratio);
+              const valueInList = aspectOptions.includes(current) ? current : "";
+              return (
+                <>
+                  <select
+                    data-testid="timeline-scene-aspect"
+                    value={valueInList}
+                    disabled={!aspectOptions.length}
+                    onChange={(e) => void updateScene({ aspect_ratio: e.target.value })}
+                  >
+                    {!aspectOptions.length ? (
+                      <option value="">No picture shapes for this model</option>
+                    ) : null}
+                    {valueInList === "" && aspectOptions.length ? (
+                      <option value="" disabled>
+                        {current} not supported — pick one
+                      </option>
+                    ) : null}
+                    {aspectOptions.map((ratio) => (
+                      <option key={ratio} value={ratio}>
+                        {ratio}
+                      </option>
+                    ))}
+                  </select>
+                  {!aspectOptions.length ? (
+                    <p className="scene-meta" role="status" data-testid="timeline-scene-aspect-empty">
+                      This model lists no production picture shapes.
+                    </p>
+                  ) : null}
+                  {valueInList === "" && aspectOptions.length ? (
+                    <p className="scene-meta" role="alert" data-testid="timeline-scene-aspect-unsupported">
+                      {current} is not supported by the selected generator. Choose a listed shape before generate.
+                    </p>
+                  ) : null}
+                </>
+              );
+            })()}
+            <HelpTip text="How wide the picture is. Options are filtered to what the selected generator supports. Changing this updates the Viewer immediately." />
           </label>
           <label className="field">
             <span>Duration <HelpTip text={sceneDurationHelp(scene.engine, scene.duration_sec)} /></span>

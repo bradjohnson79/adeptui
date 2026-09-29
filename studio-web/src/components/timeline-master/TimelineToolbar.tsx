@@ -123,6 +123,7 @@ export function TimelineToolbar({
   transportBounds,
   transportSceneId,
   onOpenAudioClip,
+  onOptimisticMaster,
 }: {
   projectId: string;
   scene: Scene;
@@ -155,6 +156,8 @@ export function TimelineToolbar({
   };
   transportSceneId?: string;
   onOpenAudioClip?: (request: { kind: AudioClipModalKind; clipId: string | null; start: number }) => void;
+  /** Instant Update: apply Master patch locally before refresh readback. */
+  onOptimisticMaster?: (master: SceneTimelineMaster) => void;
 }) {
   const { selection, snap, setSnap, zoom, setZoom, setSelection } = useDirectorSelection();
   const { t } = useTranslation("timeline");
@@ -208,10 +211,14 @@ export function TimelineToolbar({
     const { flattenMasterPrompts, patchMasterPrompt } = await import("../../timelineMaster/masterTimelineMutate");
     const segments = flattenMasterPrompts(master);
     const last = segments[segments.length - 1];
-    const start = last ? Math.min(scene.duration_sec - 0.5, last.start + last.length) : 0;
+    const duration = Math.max(0.5, Number(scene.duration_sec) || 5);
+    const length = Math.min(2, duration);
+    const lastEnd = last ? Number(last.start) + Number(last.length) : 0;
+    let start = Math.max(0, lastEnd);
+    if (start + length > duration) start = Math.max(0, duration - length);
     await patchMasterPrompt(projectId, scene.id, master, {
-      start: Math.max(0, start),
-      length: Math.min(2, scene.duration_sec || 5),
+      start,
+      length,
       text: "",
     });
     await onRefresh();
@@ -219,7 +226,11 @@ export function TimelineToolbar({
 
   const removePrompt = async () => {
     if (!master) return;
-    const { flattenMasterPrompts, removeMasterPrompts } = await import("../../timelineMaster/masterTimelineMutate");
+    const {
+      applyPromptRemovalToMaster,
+      flattenMasterPrompts,
+      removeMasterPrompts,
+    } = await import("../../timelineMaster/masterTimelineMutate");
     const segments = flattenMasterPrompts(master);
     if (!segments.length) return;
     const selectedId = selection.kind === "promptSeg" ? selection.id : undefined;
@@ -229,7 +240,11 @@ export function TimelineToolbar({
       const ok = window.confirm(t("removeInstruction"));
       if (!ok) return;
     }
-    await removeMasterPrompts(projectId, scene.id, master, [target.id]);
+    const ids = [target.id];
+    if (target.legacyPromptSegmentId) ids.push(target.legacyPromptSegmentId);
+    // Instant Update: drop from Master projection before network round-trip.
+    onOptimisticMaster?.(applyPromptRemovalToMaster(master, ids));
+    await removeMasterPrompts(projectId, scene.id, master, ids);
     if (selection.kind === "promptSeg" && selection.id === target.id) {
       setSelection({ kind: "scene", id: scene.id });
     }
@@ -393,7 +408,6 @@ export function TimelineToolbar({
       return;
     }
     await run(async () => {
-      onGenerationStandby?.(true);
       try {
         const durationSeconds = Number(scene.duration_sec || 0) || undefined;
         const result = await rematerializeThenGenerateScene({
@@ -402,6 +416,10 @@ export function TimelineToolbar({
           generatorId: selectedGen?.id || master?.sceneGeneratorId || scene.engine,
           durationSeconds,
           draftMode: draftAvailable || undefined,
+          beforeGenerate: async () => {
+            await onRefresh();
+            onGenerationStandby?.(true);
+          },
         });
         const err = timelineActionError(result);
         if (err) {
@@ -460,7 +478,7 @@ export function TimelineToolbar({
         onRemove={() => void removePrompt()}
         addTitle={t("addTimedPromptTitle")}
         removeTitle={t("removeTimedPromptTitle")}
-        disabled={busy}
+        disabled={busy || !master}
       />
       <PlusMinusGroup
         label="Audio"

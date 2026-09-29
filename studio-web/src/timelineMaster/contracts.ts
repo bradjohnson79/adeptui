@@ -221,6 +221,8 @@ export interface BatchBlock {
   sourceAnchors: TimelineVisualAnchor[];
   promptSegments: TimelinePromptSegment[];
   visualClips: BatchClip[];
+  /** Creator removed this exact video from Visual. A new deposit clears it. */
+  dismissedVisualAssetId?: string | null;
   audioClips: BatchClip[];
   sfxClips: BatchClip[];
   cameraInstructions: BatchClip[];
@@ -233,6 +235,8 @@ export interface BatchBlock {
   h3Resolution?: { mode: "auto" | "manual"; megapixels: number } | null;
   /** LTX 2.5 Timeline QUALITY tier; independent of h3Resolution. Default 720p when absent. */
   ltxQuality?: "720p" | "1080p" | "2K" | "4K" | null;
+  /** Seedance fal resolution. Absent means 720p. */
+  seedanceResolution?: "480p" | "720p" | "1080p" | "4k" | null;
   configFingerprint?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -454,6 +458,7 @@ export interface SceneTakeQuality {
   width?: number | null;
   height?: number | null;
   ltxQuality?: string | null;
+  seedanceResolution?: string | null;
   durationSec?: number | null;
   batchCount?: number;
 }

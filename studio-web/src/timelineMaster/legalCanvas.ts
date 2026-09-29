@@ -1,8 +1,8 @@
-/** Frontend mirror of the backend MiniMax H3 legal-canvas grid.
+/** Frontend mirror of backend MiniMax H3 legal-canvas (D1 ResolutionSelector).
  *
  * Width/height are never stored on BatchBlock; they are always derived from
- * the canonical megapixel grid. See studio-api/app/video_runtime/legal_canvas.py
- * for the source of truth.
+ * megapixels x aspect via ResolutionSelector(multiple=32). See
+ * studio-api/app/video_runtime/legal_canvas.py for the source of truth.
  */
 
 export type H3ResolutionMode = "auto" | "manual";
@@ -49,6 +49,83 @@ const H3_MEGAPIXEL_BY_VALUE: ReadonlyMap<number, readonly [number, number]> = ne
   H3_MEGAPIXEL_GRID.map(([mp, dims]) => [mp, dims]),
 );
 
+
+/** Adept production ∩ ResolutionSelector aspects — mirrors legal_canvas.H3_SUPPORTED_ASPECTS. */
+export const H3_SUPPORTED_ASPECTS = ["1:1", "4:3", "16:9", "9:16", "21:9"] as const;
+export type H3SupportedAspect = (typeof H3_SUPPORTED_ASPECTS)[number];
+
+/** Comfy ResolutionSelector ratio per supported H3 picture shape.
+ *
+ * Keyed by H3SupportedAspect so the capability check and the math share ONE
+ * source — there is no unknown-key fallback left to silently resolve 16:9.
+ */
+const H3_ASPECT_RATIO: Record<H3SupportedAspect, readonly [number, number]> = {
+  "1:1": [1, 1],
+  "4:3": [4, 3],
+  "16:9": [16, 9],
+  "9:16": [9, 16],
+  "21:9": [21, 9],
+};
+
+/** Soft 16:9 display aliases — mirrors backend legal_canvas.H3_ASPECT_ALIASES. */
+const H3_ASPECT_ALIASES: Record<string, H3SupportedAspect> = {
+  "≈16:9": "16:9",
+  "~16:9": "16:9",
+};
+
+/** Fail-closed capability error — mirrors backend legal_canvas.SpecFidelityError.
+ *
+ * The backend MiniMax H3 path refuses any shape outside H3_SUPPORTED_ASPECTS
+ * (legal_canvas.require_h3_timeline_aspect → code "H3_ASPECT_UNSUPPORTED"). The FE
+ * raises this instead of silently showing 16:9 dims the backend would refuse.
+ */
+export class H3UnsupportedAspectError extends Error {
+  readonly code = "H3_ASPECT_UNSUPPORTED";
+  readonly aspect: string;
+
+  constructor(aspect: string) {
+    super(
+      `MiniMax H3 does not support picture shape ${aspect}. Supported: ${H3_SUPPORTED_ASPECTS.join(", ")}.`,
+    );
+    this.name = "H3UnsupportedAspectError";
+    this.aspect = aspect;
+  }
+}
+
+/** Canonical H3 picture shape for a UI token, or null when H3 cannot resolve it.
+ *
+ * An absent/empty token and the soft 16:9 aliases normalize to "16:9" (backend
+ * `str(aspect or "").strip() or "16:9"`); every other unknown shape returns null so
+ * callers fail closed rather than falling back to 16:9.
+ */
+export function normalizeH3Aspect(aspect?: string | null): H3SupportedAspect | null {
+  const key = String(aspect || "16:9").trim() || "16:9";
+  const alias = H3_ASPECT_ALIASES[key];
+  if (alias) return alias;
+  return key in H3_ASPECT_RATIO ? (key as H3SupportedAspect) : null;
+}
+
+/** Comfy ResolutionSelector(aspect, megapixels, multiple=32) — FE mirror of D1.
+ *
+ * Fail-closed: an aspect outside H3_SUPPORTED_ASPECTS (+ soft 16:9 aliases)
+ * throws H3UnsupportedAspectError and never resolves 16:9 dims.
+ */
+export function resolveH3ResolutionSelector(
+  aspect: string,
+  megapixels: number,
+  multiple = 32,
+): { width: number; height: number } {
+  const key = String(aspect || "16:9").trim() || "16:9";
+  const supported = normalizeH3Aspect(key);
+  if (!supported) throw new H3UnsupportedAspectError(key);
+  const [a, b] = H3_ASPECT_RATIO[supported];
+  const total = Number(megapixels) * 1024 * 1024;
+  const mult = Math.max(1, Math.trunc(multiple));
+  const width = Math.max(mult, Math.round(Math.sqrt((total * a) / b) / mult) * mult);
+  const height = Math.max(mult, Math.round(Math.sqrt((total * b) / a) / mult) * mult);
+  return { width, height };
+}
+
 export function formatH3Megapixels(value: number): string {
   if (value === Math.trunc(value)) {
     return `${Math.trunc(value)}.0 MP`;
@@ -56,14 +133,20 @@ export function formatH3Megapixels(value: number): string {
   return `${value} MP`;
 }
 
-export function resolveH3MegapixelCanvas(mp: number): { label: string; width: number; height: number } {
-  const dims = H3_MEGAPIXEL_BY_VALUE.get(mp);
-  if (!dims) {
-    throw new Error(
-      `${mp} MP is not a supported MiniMax H3 canvas.`,
-    );
+/** Canonical H3 canvas for a megapixel × picture shape.
+ *
+ * Fails closed: an unsupported MP value throws, and an aspect outside
+ * H3_SUPPORTED_ASPECTS propagates H3UnsupportedAspectError from the selector.
+ */
+export function resolveH3MegapixelCanvas(
+  mp: number,
+  aspect: string = "16:9",
+): { label: string; width: number; height: number } {
+  if (!H3_MEGAPIXEL_BY_VALUE.has(mp)) {
+    throw new Error(`${mp} MP is not a supported MiniMax H3 canvas.`);
   }
-  return { label: formatH3Megapixels(mp), width: dims[0], height: dims[1] };
+  const { width, height } = resolveH3ResolutionSelector(aspect, mp, 32);
+  return { label: formatH3Megapixels(mp), width, height };
 }
 
 /** Resolve a BatchBlock's H3 resolution intent to a canonical canvas.
@@ -71,11 +154,13 @@ export function resolveH3MegapixelCanvas(mp: number): { label: string; width: nu
  * Manual mode always uses the stored megapixel value. Auto or absent uses
  * the policy constant by draftMode. Returns a provenance dict carrying the
  * resolved mode, megapixels, label, width, height, and whether the choice was
- * auto-derived.
+ * auto-derived. Aspect is fail-closed: an unsupported picture shape
+ * propagates H3UnsupportedAspectError (never a silent 16:9 canvas).
  */
 export function resolveH3TimelineCanvas(
   h3Resolution: H3ResolutionState | null | undefined,
   draftMode: boolean,
+  aspect: string = "16:9",
 ): H3ResolvedCanvas {
   let mode: H3ResolutionMode = "auto";
   let auto = true;
@@ -93,7 +178,7 @@ export function resolveH3TimelineCanvas(
     }
   }
 
-  const { label, width, height } = resolveH3MegapixelCanvas(mp);
+  const { label, width, height } = resolveH3MegapixelCanvas(mp, aspect);
   return { mode, megapixels: mp, label, width, height, auto };
 }
 
@@ -132,6 +217,7 @@ export function normalizeLtxTimelineQuality(
 
 export function resolveLtxTimelineCanvas(
   ltxQuality: string | null | undefined,
+  aspect?: string | null,
 ): {
   tier: LtxTimelineQuality;
   width: number;
@@ -140,8 +226,8 @@ export function resolveLtxTimelineCanvas(
   honestyLabel: string;
 } {
   const tier = normalizeLtxTimelineQuality(ltxQuality);
-  const dims = LTX_QUALITY_CANVAS_16_9[tier];
-  if (!dims) {
+  const dims16 = LTX_QUALITY_CANVAS_16_9[tier];
+  if (!dims16) {
     return {
       tier,
       width: 0,
@@ -150,11 +236,73 @@ export function resolveLtxTimelineCanvas(
       honestyLabel: "Native 4K is UNAVAILABLE",
     };
   }
+  const aspectKey = String(aspect || "16:9").trim() || "16:9";
+  if (aspectKey === "16:9" || aspectKey === "≈16:9" || aspectKey === "~16:9") {
+    return {
+      tier,
+      width: dims16.width,
+      height: dims16.height,
+      available: true,
+      honestyLabel: `Native ${tier} · ${dims16.width}x${dims16.height}`,
+    };
+  }
+  // Non-16:9: align to BE /32 short-edge class (legal_canvas._ALIGN32_SHORT).
+  const shortByTier: Record<LtxTimelineQuality, number | null> = {
+    "720p": 704,
+    "1080p": 1088,
+    "2K": 1440,
+    "4K": null,
+  };
+  const short = shortByTier[tier];
+  if (short == null) {
+    return {
+      tier,
+      width: 0,
+      height: 0,
+      available: false,
+      honestyLabel: "Native 4K is UNAVAILABLE",
+    };
+  }
+  const pair = ltxDimsForAspectShort(aspectKey, short);
+  if (!pair) {
+    // Honest: do not show landscape WxH for a different aspect.
+    return {
+      tier,
+      width: 0,
+      height: 0,
+      available: true,
+      honestyLabel: `Native ${tier} · ${aspectKey} (WxH at generate)`,
+    };
+  }
   return {
     tier,
-    width: dims.width,
-    height: dims.height,
+    width: pair.width,
+    height: pair.height,
     available: true,
-    honestyLabel: `Native ${tier} — ${dims.width}×${dims.height}`,
+    honestyLabel: `Native ${tier} · ${pair.width}x${pair.height}`,
   };
+}
+
+/** BE-aligned /32 short-edge dims for Timeline LTX honesty labels. */
+function ltxDimsForAspectShort(
+  aspect: string,
+  short: number,
+): { width: number; height: number } | null {
+  const map: Record<string, [number, number]> = {
+    "1:1": [1, 1],
+    "4:3": [4, 3],
+    "16:9": [16, 9],
+    "21:9": [21, 9],
+    "9:16": [9, 16],
+  };
+  const ab = map[aspect];
+  if (!ab) return null;
+  const [a, b] = ab;
+  const align = (n: number) => Math.max(32, Math.round(n / 32) * 32);
+  if (a >= b) {
+    const height = align(short);
+    return { width: align(Math.round((height * a) / b)), height };
+  }
+  const width = align(short);
+  return { width, height: align(Math.round((width * b) / a)) };
 }

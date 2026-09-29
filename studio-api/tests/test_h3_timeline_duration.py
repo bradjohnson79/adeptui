@@ -90,6 +90,17 @@ def test_seed_new_scene_duration_h3_and_ltx():
 
 # ---------------------------------------------------------------------------
 # Layer 2 — batch-creation + scene-creation seeding (creator choice wins)
+#
+# CERTIFIED CONTRACT (2026-09-26 pre-simplification backup + ORDER 8B): creator
+# Batch mutation is RETIRED. service.add_batch / duplicate_batch / delete_batch
+# early-return CREATOR_BATCH_MUTATION_DISABLED. Proof:
+#   app/director_timeline_w46/creator_batch_surface.py:62  (constant)
+#   app/director_timeline_w46/service.py:265-278           (add_batch gate)
+#   tests/test_order8b_no_batch_mint.py:110-115            (gate assertion)
+#   tests/test_timeline_architecture_guard_p4.py:35-43     (gate assertion)
+# The duration-seed intent below is preserved on the paths that remain legal:
+#   SceneService.create -> legal_canvas.seed_new_scene_duration_sec (scene seed)
+#   service.rematerialize_execution_windows -> CD plan windows (execution)
 # ---------------------------------------------------------------------------
 
 
@@ -122,38 +133,106 @@ def db_scene():
         db.close()
 
 
-def _batch_planned(res: dict) -> float:
-    batch = res.get("batch") or {}
-    if not batch and res.get("batchBlockId"):
-        return -1.0
-    return float(batch["duration"]["plannedDuration"])
+def _assert_creator_batch_mutation_disabled(res: dict) -> None:
+    """CERTIFIED GATE: creator Batch CRUD is retired (ORDER 8B / Systems P5).
+
+    Proof (certified contract, not a regression):
+      app/director_timeline_w46/creator_batch_surface.py:62  CREATOR_BATCH_MUTATION_DISABLED
+      app/director_timeline_w46/service.py:265-278           add_batch early-returns the gate
+      tests/test_order8b_no_batch_mint.py:110-115            asserts the same gate
+      tests/test_timeline_architecture_guard_p4.py:35-43     asserts the same gate
+      backups/timeline-pre-simplification/2026-09-26-.../backend-director_timeline_w46/creator_batch_surface.py:62
+    """
+    assert res["ok"] is False
+    assert res["error"] == "CREATOR_BATCH_MUTATION_DISABLED"
+    assert "Co-Director plan" in res["message"]
+    assert res["mock"] is False
+
+
+def _window_planned_total(master: dict) -> float:
+    """Planned duration sum of the LEGAL CD-plan Execution Windows."""
+    return sum(
+        float((b.get("duration") or {}).get("plannedDuration") or 0.0)
+        for b in (master.get("batchBlocks") or [])
+    )
 
 
 def test_add_batch_h3_default_seeds_fifteen(db_scene):
+    """Creator add_batch is retired; the H3 15s seed law survives on the legal path.
+
+    Root cause: service.add_batch is a hard gate now
+    (service.py:265-278 -> creator_batch_surface.py:62). Original intent (H3 with no
+    creator duration -> 15s) is preserved end-to-end through the paths that remain
+    legal: SceneService.create seed (services/scene_service.py:154-157 ->
+    legal_canvas.seed_new_scene_duration_sec:468 -> H3_NEW_SCENE_SEED_SEC=15.0) then
+    CD rematerialize (service.rematerialize_execution_windows:296).
+    """
     from app.director_timeline_w46 import service
+    from app.services.scene_service import SceneService
 
     db, pid, sid = db_scene
     service.workspace(db, pid, sid)
     res = service.add_batch(db, pid, sid, label="Batch H3", generator_id="minimax-h3")
-    assert _batch_planned(res) == 15.0
+    _assert_creator_batch_mutation_disabled(res)
+
+    scene = SceneService.create(db, pid, {"engine": "minimax-h3", "prompt": "seed"})
+    assert scene.duration_sec == 15.0  # H3 seed law still applies
+    service.workspace(db, pid, scene.id)
+    remat = service.rematerialize_execution_windows(db, pid, scene.id, generator_id="minimax-h3")
+    assert remat["ok"] is True
+    assert [b["label"] for b in remat["master"]["batchBlocks"]] == ["Window 1"]  # never "Batch 1"
+    assert _window_planned_total(remat["master"]) == 15.0
 
 
 def test_add_batch_explicit_duration_never_overridden(db_scene):
+    """Creator choice still wins; creator add_batch itself is retired.
+
+    Root cause: service.add_batch gate (service.py:265-278 /
+    creator_batch_surface.py:62). Original intent (explicit duration never
+    overridden) holds on the legal path: services/scene_service.py:151-157 only
+    seeds when the creator did not choose one, and
+    service.rematerialize_execution_windows:296-340 uses scene.duration_sec verbatim.
+    """
     from app.director_timeline_w46 import service
+    from app.services.scene_service import SceneService
 
     db, pid, sid = db_scene
     service.workspace(db, pid, sid)
-    res = service.add_batch(db, pid, sid, label="Batch H3 explicit", planned_duration=8.0, generator_id="minimax-h3")
-    assert _batch_planned(res) == 8.0
+    res = service.add_batch(
+        db, pid, sid, label="Batch H3 explicit", planned_duration=8.0, generator_id="minimax-h3"
+    )
+    _assert_creator_batch_mutation_disabled(res)
+
+    scene = SceneService.create(db, pid, {"engine": "minimax-h3", "duration_sec": 8.0})
+    assert scene.duration_sec == 8.0  # explicit creator duration, not the 15s seed
+    service.workspace(db, pid, scene.id)
+    remat = service.rematerialize_execution_windows(db, pid, scene.id, generator_id="minimax-h3")
+    assert remat["ok"] is True
+    assert _window_planned_total(remat["master"]) == 8.0
 
 
 def test_add_batch_non_h3_keeps_legacy_seed(db_scene):
+    """Non-H3 legacy 5s seed survives on the legal scene-create path.
+
+    Root cause: service.add_batch gate (service.py:265-278 /
+    creator_batch_surface.py:62). WAN is not a Timeline generator, so the CD
+    rematerialize path refuses it (codirector/production/generator_capability.py:57-59
+    -> "not a Timeline generator"); the remaining legal seed owner is
+    legal_canvas.seed_new_scene_duration_sec:468 (LEGACY_NEW_SCENE_SEED_SEC=5.0)
+    reached via services/scene_service.py:154-157.
+    """
     from app.director_timeline_w46 import service
+    from app.services.scene_service import SceneService
+    from app.video_runtime.legal_canvas import seed_new_scene_duration_sec
 
     db, pid, sid = db_scene
     service.workspace(db, pid, sid)
     res = service.add_batch(db, pid, sid, label="Batch WAN", generator_id="wan-t2v-local")
-    assert _batch_planned(res) == 5.0
+    _assert_creator_batch_mutation_disabled(res)
+
+    assert seed_new_scene_duration_sec("wan-t2v-local") == 5.0
+    scene = SceneService.create(db, pid, {"engine": "wan-t2v-local", "prompt": "w"})
+    assert scene.duration_sec == 5.0
 
 
 def test_scene_service_create_seeds_h3_fifteen(db_scene):

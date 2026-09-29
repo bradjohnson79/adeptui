@@ -25,9 +25,11 @@ export type TimelineGeneratorOption = {
   remoteCancelCostNote?: string | null;
   finalRequiresNewGeneration: boolean;
   supportsVideoReferences: boolean;
+  supportsAudioReferences: boolean;
   supportsMultipleImageReferences: boolean;
   maximumReferenceImages: number;
   maximumReferenceVideos: number;
+  maximumReferenceAudio: number;
   supportedAspectRatios: string[];
   /** From the Production Control / adapter join — not invented by the Timeline UI. */
   maxDurationSec?: number | null;
@@ -39,7 +41,9 @@ export type TimelineGeneratorOption = {
   /** Generator produces its own synchronized audio (e.g. MiniMax H3 native audio). */
   audio_generation?: boolean;
   /** Registry-declared Inspector quality control. Never inferred from display names. */
-  qualityControl?: "h3_megapixels" | "ltx_quality" | "";
+  qualityControl?: "h3_megapixels" | "ltx_quality" | "seedance_resolution" | "";
+  /** fal resolution tokens for the selected Seedance product. */
+  supportedResolutions?: string[];
   inPaintStrategies?: string[];
   supportsTimelineGeneration?: boolean;
   /** Per-surface workflow truth (t2v / i2v / multiFrame / r2v). */
@@ -70,7 +74,7 @@ const GENERATOR_ID_ALIASES: Record<string, string> = {
 
 function qualityControlFromUnknown(raw: unknown): TimelineGeneratorOption["qualityControl"] {
   const token = String(raw || "").trim();
-  if (token === "h3_megapixels" || token === "ltx_quality") return token;
+  if (token === "h3_megapixels" || token === "ltx_quality" || token === "seedance_resolution") return token;
   return "";
 }
 
@@ -184,10 +188,16 @@ export function joinProductionControlVideoOptions(
           supportsVideoReferences: Boolean(
             row.supportsVideoReferences ?? adapter?.supportsVideoReferences,
           ),
+          supportsAudioReferences: Boolean(
+            row.supportsAudioReferences ?? adapter?.supportsAudioReferences,
+          ),
           supportsMultipleImageReferences: Boolean(adapter?.supportsMultipleImageReferences),
           maximumReferenceImages: Number(adapter?.maximumReferenceImages || 0),
           maximumReferenceVideos: Number(
             row.maximumReferenceVideos ?? adapter?.maximumReferenceVideos ?? 0,
+          ),
+          maximumReferenceAudio: Number(
+            row.maximumReferenceAudio ?? adapter?.maximumReferenceAudio ?? 0,
           ),
           supportedAspectRatios: Array.isArray(row.supportedAspectRatios)
             ? row.supportedAspectRatios.map((item) => String(item))
@@ -199,6 +209,9 @@ export function joinProductionControlVideoOptions(
           ),
           qualityControl: qualityControlFromUnknown(
             row.qualityControl ?? adapter?.qualityControl,
+          ),
+          supportedResolutions: asStringList(
+            row.supportedResolutions ?? adapter?.supportedResolutions,
           ),
           inPaintStrategies: asStringList(row.inPaintStrategies),
           supportsTimelineGeneration: row.supportsTimelineGeneration !== false,
@@ -247,9 +260,11 @@ export function generatorOptionsFromPayload(payload: Record<string, unknown>): T
       remoteCancelCostNote: a.remoteCancelCostNote ? String(a.remoteCancelCostNote) : null,
       finalRequiresNewGeneration: a.finalRequiresNewGeneration !== false,
       supportsVideoReferences: Boolean(a.supportsVideoReferences),
+      supportsAudioReferences: Boolean(a.supportsAudioReferences),
       supportsMultipleImageReferences: Boolean(a.supportsMultipleImageReferences),
       maximumReferenceImages: Number(a.maximumReferenceImages || 0),
       maximumReferenceVideos: Number(a.maximumReferenceVideos || 0),
+      maximumReferenceAudio: Number(a.maximumReferenceAudio || 0),
       supportedAspectRatios: Array.isArray(a.supportedAspectRatios)
         ? a.supportedAspectRatios.map((x) => String(x))
         : [],
@@ -257,6 +272,7 @@ export function generatorOptionsFromPayload(payload: Record<string, unknown>): T
       usesFastQuality: usesFastQualityFlag(id, a.usesFastQuality),
       audio_generation: Boolean(a.audio_generation ?? a.supportsAudio),
       qualityControl: qualityControlFromUnknown(a.qualityControl),
+      supportedResolutions: asStringList(a.supportedResolutions),
     });
   }
   return out;
@@ -306,6 +322,11 @@ export function anyTimelineGeneratorExecutable(
 export function supportsVideoMotionReferences(option: TimelineGeneratorOption | null | undefined): boolean {
   return Boolean(option?.supportsVideoReferences && (option.maximumReferenceVideos || 0) > 0);
 }
+
+export function supportsTypedAudioReferences(option: TimelineGeneratorOption | null | undefined): boolean {
+  return Boolean(option?.supportsAudioReferences && (option.maximumReferenceAudio || 0) > 0);
+}
+
 
 export function supportsTurboLora(option: TimelineGeneratorOption | null | undefined): boolean {
   return Boolean(option?.supportsTurboLora);
@@ -440,3 +461,28 @@ export function resolveNativeAudioState(
     detail: `${name} produces synchronized native audio`,
   };
 }
+
+
+/** Picture Shape options for Timeline Inspector: PRODUCTION_ASPECTS ∩ model caps. */
+export function aspectTokenMatches(listed: string, production: string): boolean {
+  const a = String(listed || "").trim();
+  const b = String(production || "").trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // ≈16:9 / ~16:9 ↔ 16:9
+  const norm = (s: string) => s.replace(/^≈/, "").replace(/^~/, "").trim();
+  return norm(a) === norm(b) || a.includes(b) || b.includes(norm(a));
+}
+
+export function allowedProductionAspects(
+  productionAspects: readonly string[],
+  supportedAspectRatios: string[] | null | undefined,
+): string[] {
+  const listed = Array.isArray(supportedAspectRatios) ? supportedAspectRatios.map(String) : [];
+  if (!listed.length) {
+    // No caps advertised — show full production set (backend still hard-refuses).
+    return [...productionAspects];
+  }
+  return productionAspects.filter((aspect) => listed.some((s) => aspectTokenMatches(s, aspect)));
+}
+

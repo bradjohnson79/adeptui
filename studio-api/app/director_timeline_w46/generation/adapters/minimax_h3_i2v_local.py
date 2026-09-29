@@ -18,10 +18,24 @@ ALIASES = frozenset({"minimax-h3-i2v-local", "minimax-h3-i2v"})
 ENGINE = "minimax-h3"
 
 
+def _h3_canonical_resolution_labels() -> list[str]:
+    """Derive H3 WxH labels from the single D1 legal-pixel set."""
+    from app.video_runtime.legal_canvas import H3_LEGAL_RESOLUTION_LABELS
+
+    return list(H3_LEGAL_RESOLUTION_LABELS)
+
+
+
+def _h3_capability_aspect_ratios() -> list[str]:
+    """ONE owner: legal_canvas.H3_CAPABILITY_ASPECT_RATIOS (no cloned AR table)."""
+    from app.video_runtime.legal_canvas import H3_CAPABILITY_ASPECT_RATIOS
+
+    return list(H3_CAPABILITY_ASPECT_RATIOS)
+
 def _capabilities() -> VideoGeneratorCapabilities:
     return VideoGeneratorCapabilities(
         id=GENERATOR_ID,
-        label="MiniMax H3 Reference-to-Video (Local)",
+        label="MiniMax H3 Director — Local",
         executionType="local",
         supportsTextToVideo=False,
         supportsImageToVideo=False,
@@ -29,15 +43,15 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportsEndFrame=False,
         supportsMultipleImageReferences=True,
         supportsReferenceToVideo=True,
-        supportsVideoReferences=False,
+        supportsVideoReferences=True,
         supportsAudioReferences=True,
         maximumReferenceImages=9,
-        maximumReferenceVideos=0,
-        maximumReferenceAudio=9,
-        supportedDurations=[],
+        maximumReferenceVideos=3,
+        maximumReferenceAudio=3,
+        supportedDurations=[float(s) for s in range(3, 16)],
         maxDurationSec=15.0,
-        supportedResolutions=["864x480", "832x480", "1280x704", "1920x1088", "2560x1440", "768x448"],
-        supportedAspectRatios=["≈16:9", "16:9"],
+        supportedResolutions=_h3_canonical_resolution_labels(),
+        supportedAspectRatios=_h3_capability_aspect_ratios(),
         supportsSeed=True,
         supportsNegativePrompt=False,
         supportsCameraControls=False,
@@ -50,7 +64,7 @@ def _capabilities() -> VideoGeneratorCapabilities:
         },
         executable=True,
         notes=(
-            "Timeline Reference-to-Video. Character, place, and prior-frame pictures "
+            "MiniMax H3 Director — Local. Character, place, and prior-frame pictures "
             "enter MiniMaxH3ReferenceToVideo as ref_images. Approved character voices "
             "enter as ref_audios with <Audio j> tags. Ordinary first-frame I2V "
             "is refused. Duration comes from the Inspector (max 15s) and snaps "
@@ -61,8 +75,8 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportsRunningCancel=True,
         finalRequiresNewGeneration=True,
         draftResolution=None,
-        finalResolution="864x480",
-        supportsImageAndVideoTogether=False,
+        finalResolution="1152x640",
+        supportsImageAndVideoTogether=True,
     )
 
 
@@ -80,6 +94,18 @@ class MiniMaxH3I2VLocalAdapter:
         if request.generatorId in {"minimax-h3-t2v-local", "minimax-h3-local", "minimax-h3"}:
             # Same mechanism; the T2V row is also R2V now.
             pass
+        # Output size must be an H3 megapixel-table entry — never Scene canvas.
+        res = str(request.resolution or "").strip().lower()
+        if res and "x" in res:
+            try:
+                w_s, h_s = res.split("x", 1)
+                from app.video_runtime.legal_canvas import check_h3_resolution
+
+                checked = check_h3_resolution(int(w_s), int(h_s))
+                if not checked.ok:
+                    errors.append(checked.message or "H3_RESOLUTION_UNSUPPORTED")
+            except ValueError:
+                errors.append(f"MiniMax H3 resolution {request.resolution!r} is not a WxH pair.")
         return ValidationResult(ok=not errors, errors=errors, warnings=list(result.warnings or []))
 
     def submit(self, request: TimelineGenerationRequest) -> NormalizedJobSubmission:
@@ -93,7 +119,7 @@ class MiniMaxH3I2VLocalAdapter:
             request,
             engine=ENGINE,
             generator_id=GENERATOR_ID,
-            queue_message="Timeline batch MiniMax H3 Reference-to-Video queued",
+            queue_message="Timeline batch MiniMax H3 Director — Local queued",
         )
 
     def get_status(self, job: NormalizedJobSubmission) -> NormalizedJobStatus:

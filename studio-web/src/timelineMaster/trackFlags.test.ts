@@ -61,18 +61,21 @@ describe("trackFlags", () => {
     expect(src).not.toContain("No assets yet");
   });
 
-  it("Timeline Library rows expose an X remove control wired to onRemoveFromLibrary", () => {
+  it("Timeline Library rows expose an X remove control wired to libraryAssetIds SoT", () => {
     const tray = readFileSync(join(__dirname, "../components/AssetTray.tsx"), "utf8");
     expect(tray).toContain("onRemoveFromLibrary");
     expect(tray).toContain("asset-remove-library-");
     expect(tray).toContain("asset-item__action--remove");
     const shell = readFileSync(
-      join(__dirname, "../components/timeline-master/TimelineEditorShell.tsx"),
+      join(__dirname, "../components/film-timeline/FilmTimelineShell.tsx"),
       "utf8",
     );
     expect(shell).toContain("handleRemoveFromLibrary");
-    expect(shell).toContain("onRemoveFromLibrary={handleRemoveFromLibrary}");
-    expect(shell).toContain("library_asset_ids");
+    expect(shell).toContain("directorTimelineSetLibraryAssets");
+    expect(shell).toContain("libraryAssetIds");
+    expect(shell).toContain('title="Remove reference"');
+    expect(shell).toContain("film-timeline__asset-remove");
+    expect(shell).toContain("film-timeline-asset-remove-");
   });
 
   it("Timeline Library modal can add media into the project Library", () => {
@@ -100,9 +103,9 @@ describe("trackFlags", () => {
     expect(disabledGuards.length).toBe(2);
   });
 
-  it("Timeline left drawer keeps Scenes and Library; Video Generator stays in the Inspector", () => {
+  it("FilmTimelineShell hosts Library modal and keeps generator in the Inspector", () => {
     const src = readFileSync(
-      join(__dirname, "../components/timeline-master/TimelineEditorShell.tsx"),
+      join(__dirname, "../components/film-timeline/FilmTimelineShell.tsx"),
       "utf8",
     );
     const inspector = readFileSync(
@@ -112,9 +115,10 @@ describe("trackFlags", () => {
     expect(src).not.toContain("VideoGeneratorDock");
     expect(src).toContain("AddFromProjectLibraryModal");
     expect(src).toContain("onAssetsChanged");
-    expect(src).toContain("timeline-tab-gpu");
-    expect(src).toContain("runGenerateScene");
-    expect(src).toContain("timeline-v2__dock--scenes");
+    expect(src).toContain("film-timeline-tab-");
+    expect(src).toContain("handleAddFromProjectLibrary");
+    expect(src).toContain("handleRemoveFromLibrary");
+    expect(src).toContain("film-timeline-open-library");
     expect(inspector).toContain('data-testid="timeline-inspector-generator"');
   });
 

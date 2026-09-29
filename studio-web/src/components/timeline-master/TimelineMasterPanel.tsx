@@ -147,6 +147,12 @@ export function TimelineMasterPanel({
                 projectId,
                 sceneId,
                 generatorId: master?.sceneGeneratorId,
+                beforeGenerate: async (rematerialize) => {
+                  const next = rematerialize.master;
+                  if (next && typeof next === "object") {
+                    setMaster(next as SceneTimelineMaster);
+                  }
+                },
               });
               const err = timelineActionError(result);
               if (err) {
