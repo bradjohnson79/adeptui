@@ -211,3 +211,13 @@ def test_resolution_for_request_ltx_9_16():
     batch = BatchBlock(id="bb_ltx", sceneId="sc_test", generatorId=caps.id, ltxQuality="720p")
     res = rb._resolution_for_request(caps, "9:16", batch, draft_mode=False)
     assert res == "704x1248"
+
+
+def test_film_timeline_publishes_one_production_aspect_contract():
+    from app.film_timeline.router import capabilities
+    from app.video_runtime.legal_canvas import H3_SUPPORTED_ASPECTS, TIMELINE_PRODUCTION_ASPECTS
+
+    payload = capabilities()
+    assert payload["productionAspects"] == ["1:1", "4:3", "16:9", "9:16", "21:9"]
+    assert payload["productionAspects"] == list(TIMELINE_PRODUCTION_ASPECTS)
+    assert payload["h3Aspects"] == list(H3_SUPPORTED_ASPECTS)

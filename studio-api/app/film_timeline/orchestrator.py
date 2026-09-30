@@ -179,6 +179,50 @@ def update_timed_prompt(
     return {"ok": True, "shot": shot.model_dump(), "film": film.model_dump(), "rendered": False}
 
 
+def delete_timed_prompt(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    shot_id: str,
+    *,
+    segment_id: str | None = None,
+) -> dict[str, Any]:
+    """Clear the shot Timed Prompt, and one segment prompt when that segment is selected."""
+    film = require_film(db, project_id, scene_id)
+    shot = _shot(film, shot_id)
+    if segment_id:
+        segment = next((item for item in shot.segments if item.id == segment_id), None)
+        if segment is None:
+            return {"ok": False, "error": "SEGMENT_NOT_FOUND", "message": "That timed prompt is not on this shot."}
+        segment.timedPrompt = ""
+    shot.timedPrompt = ""
+    save_film(db, project_id, scene_id, film)
+    return {"ok": True, "shot": shot.model_dump(), "film": film.model_dump()}
+
+
+def delete_segment(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    shot_id: str,
+    segment_id: str,
+) -> dict[str, Any]:
+    """Remove one generated video segment. Other segments and their continuity packets stay."""
+    film = require_film(db, project_id, scene_id)
+    shot = _shot(film, shot_id)
+    kept = [item for item in shot.segments if item.id != segment_id]
+    if len(kept) == len(shot.segments):
+        return {"ok": False, "error": "SEGMENT_NOT_FOUND", "message": "That video segment is not on this shot."}
+    shot.segments = kept
+    shot.state.segmentIds = [item for item in shot.state.segmentIds if item != segment_id]
+    if shot.state.priorSegmentId == segment_id:
+        shot.state.priorSegmentId = kept[-1].id if kept else None
+    if segment_id in (shot.state.stitchSegmentIds or []):
+        shot.state.stitchStatus = "stale"
+    save_film(db, project_id, scene_id, film)
+    return {"ok": True, "film": film.model_dump()}
+
+
 def attach_reference(
     db: Session,
     project_id: str,
@@ -367,6 +411,49 @@ def continue_shot(
             completed[-1].id,
         )
         return _submit_plan(db, project_id, scene_id, film, shot, continue_from=completed[-1])
+
+
+def review_extend(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    shot_id: str,
+    *,
+    duration_sec: float,
+    timed_prompt: str,
+    generator_id: str | None = None,
+    provider_options: dict | None = None,
+) -> dict[str, Any]:
+    """Review the prior segment with the existing Omni packet, then use Continue Shot."""
+    from .continuity import ensure_segment_continuity
+
+    with _film_shot_lock(project_id, scene_id, shot_id):
+        film = require_film(db, project_id, scene_id)
+        shot = _shot(film, shot_id)
+        completed = [segment for segment in shot.segments if segment.status == "completed" and segment.assetId]
+        if not completed:
+            raise FilmTimelineError(
+                "CONTINUITY_MISSING",
+                "Review & Extend needs a finished segment on this shot. Generate the shot first. Nothing already finished was changed.",
+            )
+        prior = completed[-1]
+        packet = ensure_segment_continuity(db, project_id, scene_id, shot, prior) or {}
+        omni = packet.get("omni") if isinstance(packet, dict) else {}
+        status = str(omni.get("status") or "unavailable") if isinstance(omni, dict) else "unavailable"
+        meta = dict(prior.generationMetadata or {})
+        meta["reviewExtend"] = {"reviewed": True, "omniStatus": status}
+        prior.generationMetadata = meta
+        save_film(db, project_id, scene_id, film)
+    return continue_shot(
+        db,
+        project_id,
+        scene_id,
+        shot_id,
+        duration_sec=duration_sec,
+        timed_prompt=timed_prompt,
+        generator_id=generator_id,
+        provider_options=provider_options,
+    )
 
 
 def _restore_retake_asset(segment: Segment) -> bool:

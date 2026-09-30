@@ -137,9 +137,15 @@ def get_film(project_id: str, scene_id: str, db: Session = Depends(get_db)):
 
 @router.get("/capabilities")
 def capabilities():
+    from ..video_runtime.legal_canvas import H3_SUPPORTED_ASPECTS, TIMELINE_PRODUCTION_ASPECTS
     from .availability import list_generator_status
 
-    return {"ok": True, "capabilities": list_generator_status()}
+    return {
+        "ok": True,
+        "capabilities": list_generator_status(),
+        "productionAspects": list(TIMELINE_PRODUCTION_ASPECTS),
+        "h3Aspects": list(H3_SUPPORTED_ASPECTS),
+    }
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/shots")
@@ -219,6 +225,25 @@ def post_generate(project_id: str, scene_id: str, shot_id: str, body: GenerateBo
 
     try:
         return generate_shot(
+            db,
+            project_id,
+            scene_id,
+            shot_id,
+            duration_sec=body.durationSec,
+            timed_prompt=body.timedPrompt,
+            generator_id=body.generatorId,
+            provider_options=body.providerOptions,
+        )
+    except FilmTimelineError as exc:
+        _fail(exc, 409 if exc.code == "CONTINUITY_MISSING" else 400)
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/review-extend")
+def post_review_extend(project_id: str, scene_id: str, shot_id: str, body: ContinueBody, db: Session = Depends(get_db)):
+    from .orchestrator import review_extend
+
+    try:
+        return review_extend(
             db,
             project_id,
             scene_id,
@@ -390,3 +415,29 @@ def remove_clip(project_id: str, scene_id: str, clip_id: str, db: Session = Depe
     from .insertion import delete_clip
 
     return delete_clip(db, project_id, scene_id, clip_id)
+
+
+@router.delete("/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/segments/{segment_id}")
+def remove_segment(project_id: str, scene_id: str, shot_id: str, segment_id: str, db: Session = Depends(get_db)):
+    from .orchestrator import delete_segment
+
+    try:
+        return delete_segment(db, project_id, scene_id, shot_id, segment_id)
+    except FilmTimelineError as exc:
+        _fail(exc)
+
+
+@router.delete("/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/prompt")
+def remove_prompt(
+    project_id: str,
+    scene_id: str,
+    shot_id: str,
+    segment_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    from .orchestrator import delete_timed_prompt
+
+    try:
+        return delete_timed_prompt(db, project_id, scene_id, shot_id, segment_id=segment_id)
+    except FilmTimelineError as exc:
+        _fail(exc)

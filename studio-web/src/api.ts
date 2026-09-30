@@ -4409,6 +4409,119 @@ foundationStatus: (projectId: string) =>
         body: JSON.stringify(body || { scope: "full" }),
       },
     ),
+  filmTimelineGet: (projectId: string, sceneId: string) =>
+    req<{ ok: boolean; film: Record<string, any> }>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}`,
+    ),
+  filmTimelineCapabilities: () =>
+    req<{ ok: boolean; capabilities: Array<Record<string, unknown>>; productionAspects?: string[]; h3Aspects?: string[] }>(
+      `/api/film-timeline/capabilities`,
+    ),
+  filmTimelineCreateShot: (projectId: string, sceneId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelineSetShotModel: (projectId: string, sceneId: string, shotId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelineNewShot: (projectId: string, sceneId: string, body?: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/new`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) },
+    ),
+  filmTimelinePrompt: (projectId: string, sceneId: string, shotId: string, timedPrompt: string) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/prompt`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timedPrompt }) },
+    ),
+  filmTimelineGenerate: (projectId: string, sceneId: string, shotId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/generate`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelineContinue: (projectId: string, sceneId: string, shotId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/continue`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelineReviewExtend: (projectId: string, sceneId: string, shotId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/review-extend`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelineSync: (projectId: string, sceneId: string, shotId: string) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/sync`,
+      { method: "POST" },
+    ),
+  filmTimelineRegenerate: (projectId: string, sceneId: string, shotId: string, segmentId: string) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/segments/${encodeURIComponent(segmentId)}/regenerate`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    ),
+  filmTimelineAddMedia: (projectId: string, sceneId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/media`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelinePatchClip: (projectId: string, sceneId: string, clipId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/clips/${encodeURIComponent(clipId)}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelineDeleteClip: (projectId: string, sceneId: string, clipId: string) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/clips/${encodeURIComponent(clipId)}`,
+      { method: "DELETE" },
+    ),
+  filmTimelineDeleteSegment: (projectId: string, sceneId: string, shotId: string, segmentId: string) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/segments/${encodeURIComponent(segmentId)}`,
+      { method: "DELETE" },
+    ),
+  filmTimelineDeletePrompt: (projectId: string, sceneId: string, shotId: string, segmentId?: string) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/prompt${segmentId ? `?segment_id=${encodeURIComponent(segmentId)}` : ""}`,
+      { method: "DELETE" },
+    ),
+  filmTimelineAttachReference: (projectId: string, sceneId: string, shotId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/references`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelineCancel: (projectId: string, sceneId: string, shotId: string) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/cancel`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    ),
+  filmTimelineDetachReference: (projectId: string, sceneId: string, shotId: string, assetId: string) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/references/remove`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assetId }) },
+    ),
+  filmTimelineRetake: (projectId: string, sceneId: string, shotId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/shots/${encodeURIComponent(shotId)}/retake`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelinePublish: (projectId: string, sceneId: string, body: { assetId: string; update?: boolean }) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/publish`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  filmTimelineMagiOptions: (projectId: string, sceneId: string, assetId: string) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/magi/options`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assetId }) },
+    ),
+  filmTimelineMagi: (projectId: string, sceneId: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>(
+      `/api/film-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/magi`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
   directorTimelineListSceneTakes: (projectId: string, sceneId: string) =>
     req<{
       ok: boolean;

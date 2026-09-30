@@ -25,6 +25,27 @@ export function isLegacyR2vFilmmakerError(rawError: string): boolean {
  * On the Film Timeline H3 Director path, legacy R2V duration/grid sticky errors are
  * not current Generate truth — hide them (Phase 10) unless a fresh Director error arrives.
  */
+export type RenderNotice = { key: string; status: "completed" | "failed" | "cancelled"; text: string };
+
+/** Latest finished render the creator can dismiss. The key stays stable across polls. */
+export function renderNoticeForSegments(
+  segments: Array<{ id?: string; status?: string | null; error?: string | null }> | null | undefined,
+): RenderNotice | null {
+  const latest = [...(segments || [])].reverse().find((item) => {
+    const status = String(item.status || "");
+    return status === "completed" || status === "failed" || status === "cancelled";
+  });
+  if (!latest?.id) return null;
+  const status = latest.status as RenderNotice["status"];
+  const text = status === "failed" ? latest.error || "Render failed" : status === "cancelled" ? "Render cancelled" : "Render complete";
+  return { key: `${latest.id}:${status}`, status, text };
+}
+
+export function visibleRenderNotice(notice: RenderNotice | null, dismissedKey: string): RenderNotice | null {
+  if (!notice || notice.key === dismissedKey) return null;
+  return notice;
+}
+
 export function visibleSegmentError(
   rawError: string,
   stickyHidden: boolean,

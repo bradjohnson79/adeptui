@@ -24,17 +24,13 @@ import {
   allowedProductionAspects,
   type TimelineGeneratorOption,
 } from "../../timelineMaster/draftCapabilities";
-import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
-import {
-  H3_SUPPORTED_ASPECTS,
-  LTX_DEFAULT_QUALITY,
-  type LtxTimelineQuality,
-} from "../../timelineMaster/legalCanvas";
+import { normalizeProductionAspect } from "../../workspacePrefs";
+import { LTX_DEFAULT_QUALITY, type LtxTimelineQuality } from "../../timelineMaster/legalCanvas";
 import { MagiUpscaleChooser } from "../timeline-master/MagiUpscaleChooser";
 import { PreviewFullscreenTransport } from "../timeline-master/PreviewFullscreenTransport";
 import { PreviewVideoActionMenu } from "../timeline-master/PreviewVideoActionMenu";
 import { TimelineGpuPane } from "../timeline-master/TimelineGpuPane";
-import { resolveFilmTimelinePlanDims, visibleSegmentError } from "../../filmTimeline/filmTimelinePresentation";
+import { renderNoticeForSegments, resolveFilmTimelinePlanDims, visibleRenderNotice, visibleSegmentError } from "../../filmTimeline/filmTimelinePresentation";
 import { TimelineHotKeysPane } from "../timeline-master/TimelineHotKeysPane";
 import { TimelineRetakeOverlay } from "../timeline-master/TimelineRetakeOverlay";
 import { PreviewPublishBarVisibilityToggle } from "../LivePreviewMonitor";
@@ -212,10 +208,13 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
   const [duration, setDuration] = useState(10);
   const [modelId, setModelId] = useState("");
   const [models, setModels] = useState<ModelRow[]>([]);
+  const [productionAspects, setProductionAspects] = useState<string[]>([]);
+  const [h3Aspects, setH3Aspects] = useState<string[]>([]);
   const [h3Resolution, setH3Resolution] = useState<{ mode: "auto" | "manual"; megapixels: number }>({ mode: "auto", megapixels: 0.7 });
   const [ltxQuality, setLtxQuality] = useState<LtxTimelineQuality>(LTX_DEFAULT_QUALITY);
   const [message, setMessage] = useState("");
   const [stickyErrorHidden, setStickyErrorHidden] = useState(false);
+  const [dismissedNoticeKey, setDismissedNoticeKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<LeftTab>(() => {
     const stored = localStorage.getItem(LEFT_TAB_KEY);
@@ -293,7 +292,8 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
   const rawSegmentError = (shot?.segments || []).find((item) => item.status === "failed" && item.error)?.error || "";
   const _gidForErr = String(modelId || film?.generatorId || "").toLowerCase();
   const h3DirectorSelected = _gidForErr.includes("minimax-h3") && _gidForErr.includes("local");
-  const segmentError = visibleSegmentError(rawSegmentError, stickyErrorHidden, {
+  const renderNotice = visibleRenderNotice(renderNoticeForSegments(shot?.segments), dismissedNoticeKey);
+  const segmentError = visibleSegmentError(rawSegmentError, stickyErrorHidden || Boolean(renderNotice) || dismissedNoticeKey.endsWith(":failed"), {
     hideLegacyR2v: h3DirectorSelected,
   });
   const planDims = useMemo(
@@ -381,6 +381,8 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
   useEffect(() => {
     void load().catch((error) => setMessage(error instanceof Error ? error.message : "Timeline could not be opened."));
     void api.filmTimelineCapabilities().then((response) => {
+      setProductionAspects(Array.isArray(response.productionAspects) ? response.productionAspects.map(String) : []);
+      setH3Aspects(Array.isArray(response.h3Aspects) ? response.h3Aspects.map(String) : []);
       setModels(
         (response.capabilities || [])
           .filter((item) => !String(item.id || "").includes("stub"))
@@ -471,6 +473,32 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     }
   }
 
+  async function removeClip(clipId: string) {
+    if (!sceneId) return;
+    await run(() => api.filmTimelineDeleteClip(project.id, sceneId, clipId));
+  }
+
+  async function removeVideoItem(item: { id: string; kind?: "segment" | "clip" }) {
+    if (!sceneId) return;
+    if (item.kind === "segment") {
+      if (!shot) return;
+      await run(() => api.filmTimelineDeleteSegment(project.id, sceneId, shot.id, item.id));
+      if (segmentId === item.id) setSegmentId("");
+      return;
+    }
+    await removeClip(item.id);
+  }
+
+  async function removeTimedPrompt() {
+    if (!shot || !sceneId) return;
+    const selected = shot.segments.find((item) => item.id === segmentId);
+    await run(async () => {
+      const result = await api.filmTimelineDeletePrompt(project.id, sceneId, shot.id, selected?.id);
+      setPrompt("");
+      return result;
+    });
+  }
+
   async function ensureShot() {
     if (shot) return shot.id;
     const created = (await api.filmTimelineCreateShot(project.id, sceneId, {
@@ -507,6 +535,18 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     if (ltxSelected && ltxQuality) providerOpts["ltxQuality"] = ltxQuality;
     if (Object.keys(providerOpts).length) body["providerOptions"] = providerOpts;
     await run(() => api.filmTimelineContinue(project.id, sceneId, shot.id, body));
+  }
+
+  async function reviewExtend() {
+    if (!shot) return;
+    setStickyErrorHidden(false);
+    setMessage("");
+    const body: Record<string, unknown> = { durationSec: duration, timedPrompt: prompt, generatorId: modelId || undefined };
+    const providerOpts: Record<string, unknown> = {};
+    if (h3Resolution.mode === "manual") providerOpts["h3Resolution"] = h3Resolution;
+    if (ltxSelected && ltxQuality) providerOpts["ltxQuality"] = ltxQuality;
+    if (Object.keys(providerOpts).length) body["providerOptions"] = providerOpts;
+    await run(() => api.filmTimelineReviewExtend(project.id, sceneId, shot.id, body));
   }
 
   function place(asset: Asset, mode: "reference" | "timeline") {
@@ -720,11 +760,11 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     ...(shot?.segments || [])
       .filter((item) => item.assetId)
       .map((item) => {
-        const clip = { id: item.id, label: `${item.durationSec}s`, assetId: item.assetId || "", startSec: videoCursor, durationSec: item.durationSec };
+        const clip = { id: item.id, label: `${item.durationSec}s`, assetId: item.assetId || "", startSec: videoCursor, durationSec: item.durationSec, kind: "segment" as const };
         videoCursor += item.durationSec;
         return clip;
       }),
-    ...(film?.videoClips || []),
+    ...(film?.videoClips || []).map((clip) => ({ ...clip, kind: "clip" as const })),
   ];
   const previewUrl = preview.assetId ? api.assetUrl(preview.assetId, null, project.id) : "";
 
@@ -767,15 +807,12 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
       </label>
 
       {(() => {
-        // MiniMax H3 advertises no aspect caps; offer its canonical legal set
-        // (legalCanvas.H3_SUPPORTED_ASPECTS) instead of the full production list
-        // so frontend availability agrees with backend capability refusal.
+        // Picture shapes come from the backend production contract. H3 with no
+        // advertised caps uses that contract's H3 subset.
         const supportedAspects = selectedModel?.supportedAspectRatios;
         const h3Selected = String(selectedModel?.id || "").includes("minimax-h3");
-        const aspectOptions = allowedProductionAspects(
-          h3Selected && !(supportedAspects && supportedAspects.length) ? H3_SUPPORTED_ASPECTS : PRODUCTION_ASPECTS,
-          supportedAspects,
-        );
+        const aspectCatalog = h3Selected && !(supportedAspects && supportedAspects.length) ? h3Aspects : productionAspects;
+        const aspectOptions = allowedProductionAspects(aspectCatalog, supportedAspects);
         const current = normalizeProductionAspect(scene?.aspect_ratio);
         const valueInList = aspectOptions.includes(current) ? current : "";
         return (
@@ -987,6 +1024,14 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
         {preview.kind === "video" && previewUrl ? <video ref={videoRef} src={previewUrl} controls /> : null}
         {preview.kind === "empty" ? <p>Generate a shot to see it here.</p> : null}
         <FilmPreviewClock videoRef={videoRef} active={preview.kind === "video"} />
+        {renderNotice ? (
+          <p className="film-timeline__notice" data-testid="film-timeline-render-notice">
+            <span>{renderNotice.text}</span>
+            <button type="button" className="film-timeline__remove" aria-label="Dismiss notice" data-testid="film-timeline-dismiss-notice" onClick={() => setDismissedNoticeKey(renderNotice.key)}>
+              ×
+            </button>
+          </p>
+        ) : null}
         {generating ? (
           <div className="film-timeline__progress" data-testid="film-timeline-progress">
             <span>
@@ -1127,9 +1172,14 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
           <span>Video</span>
           <div>
             {videoClips.map((clip) => (
-              <button key={clip.id} type="button" className={segmentId === clip.id ? "is-selected" : ""} onClick={() => setSegmentId(clip.id)}>
-                {clip.label}
-              </button>
+              <span key={clip.id} className="film-timeline__clip-row">
+                <button type="button" className={segmentId === clip.id ? "is-selected" : ""} onClick={() => setSegmentId(clip.id)}>
+                  {clip.label}
+                </button>
+                <button type="button" className="film-timeline__remove" aria-label={`Remove ${clip.label}`} data-testid="film-timeline-delete-video" onClick={() => void removeVideoItem(clip)}>
+                  ×
+                </button>
+              </span>
             ))}
           </div>
         </div>
@@ -1139,10 +1189,15 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
           <span>Audio</span>
           <div>
             {row.map((clip) => (
-              <button key={clip.id} type="button">
-                {clip.label}
-                {clip.role ? ` Â· ${clip.role}` : ""}
-              </button>
+              <span key={clip.id} className="film-timeline__clip-row">
+                <button type="button">
+                  {clip.label}
+                  {clip.role ? ` · ${clip.role}` : ""}
+                </button>
+                <button type="button" className="film-timeline__remove" aria-label={`Remove ${clip.label}`} data-testid="film-timeline-delete-audio" onClick={() => void removeClip(clip.id)}>
+                  ×
+                </button>
+              </span>
             ))}
           </div>
         </div>
@@ -1152,9 +1207,12 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
           <span>SFX</span>
           <div>
             {(film?.sfx || []).map((clip) => (
-              <button key={clip.id} type="button">
-                {clip.label}
-              </button>
+              <span key={clip.id} className="film-timeline__clip-row">
+                <button type="button">{clip.label}</button>
+                <button type="button" className="film-timeline__remove" aria-label={`Remove ${clip.label}`} data-testid="film-timeline-delete-sfx" onClick={() => void removeClip(clip.id)}>
+                  ×
+                </button>
+              </span>
             ))}
           </div>
         </div>
@@ -1190,16 +1248,24 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
           })}
         </div>
       ) : null}
-      <label className="film-timeline__prompt">
-        Timed Prompt
+      <div className="film-timeline__prompt">
+        <span className="film-timeline__prompt-head">
+          Timed Prompt
+          <button type="button" className="film-timeline__remove" aria-label="Remove timed prompt" data-testid="film-timeline-delete-prompt" disabled={!prompt.trim()} onClick={() => void removeTimedPrompt()}>
+            ×
+          </button>
+        </span>
         <textarea value={prompt} data-testid="film-timeline-prompt" onChange={(event) => setPrompt(event.target.value)} />
-      </label>
+      </div>
       <div className="film-timeline__actions">
         <button type="button" data-testid="film-timeline-generate" disabled={busy || !prompt.trim()} onClick={() => void generate()}>
           Generate Shot
         </button>
         <button type="button" data-testid="film-timeline-continue" disabled={busy || !completed || !prompt.trim()} onClick={() => void continueShot()}>
           Continue Shot
+        </button>
+        <button type="button" data-testid="film-timeline-review-extend" disabled={busy || !completed || !prompt.trim()} onClick={() => void reviewExtend()}>
+          Review & Extend
         </button>
       </div>
       {message || segmentError || seamWarning ? (

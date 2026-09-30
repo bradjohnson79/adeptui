@@ -1,0 +1,654 @@
+.film-timeline {
+  display: flex;
+  position: relative;
+  height: 100%;
+  min-height: 640px;
+  background: #101114;
+  color: #f4f1ea;
+  font-family: "Segoe UI", sans-serif;
+}
+
+.film-timeline .ds-split {
+  height: 100%;
+}
+
+.film-timeline__left,
+.film-timeline__center {
+  min-height: 0;
+  overflow: auto;
+}
+
+.film-timeline__left {
+  padding: 12px;
+  background: #17191e;
+  border-right: 1px solid #2a2d34;
+}
+
+.film-timeline__center {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 20px;
+}
+
+.film-timeline__field,
+.film-timeline__prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #b7b3aa;
+}
+
+.film-timeline select,
+.film-timeline textarea,
+.film-timeline input,
+.film-timeline button {
+  font: inherit;
+  color: inherit;
+}
+
+.film-timeline select,
+.film-timeline textarea,
+.film-timeline input {
+  text-transform: none;
+  letter-spacing: 0;
+  background: #101114;
+  border: 1px solid #343842;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.film-timeline textarea {
+  min-height: 140px;
+  resize: vertical;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.film-timeline__shot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.film-timeline__shot-list button,
+.film-timeline__actions button,
+.film-timeline__asset button,
+.film-timeline__clip button,
+.film-timeline__track button {
+  background: #22262e;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.film-timeline__shot-list button.is-selected,
+.film-timeline__track button.is-selected {
+  background: #3d4a3a;
+}
+
+.film-timeline__library-title {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #b7b3aa;
+  margin-bottom: 6px;
+}
+
+.film-timeline__asset {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid #2a2d34;
+  font-size: 13px;
+}
+
+.film-timeline__asset img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  background: #050506;
+}
+
+.film-timeline__asset span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.film-timeline__asset em {
+  font-style: normal;
+  color: #d7c27a;
+  font-size: 11px;
+}
+
+/* Far-right Library soft-remove (libraryAssetIds). Soft-detach only; not Project Library delete. */
+.film-timeline__asset button.film-timeline__asset-remove {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-width: 1.6rem;
+  min-height: 1.6rem;
+  padding: 0.2rem 0.35rem;
+  background: #1a1d24;
+  border: 1px solid #2f343e;
+  border-radius: 4px;
+  color: #c8c4bb;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.85;
+  cursor: pointer;
+}
+.film-timeline__asset button.film-timeline__asset-remove:hover {
+  opacity: 1;
+  color: #ff8f8f;
+  border-color: #5a3030;
+  background: #241818;
+}
+.film-timeline__asset button.film-timeline__asset-remove:focus-visible {
+  outline: 2px solid #7aa2ff;
+  outline-offset: 1px;
+}
+
+.film-timeline__monitor {
+  position: relative;
+  min-height: 280px;
+  background: #050506;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.film-timeline__monitor video,
+.film-timeline__monitor img {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background: #050506;
+}
+
+.film-timeline__panel-toggle,
+.film-timeline__expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  padding: 6px;
+}
+
+.film-timeline__panel-toggle {
+  margin-left: auto;
+}
+
+.film-timeline__expand {
+  position: absolute;
+  left: 4px;
+  top: 12px;
+  z-index: 4;
+  background: #22262e;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.film-timeline.is-panel-collapsed .ds-split__pane {
+  transition: width 160ms ease, opacity 160ms ease;
+}
+
+.film-timeline__monitor p,
+.film-timeline__status {
+  margin: 0;
+  color: #c8c4bb;
+}
+
+.film-timeline__status,
+.film-timeline__notice {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 4px 8px;
+}
+
+.film-timeline__notice {
+  bottom: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  color: #f3f0ea;
+}
+
+.film-timeline__track {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+}
+
+.film-timeline__track span {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9d998f;
+}
+
+.film-timeline__track > div {
+  display: flex;
+  gap: 6px;
+  min-height: 32px;
+}
+
+.film-timeline__clip-row,
+.film-timeline__prompt-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.film-timeline__prompt-head {
+  justify-content: space-between;
+}
+
+.film-timeline__remove {
+  width: 22px;
+  min-width: 22px;
+  padding: 0;
+  background: transparent;
+  color: #c8c4bb;
+  text-align: center;
+}
+
+.film-timeline__clip {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: #243044;
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.film-timeline__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.film-timeline__actions button:first-child {
+  background: #efe7d6;
+  color: #161616;
+}
+
+.film-timeline__error {
+  margin: 0;
+  color: #e7b2a8;
+}
+
+.film-timeline option:disabled {
+  color: #77736c;
+}
+
+.film-timeline__tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.film-timeline__tabs button,
+.film-timeline__new-scene,
+.film-timeline__preview-actions button,
+.film-timeline__eye {
+  background: #22262e;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.film-timeline__tabs button.is-selected {
+  background: #efe7d6;
+  color: #161616;
+}
+
+.film-timeline__new-scene {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.film-timeline__preview-actions {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.film-timeline__eye {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+}
+
+.film-timeline__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+  font-size: 12px;
+}
+
+.film-timeline__progress i {
+  display: block;
+  height: 2px;
+  background: #efe7d6;
+  animation: film-timeline-progress 1.4s ease-in-out infinite;
+}
+
+@keyframes film-timeline-progress {
+  0% { width: 8%; }
+  100% { width: 100%; }
+}
+
+.film-timeline__tool-slot {
+  min-height: 0;
+}
+
+.film-timeline__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* V1 red Cancel pill — Preview monitor upper-left (absolute via styles.css). */
+.film-timeline .live-preview-cancel-in-stage {
+  top: 0.45rem;
+  left: 0.45rem;
+  z-index: 7;
+  color: #fef2f2;
+  background: rgba(153, 27, 27, 0.88);
+}
+
+.film-timeline .live-preview-cancel-in-stage:hover {
+  background: rgba(185, 28, 28, 0.96);
+}
+
+
+/* Always-visible Cancel: idle = same V1 red pill, muted / non-interactive. */
+.film-timeline .live-preview-cancel-in-stage:disabled,
+.film-timeline .live-preview-cancel-in-stage.is-idle,
+.film-timeline .live-preview-cancel-in-stage[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+  pointer-events: none;
+}
+
+.film-timeline .live-preview-cancel-in-stage:disabled:hover,
+.film-timeline .live-preview-cancel-in-stage.is-idle:hover {
+  background: rgba(153, 27, 27, 0.88);
+}
+
+
+/* Clear the collapsed-panel expand chevron (left:4px top:12px on shell). */
+.film-timeline.is-panel-collapsed .live-preview-cancel-in-stage {
+  left: 2.75rem;
+}
+
+.film-timeline__asset button.is-referenced {
+  color: #b6f3c4;
+}
+
+.film-reference__types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.film-reference__types button.is-selected {
+  background: #efe7d6;
+  color: #161616;
+}
+
+.film-reference__resolved {
+  margin: 8px 0 0;
+  color: #d7c27a;
+}
+
+.film-reference-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.film-reference-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #343842;
+  border-radius: 999px;
+  background: #1b1e24;
+  font-size: 13px;
+}
+
+.film-reference-chip button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.film-timeline__toolbar > button,
+.film-timeline__template > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #22262e;
+  border: 1px solid #343842;
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: inherit;
+}
+
+.film-timeline__template {
+  position: relative;
+}
+
+.film-timeline__template-menu {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+  padding: 8px;
+  background: #17191e;
+  border: 1px solid #343842;
+  border-radius: 6px;
+}
+
+.prompt-guide {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.prompt-guide__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  border: 0;
+}
+
+.prompt-guide__panel {
+  position: relative;
+  z-index: 1;
+  width: min(720px, calc(100% - 32px));
+  margin: 8vh auto 0;
+  background: #17191e;
+  color: #f4f1ea;
+  border: 1px solid #2a2d34;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.prompt-guide__panel.is-wide {
+  width: min(980px, calc(100% - 32px));
+}
+
+.prompt-guide__panel header,
+.prompt-guide__panel footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.prompt-guide__panel h2,
+.prompt-guide__lists h3 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.prompt-guide input,
+.prompt-guide select {
+  text-transform: none;
+  letter-spacing: 0;
+  background: #101114;
+  border: 1px solid #343842;
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: inherit;
+  font: inherit;
+}
+
+.prompt-guide__body {
+  overflow: auto;
+  padding: 0 14px 12px;
+}
+
+.prompt-guide__lists {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  min-width: 0;
+  align-content: flex-start;
+}
+
+.prompt-guide__lists section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 128px;
+  min-width: 0;
+  max-height: 42vh;
+  overflow: auto;
+}
+
+.prompt-guide__lists button {
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.prompt-guide__lists button.is-selected {
+  background: #efe7d6;
+  color: #161616;
+}
+
+.prompt-guide__split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 16px;
+  align-items: start;
+}
+
+.prompt-guide__split aside {
+  min-width: 0;
+}
+
+.prompt-guide__split aside p,
+.prompt-guide__copy {
+  white-space: normal;
+  overflow-wrap: break-word;
+  margin: 8px 0 0;
+}
+
+.prompt-guide__figure {
+  width: 100%;
+  height: auto;
+  background: #050506;
+  border-radius: 4px;
+}
+
+.prompt-guide__copy {
+  color: #d7c27a;
+}
+
+.prompt-guide__panel footer button {
+  background: #efe7d6;
+  color: #161616;
+  border: 0;
+  border-radius: 4px;
+  padding: 8px 14px;
+}
+
+.film-timeline__left {
+  height: 100%;
+}
+
+.film-timeline .live-preview-publish-bar__btn--publish {
+  color: #042f2e;
+  background: #14b8a6;
+}
+
+.film-timeline .live-preview-publish-bar__btn--update {
+  color: #1c1917;
+  background: #f59e0b;
+}
+
+.film-timeline .live-preview-publish-bar__btn--upscale {
+  color: #eef2ff;
+  background: #6366f1;
+}
+
+.film-timeline .live-preview-publish-bar__visibility,
+.film-timeline .timeline-retake-launcher {
+  color: #f8fafc;
+}

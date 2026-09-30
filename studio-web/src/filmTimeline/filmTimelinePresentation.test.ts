@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { resolveFilmTimelinePlanDims, visibleSegmentError } from "./filmTimelinePresentation";
+import { renderNoticeForSegments, resolveFilmTimelinePlanDims, visibleRenderNotice, visibleSegmentError } from "./filmTimelinePresentation";
+
+describe("render notices", () => {
+  it("dismisses the same polled notice and shows a new event", () => {
+    const completed = renderNoticeForSegments([{ id: "seg-a", status: "completed" }]);
+    expect(completed).toEqual({ key: "seg-a:completed", status: "completed", text: "Render complete" });
+    expect(visibleRenderNotice(completed, "seg-a:completed")).toBeNull();
+    expect(visibleRenderNotice(renderNoticeForSegments([{ id: "seg-a", status: "completed" }]), "seg-a:completed")).toBeNull();
+    const cancelled = renderNoticeForSegments([
+      { id: "seg-a", status: "completed" },
+      { id: "seg-b", status: "cancelled" },
+    ]);
+    expect(visibleRenderNotice(cancelled, "seg-a:completed")?.text).toBe("Render cancelled");
+    const failed = renderNoticeForSegments([{ id: "seg-c", status: "failed", error: "The render stopped." }]);
+    expect(failed?.text).toBe("The render stopped.");
+  });
+});
 
 describe("visibleSegmentError", () => {
   it("shows the raw sticky failure until settings change suppresses it", () => {

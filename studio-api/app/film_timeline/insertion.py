@@ -26,6 +26,7 @@ _DIRECT = {
     "sfx": "sfx",
     **{key: "audio" for key in _AUDIO_ROLES},
 }
+_OVERLAP_MESSAGE = "That time is already used on this lane. Clips can touch, but they cannot overlap."
 
 
 def _lane(media_type: str, target: str | None) -> tuple[str, str] | None:
@@ -115,6 +116,9 @@ def add_to_timeline(
         shotId=shot.id if shot else None,
         metadata=meta,
     )
+    blocked = _overlap_error(film, clip)
+    if blocked:
+        return blocked
     _bucket(film, lane).append(clip)
     save_film(db, project_id, scene_id, film)
     log.info(
@@ -140,6 +144,13 @@ def update_clip(
     clip = _find_clip(film, clip_id)
     if clip is None:
         return {"ok": False, "error": "CLIP_NOT_FOUND", "message": "That Timeline clip is not on this scene."}
+    prospective = clip.model_copy(deep=True)
+    for key in ("startSec", "durationSec", "trimInSec", "trimOutSec", "volume", "fadeInSec", "fadeOutSec", "muted", "label"):
+        if key in patch and patch[key] is not None:
+            setattr(prospective, key, patch[key])
+    blocked = _overlap_error(film, prospective, ignore_id=clip.id)
+    if blocked:
+        return blocked
     for key in ("startSec", "durationSec", "trimInSec", "trimOutSec", "volume", "fadeInSec", "fadeOutSec", "muted", "label"):
         if key in patch and patch[key] is not None:
             setattr(clip, key, patch[key])
@@ -157,6 +168,38 @@ def delete_clip(db: Session, project_id: str, scene_id: str, clip_id: str) -> di
             save_film(db, project_id, scene_id, film)
             return {"ok": True, "film": film.model_dump()}
     return {"ok": False, "error": "CLIP_NOT_FOUND", "message": "That Timeline clip is not on this scene."}
+
+
+def _span(clip: MediaClip) -> tuple[float, float]:
+    start = float(clip.startSec or 0)
+    return start, start + max(float(clip.durationSec or 0), 0.0)
+
+
+def _same_lane(left: MediaClip, right: MediaClip) -> bool:
+    if left.trackType != right.trackType:
+        return False
+    if left.trackType != "audio":
+        return True
+    return (left.role or "generic").strip().lower() == (right.role or "generic").strip().lower()
+
+
+def _overlaps(left: MediaClip, right: MediaClip) -> bool:
+    left_start, left_end = _span(left)
+    right_start, right_end = _span(right)
+    return left_start < right_end and right_start < left_end
+
+
+def _overlap_error(film: FilmTimeline, clip: MediaClip, *, ignore_id: str | None = None) -> dict[str, Any] | None:
+    if clip.trackType not in {"video", "audio", "sfx"}:
+        return None
+    for other in _bucket(film, clip.trackType):
+        if ignore_id and other.id == ignore_id:
+            continue
+        if other.id == clip.id:
+            continue
+        if _same_lane(clip, other) and _overlaps(clip, other):
+            return {"ok": False, "error": "LANE_OVERLAP", "message": _OVERLAP_MESSAGE}
+    return None
 
 
 def _bucket(film: FilmTimeline, lane: str) -> list[MediaClip]:
