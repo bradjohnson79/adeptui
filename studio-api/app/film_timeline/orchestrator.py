@@ -661,10 +661,18 @@ def _submit_one(db, project_id, scene_id, film, shot: Shot, segment: Segment) ->
                 request.providerOptions["requestedDurationSec"] = int(segment.durationSec)
                 request.providerOptions["useDirector"] = True
             else:
-                from ..workflows.h3_ref2v_builder import frames_for_duration
+                # Canonical H3 frame owner (Director cutover): the retired
+                # h3_ref2v_builder.frames_for_duration was only a thin wrapper
+                # over snap_h3_timeline_duration - call the owner directly.
+                from ..video_runtime.legal_canvas import snap_h3_timeline_duration
 
-                legal_frames = frames_for_duration(float(segment.durationSec))
-                request.providerOptions["legalFrameCount"] = legal_frames
+                _snap = snap_h3_timeline_duration(float(segment.durationSec))
+                if not _snap.get("ok"):
+                    raise SpecFidelityError(
+                        str(_snap.get("message") or "MiniMax H3 duration is unsupported."),
+                        code="ILLEGAL_DURATION",
+                    )
+                request.providerOptions["legalFrameCount"] = int(_snap["frames"])
                 request.providerOptions["requestedDurationSec"] = int(segment.durationSec)
         except SpecFidelityError as exc:
             segment.status = "failed"

@@ -44,10 +44,13 @@ class TestH3TableMembership:
         # NOT an H3 ResolutionSelector entry (table has 1280x736 @ 0.9 MP).
         assert 1280 % 32 == 0 and 704 % 32 == 0
         assert not is_h3_legal_pixels(1280, 704)
-        # check_canvas is the generic /32 alignment gate only; it accepts 1280x704.
-        # H3 table membership authority is check_h3_resolution (D1), used by
-        # adapter.validate (minimax_h3_i2v_local.py:104) and queue_worker.py:2641.
-        assert check_canvas("minimax-h3", 1280, 704).ok
+        # Certified H3 routing (gate-removal REPORT 3.1): check_canvas routes all
+        # minimax-h3* tokens to the H3 table validator, so 1280x704 is rejected
+        # with the H3-specific message - never the generic /32 text.
+        h3_canvas = check_canvas("minimax-h3", 1280, 704)
+        assert not h3_canvas.ok
+        assert "MiniMax H3" in h3_canvas.message
+        assert "multiples of 32" not in h3_canvas.message
         checked = check_h3_resolution(1280, 704)
         assert not checked.ok
         assert checked.suggestions

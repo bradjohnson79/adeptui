@@ -339,6 +339,10 @@ def check_canvas(product_id: str, width: int, height: int) -> CanvasCheck:
     multiple = alignment_for(product)
     if w <= 0 or h <= 0:
         return CanvasCheck(False, w, h, multiple, "Width and height must be positive.", [])
+    # Certified H3 routing (gate-removal REPORT 3.1): every minimax-h3* token uses
+    # the H3-specific resolution validator, never the generic /32 Scene-canvas gate.
+    if product in {"minimax-h3", "minimax-h3-i2v-local"} or product.startswith("minimax-h3"):
+        return check_h3_resolution(w, h)
     if product in _SEEDANCE_PRODUCTS:
         return CanvasCheck(True, w, h, 1, "", [])
     if product not in _ALIGN32_PRODUCTS:
