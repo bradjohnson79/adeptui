@@ -4,7 +4,10 @@ from .fal_adapter import chat_fal, enqueue_fal, probe_fal
 from .kie_adapter import chat_kie, enqueue_kie, probe_kie
 from .openai_compatible_adapter import probe_openai_compatible
 from .wavespeed_adapter import chat_wavespeed, enqueue_wavespeed, probe_wavespeed
-from .elevenlabs_adapter import generate_sfx_to_file, generate_tts_to_file, probe_elevenlabs
+try:
+    from .elevenlabs_adapter import generate_sfx_to_file, generate_tts_to_file, probe_elevenlabs
+except ImportError:  # optional provider module absent
+    generate_sfx_to_file = generate_tts_to_file = probe_elevenlabs = None  # type: ignore[assignment]
 
 __all__ = [
     "probe_fal",

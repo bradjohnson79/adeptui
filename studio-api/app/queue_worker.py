@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import traceback
 import uuid
 from datetime import datetime, timedelta
@@ -1901,6 +1902,16 @@ class JobQueue:
             from .video_runtime.legal_canvas import SpecFidelityError, preflight_spec
 
             _surface = "r2v" if bool(self._job_params(job).get("timelineGeneration")) else "i2v"
+            # Director / FT H3 eradication: never treat surface=r2v as duration
+            # authority for Film Timeline MiniMax H3. Whole-second requestedDurationSec
+            # only; frame math stays inside the Director bridge. Missing useDirector
+            # still fails closed later with H3_DIRECTOR_REQUIRED (not mod-17 R2V copy).
+            _early_params = self._job_params(job)
+            if _surface == "r2v" and (
+                bool(_early_params.get("useDirector"))
+                or _timeline_job_is_h3(_early_params, resolved_engine)
+            ):
+                _surface = "i2v"
             # MiniMax H3: the scene's raw duration (12.0s = 288 frames) may not
             # be on the 17k+5 grid. Use the legal frame count from the job params
             # (set by request_builder.py) or snap UP via frames_for_duration.
@@ -1917,15 +1928,23 @@ class JobQueue:
                 if isinstance(_batch_dur, (int, float)) and float(_batch_dur) > 0:
                     _spec_length_seconds = float(_batch_dur)
             if _timeline_job_is_h3(_job_params, resolved_engine):
-                _legal_frame_count = int(_job_params.get("legalFrameCount") or 0)
-                if _legal_frame_count > 0:
-                    _spec_length_seconds = _legal_frame_count / float(plan_fps or 24)
-                else:
-                    from .workflows.h3_ref2v_builder import frames_for_duration
+                # AUTHORITY: Scene canvas is DISPLAY only. Resolve H3 megapixel
+                # table dims BEFORE any canvas preflight. Never feed Scene WxH
+                # (e.g. 1920x824) into check_canvas / generic /32 gate.
+                from .video_runtime.h3_resolved_generation import resolve_h3_job_dimensions
+                import json as _json
 
-                    _spec_length_seconds = frames_for_duration(_spec_length_seconds) / float(
-                        plan_fps or 24
-                    )
+                _resolved = resolve_h3_job_dimensions(_job_params, resolved_engine=str(resolved_engine))
+                width = int(_resolved["width"])
+                height = int(_resolved["height"])
+                plan_width, plan_height = width, height
+                job.params_json = _json.dumps(_job_params)
+                db.commit()
+                # Preflight against the creator-requested whole-second duration,
+                # not the 17k+5 frame-grid echo. legalFrameCount is execution-only.
+                _req_dur = _job_params.get("requestedDurationSec")
+                if isinstance(_req_dur, (int, float)) and float(_req_dur) > 0:
+                    _spec_length_seconds = float(_req_dur)
             _spec = preflight_spec(
                 str(resolved_engine),
                 width=width,
@@ -1958,13 +1977,17 @@ class JobQueue:
                     # available (294 for 12.0s). Fall back to frames_for_duration
                     # which snaps UP to legal 17k+5. Other engines use
                     # assert_legal_duration as before.
-                    legal_frame_count = int(params.get("legalFrameCount") or 0)
-                    if legal_frame_count > 0 and _timeline_job_is_h3(params, resolved_engine):
-                        length = legal_frame_count
-                    elif _timeline_job_is_h3(params, resolved_engine):
-                        from ...workflows.h3_ref2v_builder import frames_for_duration
-
-                        length = frames_for_duration(float(bd))
+                    # Director cutover: when useDirector, frames_for_duration is
+                    # NOT duration authority — whole-second requestedDurationSec
+                    # only; frame math stays inside the Director bridge.
+                    # FT MiniMax H3: whole-second duration only (Director bridge owns
+                    # provider frames). Never frames_for_duration / legalFrameCount /
+                    # surface=r2v assert — even when useDirector is missing (fail-closed
+                    # raises H3_DIRECTOR_REQUIRED moments later).
+                    if _timeline_job_is_h3(params, resolved_engine):
+                        _req = params.get("requestedDurationSec")
+                        _sec = float(_req) if isinstance(_req, (int, float)) and float(_req) > 0 else float(bd)
+                        length = int(round(_sec * float(plan_fps or 24)))
                     else:
                         from .video_runtime.legal_canvas import assert_legal_duration
 
@@ -2039,7 +2062,18 @@ class JobQueue:
                     if b_end_asset:
                         end = await self._ensure_comfy_image(b_end_asset)
             if is_timeline_batch and _timeline_job_is_h3(params, resolved_engine):
-                dest = await self._build_and_run_h3_ref2v(
+                # Director cutover (fail-closed): Film Timeline MiniMax H3 Local
+                # uses ONLY the MiniMaxH3Director bridge. Missing/false useDirector
+                # is a human Timeline error — NEVER silent legacy ref2v. If Director
+                # raises, the error propagates (no catch→ref2v fallback).
+                if not params.get("useDirector"):
+                    raise RuntimeError(
+                        "H3_DIRECTOR_REQUIRED: Film Timeline MiniMax H3 Local needs "
+                        "Director mode (useDirector=true). This shot cannot run on the "
+                        "legacy Reference-to-Video path. Re-submit from Film Timeline "
+                        "so Director is selected, or contact support if this keeps happening."
+                    )
+                dest = await self._build_and_run_h3_director(
                     db,
                     project,
                     scene,
@@ -2439,6 +2473,15 @@ class JobQueue:
         params: dict,
         seed: int,
     ) -> Path:
+        # Phase 14 / Bot C: Film Timeline MiniMax H3 Local retired this execution path.
+        # Callers are already zero (Director fail-closed branch). Keep the body for
+        # non-FT helper archaeology / Performance Retake imports of h3_ref2v_builder,
+        # but NEVER execute legacy FT R2V again.
+        raise RuntimeError(
+            "H3_LEGACY_REF2V_RETIRED: Film Timeline MiniMax H3 Local must use "
+            "MiniMaxH3Director (useDirector=true). _build_and_run_h3_ref2v is gated "
+            "unreachable for FT execution."
+        )
         from .workflows.h3_ref2v_builder import (
             H3_REF2VA_UNET,
             H3_REF2V_HEIGHT,
@@ -2511,7 +2554,7 @@ class JobQueue:
             and item.get("audioIndex") is not None
         ]
         audio_names: list[str] = []
-        for item in audio_items[:9]:
+        for item in audio_items[:3]:
             asset = self._get_asset(db, str(item.get("assetId") or ""))
             uploaded = await self._ensure_comfy_file(asset)
             if not uploaded:
@@ -2525,6 +2568,36 @@ class JobQueue:
                     "assetId": item.get("assetId"),
                     "label": item.get("label"),
                     "audioIndex": item.get("audioIndex"),
+                    "comfyName": uploaded,
+                }
+            )
+        video_items = [
+            item
+            for item in slots
+            if str(item.get("role") or "") == "video"
+            and str(item.get("assetId") or "").strip()
+            and item.get("videoIndex") is not None
+        ]
+        video_names: list[str] = []
+        for item in video_items[:3]:
+            asset = self._get_asset(db, str(item.get("assetId") or ""))
+            kind = str(getattr(asset, "kind", "") or "").lower() if asset is not None else ""
+            if asset is not None and kind and kind not in {"video", "motion"}:
+                raise RuntimeError(
+                    f"{item.get('label') or item.get('assetId')} could not be delivered to the selected generator reference input."
+                )
+            uploaded = await self._ensure_comfy_file(asset)
+            if not uploaded:
+                raise RuntimeError(
+                    f"H3_REF2V_VIDEO_MISSING: could not load {item.get('label') or item.get('assetId')}."
+                )
+            video_names.append(uploaded)
+            bound.append(
+                {
+                    "role": "video",
+                    "assetId": item.get("assetId"),
+                    "label": item.get("label"),
+                    "videoIndex": item.get("videoIndex"),
                     "comfyName": uploaded,
                 }
             )
@@ -2544,7 +2617,7 @@ class JobQueue:
             params.get("requestedDurationSec") or params.get("duration") or 0.0
         )
         # FM5: Timeline H3 canvas comes from the request; default builder canvas is FM4 1152x640.
-        # Do not inherit project 1280×704 or the retired 768×448 builder default.
+        # Never inherit Scene/project canvas (e.g. 21:9 1920x824). H3 table membership is required.
         res = str(params.get("resolution") or "")
         if not params.get("width") and "x" in res.lower():
             try:
@@ -2555,6 +2628,23 @@ class JobQueue:
                 pass
         width = int(params.get("width") or H3_REF2V_WIDTH)
         height = int(params.get("height") or H3_REF2V_HEIGHT)
+        from .video_runtime.legal_canvas import SpecFidelityError, assert_h3_legal_resolution, resolve_generation_dimensions
+
+        try:
+            if not params.get("width") or not params.get("height"):
+                dims = resolve_generation_dimensions(
+                    model=str(params.get("generatorId") or "minimax-h3-i2v-local"),
+                    draft_mode=bool(params.get("draftMode") or params.get("fast_generation")),
+                )
+                width = int(dims["width"])
+                height = int(dims["height"])
+            assert_h3_legal_resolution(width, height)
+        except SpecFidelityError as exc:
+            raise RuntimeError(f"{exc.code}: {exc}") from exc
+        params["width"] = width
+        params["height"] = height
+        params["resolution"] = f"{width}x{height}"
+
         prompt = str(params.get("prompt") or positive or "").strip()
         if not prompt:
             raise RuntimeError("H3 R2V prompt is empty.")
@@ -2582,12 +2672,14 @@ class JobQueue:
             fast=fast,
             ref_image_size=ref_image_size,
             ref_audio_comfy_names=audio_names if gen_audio else None,
+            ref_video_comfy_names=video_names or None,
             generate_audio=gen_audio,
         )
         assert_h3_ref2v_graph(
             wf,
             expected_names=names,
             expected_audio_names=audio_names if gen_audio else None,
+            expected_video_names=video_names or None,
             expect_fast=fast,
         )
         try:
@@ -2732,6 +2824,343 @@ class JobQueue:
             )
         except Exception:
             logging.getLogger(__name__).warning("Failed to register audio provenance", exc_info=True)
+        db.commit()
+        return dest
+
+    async def _build_and_run_h3_director(
+        self,
+        db: Session,
+        project: Project,
+        scene: Scene,
+        job: Job,
+        *,
+        positive: str,
+        prefix: str,
+        params: dict,
+        seed: int,
+    ) -> Path:
+        """MiniMax H3 Director Local — Adept bridge to MiniMaxH3Director ComfyUI node.
+
+        This is the ONLY Film Timeline MiniMax H3 Local execution authority.
+        Director handles segmented AV decode/export; Adept owns creative intent
+        via the bridge's DirectorPlan.
+        """
+        from .film_timeline.h3_director_bridge import (
+            DirectorGroup,
+            DirectorPlan,
+            build_director_workflow,
+            seed_director_prev_segment_cache,
+        )
+        from .video_runtime.job_model import merge_video_runtime_history
+
+        if str(params.get("generationMode") or "") != "reference":
+            raise RuntimeError(
+                "H3_DIRECTOR_MODE_REQUIRED: MiniMax H3 Director — Local needs a "
+                "reference-guided shot (characters, places, or previous take). "
+                "Plain text-to-video is not available on this Film Timeline path."
+            )
+        # Prefer Director-native package; fall back to plain r2v dict (same slot shape).
+        from .film_timeline.director_refs import slots_from_params
+
+        slots = slots_from_params(params)
+
+        # --- Stage reference images ---
+        visual = [
+            item for item in slots
+            if str(item.get("role") or "") not in {"video", "audio"}
+            and str(item.get("assetId") or "").strip()
+            and item.get("pictureIndex") is not None
+        ]
+        visual.sort(key=lambda item: int(item.get("pictureIndex") or 0))
+        if not visual:
+            raise RuntimeError(
+                "H3_DIRECTOR_REFS_REQUIRED: MiniMax H3 Director — Local needs a "
+                "character, place, or previous-take picture before it can run."
+            )
+        ref_images: dict[int, str] = {}
+        for idx, item in enumerate(visual[:9]):
+            asset = self._get_asset(db, str(item.get("assetId") or ""))
+            if not asset:
+                raise RuntimeError(
+                    f"H3_DIR_ASSET_MISSING: could not find {item.get('label') or item.get('assetId')}."
+                )
+            from .director_timeline_w46.generation.direct_reference import has_direct_reference_authority
+            if has_direct_reference_authority(params=params):
+                staged = await self._stage_direct_visual_asset(asset)
+            else:
+                staged = await self._stage_h3_visual_asset(asset, str(item.get("role") or ""))
+            name = staged.comfy_name if staged is not None else None
+            if not name:
+                raise RuntimeError(
+                    f"H3_DIR_ASSET_STAGE: could not stage {item.get('label') or item.get('assetId')}."
+                )
+            ref_images[idx] = name
+
+        # --- Continuity packet (Film Timeline Continue) ---
+        continuity = params.get("continuity") if isinstance(params.get("continuity"), dict) else {}
+        prior_asset_id = str(continuity.get("priorAssetId") or "").strip()
+        prior_prompt = str(continuity.get("priorPrompt") or "").strip()
+        prior_duration = int(continuity.get("priorDurationSec") or 0)
+        continue_native = bool(continuity.get("enabled")) and bool(prior_asset_id)
+
+        # --- Stage reference videos ---
+        # Identity hierarchy: image refs = identity. Prior segment video is NOT an
+        # R2V <Video K> identity ref on Continue (that forced opening-restart).
+        video_items = [
+            item for item in slots
+            if str(item.get("role") or "") == "video"
+            and str(item.get("assetId") or "").strip()
+            and item.get("videoIndex") is not None
+        ]
+        ref_videos: dict[int, str] = {}
+        if not continue_native:
+            for idx, item in enumerate(video_items[:3]):
+                asset = self._get_asset(db, str(item.get("assetId") or ""))
+                if not asset:
+                    continue
+                staged_name = await self._stage_library_asset(asset)
+                if staged_name:
+                    ref_videos[idx] = staged_name
+
+        # --- Stage reference audios ---
+        audio_items = [
+            item for item in slots
+            if str(item.get("role") or "") == "audio"
+            and str(item.get("assetId") or "").strip()
+            and item.get("audioIndex") is not None
+        ]
+        ref_audios: dict[int, str] = {}
+        for idx, item in enumerate(audio_items[:3]):
+            asset = self._get_asset(db, str(item.get("assetId") or ""))
+            if not asset:
+                continue
+            staged_name = await self._stage_library_asset(asset)
+            if staged_name:
+                ref_audios[idx] = staged_name
+
+        # --- Build DirectorPlan from job params ---
+        duration = int(params.get("requestedDurationSec") or float(params.get("duration") or 5.0))
+        prompt = str(params.get("prompt") or positive or "").strip()
+        if not prompt:
+            raise RuntimeError("H3 Director prompt is empty.")
+
+        # Resolution from resolvedGeneration or params
+        width = int(params.get("width") or 1152)
+        height = int(params.get("height") or 640)
+        resolved = params.get("resolvedGeneration") if isinstance(params.get("resolvedGeneration"), dict) else {}
+        if resolved.get("width") and resolved.get("height"):
+            width = int(resolved["width"])
+            height = int(resolved["height"])
+
+        fps = float(scene.fps if scene.fps and scene.fps > 0 else 24.0)
+
+        if continue_native:
+            # Native Director Continue: 2 groups + seed seg_0000 from prior MP4 +
+            # run only group 1. Director pins prev_output[-overlap:] (TAIL), keeps
+            # image refs as identity, exportMode=segments so Adept gets +N only.
+            prior_asset = self._get_asset(db, prior_asset_id)
+            if prior_asset is None or not getattr(prior_asset, "path", None):
+                raise RuntimeError(
+                    "H3_DIR_CONTINUITY_PRIOR_MISSING: Continue needs the finished "
+                    "prior segment file to seed Director continuity."
+                )
+            from pathlib import Path as _Path
+            prior_path = _Path(str(prior_asset.path))
+            if not prior_path.is_file():
+                raise RuntimeError(
+                    f"H3_DIR_CONTINUITY_PRIOR_MISSING: prior file not found: {prior_path}"
+                )
+            if prior_duration <= 0:
+                prior_duration = max(1, int(round(float(getattr(prior_asset, "duration_sec", 0) or 0))) or duration)
+            if not prior_prompt:
+                prior_prompt = prompt
+            try:
+                seeded = seed_director_prev_segment_cache(
+                    prior_video=prior_path,
+                    node_id="10",
+                    fps=fps,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"H3_DIR_CONTINUITY_SEED_FAILED: could not seed Director "
+                    f"prev-segment cache from prior MP4: {exc}"
+                ) from exc
+            logging.getLogger(__name__).info(
+                "H3 Director Continue: seeded cache %s; native 2-group continuity",
+                seeded,
+            )
+            plan = DirectorPlan(
+                width=width,
+                height=height,
+                fps=fps,
+                seed=seed,
+                groups=[
+                    DirectorGroup(
+                        prompt=prior_prompt,
+                        duration_sec=int(prior_duration),
+                        ref_images=dict(ref_images),
+                        ref_videos={},
+                        ref_audios={},
+                    ),
+                    DirectorGroup(
+                        prompt=prompt,
+                        duration_sec=duration,
+                        ref_images=dict(ref_images),
+                        ref_videos={},
+                        ref_audios=dict(ref_audios),
+                    ),
+                ],
+                continuity_enabled=True,
+                continuity_overlap=22,
+                continuity_mode="continue",
+                continuity_keep_tail=True,
+                continuity_redraw=0.10,
+                run_selection=[1],
+                export_mode="segments",
+            )
+        else:
+            plan = DirectorPlan(
+                width=width,
+                height=height,
+                fps=fps,
+                seed=seed,
+                groups=[
+                    DirectorGroup(
+                        prompt=prompt,
+                        duration_sec=duration,
+                        ref_images=ref_images,
+                        ref_videos=ref_videos,
+                        ref_audios=ref_audios,
+                    ),
+                ],
+                continuity_enabled=False,
+            )
+
+        # --- Build Comfy workflow ---
+        wf = build_director_workflow(plan, seed=seed)
+
+        # --- Free VRAM, submit, wait ---
+        try:
+            await comfy.free_memory(unload_models=True, free_memory=True)
+        except Exception:
+            logging.getLogger(__name__).warning("Comfy free_memory before H3 Director failed", exc_info=True)
+
+        job.message = "MiniMax H3 Director · Adept Bridge"
+        job.history_json = merge_video_runtime_history(
+            job.history_json,
+            {
+                "director": {
+                    "mechanism": "h3_director_bridge",
+                    "unet": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+                    "width": width,
+                    "height": height,
+                    "duration_sec": duration,
+                    "ref_images": len(ref_images),
+                    "ref_videos": len(getattr(plan.groups[-1], "ref_videos", {}) or {}),
+                    "ref_audios": len(ref_audios),
+                    "runtime": "adept-comfy-8188",
+                    "continuity_native": bool(getattr(plan, "continuity_enabled", False)),
+                    "continuity_groups": len(plan.groups),
+                    "run_selection": list(plan.run_selection) if plan.run_selection is not None else None,
+                    "export_mode": getattr(plan, "export_mode", "all"),
+                }
+            },
+        )
+        params = {**params, "director": True, "resolvedRuntimeModel": "minimax_h3_ref2va_pruned_int8_convrot.safetensors"}
+        job.params_json = json.dumps(params)
+        db.commit()
+
+        async def on_progress(p: float, msg: str) -> None:
+            return
+
+        from .video_runtime.progress_telemetry import apply_heartbeat, extract_progress_telemetry, merge_progress_telemetry
+
+        prompt_id = await comfy.queue_prompt(wf)
+        job.comfy_prompt_id = prompt_id
+        job.stage = "preparing_model"
+        job.message = "Preparing model"
+        job.history_json = merge_progress_telemetry(
+            job.history_json,
+            apply_heartbeat(
+                extract_progress_telemetry(job.history_json),
+                progress=0.0,
+                message="Preparing model",
+                stage="preparing_model",
+                job_status="running",
+                grounded=False,
+            ),
+        )
+        self.bind_prompt(job.id, prompt_id)
+        db.commit()
+        history = await self._wait_comfy(
+            job, prompt_id, on_progress=on_progress, preview_engine="minimax-h3"
+        )
+        db.expire_all()
+        job = db.get(Job, job.id) or job
+        job.message = "Finalizing MiniMax H3 Director output"
+        job.stage = "writing_output"
+        job.progress = max(float(job.progress or 0), 0.97)
+        job.updated_at = datetime.utcnow()
+        db.commit()
+
+        # --- Collect output ---
+        files = comfy.find_output_files(history)
+        if not files:
+            raise RuntimeError("MiniMax H3 Director finished but no output video was found.")
+
+        dest_dir = settings.data_dir / "projects" / project.id / "renders"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"scene_{scene.index}_{uuid.uuid4().hex[:8]}{files[0].suffix}"
+        shutil.copy2(files[0], dest)
+
+        from .video_runtime.output_gate import validate_video_output
+        gate = validate_video_output(dest, asset_registered=False)
+        if not gate.passed:
+            raise RuntimeError(gate.message or "MiniMax H3 Director output gate refused the file.")
+        job.history_json = merge_video_runtime_history(
+            job.history_json, {"outputGate": gate.to_dict()}
+        )
+
+        # --- Trim to exact whole-second duration ---
+        if duration > 0:
+            from .media_clip import trim_video_to_seconds
+            trimmed = trim_video_to_seconds(dest, duration)
+            if trimmed:
+                job.history_json = merge_video_runtime_history(
+                    job.history_json,
+                    {
+                        "durationTrim": {
+                            "requestedDurationSec": duration,
+                            "trimmed": True,
+                            "reason": "MiniMax H3 Director legal frame count exceeds requested Timeline duration",
+                        }
+                    },
+                )
+
+        # --- Register native audio provenance ---
+        try:
+            from .minimax_h3.audio_import import register_native_audio_provenance
+            ffprobe = shutil.which("ffprobe")
+            audio_meta: dict[str, Any] = {}
+            if ffprobe:
+                probe_proc = subprocess.run(
+                    ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name,channels,sample_rate", "-of", "json", str(dest)],
+                    capture_output=True, text=True, timeout=30, check=False,
+                )
+                if probe_proc.returncode == 0:
+                    probe_data = json.loads(probe_proc.stdout or "{}")
+                    for s in (probe_data.get("streams") or []):
+                        if s.get("codec_type") == "audio":
+                            sr = s.get("sample_rate")
+                            audio_meta = {"channels": s.get("channels"), "sampleRateHz": int(sr) if sr else None}
+                            break
+            provenance = register_native_audio_provenance({}, audio_meta)
+            job.history_json = merge_video_runtime_history(
+                job.history_json, {"audioProvenance": provenance.get("audio", {})},
+            )
+        except Exception:
+            logging.getLogger(__name__).warning("Failed to register audio provenance for Director output", exc_info=True)
+
         db.commit()
         return dest
 

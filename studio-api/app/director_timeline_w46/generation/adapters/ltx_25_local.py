@@ -24,6 +24,8 @@ def _ltx25_capabilities() -> VideoGeneratorCapabilities:
             "label": "LTX 2.5",
             # Timeline stays R2V. CREATE T2V comes from workflowCapabilities.t2v, not this flag.
             "supportsTextToVideo": False,
+            "supportedDurations": [float(s) for s in range(4, 21, 2)],
+            "maxDurationSec": 20.0,
             "supportedResolutions": ["832x480", "1280x704", "1920x1088", "2560x1440", "480x832", "704x1248", "1088x1920", "1440x2560"],
             "draftResolution": "832x480",
             "finalResolution": "1280x704",

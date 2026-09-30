@@ -65,6 +65,28 @@ def submit_render_scene(
     from ..r2v import copy_r2v_into_job_params
 
     copy_r2v_into_job_params(params, request)
+    # Film Timeline Continue continuity packet (priorAssetId/prompt/duration + frames).
+    # Required by queue_worker H3 Director native continue (2-group + cache seed).
+    continuity = (
+        request.providerOptions.get("continuity")
+        if isinstance(request.providerOptions, dict)
+        else None
+    )
+    if isinstance(continuity, dict) and continuity:
+        params["continuity"] = dict(continuity)
+    # Director bridge flag — routes to h3_director_bridge in queue_worker.
+    # Fail-closed: local MiniMax H3 Timeline always gets useDirector=True so
+    # queue_worker cannot silently fall back to legacy ref2v.
+    _gen_tok = str(timeline_model or gen_id or "").strip().lower()
+    _is_local_h3 = "minimax-h3" in _gen_tok and "local" in _gen_tok
+    if _is_local_h3 or request.providerOptions.get("useDirector"):
+        params["useDirector"] = True
+    # Whole-second duration authority for Director (also via copy_r2v).
+    if params.get("useDirector") and params.get("requestedDurationSec") is None:
+        try:
+            params["requestedDurationSec"] = int(request.duration)
+        except (TypeError, ValueError):
+            pass
     res = str(request.resolution or "")
     if "x" in res:
         try:
@@ -73,6 +95,13 @@ def submit_render_scene(
             params["height"] = int(h_s)
         except ValueError:
             pass
+    # Carry the single resolvedGeneration object (H3 table authority) onto the job.
+    resolved = request.providerOptions.get("resolvedGeneration") if isinstance(request.providerOptions, dict) else None
+    if isinstance(resolved, dict) and resolved.get("width") and resolved.get("height"):
+        params["resolvedGeneration"] = dict(resolved)
+        params["width"] = int(resolved["width"])
+        params["height"] = int(resolved["height"])
+        params["resolution"] = f"{int(resolved['width'])}x{int(resolved['height'])}"
 
     db: Session = SessionLocal()
     try:

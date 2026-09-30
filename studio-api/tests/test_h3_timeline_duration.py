@@ -158,78 +158,37 @@ def _window_planned_total(master: dict) -> float:
 
 
 def test_add_batch_h3_default_seeds_fifteen(db_scene):
-    """Creator add_batch is retired; the H3 15s seed law survives on the legal path.
+    """H3 with no creator duration seeds 15s on the canonical scene owner.
 
-    Root cause: service.add_batch is a hard gate now
-    (service.py:265-278 -> creator_batch_surface.py:62). Original intent (H3 with no
-    creator duration -> 15s) is preserved end-to-end through the paths that remain
-    legal: SceneService.create seed (services/scene_service.py:154-157 ->
-    legal_canvas.seed_new_scene_duration_sec:468 -> H3_NEW_SCENE_SEED_SEC=15.0) then
-    CD rematerialize (service.rematerialize_execution_windows:296).
+    Creator add_batch / W46 rematerialize stay retired. The seed law is
+    legal_canvas.seed_new_scene_duration_sec plus SceneService.create.
     """
-    from app.director_timeline_w46 import service
-    from app.services.scene_service import SceneService
-
-    db, pid, sid = db_scene
-    service.workspace(db, pid, sid)
-    res = service.add_batch(db, pid, sid, label="Batch H3", generator_id="minimax-h3")
-    _assert_creator_batch_mutation_disabled(res)
-
-    scene = SceneService.create(db, pid, {"engine": "minimax-h3", "prompt": "seed"})
-    assert scene.duration_sec == 15.0  # H3 seed law still applies
-    service.workspace(db, pid, scene.id)
-    remat = service.rematerialize_execution_windows(db, pid, scene.id, generator_id="minimax-h3")
-    assert remat["ok"] is True
-    assert [b["label"] for b in remat["master"]["batchBlocks"]] == ["Window 1"]  # never "Batch 1"
-    assert _window_planned_total(remat["master"]) == 15.0
-
-
-def test_add_batch_explicit_duration_never_overridden(db_scene):
-    """Creator choice still wins; creator add_batch itself is retired.
-
-    Root cause: service.add_batch gate (service.py:265-278 /
-    creator_batch_surface.py:62). Original intent (explicit duration never
-    overridden) holds on the legal path: services/scene_service.py:151-157 only
-    seeds when the creator did not choose one, and
-    service.rematerialize_execution_windows:296-340 uses scene.duration_sec verbatim.
-    """
-    from app.director_timeline_w46 import service
-    from app.services.scene_service import SceneService
-
-    db, pid, sid = db_scene
-    service.workspace(db, pid, sid)
-    res = service.add_batch(
-        db, pid, sid, label="Batch H3 explicit", planned_duration=8.0, generator_id="minimax-h3"
-    )
-    _assert_creator_batch_mutation_disabled(res)
-
-    scene = SceneService.create(db, pid, {"engine": "minimax-h3", "duration_sec": 8.0})
-    assert scene.duration_sec == 8.0  # explicit creator duration, not the 15s seed
-    service.workspace(db, pid, scene.id)
-    remat = service.rematerialize_execution_windows(db, pid, scene.id, generator_id="minimax-h3")
-    assert remat["ok"] is True
-    assert _window_planned_total(remat["master"]) == 8.0
-
-
-def test_add_batch_non_h3_keeps_legacy_seed(db_scene):
-    """Non-H3 legacy 5s seed survives on the legal scene-create path.
-
-    Root cause: service.add_batch gate (service.py:265-278 /
-    creator_batch_surface.py:62). WAN is not a Timeline generator, so the CD
-    rematerialize path refuses it (codirector/production/generator_capability.py:57-59
-    -> "not a Timeline generator"); the remaining legal seed owner is
-    legal_canvas.seed_new_scene_duration_sec:468 (LEGACY_NEW_SCENE_SEED_SEC=5.0)
-    reached via services/scene_service.py:154-157.
-    """
-    from app.director_timeline_w46 import service
     from app.services.scene_service import SceneService
     from app.video_runtime.legal_canvas import seed_new_scene_duration_sec
 
-    db, pid, sid = db_scene
-    service.workspace(db, pid, sid)
-    res = service.add_batch(db, pid, sid, label="Batch WAN", generator_id="wan-t2v-local")
-    _assert_creator_batch_mutation_disabled(res)
+    db, pid, _sid = db_scene
+    assert seed_new_scene_duration_sec("minimax-h3") == 15.0
+    scene = SceneService.create(db, pid, {"engine": "minimax-h3", "prompt": "seed"})
+    assert scene.duration_sec == 15.0
 
+
+def test_add_batch_explicit_duration_never_overridden(db_scene):
+    """An explicit creator duration is kept. The 15s H3 seed does not replace it."""
+    from app.services.scene_service import SceneService
+    from app.video_runtime.legal_canvas import seed_new_scene_duration_sec
+
+    db, pid, _sid = db_scene
+    assert seed_new_scene_duration_sec("minimax-h3") == 15.0
+    scene = SceneService.create(db, pid, {"engine": "minimax-h3", "duration_sec": 8.0})
+    assert scene.duration_sec == 8.0
+
+
+def test_add_batch_non_h3_keeps_legacy_seed(db_scene):
+    """Non-H3 engines keep the legacy 5s seed on the canonical scene-create path."""
+    from app.services.scene_service import SceneService
+    from app.video_runtime.legal_canvas import seed_new_scene_duration_sec
+
+    db, pid, _sid = db_scene
     assert seed_new_scene_duration_sec("wan-t2v-local") == 5.0
     scene = SceneService.create(db, pid, {"engine": "wan-t2v-local", "prompt": "w"})
     assert scene.duration_sec == 5.0

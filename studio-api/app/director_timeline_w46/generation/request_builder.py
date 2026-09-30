@@ -12,6 +12,7 @@ from ...video_runtime.legal_canvas import (
     SpecFidelityError,
     infer_tier_from_pixels,
     is_minimax_h3_generator,
+    require_h3_timeline_aspect,
     resolve_h3_timeline_canvas,
     resolve_legal_canvas,
     snap_h3_timeline_duration,
@@ -395,29 +396,16 @@ def _resolution_for_request(
     Never treat landscape finalResolution WxH as aspect-blind authority.
     Per-family legal_canvas (or honest refuse) -- Law 25 / Law 64.
     """
-    # MiniMax H3: 16:9 stays megapixel-grid authority. Non-16:9 uses legal_canvas
-    # vertical dims and passes WxH through the Comfy adapter.
+    # MiniMax H3: D1 ResolutionSelector dims for supported creative aspect (never Scene canvas).
     if is_minimax_h3_generator(batch.generatorId):
-        if aspect == "16:9":
-            canvas = resolve_h3_timeline_canvas(batch.h3Resolution, draft_mode=draft_mode)
-            return f"{canvas['width']}x{canvas['height']}"
-        tier = "480p" if draft_mode else "720p"
-        h3_res = batch.h3Resolution if isinstance(batch.h3Resolution, dict) else {}
         try:
-            mp = float(h3_res.get("megapixels")) if h3_res.get("megapixels") is not None else None
-        except (TypeError, ValueError):
-            mp = None
-        if not draft_mode and mp is not None and mp >= 1.5:
-            tier = "1080p"
-        try:
-            legal = resolve_legal_canvas(
-                batch.generatorId or caps.id, tier=tier, aspect=aspect
-            )
+            h3_aspect = require_h3_timeline_aspect(aspect)
         except SpecFidelityError as exc:
-            raise ValueError(
-                f"{caps.label} cannot compile aspect {aspect}: {exc}"
-            ) from exc
-        return f"{legal.width}x{legal.height}"
+            raise ValueError(str(exc)) from exc
+        canvas = resolve_h3_timeline_canvas(
+            batch.h3Resolution, draft_mode=draft_mode, aspect=h3_aspect
+        )
+        return f"{canvas['width']}x{canvas['height']}"
 
     # Hosted cheap-preview uses provider-native labels (480p/720p), never forced pixels.
     # Seedance keeps aspect_ratio on the request; labels stay honest.

@@ -116,15 +116,8 @@ class AddBatchBody(BaseModel):
     summary=INTERNAL_RUNTIME_ONLY,
 )
 def add_batch(project_id: str, scene_id: str, body: AddBatchBody, db: Session = Depends(get_db)):
-    return service.add_batch(
-        db,
-        project_id,
-        scene_id,
-        label=body.label,
-        planned_duration=body.plannedDuration,
-        generator_id=body.generatorId,
-        at_order=body.atOrder,
-    )
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 
 
 @router.post(
@@ -133,10 +126,8 @@ def add_batch(project_id: str, scene_id: str, body: AddBatchBody, db: Session = 
     summary=INTERNAL_RUNTIME_ONLY,
 )
 def duplicate_batch(project_id: str, scene_id: str, batch_id: str, db: Session = Depends(get_db)):
-    result = service.duplicate_batch(db, project_id, scene_id, batch_id)
-    if not result.get("ok"):
-        raise HTTPException(404, result.get("error") or "Not found")
-    return result
+    _ = (project_id, scene_id, batch_id, db)
+    _film_timeline_only()
 
 
 @router.delete(
@@ -145,10 +136,8 @@ def duplicate_batch(project_id: str, scene_id: str, batch_id: str, db: Session =
     summary=INTERNAL_RUNTIME_ONLY,
 )
 def delete_batch(project_id: str, scene_id: str, batch_id: str, db: Session = Depends(get_db)):
-    result = service.delete_batch(db, project_id, scene_id, batch_id)
-    if not result.get("ok"):
-        raise HTTPException(404, result.get("error") or "Not found")
-    return result
+    _ = (project_id, scene_id, batch_id, db)
+    _film_timeline_only()
 
 
 
@@ -207,15 +196,9 @@ def add_clip_to_batch(
     body: AddClipBody,
     db: Session = Depends(get_db),
 ):
-    """Append a clip to a specific batch's owned clip array (BATCH_OWNED_CLIPS).
-
-    Adding media to one batch never mutates or deletes another batch's clips.
-    """
-    result = orchestrator.add_clip_to_batch(db, project_id, scene_id, batch_id, body.model_dump())
-    if not result.get("ok"):
-        status = 404 if result.get("error") in {"BATCH_NOT_FOUND", "SCENE_NOT_FOUND"} else 400
-        raise HTTPException(status, result.get("message") or result.get("error") or "Add clip failed")
-    return result
+    """Retired. Add to Timeline is the production insertion path."""
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 
 
 
@@ -227,19 +210,8 @@ def rematerialize_execution_windows_route(
     body: RematerializeExecutionWindowsBody,
     db: Session = Depends(get_db),
 ):
-    return service.rematerialize_execution_windows(
-        db,
-        project_id,
-        scene_id,
-        windows=body.windows,
-        plan=body.plan,
-        generator_id=body.generatorId,
-        duration_seconds=body.durationSeconds,
-        allow_scene_take_id=body.allowSceneTakeId,
-        allow_revision=body.allowRevision,
-        previous_scene_take_id=body.previousSceneTakeId,
-        force=body.force,
-    )
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 
 
 @router.patch(
@@ -254,17 +226,8 @@ def patch_batch(
     body: PatchBatchBody,
     db: Session = Depends(get_db),
 ):
-    patch = {k: v for k, v in body.model_dump().items() if v is not None}
-    # Map camelCase plannedDuration already in body
-    if "plannedDuration" in patch:
-        pass
-    result = orchestrator.touch_batch_config(db, project_id, scene_id, batch_id, patch)
-    if isinstance(result, dict) and result.get("ok") is False:
-        status = 404 if result.get("error") in {"BATCH_NOT_FOUND", "SCENE_NOT_FOUND"} else 400
-        raise HTTPException(status, result.get("message") or result.get("error") or "Update failed")
-    return result
-
-
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 class ModeBody(BaseModel):
     mode: Literal["image_planning", "video_finishing"]
 
@@ -276,19 +239,8 @@ def set_mode(project_id: str, scene_id: str, body: ModeBody, db: Session = Depen
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/stitch")
 def stitch_scene(project_id: str, scene_id: str, db: Session = Depends(get_db)):
-    result = service.stitch_scene(db, project_id, scene_id)
-    if not result.get("ok"):
-        code = str(result.get("error") or "STITCH_FAILED")
-        status = 404 if code == "SCENE_NOT_FOUND" else 503 if code == "FFMPEG_UNAVAILABLE" else 400
-        raise HTTPException(
-            status,
-            {
-                "error": code,
-                "message": result.get("message") or code,
-                "details": {k: v for k, v in result.items() if k not in {"ok", "error", "message", "mock"}},
-            },
-        )
-    return result
+    _ = (project_id, scene_id, db)
+    _film_timeline_only()
 
 
 class ExtendBody(BaseModel):
@@ -297,39 +249,21 @@ class ExtendBody(BaseModel):
     force: bool = False
 
 
+def _film_timeline_only() -> None:
+    raise HTTPException(
+        410,
+        {
+            "error": "FILM_TIMELINE_REQUIRED",
+            "message": "This Timeline action now runs through Film Timeline. Use Generate Shot, Continue Shot, or Add to Timeline.",
+        },
+    )
+
+
 @router.post("/projects/{project_id}/scenes/{scene_id}/extend")
 def extend_scene(project_id: str, scene_id: str, body: ExtendBody, db: Session = Depends(get_db)):
-    """Long-form Review & Extend — analyze the current scene video, compile the
-    Continuity Packet, append the next Batch Block, and generate only that
-    segment (one legal H3 segment; prior batches untouched)."""
-    from .extend_service import review_and_extend
-
-    result = review_and_extend(
-        db,
-        project_id,
-        scene_id,
-        prompt=body.prompt,
-        duration_sec=body.durationSec,
-        force=body.force,
-    )
-    if not result.get("ok"):
-        code = str(result.get("error") or "EXTEND_FAILED")
-        status = (
-            404
-            if code == "SCENE_NOT_FOUND"
-            else 409
-            if code in {"EXTEND_IN_FLIGHT", "EXTEND_GENERATION_IN_FLIGHT"}
-            else 400
-        )
-        raise HTTPException(
-            status,
-            {
-                "error": code,
-                "message": result.get("message") or code,
-                "details": {k: v for k, v in result.items() if k not in {"ok", "error", "message", "mock"}},
-            },
-        )
-    return result
+    """Retired. Continue Shot is the production continuation path."""
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 
 
 class ExtendRetakeBody(BaseModel):
@@ -341,22 +275,9 @@ class ExtendRetakeBody(BaseModel):
 def retake_extend_segment(
     project_id: str, scene_id: str, segment_id: str, body: ExtendRetakeBody, db: Session = Depends(get_db)
 ):
-    """Replace one extend segment's take; later segments are marked stale."""
-    from .extend_service import retake_extend_segment as _retake
-
-    result = _retake(db, project_id, scene_id, segment_id, prompt=body.prompt, duration_sec=body.durationSec)
-    if not result.get("ok"):
-        code = str(result.get("error") or "EXTEND_FAILED")
-        status = 404 if code in {"SCENE_NOT_FOUND", "SEGMENT_NOT_FOUND"} else 400
-        raise HTTPException(
-            status,
-            {
-                "error": code,
-                "message": result.get("message") or code,
-                "details": {k: v for k, v in result.items() if k not in {"ok", "error", "message", "mock"}},
-            },
-        )
-    return result
+    """Retired. Regenerate the Film Timeline segment instead."""
+    _ = (project_id, scene_id, segment_id, body, db)
+    _film_timeline_only()
 
 
 class GenerateBody(BaseModel):
@@ -371,14 +292,8 @@ class GenerateBatchBody(BaseModel):
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/generate")
 def generate_scene(project_id: str, scene_id: str, body: GenerateBody, db: Session = Depends(get_db)):
-    return orchestrator.generate_scene(
-        db,
-        project_id,
-        scene_id,
-        scope=body.scope,
-        batch_ids=body.batchBlockIds or None,
-        draft_mode=body.draftMode,
-    )
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 
 
 @router.get("/projects/{project_id}/scenes/{scene_id}/scene-takes")
@@ -468,30 +383,18 @@ def generate_batch(
     body: GenerateBatchBody | None = Body(default=None),
     db: Session = Depends(get_db),
 ):
-    draft_mode = body.draftMode if body else None
-    return orchestrator.submit_batch_generation(
-        db, project_id, scene_id, batch_id, draft_mode=draft_mode
-    )
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/qc-retry")
 def qc_retry_batch(project_id: str, scene_id: str, batch_id: str, db: Session = Depends(get_db)):
-    """Re-run dialogue QC on same Take/asset — no H3 regen."""
-    result = orchestrator.qc_retry_batch(db, project_id, scene_id, batch_id)
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("error") or "QC retry failed")
-    return result
-
-
+    _ = (project_id, scene_id, batch_id, db)
+    _film_timeline_only()
 @router.post("/projects/{project_id}/scenes/{scene_id}/reconcile-generation")
 def reconcile_generation(project_id: str, scene_id: str, db: Session = Depends(get_db)):
-    """Bounce recovery: terminalize Generating batches from durable Job/asset evidence."""
-    result = orchestrator.reconcile_timeline_generation(db, project_id, scene_id)
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("error") or "Reconcile failed")
-    return result
-
-
+    _ = (project_id, scene_id, db)
+    _film_timeline_only()
 @router.get("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/reference-transport")
 def inspect_reference_transport(
     project_id: str, scene_id: str, batch_id: str, db: Session = Depends(get_db)
@@ -555,17 +458,8 @@ def complete_batch(
     body: CompleteBody,
     db: Session = Depends(get_db),
 ):
-    return orchestrator.complete_batch_candidate(
-        db,
-        project_id,
-        scene_id,
-        batch_id,
-        asset_id=body.assetId,
-        generated_duration=body.generatedDuration,
-        execution_snapshot_id=body.executionSnapshotId,
-    )
-
-
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 class ApproveBody(BaseModel):
     candidateId: str
 
@@ -582,9 +476,8 @@ def approve_batch(
     body: ApproveBody,
     db: Session = Depends(get_db),
 ):
-    return orchestrator.approve_candidate(db, project_id, scene_id, batch_id, body.candidateId)
-
-
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 class RejectBody(BaseModel):
     candidateId: str
 
@@ -601,14 +494,12 @@ def reject_batch(
     body: RejectBody,
     db: Session = Depends(get_db),
 ):
-    return orchestrator.reject_candidate(db, project_id, scene_id, batch_id, body.candidateId)
-
-
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 @router.post("/projects/{project_id}/scenes/{scene_id}/cancel")
 def cancel(project_id: str, scene_id: str, body: CancelRequest, db: Session = Depends(get_db)):
-    return orchestrator.cancel_scene(db, project_id, scene_id, body)
-
-
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 class RepairBody(BaseModel):
     start: float = 0.0
     length: float = 1.0
@@ -630,44 +521,12 @@ def add_repair(
     body: RepairBody,
     db: Session = Depends(get_db),
 ):
-    payload = body.model_dump()
-    policy = payload.pop("policy", None)
-    return orchestrator.add_repair_range(
-        db, project_id, scene_id, batch_id, payload, policy=policy
-    )
-
-
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 @router.get("/projects/{project_id}/scenes/{scene_id}/preflight")
 def preflight(project_id: str, scene_id: str, db: Session = Depends(get_db)):
-    bundle = service.load_timeline_bundle(db, project_id, scene_id)
-    if not bundle.get("ok"):
-        raise HTTPException(404, bundle.get("error") or "Not found")
-    master = bundle["master"]
-    findings = orchestrator.run_preflight(
-        master,
-        lipsync_tracks=bundle.get("lipsyncTracks"),
-        db=db,
-        project_id=project_id,
-        scene_id=scene_id,
-    )
-    production = None
-    try:
-        from ..codirector.production_lifecycle.service import assess_scene_readiness_from_project
-
-        production = assess_scene_readiness_from_project(db, project_id, scene_id)
-    except Exception as exc:  # noqa: BLE001 — findings still return
-        production = {"ok": False, "error": str(exc)}
-    scene = (production or {}).get("scene") or {}
-    if isinstance(scene, dict) and (production or {}).get("live"):
-        scene = {**scene, "live": (production or {}).get("live")}
-    return {
-        "ok": True,
-        "findings": findings,
-        "productionReadiness": scene,
-        "mock": False,
-    }
-
-
+    _ = (project_id, scene_id, db)
+    _film_timeline_only()
 @router.get("/projects/{project_id}/scenes/{scene_id}/snapshots/{snapshot_id}")
 def get_snapshot(project_id: str, scene_id: str, snapshot_id: str, db: Session = Depends(get_db)):
     result = service.snapshot_get(db, project_id, scene_id, snapshot_id)
@@ -735,16 +594,9 @@ def retake_batch(
     body: RetakeBody,
     db: Session = Depends(get_db),
 ):
-    """Re-Take creates a new job + immutable snapshot; never mutates prior snapshots."""
-    return orchestrator.retake_batch(
-        db,
-        project_id,
-        scene_id,
-        batch_id,
-        user_correction=body.userCorrection,
-        continuity_aware=body.continuityAware,
-        mode=body.mode,
-    )
+    """Retired. Regenerate the Film Timeline segment."""
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 
 
 class RetakeRangeBody(BaseModel):
@@ -786,21 +638,9 @@ def retake_range(
     body: RetakeRangeBody,
     db: Session = Depends(get_db),
 ):
-    """Replace only the marked Timeline region with the selected generator."""
-    return orchestrator.retake_range(
-        db,
-        project_id,
-        scene_id,
-        batch_id,
-        start=body.start,
-        length=body.length,
-        prompt=body.prompt,
-        spend_api_credits=body.spendApiCredits,
-        mask_png_base64=body.maskPngBase64,
-        reference_frame_time=body.referenceFrameTime,
-        frame_asset_id=body.frameAssetId,
-        remove_background=body.removeBackground,
-    )
+    """Retired. Regenerate the Film Timeline segment."""
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 
 
 class PlaceVisualImageRangeBody(BaseModel):
@@ -820,29 +660,9 @@ def place_visual_image_range(
     body: PlaceVisualImageRangeBody,
     db: Session = Depends(get_db),
 ):
-    """Place a still image into Visual as A|imgclip_*|B (image-frame re-take).
-
-    FE contract: Timeline UX places image; reads timeline.video_clips.
-    Request: projectId (path), sceneId (path), markIn, markOut, imageAssetId,
-    optional placementId / batchId / sourceAssetId / label.
-    """
-    result = orchestrator.place_visual_image_range(
-        db,
-        project_id,
-        scene_id,
-        mark_in=body.markIn,
-        mark_out=body.markOut,
-        image_asset_id=body.imageAssetId,
-        placement_id=body.placementId,
-        batch_id=body.batchId,
-        source_asset_id=body.sourceAssetId,
-        label=body.label,
-    )
-    if not result.get("ok"):
-        code = str(result.get("error") or "PLACE_FAILED")
-        status = 404 if code in {"SCENE_NOT_FOUND", "IMAGE_ASSET_NOT_FOUND", "ACTIVE_VISUAL_TAKE_NOT_FOUND"} else 400
-        raise HTTPException(status_code=status, detail=result)
-    return result
+    """Retired. Add to Timeline places an image as a reference or still."""
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 
 
 @router.post(
@@ -879,19 +699,8 @@ def submit_inpaint_repair(
     body: RepairInpaintSubmitBody,
     db: Session = Depends(get_db),
 ):
-    from .inpaint_repair import submit_inpaint_repair as submit_repair
-
-    return submit_repair(
-        db,
-        project_id,
-        scene_id,
-        batch_id,
-        repair_id,
-        prompt=body.prompt,
-        mask_png_base64=body.maskPngBase64,
-        at_seconds=body.atSeconds,
-        frame_asset_id=body.frameAssetId,
-    )
+    _ = (project_id, scene_id, batch_id, repair_id, body, db)
+    _film_timeline_only()
 
 
 @router.post(
@@ -905,17 +714,8 @@ def apply_inpaint_repair(
     body: RepairInpaintApplyBody = Body(default_factory=RepairInpaintApplyBody),
     db: Session = Depends(get_db),
 ):
-    from .inpaint_repair import apply_inpaint_repair as apply_repair
-
-    return apply_repair(
-        db,
-        project_id,
-        scene_id,
-        batch_id,
-        repair_id,
-        job_id=body.jobId,
-        repaired_asset_id=body.repairedAssetId,
-    )
+    _ = (project_id, scene_id, batch_id, repair_id, body, db)
+    _film_timeline_only()
 
 
 class ContinuityPolicyBody(BaseModel):
@@ -944,14 +744,8 @@ def set_continuity_policy(
     body: ContinuityPolicyBody,
     db: Session = Depends(get_db),
 ):
-    result = orchestrator.set_scene_continuity_policy(
-        db, project_id, scene_id, body.configuredTailDuration
-    )
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("message") or result.get("error") or "Policy update failed")
-    return result
-
-
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 @router.post("/projects/{project_id}/scenes/{scene_id}/codirector-continuity-policy")
 def set_codirector_continuity_policy(
     project_id: str,
@@ -959,13 +753,8 @@ def set_codirector_continuity_policy(
     body: CoDirectorContinuityPolicyBody,
     db: Session = Depends(get_db),
 ):
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
-    result = orchestrator.set_scene_codirector_continuity_policy(db, project_id, scene_id, updates)
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("message") or result.get("error") or "Policy update failed")
-    return result
-
-
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 @router.post("/projects/{project_id}/scenes/{scene_id}/temporal-continuity/reject")
 def reject_temporal_continuation(
     project_id: str,
@@ -973,14 +762,8 @@ def reject_temporal_continuation(
     body: RejectTemporalBody,
     db: Session = Depends(get_db),
 ):
-    result = orchestrator.reject_temporal_continuation(
-        db, project_id, scene_id, body.packetId, manual_note=body.manualNote
-    )
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("error") or "Reject failed")
-    return result
-
-
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 @router.get("/projects/{project_id}/scenes/{scene_id}/temporal-continuity")
 def get_temporal_continuity(project_id: str, scene_id: str, db: Session = Depends(get_db)):
     from .store import load_master
@@ -1013,27 +796,18 @@ def activate_take(
     body: ActivateTakeBody,
     db: Session = Depends(get_db),
 ):
-    return orchestrator.activate_take(db, project_id, scene_id, batch_id, body.candidateId)
-
-
+    _ = (project_id, scene_id, batch_id, body, db)
+    _film_timeline_only()
 @router.post("/projects/{project_id}/scenes/{scene_id}/bridges/{bridge_id}/retry")
 def retry_bridge(project_id: str, scene_id: str, bridge_id: str, db: Session = Depends(get_db)):
-    result = orchestrator.retry_continuity_bridge(db, project_id, scene_id, bridge_id)
-    if not result.get("ok"):
-        raise HTTPException(404, result.get("error") or "Bridge not found")
-    return result
-
-
+    _ = (project_id, scene_id, db, bridge_id)
+    _film_timeline_only()
 @router.post("/projects/{project_id}/scenes/{scene_id}/bridges/{bridge_id}/continue-without")
 def continue_without_bridge(
     project_id: str, scene_id: str, bridge_id: str, db: Session = Depends(get_db)
 ):
-    result = orchestrator.continue_without_continuity_bridge(db, project_id, scene_id, bridge_id)
-    if not result.get("ok"):
-        raise HTTPException(404, result.get("error") or "Bridge not found")
-    return result
-
-
+    _ = (project_id, scene_id, db, bridge_id)
+    _film_timeline_only()
 class ReconcileBody(BaseModel):
     spendApiCredits: bool = False
 
@@ -1042,32 +816,12 @@ class ReconcileBody(BaseModel):
 def reconcile_downstream(
     project_id: str, scene_id: str, body: ReconcileBody, db: Session = Depends(get_db)
 ):
-    result = orchestrator.reconcile_downstream(
-        db, project_id, scene_id, spend_api_credits=body.spendApiCredits
-    )
-    if not result.get("ok") and result.get("error") in {
-        "API_CREDIT_CONFIRMATION_REQUIRED",
-        "API_CONTINUITY_OFF",
-    }:
-        raise HTTPException(400, result.get("message") or result.get("error"))
-    return result
-
-
+    _ = (project_id, scene_id, body, db)
+    _film_timeline_only()
 @router.post("/projects/{project_id}/scenes/{scene_id}/keep-existing-downstream")
 def keep_existing_downstream(project_id: str, scene_id: str, db: Session = Depends(get_db)):
-    return orchestrator.keep_existing_downstream(db, project_id, scene_id)
-
-
-# ---------------------------------------------------------------------------
-# Certification stub control endpoints (CERT_STUB_ENV_GATED)
-#
-# Registered routes always exist, but every handler returns 404 unless
-# ADEPT_TIMELINE_CERT_STUB=1 — invisible in production. These endpoints give
-# tests deterministic control over stub job lifecycle states and read access
-# to the JSONL request sink. No provider code ever runs through them.
-# ---------------------------------------------------------------------------
-
-
+    _ = (project_id, scene_id, db)
+    _film_timeline_only()
 def _require_stub():
     from .generation.adapters.stub_cert import stub_enabled
 
