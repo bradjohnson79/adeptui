@@ -115,12 +115,15 @@ function installDependencies() {
   fs.mkdirSync(build, { recursive: true });
   fs.writeFileSync(selectedFile, rendered);
   console.log("MACOS PYWIN32 INSTALL ATTEMPT = 0");
+  // The pin file is the Windows site-packages freeze. It is not a freshly
+  // solvable set (sse-starlette 3.4.11 and starlette 0.47.3 ship together).
   run(pythonBin(), [
     "-m",
     "pip",
     "install",
     "--disable-pip-version-check",
     "--no-warn-script-location",
+    "--no-deps",
     "-r",
     selectedFile,
   ]);
