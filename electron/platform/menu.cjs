@@ -32,7 +32,15 @@ function buildMenu({ productName, onQuit }) {
   if (process.platform === "darwin") {
     template.push({
       label: productName,
-      submenu: [{ role: "about" }, { type: "separator" }, quit],
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        quit,
+      ],
     });
   } else {
     template.push({ label: "File", submenu: [quit] });

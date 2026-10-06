@@ -53,6 +53,7 @@ jobs:
     if: ${{ inputs.platform == 'macos' || inputs.platform == 'all' }}
     # macos-14 is Apple Silicon. macos-13 is Intel and must not build this package.
     runs-on: macos-14
+    timeout-minutes: 180
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
@@ -76,6 +77,7 @@ jobs:
           path: |
             electron/dist/*.dmg
             electron/build/macos-smoke-result.json
+            electron/build/macos-evidence/**
           if-no-files-found: error
 
   linux-x64:
@@ -86,10 +88,58 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Skip full Linux packaging for a macOS-only change
+        id: linux_scope
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          before="${{ github.event.before }}"
+          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only "$before" "${{ github.sha }}" > /tmp/changed-files.txt
+          cat /tmp/changed-files.txt
+          run=false
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              electron/scripts/smoke-macos.mjs|electron/scripts/build-macos.mjs|electron/scripts/stage-packaged-runtime-darwin.mjs|electron/entitlements.mac.plist|electron/E*.md)
+                ;;
+              electron/platform/menu.cjs)
+                if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -F 'Alt+F4' >/dev/null; then
+                  run=true
+                fi
+                ;;
+              electron/builder.config.cjs)
+                if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -E 'linux:|deb:|appImage|win:|nsis' >/dev/null; then
+                  run=true
+                fi
+                ;;
+              .github/workflows/electron-desktop.yml)
+                linux_build=$(printf '%s%s' 'build-' 'linux')
+                linux_smoke=$(printf '%s%s' 'smoke-' 'linux')
+                if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -F "$linux_build" >/dev/null; then
+                  run=true
+                fi
+                if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -F "$linux_smoke" >/dev/null; then
+                  run=true
+                fi
+                ;;
+              *)
+                run=true
+                ;;
+            esac
+          done < /tmp/changed-files.txt
+          echo "run=$run" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
+        if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
         with:
           node-version: 22
       - name: Linux build prerequisites
+        if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -99,13 +149,17 @@ jobs:
           test "$(uname -m)" = "x86_64"
           echo "LINUX NATIVE RUNNER = PASS"
       - run: npm install
+        if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
       - run: npm --prefix studio-web install
+        if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
       - name: Stage Linux Python, install dependencies, build AppImage and deb
+        if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
         run: node electron/scripts/build-linux.mjs
       - name: Launch packaged Adept UI under Xvfb and certify
+        if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
         run: xvfb-run -a --server-args="-screen 0 1440x900x24" node electron/scripts/smoke-linux.mjs
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
         with:
           name: adept-ui-desktop-linux-x64
           path: |

@@ -72,6 +72,10 @@ const config = {
     category: "public.app-category.video",
     identity: null,
     notarize: false,
+    hardenedRuntime: true,
+    gatekeeperAssess: false,
+    entitlements: "electron/entitlements.mac.plist",
+    entitlementsInherit: "electron/entitlements.mac.plist",
     artifactName: "${productName}-${version}-mac-arm64.${ext}",
   },
   dmg: {
