@@ -106,6 +106,21 @@ function assertNoWindowsBits() {
   console.log("WINDOWS BINARIES IN MAC PACKAGE = 0");
 }
 
+function stripVendorWindowsLaunchers(sitePackages) {
+  for (const name of ["pip", "setuptools"]) {
+    const vendor = path.join(sitePackages, name);
+    if (!fs.existsSync(vendor)) continue;
+    const walk = (current) => {
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const full = path.join(current, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.exe$/i.test(entry.name)) fs.rmSync(full);
+      }
+    };
+    walk(vendor);
+  }
+}
+
 function installDependencies() {
   const pins = fs.readFileSync(pinFile, "utf8");
   const rendered = renderSelectedRequirements(pins, "darwin");
@@ -136,6 +151,7 @@ function installDependencies() {
         fs.rmSync(path.join(sitePackages, name), { recursive: true, force: true });
       }
     }
+    stripVendorWindowsLaunchers(sitePackages);
   }
 }
 

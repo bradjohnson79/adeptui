@@ -43,6 +43,7 @@ test("the Mac package audit rejects Windows binaries and keeps pywin32-ctypes", 
 test("macOS staging installs the freeze without re-resolving conflicting pins", () => {
   const source = fs.readFileSync(path.join(root, "electron", "scripts", "stage-packaged-runtime-darwin.mjs"), "utf8");
   assert.match(source, /--no-deps/);
+  assert.match(source, /stripVendorWindowsLaunchers/);
   assert.match(source, /cpython-3\.11\.14/);
   assert.match(source, /aarch64-apple-darwin/);
 });
