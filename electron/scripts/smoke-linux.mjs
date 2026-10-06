@@ -454,7 +454,6 @@ async function main() {
   let debHealth = { status: 0 };
   const installedFile = installedBin && fs.existsSync(installedBin) && fs.statSync(installedBin).isFile();
   if (installedFile) {
-    fs.chmodSync(installedBin, 0o755);
     const debApp = await launchElectron(installedBin, debProfile);
     await debApp.firstWindow();
     debHealth = await waitHealth();
