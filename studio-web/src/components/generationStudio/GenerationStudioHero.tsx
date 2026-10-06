@@ -6,6 +6,7 @@
 const CAPABILITIES = [
   ["Characters", "Image Generation", "Storyboarding", "AI Video"],
   ["Voice", "Scriptwriting", "Editing", "Production Management"],
+  ["Local AI Models", "API Models"],
 ] as const;
 
 export function GenerationStudioHero() {
