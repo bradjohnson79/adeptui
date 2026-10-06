@@ -167,12 +167,38 @@ async function bootReport() {
 function classifyStream(response) {
   const type = String(response.headers["content-type"] || "");
   const wired = response.status === 200 && type.includes("text/event-stream");
-  const unavailable = /provider|not configured|unavailable|api key|model/i.test(response.body || "");
+  const unavailable = /could not reach|couldn't reach|provider|not configured|unavailable|api key|local ai runtime/i.test(response.body || "");
   const failedTurn = (response.body || "").includes("DURABLE_TURN_FAILED");
+  if (wired && unavailable) return { wiring: "PASS", execution: "UNAVAILABLE" };
   if (wired && !failedTurn) return { wiring: "PASS", execution: "PASS" };
-  if (wired && failedTurn && unavailable) return { wiring: "PASS", execution: "UNAVAILABLE" };
   if (wired && failedTurn) return { wiring: "PASS", execution: "FAIL" };
   return { wiring: "FAIL", execution: "NOT RUN" };
+}
+
+function isBundledSecret(name) {
+  const lower = name.toLowerCase();
+  if (lower === ".env" || lower === ".env.local" || lower === ".env.production") return true;
+  if (lower.startsWith("id_rsa") || lower.startsWith("id_ed25519")) return true;
+  if (lower === "credentials.json" || lower === "service-account.json") return true;
+  return lower.endsWith(".pem") && lower !== "cacert.pem";
+}
+
+function matchingNames(dir, test) {
+  const found = [];
+  const walk = (current) => {
+    if (!fs.existsSync(current)) return;
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (test(entry.name)) found.push(path.join(current, entry.name));
+      if (entry.isDirectory()) walk(path.join(current, entry.name));
+    }
+  };
+  walk(dir);
+  return found;
+}
+
+function allowedFreshBootMiss(row) {
+  const blob = `${row.system || ""} ${row.check || ""} ${row.detail || ""}`.toLowerCase();
+  return blob.includes("background services") || blob.includes("control plane") || blob.includes("8759");
 }
 
 const surfaces = [
@@ -223,8 +249,12 @@ async function main() {
   setGate("USER LIBRARY ASSETS BUNDLED", countNames(path.join(resources, "studio-api"), /^studio\.db$/));
   setGate("MODEL WEIGHTS BUNDLED", countNames(resources, /\.(safetensors|ckpt|gguf)$/i));
   setGate("BACKUPS BUNDLED", countNames(resources, /\.(bak|backup)$/i));
-  setGate("PLAYWRIGHT ARTIFACTS BUNDLED", countNames(resources, /^playwright/i));
-  setGate("SECRETS BUNDLED", countNames(resources, /^(credentials|\.env|id_rsa)/i));
+  const playwrightBundled = matchingNames(resources, (name) => /^playwright/i.test(name));
+  const secretsBundled = matchingNames(resources, isBundledSecret);
+  evidence.playwrightBundled = playwrightBundled.slice(0, 20);
+  evidence.secretsBundled = secretsBundled.slice(0, 20);
+  setGate("PLAYWRIGHT ARTIFACTS BUNDLED", playwrightBundled.length);
+  setGate("SECRETS BUNDLED", secretsBundled.length);
   setGate("WINDOWS COMFY FILES BUNDLED", countNames(resources, /^ComfyUI$/));
 
   const python = path.join(resources, "python", "bin", "python");
@@ -264,7 +294,7 @@ async function main() {
   const boot = await bootReport();
   evidence.bootVerdict = boot.body?.verdict || null;
   evidence.bootFailed = boot.failed;
-  const supervisorOnly = boot.failed.length > 0 && boot.failed.every((row) => String(row.check || row.system || "").toLowerCase().includes("background") || String(row.detail || "").includes("8759"));
+  const supervisorOnly = boot.failed.length > 0 && boot.failed.every(allowedFreshBootMiss);
   setGate("BOOT MANAGER", boot.boot.status === 200 && !boot.fakeGo ? "PASS" : "FAIL");
   setGate("FAILED REQUIRED CHECKS", boot.failed.length);
   setGate("BOOT SUPERVISOR ONLY", supervisorOnly ? "YES" : "NO");
@@ -274,8 +304,9 @@ async function main() {
   const falseCuda = !cudaAvailable && /cuda[^"]{0,40}(ready|pass|available)/i.test(cudaClaim);
   setGate("CUDA AVAILABLE", cudaAvailable ? "YES" : "NO");
   setGate("FALSE CUDA READY STATES", falseCuda ? 1 : 0);
-  const unexpectedBoot = boot.failed.filter((row) => !String(row.detail || "").includes("8759"));
+  const unexpectedBoot = boot.failed.filter((row) => !allowedFreshBootMiss(row));
   evidence.unexpectedBootFailures = unexpectedBoot;
+  console.log(`BOOT UNEXPECTED = ${JSON.stringify(unexpectedBoot)}`);
   setGate("BOOT REQUIRED ASIDE FROM SUPERVISOR", unexpectedBoot.length === 0 ? "PASS" : "FAIL");
   setGate("COMFY TRUTHFUL", /ComfyUI|8188/.test(JSON.stringify(boot.body || {})) ? "PASS" : "FAIL");
 
@@ -302,6 +333,14 @@ async function main() {
     page.on("pageerror", onError);
     try {
       await page.goto(`${origin}${target}`, { waitUntil: "domcontentloaded", timeout: 30000 });
+      try {
+        await page.waitForFunction(() => {
+          const text = (document.body && document.body.innerText) || "";
+          return text.trim().length > 20 && !/^\s*Loading\.\.\.\s*$/.test(text);
+        }, undefined, { timeout: 20000 });
+      } catch (err) {
+        errors.push(`still loading ${err}`);
+      }
       await page.screenshot({ path: path.join(evidenceDir, `${label.toLowerCase().replace(/\s+/g, "-")}.png`) });
       if (!errors.length && page.url().includes("127.0.0.1")) surfacePass += 1;
       else surfaceErrors.push(`${label} ${errors[0] || page.url()}`);
@@ -397,7 +436,11 @@ async function main() {
   evidence.debInstallLog = `${installed.stdout || ""}\n${installed.stderr || ""}`.slice(-2000);
   const listingDeb = spawnSync("dpkg", ["-L", packageName], { encoding: "utf8" }).stdout || "";
   const desktopFile = listingDeb.split("\n").find((line) => line.endsWith(".desktop")) || "";
-  const installedBin = listingDeb.split("\n").find((line) => line.endsWith("/Adept UI")) || "";
+  const installedBin = listingDeb
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.endsWith("/Adept UI"))
+    .sort((a, b) => b.length - a.length)[0] || "";
   let desktopText = "";
   if (desktopFile && fs.existsSync(desktopFile)) desktopText = fs.readFileSync(desktopFile, "utf8");
   evidence.desktop = desktopText;

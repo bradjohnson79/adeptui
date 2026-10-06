@@ -6,6 +6,7 @@ pops a blocking error dialog. Do not spawn netstat from the supervisor.
 
 from __future__ import annotations
 
+import os
 import re
 import socket
 import struct
@@ -88,12 +89,77 @@ def port_owner_pid(port: int) -> int | None:
     return pids[0] if pids else None
 
 
+def parse_proc_net_tcp(text: str, port: int) -> list[str]:
+    """Socket inodes in LISTEN state for a port, from /proc/net/tcp or tcp6."""
+    inodes: list[str] = []
+    want = int(port)
+    for raw in (text or "").splitlines():
+        parts = raw.split()
+        if len(parts) < 10 or ":" not in parts[1]:
+            continue
+        if parts[3].upper() != "0A":
+            continue
+        try:
+            local_port = int(parts[1].rsplit(":", 1)[1], 16)
+        except ValueError:
+            continue
+        if local_port != want:
+            continue
+        inode = parts[9]
+        if inode and inode != "0" and inode not in inodes:
+            inodes.append(inode)
+    return inodes
+
+
+def _pids_for_socket_inodes(inodes: list[str]) -> list[int]:
+    wanted = {f"socket:[{inode}]" for inode in inodes}
+    found: list[int] = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return []
+    for name in entries:
+        if not name.isdigit():
+            continue
+        fd_dir = os.path.join("/proc", name, "fd")
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                target = os.readlink(os.path.join(fd_dir, fd))
+            except OSError:
+                continue
+            if target in wanted:
+                pid = int(name)
+                if pid not in found:
+                    found.append(pid)
+                break
+    return found
+
+
+def _listening_pids_proc(port: int) -> list[int]:
+    inodes: list[str] = []
+    for name in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(name, "r", encoding="utf-8", errors="replace") as handle:
+                inodes.extend(parse_proc_net_tcp(handle.read(), port))
+        except OSError:
+            continue
+    if not inodes:
+        return []
+    return _pids_for_socket_inodes(inodes)
+
+
 def listening_pids(port: int) -> list[int]:
     if sys.platform == "win32":
         try:
             return _listening_pids_iphlpapi(port)
         except (OSError, ValueError, AttributeError, BufferError):
             return []
+    if sys.platform.startswith("linux"):
+        return _listening_pids_proc(port)
     return []
 
 

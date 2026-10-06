@@ -84,13 +84,19 @@ def collect_facts(*, force: bool = False) -> tuple[BootFacts, dict[str, int]]:
         begin = time.perf_counter()
         # A healthy status call already takes about 1.5s. Keep enough room
         # that a live manager is not recorded as unreachable.
+        from ..runtime_endpoint import resolve_studio_api_endpoint
+
+        endpoint = resolve_studio_api_endpoint()
+        facts.runtime_mode = str(endpoint["runtimeMode"])
+        facts.api_port = int(endpoint["studioApiPort"])
         facts.supervisor_reachable = bool(control_plane_reachable(timeout=8.0))
-        facts.api_pids = listening_pids(8758)
+        facts.api_pids = listening_pids(facts.api_port)
         facts.api_commands = _commands(facts.api_pids)
-        facts.api_health_status, _body = _http("http://127.0.0.1:8758/api/healthz")
-        facts.vite_pids = listening_pids(5173)
-        facts.vite_commands = _commands(facts.vite_pids)
-        facts.vite_status, facts.vite_body = _http("http://127.0.0.1:5173/")
+        facts.api_health_status, _body = _http(f"{endpoint['studioApiBaseUrl']}/api/healthz")
+        if facts.runtime_mode != "electron-packaged":
+            facts.vite_pids = listening_pids(5173)
+            facts.vite_commands = _commands(facts.vite_pids)
+            facts.vite_status, facts.vite_body = _http("http://127.0.0.1:5173/")
         # Same owner as Comfy Manager. Observe only — never restart Comfy.
         from ..comfy_health import authoritative_comfy_health
 

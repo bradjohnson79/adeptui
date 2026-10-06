@@ -70,6 +70,20 @@ def test_port_owner_parser_extracts_pid():
     assert parse_netstat_owner(text, 59998) == 12345
 
 
+def test_proc_net_tcp_listener_inode_ignores_established_connections():
+    from runtime_supervisor.ports import parse_proc_net_tcp
+
+    text = "\n".join(
+        [
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+            "   0: 0100007F:2238 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1 0000000000000000 100 0 0 10 0",
+            "   1: 0100007F:2238 0100007F:C3A1 01 00000000:00000000 00:00000000 00000000  1000        0 9999 1 0000000000000000 20 4 30 10 -1",
+            "   2: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 1111 1 0000000000000000 100 0 0 10 0",
+        ]
+    )
+    assert parse_proc_net_tcp(text, 8760) == ["4242"]
+
+
 def test_port_owner_uses_ip_helper_not_netstat_exe():
     import inspect
     import os

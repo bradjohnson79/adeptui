@@ -15,6 +15,8 @@ class BootFacts:
     api_pids: list[int] = field(default_factory=list)
     api_commands: dict[int, str] = field(default_factory=dict)
     api_health_status: int | None = None
+    api_port: int = 8758
+    runtime_mode: str = "web-development"
     vite_pids: list[int] = field(default_factory=list)
     vite_commands: dict[int, str] = field(default_factory=dict)
     vite_status: int | None = None
@@ -156,7 +158,7 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
             "runtime supervisor",
             "port owner",
             "PASS" if len(facts.api_pids) == 1 else "FAIL",
-            f"{len(facts.api_pids)} listener(s) on 8758",
+            f"{len(facts.api_pids)} listener(s) on {facts.api_port}",
             required=True,
             classification="BOOT_REQUIRED",
         ),
@@ -186,31 +188,32 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
             classification="BOOT_REQUIRED",
         ),
     )
+    desktop = facts.runtime_mode == "electron-packaged"
     vite_cmd = facts.vite_commands.get(facts.vite_pids[0], "") if len(facts.vite_pids) == 1 else ""
-    vite_expected = len(facts.vite_pids) == 1 and _expected_process(vite_cmd, ("vite", "studio-web"))
+    vite_expected = desktop or (len(facts.vite_pids) == 1 and _expected_process(vite_cmd, ("vite", "studio-web")))
     add(
         "vite_process",
         _check(
             "Creator UI",
-            "Vite",
+            "Vite" if not desktop else "packaged renderer",
             "process identity",
             "PASS" if vite_expected else "FAIL",
-            vite_cmd or "No expected Creator UI process is listening.",
-            required=True,
-            classification="BOOT_REQUIRED",
+            "Packaged renderer is the creator UI." if desktop else (vite_cmd or "No expected Creator UI process is listening."),
+            required=not desktop,
+            classification="BOOT_REQUIRED" if not desktop else "DESKTOP_RENDERER",
         ),
     )
-    document_ok = facts.vite_status == 200 and "Adept UI Studio" in (facts.vite_body or "")
+    document_ok = desktop or (facts.vite_status == 200 and "Adept UI Studio" in (facts.vite_body or ""))
     add(
         "vite_health",
         _check(
             "Creator UI",
-            "Vite",
+            "Vite" if not desktop else "packaged renderer",
             "document",
             "PASS" if document_ok else "FAIL",
-            "Adept UI Studio" if document_ok else f"HTTP {facts.vite_status}",
-            required=True,
-            classification="BOOT_REQUIRED",
+            "Packaged renderer is the creator UI." if desktop else ("Adept UI Studio" if document_ok else f"HTTP {facts.vite_status}"),
+            required=not desktop,
+            classification="BOOT_REQUIRED" if not desktop else "DESKTOP_RENDERER",
         ),
     )
     vite_duplicates = max(0, len(facts.vite_pids) - 1) if facts.vite_pids else 0
@@ -222,8 +225,8 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
             "duplicate listeners",
             "PASS" if vite_duplicates == 0 else "FAIL",
             str(vite_duplicates),
-            required=True,
-            classification="BOOT_REQUIRED",
+            required=not desktop,
+            classification="BOOT_REQUIRED" if not desktop else "DESKTOP_RENDERER",
         ),
     )
     add(
@@ -420,19 +423,9 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
                 classification="OPTIONAL",
             ),
         )
-    add(
-        "cloud_12",
-        _check(
-            "Cloud 1.2",
-            "release shelf",
-            "excluded",
-            "OPTIONAL",
-            "Cloud 1.2 is not part of this startup.",
-            required=False,
-            classification="CLOUD_1_2_EXCLUDED",
-        ),
-    )
 
+    # Adept UI 1.1 Boot certifies 1.1 only. Cloud 1.2 is a separate version and
+    # must not appear in checks, progress, optional rows, warnings, or GO/NO-GO.
     required = [row for row in checks if row["required"]]
     failed = [row for row in required if row["result"] != "PASS"]
     verdict = "NO-GO" if failed else "GO"
@@ -442,13 +435,19 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
         "verdict": verdict,
         "phase": "ready" if verdict == "GO" else "needs_attention",
         "headline": "ADEPT UI READY — GO" if verdict == "GO" else "ADEPT UI STARTUP — NO-GO",
+        "studioApi": {
+            "host": "127.0.0.1",
+            "port": facts.api_port,
+            "baseUrl": f"http://127.0.0.1:{facts.api_port}",
+            "runtimeMode": facts.runtime_mode,
+        },
         "progressPct": progress,
         "checks": checks,
         "failed": [{"system": row["system"], "check": row["check"], "detail": row["detail"], "result": row["result"]} for row in failed],
         "optional": [
             row
             for row in checks
-            if not row["required"] and row["result"] != "PASS" and row["classification"] != "CLOUD_1_2_EXCLUDED"
+            if not row["required"] and row["result"] != "PASS"
         ],
         "preloadPlan": {
             "preloaded": [

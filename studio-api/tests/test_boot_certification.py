@@ -118,9 +118,73 @@ def test_timeout_and_not_run_are_no_go():
     assert _ids(evaluate(facts))["library"] == "NOT_RUN"
 
 
+def test_packaged_desktop_boot_uses_its_own_port_and_not_vite():
+    facts = healthy_facts()
+    facts.runtime_mode = "electron-packaged"
+    facts.api_port = 8760
+    facts.api_commands = {100: "python -m uvicorn app.main:app --port 8760"}
+    facts.vite_pids = []
+    facts.vite_status = None
+    facts.vite_body = ""
+    report = evaluate(facts)
+    assert report["studioApi"]["port"] == 8760
+    assert report["studioApi"]["baseUrl"] == "http://127.0.0.1:8760"
+    assert report["studioApi"]["runtimeMode"] == "electron-packaged"
+    owner = next(row for row in report["checks"] if row["id"] == "studio_api_owner")
+    assert "8760" in owner["detail"]
+    assert report["verdict"] == "GO"
+    vite = next(row for row in report["checks"] if row["id"] == "vite_health")
+    assert vite["required"] is False
+
+
+def test_packaged_endpoint_reads_desktop_env(monkeypatch):
+    from app.runtime_endpoint import resolve_studio_api_endpoint
+
+    monkeypatch.setenv("ADEPT_RUNTIME_MODE", "electron-packaged")
+    monkeypatch.setenv("ADEPT_STUDIO_API_PORT", "8760")
+    endpoint = resolve_studio_api_endpoint()
+    assert endpoint["studioApiPort"] == 8760
+    assert endpoint["runtimeMode"] == "electron-packaged"
+    assert endpoint["studioApiBaseUrl"] == "http://127.0.0.1:8760"
+
+
+def test_dev_endpoint_stays_8758(monkeypatch):
+    from app.runtime_endpoint import resolve_studio_api_endpoint
+
+    monkeypatch.delenv("ADEPT_RUNTIME_MODE", raising=False)
+    monkeypatch.delenv("ADEPT_STUDIO_API_PORT", raising=False)
+    endpoint = resolve_studio_api_endpoint()
+    assert endpoint["studioApiPort"] == 8758
+    assert endpoint["runtimeMode"] == "web-development"
+
+
 def test_slow_passing_check_still_goes():
     report = evaluate(healthy_facts(), durations={"timeline": 2500, "total": 2600})
     timeline = next(row for row in report["checks"] if row["id"] == "timeline")
     assert timeline["result"] == "PASS"
     assert timeline["durationMs"] == 2500
     assert report["verdict"] == "GO"
+
+
+def test_cloud_12_is_outside_adept_ui_11_boot():
+    """Cloud 1.2 has zero authority over Adept UI 1.1 readiness."""
+    import json
+
+    for mode in ("web-development", "electron-packaged", "electron-development"):
+        facts = healthy_facts()
+        facts.runtime_mode = mode
+        if mode == "electron-packaged":
+            facts.api_port = 8760
+            facts.api_commands = {100: "python -m uvicorn app.main:app --port 8760"}
+            facts.vite_pids = []
+            facts.vite_status = None
+            facts.vite_body = ""
+        report = evaluate(facts)
+        blob = json.dumps(report)
+        assert "Cloud 1.2" not in blob
+        assert "cloud_12" not in blob
+        assert "CLOUD_1_2" not in blob
+        assert report["verdict"] == "GO"
+        assert report["progressPct"] == 100
+        assert all(row["system"] != "Cloud 1.2" and row["id"] != "cloud_12" for row in report["checks"])
+        assert all(row["system"] != "Cloud 1.2" for row in report["optional"])
