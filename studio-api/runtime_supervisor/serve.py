@@ -309,7 +309,14 @@ def serve_forever(*, watch_interval: int = 15) -> int:
                 "ownership": "owned" if ensured.get("ok") else "external",
             },
         )()
-    comfy_started = request_start(paths, state, spawn=True)
+    try:
+        comfy_started = request_start(paths, state, spawn=True)
+    except Exception as exc:  # noqa: BLE001 — missing Comfy must not take the manager down
+        comfy_started = type(
+            "R",
+            (),
+            {"ok": False, "message": f"Comfy setup required: {exc}", "pid": None, "ownership": "external"},
+        )()
     # Local AI Runtime is part of the unified fabric. Failure must not abort serve.
     try:
         ollama_started = start_ollama(paths, state, start_if_down=True, spawn=True)

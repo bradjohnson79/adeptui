@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +65,8 @@ def _run_schtasks(args: list[str], timeout: int = 30) -> subprocess.CompletedPro
 
 
 def query_task(name: str = TASK_NAME) -> TaskStatus:
+    if sys.platform != "win32":
+        return TaskStatus(name=name, exists=False, running=False, raw="")
     completed = _run_schtasks(["/Query", "/TN", name, "/FO", "LIST", "/V"])
     text = (completed.stdout or "") + (completed.stderr or "")
     exists = completed.returncode == 0 and "ERROR:" not in (completed.stderr or "").upper()

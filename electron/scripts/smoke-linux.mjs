@@ -39,12 +39,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function request(url, { method = "GET", payload = null, timeoutMs = 8000 } = {}) {
+function request(url, { method = "GET", payload = null, timeoutMs = 8000, headers = {} } = {}) {
   const body = payload ? Buffer.from(JSON.stringify(payload)) : null;
+  const sent = { ...headers };
+  if (body) {
+    sent["content-type"] = "application/json";
+    sent["content-length"] = body.length;
+  }
   return new Promise((resolve) => {
     const req = http.request(url, {
       method,
-      headers: body ? { "content-type": "application/json", "content-length": body.length } : {},
+      headers: sent,
     }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
@@ -196,9 +201,20 @@ function matchingNames(dir, test) {
   return found;
 }
 
-function allowedFreshBootMiss(row) {
-  const blob = `${row.system || ""} ${row.check || ""} ${row.detail || ""}`.toLowerCase();
-  return blob.includes("background services") || blob.includes("control plane") || blob.includes("8759");
+function listeningPids(port) {
+  const result = spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8" });
+  return (result.stdout || "")
+    .split(/\s+/)
+    .map((item) => Number(item))
+    .filter((item) => Number.isInteger(item) && item > 0);
+}
+
+async function waitListenersClosed(port) {
+  for (let i = 0; i < 40; i += 1) {
+    if (listeningPids(port).length === 0) return true;
+    await sleep(500);
+  }
+  return false;
 }
 
 const surfaces = [
@@ -288,26 +304,48 @@ async function main() {
   setGate("VITE :5173 DEPENDENCY", status?.viteContacted === true || origin.endsWith(":5173") ? 1 : 0);
   setGate("DEV VENV DEPENDENCY", command.includes("/.venv/") ? 1 : 0);
   setGate("DEV REPO DEPENDENCY", status?.paths?.devRepoPathDependency ? 1 : 0);
-  setGate("SYSTEM PYTHON DEPENDENCY", command.startsWith("/usr/bin/python") ? 1 : 0);
+  const services = status?.backgroundServices || {};
+  evidence.backgroundServices = services;
+  const supervisorCommand = String(services.command || "");
+  setGate("SYSTEM PYTHON DEPENDENCY", command.startsWith("/usr/bin/python") || supervisorCommand.includes("/usr/bin/python") ? 1 : 0);
+  setGate("BACKGROUND SERVICES PROCESS STARTED", services.spawned === true ? "PASS" : "FAIL");
+  const tokenFile = path.join(fresh, "runtime", "supervisor", "control.token");
+  let controlToken = "";
+  try { controlToken = fs.readFileSync(tokenFile, "utf8").trim(); } catch { controlToken = ""; }
+  const controlHealth = await request("http://127.0.0.1:8759/status", {
+    headers: controlToken ? { "X-Adept-Runtime-Token": controlToken, Accept: "application/json" } : {},
+    timeoutMs: 8000,
+  });
+  evidence.controlStatus = controlHealth.status;
+  evidence.controlBody = (controlHealth.body || "").slice(0, 500);
+  setGate("BACKGROUND SERVICES :8759", controlHealth.status === 200 && /"ok"\s*:\s*true/.test(controlHealth.body || "") ? "HEALTHY" : "FAIL");
+  const owners = listeningPids(8759);
+  evidence.backgroundServicePids = owners;
+  setGate("OWNER COUNT", owners.length);
+  const processList = spawnSync("ps", ["-eo", "args"], { encoding: "utf8" }).stdout || "";
+  const managerLines = processList.split("\n").filter((line) => line.includes("runtime_supervisor") && line.includes("serve"));
+  evidence.managerLines = managerLines;
+  setGate("DUPLICATE MANAGERS", Math.max(0, managerLines.length - 1));
+  const supervisorLogPath = path.join(fresh, "logs", "background-services.log");
+  const supervisorLog = fs.existsSync(supervisorLogPath) ? fs.readFileSync(supervisorLogPath, "utf8") : "";
+  evidence.supervisorLogTail = supervisorLog.slice(-2000);
+  const toolingBlob = `${command}\n${supervisorCommand}\n${supervisorLog}`;
+  setGate("WINDOWS-ONLY PROCESS TOOLING", /powershell|taskkill|schtasks|netstat|\bwmic\b/i.test(toolingBlob) ? 1 : 0);
   evidence.sandboxFallback = Boolean(evidence.sandboxFirstError);
 
   const boot = await bootReport();
   evidence.bootVerdict = boot.body?.verdict || null;
   evidence.bootFailed = boot.failed;
-  const supervisorOnly = boot.failed.length > 0 && boot.failed.every(allowedFreshBootMiss);
-  setGate("BOOT MANAGER", boot.boot.status === 200 && !boot.fakeGo ? "PASS" : "FAIL");
+  setGate("BOOT MANAGER", boot.body?.verdict === "GO" && boot.failed.length === 0 && !boot.fakeGo ? "GO" : "NO-GO");
   setGate("FAILED REQUIRED CHECKS", boot.failed.length);
-  setGate("BOOT SUPERVISOR ONLY", supervisorOnly ? "YES" : "NO");
   const cudaClaim = JSON.stringify(boot.body || {}).toLowerCase();
   const nvidia = spawnSync("nvidia-smi", ["-L"], { encoding: "utf8" });
   const cudaAvailable = nvidia.status === 0;
   const falseCuda = !cudaAvailable && /cuda[^"]{0,40}(ready|pass|available)/i.test(cudaClaim);
   setGate("CUDA AVAILABLE", cudaAvailable ? "YES" : "NO");
   setGate("FALSE CUDA READY STATES", falseCuda ? 1 : 0);
-  const unexpectedBoot = boot.failed.filter((row) => !allowedFreshBootMiss(row));
-  evidence.unexpectedBootFailures = unexpectedBoot;
-  console.log(`BOOT UNEXPECTED = ${JSON.stringify(unexpectedBoot)}`);
-  setGate("BOOT REQUIRED ASIDE FROM SUPERVISOR", unexpectedBoot.length === 0 ? "PASS" : "FAIL");
+  evidence.unexpectedBootFailures = boot.failed;
+  console.log(`BOOT FAILED = ${JSON.stringify(boot.failed)}`);
   setGate("COMFY TRUTHFUL", /ComfyUI|8188/.test(JSON.stringify(boot.body || {})) ? "PASS" : "FAIL");
 
   const projects = await request("http://127.0.0.1:8760/api/projects");
@@ -367,7 +405,8 @@ async function main() {
   const logPath = path.join(fresh, "logs", "studio-api.log");
   evidence.apiLogTail = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").slice(-2000) : "";
   await closeApp(app);
-  setGate("CLEAN SHUTDOWN", (await waitPortClosed()) ? "PASS" : "FAIL");
+  const managerClosed = await waitListenersClosed(8759);
+  setGate("CLEAN SHUTDOWN", (await waitPortClosed()) && managerClosed ? "PASS" : "FAIL");
   setGate("UNOWNED PROCESS KILLED", alive(bystander.pid) ? "NO" : "YES");
 
   const reopened = await launchElectron(unpackedBin, fresh);
@@ -391,6 +430,24 @@ async function main() {
   await closeApp(collided);
   listener.kill();
   await waitPortClosed();
+  await waitListenersClosed(8759);
+
+  const foreignManager = spawn(process.execPath, ["-e", "require('net').createServer().listen(8759,'127.0.0.1')"], { stdio: "ignore" });
+  await sleep(400);
+  const controlProfile = path.join(work, "control-collision");
+  prepareProfile(controlProfile);
+  const controlCollided = await launchElectron(unpackedBin, controlProfile);
+  let controlCollisionStatus = null;
+  for (let i = 0; i < 40; i += 1) {
+    controlCollisionStatus = readStatus(controlProfile);
+    if (controlCollisionStatus?.backgroundServices) break;
+    await sleep(500);
+  }
+  setGate("8759 COLLISION HANDLING", controlCollisionStatus?.backgroundServices?.collision === true && alive(foreignManager.pid) ? "PASS" : "FAIL");
+  await closeApp(controlCollided);
+  evidence.foreignManagerAliveAfterQuit = alive(foreignManager.pid);
+  if (foreignManager.pid) foreignManager.kill();
+  await waitListenersClosed(8759);
 
   const lossProfile = path.join(work, "loss");
   prepareProfile(lossProfile);
@@ -480,11 +537,14 @@ async function main() {
   evidence.gates = gates;
   console.log(JSON.stringify({ appImage: evidence.appImage, deb: evidence.deb, bootVerdict: evidence.bootVerdict, surfaces: surfacePass }, null, 2));
 
-  const numericFails = ["PYWIN32 BUNDLED", "VITE :5173 DEPENDENCY", "DEV VENV DEPENDENCY", "DEV REPO DEPENDENCY", "SYSTEM PYTHON DEPENDENCY", "FALSE CUDA READY STATES", "FALSE HEALTHY STATES", "WINDOWS BINARIES BUNDLED", "MACOS BINARIES BUNDLED", "USER PROJECTS BUNDLED", "USER LIBRARY ASSETS BUNDLED", "MODEL WEIGHTS BUNDLED", "BACKUPS BUNDLED", "PLAYWRIGHT ARTIFACTS BUNDLED", "SECRETS BUNDLED", "WINDOWS COMFY FILES BUNDLED", "DEV VENV", "DEV .ENV", "ADEPT PROJECTS BEFORE LAUNCH", "WINDOWS PROJECT DATA"];
-  const passFails = ["ELECTRON PROCESS STARTED", "PACKAGED RENDERER LOADED", "STUDIO API :8760", "BOOT MANAGER", "BOOT REQUIRED ASIDE FROM SUPERVISOR", "FRESH PROFILE", "FIRST PROJECT PERSISTENCE", "MAJOR PRODUCT SURFACE SMOKE", "APPIMAGE EXECUTION", "DEB INSTALL", "DEB APPLICATION LAUNCH", "DEB UNINSTALL", "DEFAULT UNINSTALL PRESERVES USER DATA", "CLEAN SHUTDOWN", "8760 COLLISION HANDLING", "PACKAGED API LOSS DETECTION", "COMFY TRUTHFUL", "DESKTOP ENTRY", "CO-DIRECTOR STREAM WIRING"];
+  const numericFails = ["PYWIN32 BUNDLED", "VITE :5173 DEPENDENCY", "DEV VENV DEPENDENCY", "DEV REPO DEPENDENCY", "SYSTEM PYTHON DEPENDENCY", "FALSE CUDA READY STATES", "FALSE HEALTHY STATES", "WINDOWS BINARIES BUNDLED", "MACOS BINARIES BUNDLED", "USER PROJECTS BUNDLED", "USER LIBRARY ASSETS BUNDLED", "MODEL WEIGHTS BUNDLED", "BACKUPS BUNDLED", "PLAYWRIGHT ARTIFACTS BUNDLED", "SECRETS BUNDLED", "WINDOWS COMFY FILES BUNDLED", "DEV VENV", "DEV .ENV", "ADEPT PROJECTS BEFORE LAUNCH", "WINDOWS PROJECT DATA", "DUPLICATE MANAGERS", "FAILED REQUIRED CHECKS", "WINDOWS-ONLY PROCESS TOOLING"];
+  const passFails = ["ELECTRON PROCESS STARTED", "PACKAGED RENDERER LOADED", "STUDIO API :8760", "BACKGROUND SERVICES PROCESS STARTED", "FRESH PROFILE", "FIRST PROJECT PERSISTENCE", "MAJOR PRODUCT SURFACE SMOKE", "APPIMAGE EXECUTION", "DEB INSTALL", "DEB APPLICATION LAUNCH", "DEB UNINSTALL", "DEFAULT UNINSTALL PRESERVES USER DATA", "CLEAN SHUTDOWN", "8760 COLLISION HANDLING", "8759 COLLISION HANDLING", "PACKAGED API LOSS DETECTION", "COMFY TRUTHFUL", "DESKTOP ENTRY", "CO-DIRECTOR STREAM WIRING"];
   const bad = numericFails.some((name) => gates[name] !== 0)
     || passFails.some((name) => gates[name] !== "PASS")
     || gates["UNOWNED PROCESS KILLED"] === "YES"
+    || gates["BOOT MANAGER"] !== "GO"
+    || gates["BACKGROUND SERVICES :8759"] !== "HEALTHY"
+    || gates["OWNER COUNT"] !== 1
     || gates["PYTHON ARCH"] !== "x64"
     || gates["PLATFORM"] !== "linux";
   if (bad) process.exitCode = 1;

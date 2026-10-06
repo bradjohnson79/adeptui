@@ -19,6 +19,7 @@ const packaged = app.isPackaged;
 let mainWindow = null;
 let rendererServer = null;
 let apiChild = null;
+let supervisorChild = null;
 let desktopStatus = {
   packaged,
   version: identity.version,
@@ -158,6 +159,16 @@ async function startPackaged() {
     userData: app.getPath("userData"),
   });
   apiChild = prepared.child;
+  supervisorChild = prepared.supervisorChild || null;
+  if (supervisorChild) {
+    supervisorChild.on("exit", () => {
+      if (desktopStatus.backgroundServices) {
+        desktopStatus.backgroundServices.spawned = false;
+        desktopStatus.backgroundServices.healthy = false;
+      }
+      writeStatus();
+    });
+  }
   if (apiChild) {
     apiChild.on("exit", (code) => {
       desktopStatus.apiOwned = false;
@@ -171,6 +182,7 @@ async function startPackaged() {
   desktopStatus.apiCommand = prepared.status.command || null;
   desktopStatus.reason = prepared.status.reason || "";
   desktopStatus.setupRequired = Boolean(prepared.status.setupRequired);
+  desktopStatus.backgroundServices = prepared.status.backgroundServices || null;
   desktopStatus.ports = {
     api: prepared.status.api,
     control: prepared.status.control,
@@ -265,6 +277,13 @@ if (!gotLock) {
         apiChild.kill();
       } catch {
         /* the packaged API already exited */
+      }
+    }
+    if (supervisorChild && supervisorChild.exitCode === null && !supervisorChild.killed) {
+      try {
+        supervisorChild.kill();
+      } catch {
+        /* Background Services already exited */
       }
     }
   });

@@ -28,6 +28,34 @@ def test_config_yaml_has_no_hardcoded_machine_paths():
     assert "bradj" not in text
 
 
+def test_unconfigured_comfy_keeps_background_services_valid(tmp_path: Path):
+    models = tmp_path / "models"
+    models.mkdir()
+    cfg = RuntimeConfig(
+        comfyRoot="",
+        comfyPython="",
+        modelRoot=str(models),
+        logDir=str(tmp_path / "logs"),
+        stateDir=str(tmp_path / "state"),
+    )
+    cfg.studioApi.enabled = False
+    assert validate_runtime_config(cfg) == []
+
+
+def test_query_task_does_not_call_schtasks_off_windows(monkeypatch: pytest.MonkeyPatch):
+    from runtime_supervisor.windows_task import query_task
+
+    monkeypatch.setattr("runtime_supervisor.windows_task.sys.platform", "linux")
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("schtasks must not run off Windows")
+
+    monkeypatch.setattr("runtime_supervisor.windows_task._run_schtasks", boom)
+    status = query_task()
+    assert status.exists is False
+    assert status.running is False
+
+
 def test_invalid_config_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ADEPT_RUNTIME_CONFIG", str(tmp_path / "runtime.json"))
     cfg = RuntimeConfig(comfyRoot="", comfyPython="", modelRoot="")

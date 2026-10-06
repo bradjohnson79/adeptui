@@ -24,9 +24,12 @@ def adept_config_dir() -> Path:
     if override:
         return Path(override)
     appdata = (os.environ.get("APPDATA") or "").strip()
-    if not appdata:
-        raise RuntimeError("APPDATA is not set; cannot place Adept Comfy config.")
-    return Path(appdata) / "Adept" / "Comfy"
+    if appdata:
+        return Path(appdata) / "Adept" / "Comfy"
+    runtime_home = (os.environ.get("ADEPT_RUNTIME_HOME") or "").strip()
+    if runtime_home:
+        return Path(runtime_home) / "comfy"
+    raise RuntimeError("APPDATA is not set; cannot place Adept Comfy config.")
 
 
 def yaml_path() -> Path:

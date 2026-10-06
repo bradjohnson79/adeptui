@@ -185,21 +185,26 @@ def try_load_runtime_config() -> RuntimeConfig | None:
 
 def validate_runtime_config(cfg: RuntimeConfig) -> list[str]:
     errors: list[str] = []
-    if not cfg.comfyRoot:
-        errors.append("comfyRoot is required")
-    else:
-        root = cfg.comfy_root_path()
-        main = root / "ComfyUI" / "main.py"
-        if not main.is_file():
-            main = root / "main.py"
-        if not root.is_dir():
-            errors.append(f"comfyRoot is not a directory: {root}")
-        elif not main.is_file():
-            errors.append(f"Comfy main.py missing under {root}")
-    if not cfg.comfyPython:
-        errors.append("comfyPython is required")
-    elif not cfg.comfy_python_path().is_file():
-        errors.append(f"comfyPython is not a file: {cfg.comfyPython}")
+    # Empty Comfy paths mean the picture engine is not set up yet. Background
+    # Services still starts and reports that state. A path that is set must be real.
+    comfy_root = (cfg.comfyRoot or "").strip()
+    comfy_python = (cfg.comfyPython or "").strip()
+    if comfy_root or comfy_python:
+        if not comfy_root:
+            errors.append("comfyRoot is required")
+        else:
+            root = cfg.comfy_root_path()
+            main = root / "ComfyUI" / "main.py"
+            if not main.is_file():
+                main = root / "main.py"
+            if not root.is_dir():
+                errors.append(f"comfyRoot is not a directory: {root}")
+            elif not main.is_file():
+                errors.append(f"Comfy main.py missing under {root}")
+        if not comfy_python:
+            errors.append("comfyPython is required")
+        elif not cfg.comfy_python_path().is_file():
+            errors.append(f"comfyPython is not a file: {cfg.comfyPython}")
     if cfg.port != COMFY_PORT:
         errors.append(f"port must be {COMFY_PORT} for canonical Adept Comfy")
     if int(cfg.controlPort) == RETIRED_WEB_PORT:
