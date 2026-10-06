@@ -434,16 +434,17 @@ async function main() {
   evidence.debPackage = packageName;
   const installed = spawnSync("sudo", ["dpkg", "-i", deb], { encoding: "utf8" });
   evidence.debInstallLog = `${installed.stdout || ""}\n${installed.stderr || ""}`.slice(-2000);
-  const listingDeb = spawnSync("dpkg", ["-L", packageName], { encoding: "utf8" }).stdout || "";
-  const desktopFile = listingDeb.split("\n").find((line) => line.endsWith(".desktop")) || "";
-  const installedBin = listingDeb
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.endsWith("/Adept UI"))
-    .sort((a, b) => b.length - a.length)[0] || "";
+  const listingDeb = spawnSync("dpkg", ["-L", packageName], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).stdout || "";
+  const desktopFile = listingDeb.split("\n").map((line) => line.trim()).find((line) => line.endsWith(".desktop")) || "";
   let desktopText = "";
   if (desktopFile && fs.existsSync(desktopFile)) desktopText = fs.readFileSync(desktopFile, "utf8");
   evidence.desktop = desktopText;
+  const execLine = desktopText.match(/^Exec=(.+)$/m);
+  const quotedExec = execLine ? execLine[1].trim().match(/^"([^"]+)"/) : null;
+  const installedBin = (quotedExec && quotedExec[1])
+    || listingDeb.split("\n").map((line) => line.trim()).filter((line) => line.endsWith("/Adept UI")).sort((a, b) => b.length - a.length)[0]
+    || "";
+  evidence.installedBin = installedBin;
   const desktopOk = /Name=Adept UI/.test(desktopText) && /Terminal=false/.test(desktopText) && /Icon=/.test(desktopText);
   setGate("DEB INSTALL", installed.status === 0 && installedBin ? "PASS" : "FAIL");
   setGate("DESKTOP ENTRY", desktopOk ? "PASS" : "FAIL");
@@ -451,7 +452,9 @@ async function main() {
   prepareProfile(debProfile);
   fs.writeFileSync(path.join(debProfile, "keep.txt"), "keep");
   let debHealth = { status: 0 };
-  if (installedBin) {
+  const installedFile = installedBin && fs.existsSync(installedBin) && fs.statSync(installedBin).isFile();
+  if (installedFile) {
+    fs.chmodSync(installedBin, 0o755);
     const debApp = await launchElectron(installedBin, debProfile);
     await debApp.firstWindow();
     debHealth = await waitHealth();
@@ -459,6 +462,7 @@ async function main() {
     setGate("USER DATA OUTSIDE PACKAGE", debStatus?.paths?.userData && !String(debStatus.paths.userData).startsWith("/opt") ? "PASS" : "FAIL");
     await closeApp(debApp);
   } else {
+    evidence.debLaunchError = installedBin ? `not a file: ${installedBin}` : "desktop Exec missing";
     setGate("USER DATA OUTSIDE PACKAGE", "FAIL");
   }
   setGate("DEB APPLICATION LAUNCH", debHealth.status === 200 ? "PASS" : "FAIL");
