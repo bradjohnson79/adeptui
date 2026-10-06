@@ -219,6 +219,10 @@ async function startPackaged() {
   writeStatus();
   mainWindow = createWindow(`${rendererServer.origin}/`);
   attachNavigation(mainWindow, rendererServer.origin);
+  mainWindow.webContents.session.webRequest.onBeforeRequest(
+    { urls: ["*://fonts.googleapis.com/*", "*://fonts.gstatic.com/*"] },
+    (_details, callback) => callback({ cancel: true }),
+  );
 }
 
 function registerIpc() {
@@ -272,19 +276,15 @@ if (!gotLock) {
   app.on("before-quit", () => {
     writeStatus();
     if (rendererServer) rendererServer.server.close();
-    if (apiChild && apiChild.exitCode === null && !apiChild.killed) {
+    const stopOwned = (child) => {
+      if (!child || child.exitCode !== null || child.killed) return;
       try {
-        apiChild.kill();
+        child.kill(process.platform === "darwin" ? "SIGKILL" : undefined);
       } catch {
-        /* the packaged API already exited */
+        /* the owned process already exited */
       }
-    }
-    if (supervisorChild && supervisorChild.exitCode === null && !supervisorChild.killed) {
-      try {
-        supervisorChild.kill();
-      } catch {
-        /* Background Services already exited */
-      }
-    }
+    };
+    stopOwned(apiChild);
+    stopOwned(supervisorChild);
   });
 }

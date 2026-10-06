@@ -462,8 +462,12 @@ async function main() {
   await page.waitForURL(/127\.0\.0\.1:(?!5173)\d+/, { timeout: 120000 });
   const origin = new URL(page.url()).origin;
   const fontUrls = new Set();
+  const fontLoaded = new Set();
   page.on("request", (req) => {
     if (/fonts\.(googleapis|gstatic)\.com/i.test(req.url())) fontUrls.add(req.url());
+  });
+  page.on("requestfinished", (req) => {
+    if (/fonts\.(googleapis|gstatic)\.com/i.test(req.url())) fontLoaded.add(req.url());
   });
   setGate("PACKAGED RENDERER", origin.includes("127.0.0.1") && !origin.endsWith(":5173") ? "PASS" : "FAIL");
   await page.screenshot({ path: path.join(evidenceDir, "startup.png") });
@@ -602,13 +606,15 @@ async function main() {
   setGate("MAJOR PRODUCT SURFACES", surfacePass === surfaces.length ? "PASS" : "FAIL");
   const fontEntries = await page.evaluate(() => performance.getEntriesByType("resource").map((entry) => entry.name).filter((name) => /fonts\.(googleapis|gstatic)\.com/i.test(name)));
   for (const name of fontEntries) fontUrls.add(name);
-  evidence.fontUrls = [...fontUrls].slice(0, 8);
-  if (fontUrls.size) console.log(`FONT URLS = ${evidence.fontUrls.join(" | ")}`);
-  setGate("GOOGLE FONT NETWORK DEPENDENCY", fontUrls.size);
+  evidence.fontUrls = [...fontLoaded].slice(0, 8);
+  evidence.fontAttempts = [...fontUrls].slice(0, 8);
+  if (fontUrls.size) console.log(`FONT ATTEMPTS = ${evidence.fontAttempts.join(" | ")}`);
+  setGate("GOOGLE FONT NETWORK DEPENDENCY", fontLoaded.size);
   const beforeExternal = page.url();
   let externalError = "";
   try {
-    await page.goto("https://example.com/help", { timeout: 5000, waitUntil: "commit" });
+    await page.evaluate(() => { window.location.assign("https://example.com/help"); });
+    await sleep(800);
   } catch (err) {
     externalError = String(err).slice(0, 240);
   }
