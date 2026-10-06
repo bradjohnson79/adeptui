@@ -10,6 +10,7 @@ import os
 import re
 import socket
 import struct
+import subprocess
 import sys
 import time
 
@@ -152,6 +153,30 @@ def _listening_pids_proc(port: int) -> list[int]:
     return _pids_for_socket_inodes(inodes)
 
 
+def parse_lsof_listen_pids(text: str) -> list[int]:
+    """PIDs from `lsof -t` output. Blank and repeated lines are ignored."""
+    found: list[int] = []
+    for raw in (text or "").split():
+        try:
+            pid = int(raw)
+        except ValueError:
+            continue
+        if pid > 0 and pid not in found:
+            found.append(pid)
+    return found
+
+
+def _listening_pids_lsof(port: int) -> list[int]:
+    completed = subprocess.run(
+        ["lsof", "-nP", f"-iTCP:{int(port)}", "-sTCP:LISTEN", "-t"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    return parse_lsof_listen_pids(completed.stdout or "")
+
+
 def listening_pids(port: int) -> list[int]:
     if sys.platform == "win32":
         try:
@@ -160,6 +185,11 @@ def listening_pids(port: int) -> list[int]:
             return []
     if sys.platform.startswith("linux"):
         return _listening_pids_proc(port)
+    if sys.platform == "darwin":
+        try:
+            return _listening_pids_lsof(port)
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            return []
     return []
 
 

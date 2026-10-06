@@ -153,6 +153,12 @@ function installDependencies() {
     }
     stripVendorWindowsLaunchers(sitePackages);
   }
+  const bin = path.join(pyDir, "bin");
+  if (fs.existsSync(bin)) {
+    for (const name of fs.readdirSync(bin)) {
+      if (name === "playwright" || name.startsWith("playwright-")) fs.rmSync(path.join(bin, name), { force: true });
+    }
+  }
 }
 
 const expectedStamp = `${pythonUrl}\n${pinHash()}\n`;

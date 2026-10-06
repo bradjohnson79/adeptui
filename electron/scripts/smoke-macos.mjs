@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { pywin32InstallPlan } from "../packaged-requirements-contract.mjs";
+import { auditPackagedTree, pywin32InstallPlan } from "../packaged-requirements-contract.mjs";
 
 const require = createRequire(import.meta.url);
 const { selectDesktopArtifact, loadFixtureCatalog } = require("../update/bridge.cjs");
@@ -42,7 +42,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function request(url, { method = "GET", payload = null, timeoutMs = 8000, headers = {} } = {}) {
+function request(url, { method = "GET", payload = null, timeoutMs = 8000, headers = {}, maxChars = 8000 } = {}) {
   const body = payload ? Buffer.from(JSON.stringify(payload)) : null;
   const sent = { ...headers };
   if (body) {
@@ -55,7 +55,7 @@ function request(url, { method = "GET", payload = null, timeoutMs = 8000, header
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => resolve({
         status: res.statusCode,
-        body: Buffer.concat(chunks).toString("utf8").slice(0, 8000),
+        body: Buffer.concat(chunks).toString("utf8").slice(0, maxChars),
         headers: res.headers,
       }));
     });
@@ -209,6 +209,11 @@ async function waitListenersClosed(port) {
 async function closeApp(app) {
   if (!app) return;
   try {
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+  } catch {
+    /* quitting closes the Playwright connection */
+  }
+  try {
     await app.close();
   } catch {
     /* already closed */
@@ -254,7 +259,7 @@ async function launchElectron(executable, userData) {
 }
 
 async function bootReport() {
-  const boot = await request("http://127.0.0.1:8760/api/boot/certification", { timeoutMs: 120000 });
+  const boot = await request("http://127.0.0.1:8760/api/boot/certification", { timeoutMs: 120000, maxChars: 200000 });
   let body = null;
   try {
     body = JSON.parse(boot.body || "{}");
@@ -414,14 +419,18 @@ async function main() {
   evidence.pe = foreign.pe.slice(0, 20);
   setGate("LINUX BINARIES BUNDLED", foreign.elf.length);
   setGate("WINDOWS BINARIES BUNDLED", foreign.pe.length);
-  setGate("PYWIN32 BUNDLED", countNames(resources, /^pywin32$/));
+  const pythonAudit = auditPackagedTree(path.join(resources, "python"));
+  setGate("PYWIN32 BUNDLED", pythonAudit.some((item) => /[/\\]pywin32([/\\.-]|$)/i.test(item)) ? 1 : 0);
   setGate("DEV VENV", countNames(resources, /^\.venv$/));
   setGate("DEV .ENV", countNames(resources, /^\.env$/));
   setGate("USER PROJECTS BUNDLED", countNames(resources, /^studio\.db$/));
   setGate("USER LIBRARY ASSETS BUNDLED", countNames(path.join(resources, "studio-api"), /^studio\.db$/));
   setGate("MODEL WEIGHTS BUNDLED", countNames(resources, /\.(safetensors|ckpt|gguf)$/i));
   setGate("BACKUPS BUNDLED", countNames(resources, /\.(bak|backup)$/i));
-  setGate("PLAYWRIGHT ARTIFACTS BUNDLED", matchingNames(resources, (name) => /^playwright/i.test(name)).length);
+  const playwrightBundled = matchingNames(resources, (name) => /^playwright/i.test(name));
+  evidence.playwrightBundled = playwrightBundled.slice(0, 10);
+  if (playwrightBundled.length) console.log(`PLAYWRIGHT PATHS = ${playwrightBundled.slice(0, 5).join(" | ")}`);
+  setGate("PLAYWRIGHT ARTIFACTS BUNDLED", playwrightBundled.length);
   setGate("SECRETS BUNDLED", matchingNames(resources, isBundledSecret).length);
   setGate("BRAD-SPECIFIC DATA", countNames(resources, /bradj/i));
   setGate("WINDOWS DATA", countNames(path.join(work, "none"), /\.db$/));
@@ -452,9 +461,9 @@ async function main() {
   const page = await app.firstWindow();
   await page.waitForURL(/127\.0\.0\.1:(?!5173)\d+/, { timeout: 120000 });
   const origin = new URL(page.url()).origin;
-  let fontRequests = 0;
+  const fontUrls = new Set();
   page.on("request", (req) => {
-    if (/fonts\.(googleapis|gstatic)\.com/i.test(req.url())) fontRequests += 1;
+    if (/fonts\.(googleapis|gstatic)\.com/i.test(req.url())) fontUrls.add(req.url());
   });
   setGate("PACKAGED RENDERER", origin.includes("127.0.0.1") && !origin.endsWith(":5173") ? "PASS" : "FAIL");
   await page.screenshot({ path: path.join(evidenceDir, "startup.png") });
@@ -543,6 +552,7 @@ async function main() {
   const boot = await bootReport();
   evidence.bootVerdict = boot.body?.verdict || null;
   evidence.bootFailed = boot.failed;
+  console.log(`BOOT FAILED = ${JSON.stringify(boot.failed)}`);
   setGate("BOOT MANAGER", boot.body?.verdict === "GO" && boot.failed.length === 0 && !boot.fakeGo ? "GO" : "NO-GO");
   setGate("FAILED REQUIRED BOOT CHECKS", boot.failed.length);
   const cudaClaim = JSON.stringify(boot.body || {});
@@ -590,16 +600,22 @@ async function main() {
   }
   evidence.surfaceErrors = surfaceErrors;
   setGate("MAJOR PRODUCT SURFACES", surfacePass === surfaces.length ? "PASS" : "FAIL");
-  const fontEntries = await page.evaluate(() => performance.getEntriesByType("resource").filter((entry) => /fonts\.(googleapis|gstatic)\.com/i.test(entry.name)).length);
-  setGate("GOOGLE FONT NETWORK DEPENDENCY", fontRequests + fontEntries);
+  const fontEntries = await page.evaluate(() => performance.getEntriesByType("resource").map((entry) => entry.name).filter((name) => /fonts\.(googleapis|gstatic)\.com/i.test(name)));
+  for (const name of fontEntries) fontUrls.add(name);
+  evidence.fontUrls = [...fontUrls].slice(0, 8);
+  if (fontUrls.size) console.log(`FONT URLS = ${evidence.fontUrls.join(" | ")}`);
+  setGate("GOOGLE FONT NETWORK DEPENDENCY", fontUrls.size);
   const beforeExternal = page.url();
+  let externalError = "";
   try {
     await page.goto("https://example.com/help", { timeout: 5000, waitUntil: "commit" });
-  } catch {
-    /* the packaged shell refuses to leave the app */
+  } catch (err) {
+    externalError = String(err).slice(0, 240);
   }
   const afterExternal = page.url();
-  setGate("EXTERNAL LINKS", afterExternal.startsWith(origin) && beforeExternal.startsWith(origin) ? "PASS" : "FAIL");
+  evidence.externalNavigation = { before: beforeExternal, after: afterExternal, error: externalError };
+  console.log(`EXTERNAL URL = ${afterExternal}`);
+  setGate("EXTERNAL LINKS", beforeExternal.startsWith(origin) && afterExternal.startsWith(origin) && !/example\.com/i.test(afterExternal) ? "PASS" : "FAIL");
 
   const stream = projectId
     ? await request("http://127.0.0.1:8760/api/codirector/chat/stream", {
@@ -673,6 +689,7 @@ async function main() {
   const controlApi = await waitHealth();
   const bootDuringCollision = await bootReport();
   evidence.bootDuring8759Collision = bootDuringCollision.body?.verdict || null;
+  console.log(`8759 COLLISION STATE = ${JSON.stringify({ collision: Boolean(controlCollisionStatus?.backgroundServices?.collision), verdict: evidence.bootDuring8759Collision, foreignAlive: alive(foreignManager.pid), api: controlApi.status })}`);
   setGate("8759 COLLISION HANDLING", controlCollisionStatus?.backgroundServices?.collision === true && alive(foreignManager.pid) && controlApi.status === 200 && bootDuringCollision.body?.verdict !== "GO" ? "PASS" : "FAIL");
   await closeApp(controlCollided);
   if (foreignManager.pid) foreignManager.kill();

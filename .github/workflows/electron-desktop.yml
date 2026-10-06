@@ -72,6 +72,7 @@ jobs:
       - name: Launch packaged app and wait for Studio API
         run: node electron/scripts/smoke-macos.mjs
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: adept-ui-desktop-mac-arm64
           path: |
@@ -106,7 +107,7 @@ jobs:
           while IFS= read -r file; do
             [ -z "$file" ] && continue
             case "$file" in
-              electron/scripts/smoke-macos.mjs|electron/scripts/build-macos.mjs|electron/scripts/stage-packaged-runtime-darwin.mjs|electron/entitlements.mac.plist|electron/packaged-requirements.test.mjs|electron/E*.md)
+              electron/scripts/smoke-macos.mjs|electron/scripts/build-macos.mjs|electron/scripts/stage-packaged-runtime-darwin.mjs|electron/entitlements.mac.plist|electron/packaged-requirements.test.mjs|studio-api/runtime_supervisor/ports.py|studio-api/runtime_supervisor/process.py|studio-api/tests/test_runtime_supervisor_lifecycle.py|electron/E*.md)
                 ;;
               electron/platform/menu.cjs)
                 if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -F 'Alt+F4' >/dev/null; then

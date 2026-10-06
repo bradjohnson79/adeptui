@@ -112,6 +112,12 @@ def process_parent_pid(pid: int) -> int | None:
             import ctypes
 
             ctypes.windll.kernel32.CloseHandle(handle)
+    if sys.platform == "darwin":
+        try:
+            parent = int(_ps_field(pid, "ppid=") or "0")
+        except ValueError:
+            return None
+        return parent or None
     try:
         text = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8")
         return int(text.split()[3])
@@ -119,8 +125,21 @@ def process_parent_pid(pid: int) -> int | None:
         return None
 
 
+def _ps_field(pid: int, field: str) -> str:
+    if not pid or pid <= 0:
+        return ""
+    completed = subprocess.run(
+        ["ps", "-p", str(int(pid)), "-o", field],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    return (completed.stdout or "").strip()
+
+
 def process_command_line(pid: int) -> str:
-    """Best-effort command line. PEB read on Windows (WMIC is gone), /proc on POSIX."""
+    """Best-effort command line. PEB read on Windows (WMIC is gone), /proc on Linux, ps on macOS."""
     if sys.platform == "win32":
         opened = _win32_process_basic(pid)
         if opened:
@@ -144,6 +163,8 @@ def process_command_line(pid: int) -> str:
 
                 ctypes.windll.kernel32.CloseHandle(handle)
         return process_image_name(pid)
+    if sys.platform == "darwin":
+        return _ps_field(pid, "args=")
     try:
         return Path(f"/proc/{int(pid)}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "replace")
     except OSError:

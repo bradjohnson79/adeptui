@@ -70,6 +70,24 @@ def test_port_owner_parser_extracts_pid():
     assert parse_netstat_owner(text, 59998) == 12345
 
 
+def test_lsof_listen_pid_parser_keeps_unique_positive_pids():
+    from runtime_supervisor.ports import parse_lsof_listen_pids
+
+    assert parse_lsof_listen_pids("4242\n4242\n99\n\nnot-a-pid\n") == [4242, 99]
+    assert parse_lsof_listen_pids("") == []
+
+
+def test_macos_command_line_uses_ps_and_linux_keeps_proc():
+    import inspect
+
+    from runtime_supervisor import process as process_mod
+
+    src = inspect.getsource(process_mod)
+    assert 'sys.platform == "darwin"' in src
+    assert '"ps"' in src
+    assert "/proc/{int(pid)}/cmdline" in src
+
+
 def test_proc_net_tcp_listener_inode_ignores_established_connections():
     from runtime_supervisor.ports import parse_proc_net_tcp
 
@@ -95,7 +113,10 @@ def test_port_owner_uses_ip_helper_not_netstat_exe():
 
     src = inspect.getsource(ports)
     assert '["netstat"' not in src
-    assert "subprocess.run" not in src
+    assert "/proc/net/tcp" in src
+    assert 'sys.platform == "darwin"' in src
+    assert "lsof" in src
+    assert src.count("subprocess.run") == 1
     if sys.platform != "win32":
         return
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
