@@ -1,6 +1,8 @@
 # Adept UI 1.1 Electron — macOS runtime enablement
 
-Verdict: **ADEPT UI 1.1 MACOS RUNTIME ENABLEMENT — NO-GO**
+> Historical. This enablement note is not the macOS certification. The governing result is `electron/E22_MACOS_CERTIFICATION.md`.
+
+Verdict at the time of this note: **ADEPT UI 1.1 MACOS RUNTIME ENABLEMENT — NO-GO**
 
 Phase 2 certification was not rerun. It remains **ADEPT UI 1.1 ELECTRON — MACOS NO-GO**.
 
