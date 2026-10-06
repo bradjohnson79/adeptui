@@ -100,8 +100,9 @@ export function auditPackagedTree(rootDir, options = {}) {
       const full = path.join(dir, entry.name);
       const name = entry.name.toLowerCase();
       const ctypes = name.startsWith("pywin32_ctypes") || name.startsWith("pywin32-ctypes");
+      const insideCtypes = dir.split(/[/\\]/).some((part) => part.toLowerCase() === "win32ctypes");
       if (entry.isDirectory()) {
-        if (!ctypes && (name === "pywin32" || name.startsWith("pywin32-"))) problems.push(full);
+        if (!ctypes && !insideCtypes && (name === "pywin32" || name.startsWith("pywin32-"))) problems.push(full);
         walk(full);
         continue;
       }

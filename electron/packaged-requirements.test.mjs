@@ -43,8 +43,23 @@ test("the Mac package audit rejects Windows binaries and keeps pywin32-ctypes", 
 test("Linux staging installs the freeze without re-resolving conflicting pins", () => {
   const source = fs.readFileSync(path.join(root, "electron", "scripts", "stage-packaged-runtime-linux.mjs"), "utf8");
   assert.match(source, /--no-deps/);
+  assert.match(source, /stripVendorWindowsLaunchers/);
   assert.match(source, /cpython-3\.11\.14/);
   assert.match(source, /x86_64-unknown-linux-gnu/);
+});
+
+test("pywin32-ctypes keeps its win32ctypes namespace and a real pywin32 tree still fails", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adept-linux-audit-"));
+  fs.mkdirSync(path.join(dir, "win32ctypes", "pywin32"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "win32ctypes", "pywin32", "__init__.py"), "");
+  assert.deepEqual(auditPackagedTree(dir, { rejectMac: true }), []);
+  fs.mkdirSync(path.join(dir, "pywin32"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "pip"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "pip", "w64.exe"), "");
+  const problems = auditPackagedTree(dir, { rejectMac: true });
+  assert.equal(problems.some((item) => item.endsWith(`${path.sep}pywin32`) || item.endsWith("/pywin32")), true);
+  assert.equal(problems.some((item) => item.endsWith("w64.exe")), true);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("Windows staging still copies the Windows runtime and does not pip-filter pywin32", () => {
