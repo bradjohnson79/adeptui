@@ -43,8 +43,8 @@ def parse_netstat_owner(netstat_text: str, port: int) -> int | None:
     return None
 
 
-def _port_owner_pid_iphlpapi(port: int) -> int | None:
-    """Look up a LISTENING owner via GetExtendedTcpTable. No netstat.exe."""
+def _listening_pids_iphlpapi(port: int) -> list[int]:
+    """Every LISTEN owner on a port. Empty when the table cannot be read."""
     import ctypes
     from ctypes import wintypes
 
@@ -62,36 +62,39 @@ def _port_owner_pid_iphlpapi(port: int) -> int | None:
     size = wintypes.DWORD(0)
     iphlpapi.GetExtendedTcpTable(None, ctypes.byref(size), False, _AF_INET, _TCP_TABLE_OWNER_PID_ALL, 0)
     if size.value <= 0:
-        return None
+        return []
     buf = ctypes.create_string_buffer(size.value)
     status = iphlpapi.GetExtendedTcpTable(buf, ctypes.byref(size), False, _AF_INET, _TCP_TABLE_OWNER_PID_ALL, 0)
     if status != 0:
-        return None
+        return []
     count = struct.unpack_from("I", buf, 0)[0]
     offset = ctypes.sizeof(wintypes.DWORD)
     row_size = ctypes.sizeof(_Row)
     want = int(port)
+    found: list[int] = []
     for index in range(count):
         row = _Row.from_buffer_copy(buf, offset + index * row_size)
         local_port = socket.ntohs(row.dwLocalPort & 0xFFFF)
         pid = int(row.dwOwningPid)
         if local_port != want or pid <= 0:
             continue
-        # Only a LISTEN row means a server owns the port. FIN_WAIT/TIME_WAIT
-        # leftovers from a just-stopped API must not block a new bind.
-        if int(row.dwState) == _MIB_TCP_STATE_LISTEN:
-            return pid
-    return None
+        if int(row.dwState) == _MIB_TCP_STATE_LISTEN and pid not in found:
+            found.append(pid)
+    return found
 
 
 def port_owner_pid(port: int) -> int | None:
+    pids = listening_pids(port)
+    return pids[0] if pids else None
+
+
+def listening_pids(port: int) -> list[int]:
     if sys.platform == "win32":
         try:
-            return _port_owner_pid_iphlpapi(port)
+            return _listening_pids_iphlpapi(port)
         except (OSError, ValueError, AttributeError, BufferError):
-            return None
-    # Non-Windows tests may still feed parse_netstat_owner directly.
-    return None
+            return []
+    return []
 
 
 def port_is_free(port: int) -> bool:

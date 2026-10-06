@@ -48,8 +48,18 @@ class ShotBody(BaseModel):
         return _validate_whole_seconds(v)
 
 
+class LanguageBody(BaseModel):
+    spokenLanguage: str
+    spokenLanguageCustom: str = ""
+
+
+class DialogueBody(BaseModel):
+    dialogueAuthority: str
+
+
 class ShotModelBody(BaseModel):
     generatorId: str
+    providerOptions: Optional[dict] = None
 
 
 class PromptBody(BaseModel):
@@ -57,11 +67,21 @@ class PromptBody(BaseModel):
     modelPrompt: Optional[str] = None
 
 
+class ReorderBody(BaseModel):
+    segmentId: str
+    direction: Optional[str] = None
+    beforeSegmentId: Optional[str] = None
+    afterSegmentId: Optional[str] = None
+
+
 class GenerateBody(BaseModel):
     durationSec: Optional[float] = None
     timedPrompt: Optional[str] = None
     generatorId: Optional[str] = None
     providerOptions: Optional[dict] = None
+    spokenLanguage: Optional[str] = None
+    spokenLanguageCustom: Optional[str] = None
+    dialogueAuthority: Optional[str] = None
 
     @field_validator("durationSec", mode="before")
     @classmethod
@@ -74,6 +94,9 @@ class ContinueBody(BaseModel):
     timedPrompt: str
     generatorId: Optional[str] = None
     providerOptions: Optional[dict] = None
+    spokenLanguage: Optional[str] = None
+    spokenLanguageCustom: Optional[str] = None
+    dialogueAuthority: Optional[str] = None
 
     @field_validator("durationSec", mode="before")
     @classmethod
@@ -88,6 +111,8 @@ class ReferenceBody(BaseModel):
     tag: str = ""
     sceneLevel: bool = False
     referenceId: str = ""
+    source: str = ""
+    role: str = ""
 
 
 class RetakeBody(BaseModel):
@@ -99,6 +124,7 @@ class RetakeBody(BaseModel):
 class PublishBody(BaseModel):
     assetId: str
     update: bool = False
+    shotId: Optional[str] = None
 
 
 class MagiBody(BaseModel):
@@ -171,7 +197,46 @@ def patch_shot_model(project_id: str, scene_id: str, shot_id: str, body: ShotMod
     from .orchestrator import set_shot_generator
 
     try:
-        return set_shot_generator(db, project_id, scene_id, shot_id, body.generatorId)
+        return set_shot_generator(
+            db, project_id, scene_id, shot_id, body.generatorId, provider_options=body.providerOptions
+        )
+    except FilmTimelineError as exc:
+        _fail(exc)
+
+
+@router.get("/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/dialogue")
+def get_shot_dialogue(project_id: str, scene_id: str, shot_id: str, db: Session = Depends(get_db)):
+    from .orchestrator import dialogue_status
+
+    try:
+        return dialogue_status(db, project_id, scene_id, shot_id)
+    except FilmTimelineError as exc:
+        _fail(exc)
+
+
+@router.put("/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/dialogue")
+def put_shot_dialogue(project_id: str, scene_id: str, shot_id: str, body: DialogueBody, db: Session = Depends(get_db)):
+    from .orchestrator import set_shot_dialogue_authority
+
+    try:
+        return set_shot_dialogue_authority(db, project_id, scene_id, shot_id, body.dialogueAuthority)
+    except FilmTimelineError as exc:
+        _fail(exc)
+
+
+@router.put("/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/language")
+def put_shot_language(project_id: str, scene_id: str, shot_id: str, body: LanguageBody, db: Session = Depends(get_db)):
+    from .orchestrator import set_shot_spoken_language
+
+    try:
+        return set_shot_spoken_language(
+            db,
+            project_id,
+            scene_id,
+            shot_id,
+            body.spokenLanguage,
+            body.spokenLanguageCustom,
+        )
     except FilmTimelineError as exc:
         _fail(exc)
 
@@ -214,6 +279,8 @@ def post_reference(project_id: str, scene_id: str, shot_id: str, body: Reference
             tag=body.tag,
             scene_level=body.sceneLevel,
             reference_id=body.referenceId,
+            source=body.source,
+            role=body.role,
         )
     except FilmTimelineError as exc:
         _fail(exc)
@@ -233,6 +300,9 @@ def post_generate(project_id: str, scene_id: str, shot_id: str, body: GenerateBo
             timed_prompt=body.timedPrompt,
             generator_id=body.generatorId,
             provider_options=body.providerOptions,
+            spoken_language=body.spokenLanguage,
+            spoken_language_custom=body.spokenLanguageCustom,
+            dialogue_authority=body.dialogueAuthority,
         )
     except FilmTimelineError as exc:
         _fail(exc, 409 if exc.code == "CONTINUITY_MISSING" else 400)
@@ -252,6 +322,31 @@ def post_review_extend(project_id: str, scene_id: str, shot_id: str, body: Conti
             timed_prompt=body.timedPrompt,
             generator_id=body.generatorId,
             provider_options=body.providerOptions,
+            spoken_language=body.spokenLanguage,
+            spoken_language_custom=body.spokenLanguageCustom,
+            dialogue_authority=body.dialogueAuthority,
+        )
+    except FilmTimelineError as exc:
+        _fail(exc, 409 if exc.code == "CONTINUITY_MISSING" else 400)
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/prepend")
+def post_prepend(project_id: str, scene_id: str, shot_id: str, body: ContinueBody, db: Session = Depends(get_db)):
+    from .orchestrator import prepend_shot
+
+    try:
+        return prepend_shot(
+            db,
+            project_id,
+            scene_id,
+            shot_id,
+            duration_sec=body.durationSec,
+            timed_prompt=body.timedPrompt,
+            generator_id=body.generatorId,
+            provider_options=body.providerOptions,
+            spoken_language=body.spokenLanguage,
+            spoken_language_custom=body.spokenLanguageCustom,
+            dialogue_authority=body.dialogueAuthority,
         )
     except FilmTimelineError as exc:
         _fail(exc, 409 if exc.code == "CONTINUITY_MISSING" else 400)
@@ -271,6 +366,9 @@ def post_continue(project_id: str, scene_id: str, shot_id: str, body: ContinueBo
             timed_prompt=body.timedPrompt,
             generator_id=body.generatorId,
             provider_options=body.providerOptions,
+            spoken_language=body.spokenLanguage,
+            spoken_language_custom=body.spokenLanguageCustom,
+            dialogue_authority=body.dialogueAuthority,
         )
     except FilmTimelineError as exc:
         _fail(exc, 409 if exc.code == "CONTINUITY_MISSING" else 400)
@@ -282,6 +380,20 @@ async def post_cancel(project_id: str, scene_id: str, shot_id: str, db: Session 
 
     try:
         return await cancel_shot(db, project_id, scene_id, shot_id)
+    except FilmTimelineError as exc:
+        _fail(exc)
+
+
+class ImportVideoBody(BaseModel):
+    assetId: str
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/import-video")
+def post_import_video(project_id: str, scene_id: str, shot_id: str, body: ImportVideoBody, db: Session = Depends(get_db)):
+    from .orchestrator import import_library_video
+
+    try:
+        return import_library_video(db, project_id, scene_id, shot_id, asset_id=body.assetId)
     except FilmTimelineError as exc:
         _fail(exc)
 
@@ -318,7 +430,7 @@ def post_detach_reference(project_id: str, scene_id: str, shot_id: str, body: Re
 def post_publish(project_id: str, scene_id: str, body: PublishBody, db: Session = Depends(get_db)):
     from .publish_media import publish_film_media
 
-    return publish_film_media(db, project_id, scene_id, asset_id=body.assetId, update=body.update)
+    return publish_film_media(db, project_id, scene_id, asset_id=body.assetId, update=body.update, shot_id=body.shotId)
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/magi/options")
@@ -382,6 +494,31 @@ def post_stitch(project_id: str, scene_id: str, shot_id: str, db: Session = Depe
     from .stitch import stitch_shot
 
     return stitch_shot(db, project_id, scene_id, shot_id)
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/reorder")
+def post_reorder(
+    project_id: str,
+    scene_id: str,
+    shot_id: str,
+    body: ReorderBody,
+    db: Session = Depends(get_db),
+):
+    from .orchestrator import reorder_composition
+
+    try:
+        return reorder_composition(
+            db,
+            project_id,
+            scene_id,
+            shot_id,
+            segment_id=body.segmentId,
+            direction=body.direction,
+            before_segment_id=body.beforeSegmentId,
+            after_segment_id=body.afterSegmentId,
+        )
+    except FilmTimelineError as exc:
+        _fail(exc)
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/media")

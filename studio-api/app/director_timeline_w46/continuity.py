@@ -1,4 +1,4 @@
-﻿"""Timeline Auto-Extend helpers.
+"""Timeline Auto-Extend helpers.
 
 Extend = creator-facing Adept UI capability.
 ContinuityBridge = internal Timeline handoff.

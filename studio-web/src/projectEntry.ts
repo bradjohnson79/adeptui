@@ -18,6 +18,8 @@ export type PendingProjectEntry =
       setupMode?: "ai_guided" | "guided" | "manual" | string | null;
       setupComponent?: string | null;
       setupSource?: SetupEntrySource | string | null;
+      setupSection?: string | null;
+      setupMissing?: string | null;
       returnTo?: string | null;
     };
 
@@ -89,6 +91,12 @@ export function buildHomeCreateProjectPath({
       if (pendingEntry.setupSource) {
         params.set(PENDING_SETUP_SOURCE_PARAM, pendingEntry.setupSource);
       }
+      if (pendingEntry.setupSection) {
+        params.set("setupSection", pendingEntry.setupSection);
+      }
+      if (pendingEntry.setupMissing) {
+        params.set("setupMissing", pendingEntry.setupMissing);
+      }
     }
   }
   return `/?${params.toString()}`;
@@ -127,13 +135,20 @@ export function buildSetupPendingEntry(params: URLSearchParams): PendingProjectE
   if (!setupMode) {
     return null;
   }
-  return {
+  const entry: PendingProjectEntry = {
     kind: "setup",
     setupMode,
     setupComponent: params.get("setupComponent") || params.get("componentId"),
     setupSource: params.get("setupSource"),
     returnTo: sanitizeReturnToPath(params.get(PENDING_RETURN_TO_PARAM)),
   };
+  if (entry.kind === "setup") {
+    const setupSection = params.get("setupSection");
+    const setupMissing = params.get("setupMissing");
+    if (setupSection) entry.setupSection = setupSection;
+    if (setupMissing) entry.setupMissing = setupMissing;
+  }
+  return entry;
 }
 
 export function buildPendingProjectCancelDestination(pendingEntry?: PendingProjectEntry | null): string {
@@ -158,6 +173,8 @@ export function buildPendingProjectDestination(projectId: string, pendingEntry?:
         projectId,
         componentId: pendingEntry.setupComponent,
         source: pendingEntry.setupSource,
+        setupSection: pendingEntry.setupSection,
+        missingComponentIds: pendingEntry.setupMissing ? pendingEntry.setupMissing.split(",").filter(Boolean) : null,
       });
     }
     const params = new URLSearchParams();

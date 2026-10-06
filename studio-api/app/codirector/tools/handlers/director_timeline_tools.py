@@ -24,6 +24,7 @@ from ...errors import (
     TOOL_TARGET_NOT_FOUND,
     CoDirectorError,
 )
+from ...active_timeline_scene_snapshot import build_timeline_v2_read_block
 from ..definitions import ToolContext, ToolPreview
 
 
@@ -692,7 +693,7 @@ async def get_workspace(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
         raise _target_not_found("Scene timeline not found.", sceneId=scene_id)
     bundle = _require_bundle(ctx, {**args, "sceneId": scene_id})
     master = bundle["master"]
-    return {
+    result = {
         **context,
         "master": master.model_dump(),
         "_evidence": _receipt(
@@ -703,6 +704,12 @@ async def get_workspace(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
             revision_after=int(context["timelineRevision"]),
         ),
     }
+    # ADDITIVE: the live Timeline V2 document is the owner for V2 scenes. The W46
+    # master block above is unchanged; V2 truth is exposed alongside it.
+    v2_block = build_timeline_v2_read_block(ctx.db, ctx.project_id, scene_id)
+    if v2_block:
+        result["timelineV2"] = v2_block
+    return result
 
 
 async def get_playhead(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -807,7 +814,7 @@ async def inspect_batches(ctx: ToolContext, args: dict[str, Any]) -> dict[str, A
     context = build_timeline_context(ctx.db, ctx.project_id, _scene_id(ctx, args))
     if not context.get("ok"):
         raise _target_not_found("Scene timeline not found.")
-    return {
+    result = {
         "batches": context["batchesSummary"],
         "batchCount": context["batchCount"],
         "timelineRevision": context["timelineRevision"],
@@ -819,6 +826,12 @@ async def inspect_batches(ctx: ToolContext, args: dict[str, Any]) -> dict[str, A
             revision_after=int(context["timelineRevision"]),
         ),
     }
+    # ADDITIVE: V2 scenes report their live shots/segments alongside the W46
+    # batch summary. Non-V2 scenes keep the exact previous payload.
+    v2_block = build_timeline_v2_read_block(ctx.db, ctx.project_id, context["sceneId"])
+    if v2_block:
+        result["timelineV2"] = v2_block
+    return result
 
 
 async def preflight(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -1429,52 +1442,12 @@ def preview_propose_add_batch(ctx: ToolContext, args: dict[str, Any]) -> ToolPre
 
 
 def apply_propose_add_batch(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    bundle = _require_bundle(ctx, args)
-    workspace = bundle["workspace"]
-    _check_revision(args, workspace)
-    scene_id = bundle["sceneId"]
-    revision_before = int(workspace.get("timelineRevision") or 1)
-    result = service.add_batch(
-        ctx.db,
-        ctx.project_id,
-        scene_id,
-        label=args.get("label"),
-        planned_duration=float(args.get("plannedDuration") or 5.0),
-        generator_id=args.get("generatorId"),
-        at_order=args.get("atOrder"),
-    )
-    if not result.get("ok"):
-        raise _target_not_found(str(result.get("error") or "add_batch failed"))
-    store.save_master(
-        ctx.db,
-        ctx.project_id,
-        scene_id,
-        SceneTimelineMaster.model_validate(result["master"]),
-        workspace=workspace,
-        bump_revision=True,
-    )
-    revision_after = revision_before + 1
-    batch_id = (result.get("batch") or {}).get("id")
-    ui_focus = {
-        "target": "batch",
-        "sceneId": scene_id,
-        "selectionKind": "batch",
-        "selectionId": batch_id,
-        "openRightTab": "inspector",
-    }
+    _ = (ctx, args)
     return {
-        **result,
-        "timelineRevision": revision_after,
-        "uiFocus": ui_focus,
-        "_uiFocus": ui_focus,
-        "_evidence": _receipt(
-            ctx,
-            tool_id="timeline.propose_add_batch",
-            scene_id=scene_id,
-            revision_before=revision_before,
-            revision_after=revision_after,
-            extra={"batchId": batch_id},
-        ),
+        "ok": False,
+        "error": "FILM_TIMELINE_REQUIRED",
+        "message": "Create Shot adds a shot. Batch blocks are no longer Timeline state.",
+        "mock": False,
     }
 
 
@@ -1488,83 +1461,24 @@ def preview_propose_add_image_clip(ctx: ToolContext, args: dict[str, Any]) -> To
 
 
 def apply_propose_add_image_clip(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    from ....director_timeline_w46.contracts import BatchClip
+    from ....film_timeline.insertion import add_to_timeline
 
     bundle = _require_bundle(ctx, args)
-    workspace = bundle["workspace"]
-    _check_revision(args, workspace)
     scene_id = bundle["sceneId"]
-    revision_before = int(workspace.get("timelineRevision") or 1)
-    master = bundle["master"]
-    duration = _master_scene_duration(master)
-    existing = []
-    for batch in getattr(master, "batchBlocks", None) or []:
-        existing.extend(getattr(batch, "visualClips", None) or [])
-    start = float(args["start"]) if args.get("start") is not None else (
-        max((float(getattr(c, "start", 0) or 0) + float(getattr(c, "length", 0) or 0) for c in existing), default=0.0)
-    )
-    length = float(args.get("length") or min(2.0, duration))
-    clip = BatchClip(
-        kind="image",
-        start=max(0.0, start),
-        length=max(0.1, min(length, duration)),
-        label=str(args.get("label") or f"Image {len(existing) + 1}"),
-        role="guide",
-        assetId=args.get("assetId"),
-    )
-    _append_master_clip(master, clip, float(clip.start), "visualClips")
-    store.save_master(
+    asset_id = str(args.get("assetId") or "").strip()
+    if not asset_id:
+        raise _argument_error("assetId is required.", parameter="assetId")
+    placed = add_to_timeline(
         ctx.db,
         ctx.project_id,
         scene_id,
-        master,
-        workspace=workspace,
-        bump_revision=True,
+        media_type="image",
+        asset_id=asset_id,
+        target_track_type="reference",
+        label=str(args.get("label") or "Image"),
+        shot_id=str(args.get("shotId") or "") or None,
     )
-    revision_after = revision_before + 1
-    try:
-        from ....production_events import ACTOR_CODIRECTOR, record_production_event
-
-        record_production_event(
-            ctx.db,
-            project_id=ctx.project_id,
-            scene_id=scene_id,
-            event_type="timeline.clip_added",
-            actor=ACTOR_CODIRECTOR,
-            actor_detail="tool:timeline.propose_add_image_clip",
-            subject_kind="image_clip",
-            subject_id=clip.id,
-            summary=f"Image clip {clip.label} added at {round(clip.start, 3)}s for {round(clip.length, 3)}s",
-            payload={"clipId": clip.id, "start": clip.start, "length": clip.length, "assetId": clip.assetId},
-
-        )
-    except Exception:  # noqa: BLE001 - event recording never breaks the operation
-        pass
-    ui_focus = {
-        "target": "trackItem",
-        "sceneId": scene_id,
-        "selectionKind": "imageClip",
-        "selectionId": clip.id,
-        "openRightTab": "inspector",
-    }
-    return {
-        "ok": True,
-        "clipId": clip.id,
-        "timelineRevision": revision_after,
-        "uiFocus": ui_focus,
-        "_uiFocus": ui_focus,
-        "mock": False,
-        "_evidence": _receipt(
-            ctx,
-            tool_id="timeline.propose_add_image_clip",
-            scene_id=scene_id,
-            revision_before=revision_before,
-            revision_after=revision_after,
-            extra={"clipId": clip.id},
-        ),
-    }
-
-
+    return {"ok": bool(placed.get("ok")), "rendered": False, "filmTimeline": True, **placed}
 
 def _timed_prompt_requested_coverage_sec(text: str) -> float | None:
     """Max end-time claimed by Timed Prompt text (markers and coverage phrases).
@@ -1681,6 +1595,31 @@ def _upsert_master_timed_prompt(
         # instead of destroying the existing segment.
         hit = segs[0]
 
+    from ....director_timeline_w46.same_track_no_overlap import (
+        SameTrackOverlapError,
+        assert_master_prompt_candidate_fits,
+        CD_LAYMAN_TRACK_OCCUPIED,
+    )
+
+    candidate_id = str(getattr(hit, "id", "") or "") or None
+    try:
+        assert_master_prompt_candidate_fits(
+            master,
+            {
+                "id": candidate_id,
+                "start": float(start),
+                "length": float(length),
+            },
+        )
+    except SameTrackOverlapError as exc:
+        raise _argument_error(
+            CD_LAYMAN_TRACK_OCCUPIED,
+            field="start",
+            toolId="timeline.propose_add_prompt_segment",
+            code="SAME_TRACK_OVERLAP",
+            detail=str(exc),
+        ) from exc
+
     if hit is None:
         hit = TimelinePromptSegment(
             start=float(start),
@@ -1713,6 +1652,7 @@ def _upsert_master_timed_prompt(
     return target, str(getattr(hit, "id", "") or "")
 
 
+
 def _master_prompt_text_by_id(master: Any, segment_id: str) -> str:
     for b in getattr(master, "batchBlocks", None) or []:
         for s in getattr(b, "promptSegments", None) or []:
@@ -1722,6 +1662,17 @@ def _master_prompt_text_by_id(master: Any, segment_id: str) -> str:
                 return str(getattr(s, "text", "") or "")
     return ""
 
+
+
+def _refuse_timed_prompt_while_rendering(master: Any, tool_id: str) -> None:
+    from ....director_timeline_w46.scene_takes import take_render_is_live
+
+    if take_render_is_live(master):
+        raise _argument_error(
+            "A take is rendering. The Timed Prompt stays as written until that take finishes.",
+            field="text",
+            toolId=tool_id,
+        )
 
 
 def apply_propose_add_prompt_segment(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -1745,6 +1696,7 @@ def apply_propose_add_prompt_segment(ctx: ToolContext, args: dict[str, Any]) -> 
     # directorTimeline.duration_sec is frozen COW data and fenced a 45s scene
     # at 5s — never a fence authority.
     master = bundle["master"]
+    _refuse_timed_prompt_while_rendering(master, "timeline.propose_add_prompt_segment")
     scene_row = store.get_scene(ctx.db, ctx.project_id, scene_id)
     duration = _master_scene_duration(
         master,
@@ -1846,7 +1798,7 @@ def apply_propose_add_prompt_segment(ctx: ToolContext, args: dict[str, Any]) -> 
         "openRightTab": "inspector",
     }
     return {
-        "ok": True,
+        "ok": bool(verified),
         "verified": verified,
         "segmentId": segment_id,
         "timelineRevision": revision_after,
@@ -1884,162 +1836,30 @@ def preview_build_shot(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
 
 
 def apply_build_shot(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    """Composite shot build: image clip + optional matched prompt segment.
-
-    Steps:
-    1. Validate the asset belongs to the project.
-    2. Best-effort library durability (assign_asset metadata).
-    3. Compute start (explicit, else end of the last image clip - sequential).
-    4. Add the Image clip with the exact requested duration.
-    5. Optionally add a Prompt segment aligned to the same interval, storing
-       userDirection vs productionPrompt and verbatim dialogue.
-    """
-    from ....director_timeline_w46.contracts import BatchClip
-    from ....db import Asset as StudioAsset
+    """Place an image as a Film Timeline reference. Does not render."""
+    from ....film_timeline.insertion import add_to_timeline
+    from ....film_timeline.orchestrator import update_timed_prompt
 
     bundle = _require_bundle(ctx, args)
-    workspace = bundle["workspace"]
-    _check_revision(args, workspace)
-    scene_id = bundle["sceneId"]
-    revision_before = int(workspace.get("timelineRevision") or 1)
-    master = bundle["master"]
-    duration = _master_scene_duration(master)
-
+    scene_id = str(bundle["sceneId"])
     asset_id = str(args.get("assetId") or "").strip()
     if not asset_id:
         raise _argument_error("assetId is required.", parameter="assetId")
-    asset = ctx.db.get(StudioAsset, asset_id)
-    if asset is None or asset.project_id != ctx.project_id:
-        raise _target_not_found("Asset not found in this project.", assetId=asset_id)
-
-    # Best-effort library durability: classify/persist library metadata so the
-    # asset is a durable Library asset (mission Part 29). Never blocks.
-    try:
-        from ....project_library.service import assign_asset
-
-        assign_asset(ctx.db, asset, classified_by="codirector")
-    except Exception:
-        pass
-
-    existing = []
-    for batch in getattr(master, "batchBlocks", None) or []:
-        existing.extend(getattr(batch, "visualClips", None) or [])
-    length = float(args.get("length") or min(5.0, duration))
-    length = max(0.1, min(length, duration))
-    start = float(args["start"]) if args.get("start") is not None else (
-        round(
-            max(
-                (float(getattr(c, "start", 0) or 0) + float(getattr(c, "length", 0) or 0) for c in existing),
-                default=0.0,
-            ),
-            6,
-        )
-    )
-    # Sequential placement is canonical: no clamp to scene duration, so
-    # shot 2 lands exactly at the end of shot 1 (mission Part 22, no drift).
-    start = max(0.0, start)
-    label = str(args.get("label") or f"Shot {len(existing) + 1}")
-    clip = BatchClip(
-        kind="image",
-        start=start,
-        length=length,
-        label=label,
-        role="guide",
-        assetId=asset_id,
-    )
-    _append_master_clip(master, clip, float(start), "visualClips")
-
-    segment_id = None
-    prompt_text = str(args.get("prompt") or "")
-    production_prompt = str(args.get("productionPrompt") or "")
-    user_direction = str(args.get("userDirection") or "")
-    dialogue = str(args.get("dialogue") or "")
-    want_prompt = bool(args.get("addPromptSegment")) if args.get("addPromptSegment") is not None else bool(prompt_text or production_prompt or user_direction or dialogue)
-    if want_prompt:
-        # SINGLE-STORE: write Timed Prompt into Master batch.promptSegments only.
-        text = production_prompt or prompt_text or user_direction or dialogue
-        master = bundle["master"]
-        _batch_target, segment_id = _upsert_master_timed_prompt(
-            master,
-            text=text,
-            start=float(start),
-            length=float(length),
-            legacy_id=None,
-            user_direction=user_direction or None,
-            production_prompt=production_prompt or None,
-            dialogue=dialogue or None,
-            weight=1.0,
-        )
-
-    store.save_master(
+    placed = add_to_timeline(
         ctx.db,
         ctx.project_id,
         scene_id,
-        bundle["master"],
-        workspace=workspace,
-        bump_revision=True,
+        media_type="image",
+        asset_id=asset_id,
+        target_track_type="reference",
+        label=str(args.get("label") or "Image"),
+        shot_id=str(args.get("shotId") or "") or None,
     )
-    revision_after = revision_before + 1
-
-    try:
-        from ....production_events import ACTOR_CODIRECTOR, record_production_event
-
-        record_production_event(
-            ctx.db,
-            project_id=ctx.project_id,
-            scene_id=scene_id,
-            event_type="timeline.clip_added",
-            actor=ACTOR_CODIRECTOR,
-            actor_detail="tool:timeline.build_shot",
-            subject_kind="image_clip",
-            subject_id=clip.id,
-            summary=f"Shot {label} added at {round(start, 3)}s for {round(length, 3)}s" + (" with timed prompt" if segment_id else ""),
-            payload={"clipId": clip.id, "segmentId": segment_id, "assetId": asset_id, "start": start, "length": length, "userDirection": user_direction[:200] if user_direction else None},
-
-        )
-        if segment_id:
-            record_production_event(
-                ctx.db,
-                project_id=ctx.project_id,
-                scene_id=scene_id,
-                event_type="timeline.prompt_added",
-                actor=ACTOR_CODIRECTOR,
-                actor_detail="tool:timeline.build_shot",
-                subject_kind="prompt_segment",
-                subject_id=segment_id,
-                summary=f"Timed prompt added at {round(start, 3)}s for {round(length, 3)}s",
-                payload={"segmentId": segment_id, "clipId": clip.id, "start": start, "length": length},
-            )
-    except Exception:  # noqa: BLE001 - event recording never breaks the operation
-        pass
-
-    # Persist prompt provenance (userDirection / productionPrompt / dialogue)
-    # onto the master workspace so later turns can resolve it (Part 14).
-    try:
-        from . import _persist_revision_bump  # noqa: F401 - placeholder guard
-    except Exception:
-        pass
-
-    return {
-        "ok": True,
-        "clipId": clip.id,
-        "segmentId": segment_id,
-        "assetId": asset_id,
-        "start": start,
-        "duration": length,
-        "timelineRevision": revision_after,
-        "libraryDurable": True,
-        "mock": False,
-        "_evidence": _receipt(
-            ctx,
-            tool_id="timeline.build_shot",
-            scene_id=scene_id,
-            revision_before=revision_before,
-            revision_after=revision_after,
-            extra={"clipId": clip.id, "segmentId": segment_id},
-        ),
-    }
-
+    prompt = str(args.get("prompt") or args.get("text") or "").strip()
+    shot_id = str(args.get("shotId") or "")
+    if prompt and shot_id:
+        update_timed_prompt(ctx.db, ctx.project_id, scene_id, shot_id, prompt)
+    return {"ok": bool(placed.get("ok")), "rendered": False, "filmTimeline": True, **placed}
 
 def preview_propose_generate_scene(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     scope = str(args.get("scope") or "full")
@@ -2052,29 +1872,12 @@ def preview_propose_generate_scene(ctx: ToolContext, args: dict[str, Any]) -> To
 
 
 def apply_propose_generate_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    bundle = _require_bundle(ctx, args)
-    workspace = bundle["workspace"]
-    _check_revision(args, workspace)
-    scene_id = bundle["sceneId"]
-    revision_before = int(workspace.get("timelineRevision") or 1)
-    result = orchestrator.generate_scene(
-        ctx.db,
-        ctx.project_id,
-        scene_id,
-        scope=args.get("scope") or "full",
-        batch_ids=args.get("batchBlockIds"),
-    )
-    revision_after = _persist_revision_bump(ctx, scene_id, workspace, revision_before)
+    _ = (ctx, args)
     return {
-        **result,
-        "timelineRevision": revision_after,
-        "_evidence": _receipt(
-            ctx,
-            tool_id="timeline.propose_generate_scene",
-            scene_id=scene_id,
-            revision_before=revision_before,
-            revision_after=revision_after,
-        ),
+        "ok": False,
+        "error": "FILM_TIMELINE_REQUIRED",
+        "message": "Generate Shot renders a Timeline shot. Writing a Timed Prompt does not render.",
+        "mock": False,
     }
 
 
@@ -2175,52 +1978,12 @@ def preview_propose_retake(ctx: ToolContext, args: dict[str, Any]) -> ToolPrevie
 
 
 def apply_propose_retake(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    bundle = _require_bundle(ctx, args)
-    workspace = bundle["workspace"]
-    _check_revision(args, workspace)
-    scene_id = bundle["sceneId"]
-    revision_before = int(workspace.get("timelineRevision") or 1)
-    batch_id = str(args.get("batchBlockId") or "")
-    if not batch_id:
-        raise _argument_error("batchBlockId is required.", parameter="batchBlockId")
-    guidance = str(workspace.get("guidancePriority") or "") or None
-    start = args.get("start")
-    length = args.get("length")
-    prompt = str(args.get("prompt") or args.get("delta") or "").strip()
-    if start is not None and length is not None and prompt:
-        result = orchestrator.retake_range(
-            ctx.db,
-            ctx.project_id,
-            scene_id,
-            batch_id,
-            start=float(start),
-            length=float(length),
-            prompt=prompt,
-            mask_png_base64=args.get("maskPngBase64"),
-            reference_frame_time=args.get("referenceFrameTime"),
-            frame_asset_id=args.get("frameAssetId"),
-            remove_background=bool(args.get("removeBackground")),
-        )
-    else:
-        result = orchestrator.submit_batch_generation(
-            ctx.db,
-            ctx.project_id,
-            scene_id,
-            batch_id,
-            guidance_priority=guidance,
-        )
-    revision_after = _persist_revision_bump(ctx, scene_id, workspace, revision_before)
+    _ = (ctx, args)
     return {
-        **result,
-        "timelineRevision": revision_after,
-        "_evidence": _receipt(
-            ctx,
-            tool_id="timeline.propose_retake",
-            scene_id=scene_id,
-            revision_before=revision_before,
-            revision_after=revision_after,
-            extra={"batchBlockId": batch_id, "guidancePriority": guidance},
-        ),
+        "ok": False,
+        "error": "FILM_TIMELINE_REQUIRED",
+        "message": "Regenerate a segment or Continue Shot. Batch retake is no longer a Timeline action.",
+        "mock": False,
     }
 
 
@@ -3083,87 +2846,13 @@ def preview_propose_execute_inpaint(ctx: ToolContext, args: dict[str, Any]) -> T
 
 
 def apply_propose_execute_inpaint(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    bundle = _require_bundle(ctx, args)
-    workspace = bundle["workspace"]
-    _check_revision(args, workspace)
-    scene_id = bundle["sceneId"]
-    revision_before = int(workspace.get("timelineRevision") or 1)
-    master = bundle["master"]
-    batch_id = str(args.get("batchBlockId") or "").strip()
-    repair_id = str(args.get("repairId") or "").strip()
-    if not batch_id or not repair_id:
-        raise _argument_error("batchBlockId and repairId are required.", parameter="batchBlockId")
-    batch = _find_batch_or_error(master, batch_id)
-    repair = _find_repair_or_error(batch, repair_id)
-    metadata = repair.metadata.get("inpaint") if isinstance(repair.metadata, dict) else {}
-    generator_id = str(args.get("generatorId") or metadata.get("generatorId") or "").strip() or None
-    if generator_id and generator_id != batch.generatorId:
-        result = orchestrator.touch_batch_config(
-            ctx.db,
-            ctx.project_id,
-            scene_id,
-            batch_id,
-            {"generatorId": generator_id},
-        )
-        if not result.get("ok"):
-            raise _argument_error("Unable to update batch generator for inpaint.", batchBlockId=batch_id, result=result)
-        master = _reload_master(ctx, scene_id)
-        batch = _find_batch_or_error(master, batch_id)
-        repair = _find_repair_or_error(batch, repair_id)
-    prior_approved = batch.approvedClip.model_dump() if batch.approvedClip else None
-    result = orchestrator.submit_batch_generation(
-        ctx.db,
-        ctx.project_id,
-        scene_id,
-        batch_id,
-        guidance_priority=str(workspace.get("guidancePriority") or "") or None,
-    )
-    if not result.get("ok"):
-        raise _argument_error("Unable to queue inpaint generation.", batchBlockId=batch_id, repairId=repair_id, result=result)
-    master = _reload_master(ctx, scene_id)
-    batch = _find_batch_or_error(master, batch_id)
-    repair = _find_repair_or_error(batch, repair_id)
-    inpaint_meta = repair.metadata.get("inpaint") if isinstance(repair.metadata, dict) else {}
-    if not isinstance(inpaint_meta, dict):
-        inpaint_meta = {}
-    if prior_approved and "previousApprovedClip" not in inpaint_meta:
-        inpaint_meta["previousApprovedClip"] = prior_approved
-    inpaint_meta["lastExecutionSnapshotId"] = result.get("executionSnapshotId")
-    repair.metadata = {**repair.metadata, "inpaint": inpaint_meta}
-    repair.status = "queued"
-    repair.executionSnapshotId = result.get("executionSnapshotId")
-    orchestrator.touch_batch_config(
-        ctx.db,
-        ctx.project_id,
-        scene_id,
-        batch_id,
-        {"repairRanges": [item.model_dump() for item in batch.repairRanges]},
-    )
-    revision_after = _persist_revision_bump(ctx, scene_id, workspace, revision_before)
-    ui_focus = {
-        "target": "queueJob",
-        "sceneId": scene_id,
-        "selectionKind": "repair",
-        "selectionId": repair.id,
-        "jobId": (result.get("job") or {}).get("id"),
-        "openRightTab": "inspector",
-    }
+    _ = (ctx, args)
     return {
-        **result,
-        "repairId": repair.id,
-        "timelineRevision": revision_after,
-        "uiFocus": ui_focus,
-        "_uiFocus": ui_focus,
-        "_evidence": _receipt(
-            ctx,
-            tool_id="timeline.propose_execute_inpaint",
-            scene_id=scene_id,
-            revision_before=revision_before,
-            revision_after=revision_after,
-            extra={"batchBlockId": batch_id, "repairId": repair.id},
-        ),
+        "ok": False,
+        "error": "FILM_TIMELINE_REQUIRED",
+        "message": "Regenerate the Film Timeline segment. Inpaint no longer submits a batch.",
+        "mock": False,
     }
-
 
 def preview_propose_approve_inpaint(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     return _preview_mutation(

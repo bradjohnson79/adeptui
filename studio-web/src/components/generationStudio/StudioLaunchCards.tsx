@@ -37,7 +37,7 @@ const CARDS: {
     description:
       "AI-native editing with MAGI Command, Actions, and Recipes — certified image edits today, honest multimodal tools as they certify.",
     cta: "Open MAGI Editor →",
-    imageSrc: "/images/hero/MAGI_Korri_4-3.png",
+    imageSrc: "/images/hero/MAGI_Korri_4-3.webp",
     imageAlt: "Adept UI MAGI Editor — Korri",
     testId: "magi-launch-card",
     accent: "magi",
@@ -58,7 +58,7 @@ export function StudioLaunchCards({ busy = false, onOpen }: StudioLaunchCardsPro
           data-testid={card.testId}
         >
           <div className="gs-studio-launch-card__media">
-            <img src={card.imageSrc} alt={card.imageAlt} loading="lazy" />
+            <img src={card.imageSrc} alt={card.imageAlt} decoding="async" loading="lazy" />
             <div className="gs-studio-launch-card__scrim" aria-hidden="true" />
           </div>
           <div className="gs-studio-launch-card__content">

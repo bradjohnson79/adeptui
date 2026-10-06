@@ -225,6 +225,11 @@ export function formatErsProvenance(source: {
   model?: string | null;
   sourceKind?: "Local" | "API" | null;
 }): string {
+  const raw = String(source.model || "");
+  if (raw.startsWith("env:")) {
+    const label = raw.slice(4).trim();
+    return label ? `Generating with ${label}` : "";
+  }
   const resolved = resolveErsGeneratorFromModel(source);
   if (resolved === "gpt-image-2") return "Generating with GPT Image 2 · Image Edit";
   if (resolved === "qwen2512") return "Generating with Qwen Image · Reference";

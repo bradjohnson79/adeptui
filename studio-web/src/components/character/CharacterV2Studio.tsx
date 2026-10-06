@@ -502,10 +502,10 @@ export function CharacterV2Studio({ projectId, characterId, mode, saved, editabl
           ))}
         </div>
       </section>
-      {mode === "standard"
+      {mode === "standard" || frontOk
         ? card(
             "closeup",
-            "Close-up",
+            mode === "express" ? "Close-up — Optional" : "Close-up",
             "Close-up is optional. You do not need it to finish the character or create the Character Sheet.",
           )
         : null}

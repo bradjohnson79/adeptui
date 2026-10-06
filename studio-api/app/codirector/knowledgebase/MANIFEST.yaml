@@ -1,0 +1,301 @@
+﻿schema: adept-codirector-knowledge/v1
+version: "2026.09.14"
+authority_order:
+  - live_project
+  - adept_registry
+  - knowledge_markdown
+  - installed_workflow
+  - upstream_docs
+  - general_llm
+entries:
+  - id: adept-authority
+    path: adept/authority.md
+    kind: adept
+    registry_ids: []
+  - id: adept-platform
+    path: adept/platform.md
+    kind: adept
+    registry_ids: []
+  - id: adept-terminology
+    path: adept/terminology.md
+    kind: adept
+    registry_ids: []
+  - id: adept-system-map
+    path: adept/system-map.md
+    kind: adept
+    registry_ids: []
+  - id: adept-readiness
+    path: adept/readiness.md
+    kind: adept
+    registry_ids: []
+  - id: wiki
+    path: systems/wiki.md
+    kind: system
+    registry_ids: []
+  - id: notes
+    path: systems/notes.md
+    kind: system
+    registry_ids: []
+  - id: story
+    path: systems/story.md
+    kind: system
+    registry_ids: []
+  - id: script-writer
+    path: systems/script-writer.md
+    kind: system
+    registry_ids: []
+  - id: character-creator
+    path: systems/character-creator.md
+    kind: system
+    registry_ids:
+      - illustrious-local
+      - qwen-image-2512-local
+      - zimage-local
+      - flux-local
+      - krea2-turbo-local
+  - id: voice-creator
+    path: systems/voice-creator.md
+    kind: system
+    registry_ids:
+      - qwen3-tts
+      - index-tts2-local
+  - id: prop-creator
+    path: systems/prop-creator.md
+    kind: system
+    registry_ids: []
+  - id: spatial-map
+    path: systems/spatial-map.md
+    kind: system
+    registry_ids:
+      - gpt-image-2-fal
+      - gpt-image-2-kie
+  - id: posecraft
+    path: systems/posecraft.md
+    kind: system
+    registry_ids: []
+  - id: scene-creator
+    path: systems/scene-creator.md
+    kind: system
+    registry_ids:
+      - qwen-image-2512-local
+      - zimage-local
+      - flux-local
+      - gpt-image-2-fal
+  - id: timeline
+    path: systems/timeline.md
+    kind: system
+    registry_ids:
+      - minimax-h3
+      - ltx-2.5-distilled
+      - ltx-2.5-full
+      - ltx-2.5-comfy
+  - id: library
+    path: systems/library.md
+    kind: system
+    registry_ids: []
+  - id: image-generation
+    path: systems/image-generation.md
+    kind: system
+    registry_ids:
+      - qwen-image-2512-local
+      - qwen-image-edit-2509-local
+      - flux-local
+      - flux-kontext-dev-local
+      - zimage-local
+      - gpt-image-2-fal
+      - krea2-turbo-local
+      - illustrious-local
+      - seedream-kie
+      - nano-banana-kie
+  - id: video-generation
+    path: systems/video-generation.md
+    kind: system
+    registry_ids:
+      - minimax-h3
+      - ltx-2.5-distilled
+      - ltx-2.5-full
+      - ltx-2.5-comfy
+  - id: audio-sfx
+    path: systems/audio-sfx.md
+    kind: system
+    registry_ids:
+      - ace-step-local
+      - mmaudio-local
+  - id: magi
+    path: systems/magi.md
+    kind: system
+    registry_ids: []
+  - id: magi-color
+    path: systems/magi-color.md
+    kind: system
+    registry_ids: []
+  - id: magi-edit
+    path: systems/magi-edit.md
+    kind: system
+    registry_ids: []
+  - id: magi-sound
+    path: systems/magi-sound.md
+    kind: system
+    registry_ids:
+      - mmaudio-local
+  - id: magi-music
+    path: systems/magi-music.md
+    kind: system
+    registry_ids:
+      - ace-step-local
+  - id: qwen-2512
+    path: generators/image/qwen-2512.md
+    kind: generator
+    registry_ids:
+      - qwen-image-2512-local
+  - id: qwen-edit-2509
+    path: generators/image/qwen-edit-2509.md
+    kind: generator
+    registry_ids:
+      - qwen-image-edit-2509-local
+  - id: flux
+    path: generators/image/flux.md
+    kind: generator
+    registry_ids:
+      - flux-local
+      - flux-schnell-local
+      - flux-fal
+      - flux-kie
+  - id: flux-kontext
+    path: generators/image/flux-kontext.md
+    kind: generator
+    registry_ids:
+      - flux-kontext-dev-local
+  - id: z-image
+    path: generators/image/z-image.md
+    kind: generator
+    registry_ids:
+      - zimage-local
+  - id: gpt-image-2
+    path: generators/image/gpt-image-2.md
+    kind: generator
+    registry_ids:
+      - gpt-image-2-fal
+      - gpt-image-2-kie
+  - id: krea2
+    path: generators/image/krea2.md
+    kind: generator
+    registry_ids:
+      - krea2-turbo-local
+      - krea2-raw-local
+      - krea2-turbo-fal
+      - krea2-medium-fal
+      - krea2-large-fal
+  - id: illustrious
+    path: generators/image/illustrious.md
+    kind: generator
+    registry_ids:
+      - illustrious-local
+  - id: seedream
+    path: generators/image/seedream.md
+    kind: generator
+    registry_ids:
+      - seedream-kie
+  - id: nano-banana
+    path: generators/image/nano-banana.md
+    kind: generator
+    registry_ids:
+      - nano-banana-kie
+  - id: ace-step
+    path: generators/audio/ace-step.md
+    kind: generator
+    registry_ids:
+      - ace-step-local
+  - id: mmaudio
+    path: generators/audio/mmaudio.md
+    kind: generator
+    registry_ids:
+      - mmaudio-local
+  - id: qwen-tts
+    path: generators/voice/qwen-tts.md
+    kind: generator
+    registry_ids:
+      - qwen3-tts
+  - id: indextts2
+    path: generators/voice/indextts2.md
+    kind: generator
+    registry_ids:
+      - index-tts2-local
+  - id: ltx-2.5
+    path: video-generators/ltx-2.5.md
+    kind: generator
+    registry_ids:
+      - ltx-2.5-full
+      - ltx-2.5-distilled
+      - ltx-2.5-comfy
+      - ltx_2_5_full
+      - ltx_2_5_distilled
+      - ltx_2_5_comfy
+  - id: minimax-h3
+    path: video-generators/minimax-h3.md
+    kind: generator
+    registry_ids:
+      - minimax-h3
+      - minimax-h3-local
+      - minimax-h3-t2v-local
+      - minimax-h3-i2v-local
+      - minimax-h3-i2v
+  - id: kling
+    path: video-generators/kling.md
+    kind: generator
+    registry_ids:
+      - kling-api
+      - kling-fal
+      - kling-kie
+  - id: seedance-2.0
+    path: video-generators/seedance-2.0.md
+    kind: generator
+    registry_ids:
+      - seedance-api
+      - seedance-fal
+  - id: seedance-kie
+    path: video-generators/seedance-kie.md
+    kind: generator
+    registry_ids:
+      - seedance-kie
+  - id: veo-3.1
+    path: video-generators/veo-3.1.md
+    kind: generator
+    registry_ids:
+      - veo-api
+      - veo-kie
+  - id: veo-fal
+    path: video-generators/veo-fal.md
+    kind: generator
+    registry_ids:
+      - veo-fal
+  - id: ers-spec
+    path: environment-reference-sheet/ERS_SPEC.md
+    kind: workflow
+    registry_ids:
+      - gpt-image-2-fal
+      - gpt-image-2-kie
+  - id: character-identity
+    path: workflows/character-identity.md
+    kind: workflow
+    registry_ids: []
+  - id: reference-semantics
+    path: workflows/reference-semantics.md
+    kind: workflow
+    registry_ids: []
+  - id: continuity
+    path: workflows/continuity.md
+    kind: workflow
+    registry_ids: []
+  - id: prompt-names
+    path: workflows/prompt-names.md
+    kind: workflow
+    registry_ids: []
+  - id: ers-law
+    path: workflows/ers-law.md
+    kind: workflow
+    registry_ids:
+      - gpt-image-2-fal
+      - gpt-image-2-kie
+
+

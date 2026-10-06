@@ -1,4 +1,5 @@
 import { useEffect, useState, type RefObject } from "react";
+import { TransportBatchEndIcon, TransportBatchStartIcon, TransportForward5Icon, TransportPauseIcon, TransportPlayIcon, TransportRewind5Icon, TransportSceneEndIcon, TransportSceneStartIcon } from "./previewTransportIcons";
 
 /**
  * Fullscreen-only transport bar for the Preview Monitor.
@@ -45,6 +46,11 @@ export function PreviewFullscreenTransport({
   timelineTimeSec = 0,
   timelineDurationSec = 0,
   timelinePlaying = false,
+  sceneTimeSec,
+  sceneDurationSec = 0,
+  onSceneSeek,
+  onBatchStart,
+  onBatchEnd,
 }: {
   videoRef: RefObject<HTMLVideoElement | null>;
   isFullscreen: boolean;
@@ -58,6 +64,11 @@ export function PreviewFullscreenTransport({
   timelineTimeSec?: number;
   timelineDurationSec?: number;
   timelinePlaying?: boolean;
+  sceneTimeSec?: number;
+  sceneDurationSec?: number;
+  onSceneSeek?: (sceneTime: number) => void;
+  onBatchStart?: () => void;
+  onBatchEnd?: () => void;
 }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -100,6 +111,12 @@ export function PreviewFullscreenTransport({
     if (!isFullscreen) return;
 
     const seek = (delta: number) => {
+      if (onSceneSeek) {
+        const base = sceneTimeSec ?? timelineTimeSec;
+        const limit = sceneDurationSec > 0 ? sceneDurationSec : Number.POSITIVE_INFINITY;
+        onSceneSeek(Math.max(0, Math.min(limit, base + delta)));
+        return;
+      }
       const v = readVideo(videoRef);
       const base = v ? v.currentTime : timelineTimeSec;
       const dur =
@@ -113,6 +130,10 @@ export function PreviewFullscreenTransport({
     };
 
     const jumpToStart = () => {
+      if (onSceneSeek) {
+        onSceneSeek(0);
+        return;
+      }
       const v = readVideo(videoRef);
       if (v) v.currentTime = 0;
       setCurrentTime(0);
@@ -120,6 +141,10 @@ export function PreviewFullscreenTransport({
     };
 
     const jumpToEnd = () => {
+      if (onSceneSeek) {
+        onSceneSeek(sceneDurationSec);
+        return;
+      }
       const v = readVideo(videoRef);
       const dur =
         (v && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0) ||
@@ -133,6 +158,10 @@ export function PreviewFullscreenTransport({
     };
 
     const togglePlay = () => {
+      if (onSceneSeek) {
+        onTogglePlay?.();
+        return;
+      }
       const v = readVideo(videoRef);
       if (isVideoMedia && v) {
         if (v.paused) {
@@ -192,17 +221,26 @@ export function PreviewFullscreenTransport({
     return () => {
       document.removeEventListener("keydown", onKey, true);
     };
-  }, [isFullscreen, videoRef, onExitFullscreen, onTogglePlay, onSeekLocalTime, duration, timelineTimeSec, timelineDurationSec, isVideoMedia]);
+  }, [isFullscreen, videoRef, onExitFullscreen, onTogglePlay, onSeekLocalTime, onSceneSeek, duration, timelineTimeSec, timelineDurationSec, sceneTimeSec, sceneDurationSec, isVideoMedia]);
 
   if (!isFullscreen) return null;
 
+  const shownScene = onSceneSeek != null;
   const handleJumpToStart = () => {
+    if (shownScene) {
+      onSceneSeek?.(0);
+      return;
+    }
     const v = readVideo(videoRef);
     if (v) v.currentTime = 0;
     setCurrentTime(0);
     onSeekLocalTime?.(0);
   };
   const handleRewind5 = () => {
+    if (shownScene) {
+      onSceneSeek?.(Math.max(0, (sceneTimeSec ?? 0) - 5));
+      return;
+    }
     const v = readVideo(videoRef);
     const base = v ? v.currentTime : timelineTimeSec;
     const next = Math.max(0, base - 5);
@@ -211,6 +249,11 @@ export function PreviewFullscreenTransport({
     onSeekLocalTime?.(next);
   };
   const handleForward5 = () => {
+    if (shownScene) {
+      const limit = sceneDurationSec > 0 ? sceneDurationSec : Number.POSITIVE_INFINITY;
+      onSceneSeek?.(Math.min(limit, (sceneTimeSec ?? 0) + 5));
+      return;
+    }
     const v = readVideo(videoRef);
     const base = v ? v.currentTime : timelineTimeSec;
     const dur =
@@ -224,6 +267,10 @@ export function PreviewFullscreenTransport({
     onSeekLocalTime?.(next);
   };
   const handleJumpToEnd = () => {
+    if (shownScene) {
+      onSceneSeek?.(sceneDurationSec);
+      return;
+    }
     const v = readVideo(videoRef);
     const dur =
       (v && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0) ||
@@ -236,6 +283,10 @@ export function PreviewFullscreenTransport({
     onSeekLocalTime?.(next);
   };
   const handlePlayPause = () => {
+    if (shownScene) {
+      onTogglePlay?.();
+      return;
+    }
     const v = readVideo(videoRef);
     if (isVideoMedia && v) {
       if (v.paused) {
@@ -249,12 +300,11 @@ export function PreviewFullscreenTransport({
   };
 
   const live = readVideo(videoRef);
-  const playing = isVideoMedia && live ? isPlaying : timelinePlaying;
-  const shownTime = live ? currentTime : timelineTimeSec;
-  const durDisplay =
-    duration ||
-    (live && Number.isFinite(live.duration) ? live.duration : 0) ||
-    timelineDurationSec;
+  const playing = shownScene ? timelinePlaying : isVideoMedia && live ? isPlaying : timelinePlaying;
+  const shownTime = shownScene ? sceneTimeSec ?? 0 : live ? currentTime : timelineTimeSec;
+  const durDisplay = shownScene
+    ? sceneDurationSec
+    : duration || (live && Number.isFinite(live.duration) ? live.duration : 0) || timelineDurationSec;
 
   return (
     <div className="preview-fullscreen-transport" data-testid="preview-fullscreen-transport">
@@ -273,8 +323,20 @@ export function PreviewFullscreenTransport({
             aria-label="Jump to Beginning"
             onClick={handleJumpToStart}
           >
-            |&laquo;
+            <TransportSceneStartIcon />
           </button>
+          {onBatchStart ? (
+            <button
+              type="button"
+              className="preview-transport-btn"
+              data-testid="preview-fs-batch-start"
+              title="Start of Batch"
+              aria-label="Start of Batch"
+              onClick={onBatchStart}
+            >
+              <TransportBatchStartIcon />
+            </button>
+          ) : null}
           <button
             type="button"
             className="preview-transport-btn"
@@ -283,7 +345,7 @@ export function PreviewFullscreenTransport({
             aria-label="Rewind 5 Seconds"
             onClick={handleRewind5}
           >
-            -5s
+            <TransportRewind5Icon />
           </button>
           <button
             type="button"
@@ -294,7 +356,7 @@ export function PreviewFullscreenTransport({
             aria-pressed={playing}
             onClick={handlePlayPause}
           >
-            {playing ? "\u23F8" : "\u25B6"}
+            {playing ? <TransportPauseIcon /> : <TransportPlayIcon />}
           </button>
           <button
             type="button"
@@ -304,8 +366,20 @@ export function PreviewFullscreenTransport({
             aria-label="Forward 5 Seconds"
             onClick={handleForward5}
           >
-            +5s
+            <TransportForward5Icon />
           </button>
+          {onBatchEnd ? (
+            <button
+              type="button"
+              className="preview-transport-btn"
+              data-testid="preview-fs-batch-end"
+              title="End of Batch"
+              aria-label="End of Batch"
+              onClick={onBatchEnd}
+            >
+              <TransportBatchEndIcon />
+            </button>
+          ) : null}
           <button
             type="button"
             className="preview-transport-btn"
@@ -314,7 +388,7 @@ export function PreviewFullscreenTransport({
             aria-label="Jump to End"
             onClick={handleJumpToEnd}
           >
-            &raquo;|
+            <TransportSceneEndIcon />
           </button>
       </div>
 

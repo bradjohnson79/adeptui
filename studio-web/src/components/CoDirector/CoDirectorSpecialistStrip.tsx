@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
+import { AdeptSelect } from "../ui/AdeptSelect";
 import { useCoDirectorSession } from "./CoDirectorSession";
 
 type SpecialistOption = { id: string; displayName: string };
 
 export function CoDirectorSpecialistStrip() {
   const { uiContext } = useCoDirectorSession();
-  const [specialists, setSpecialists] = useState<SpecialistOption[]>([]);
+  const [specialists, setSpecialists] = useState<SpecialistOption[]>([
+    { id: "character-creator", displayName: "Character Creator" },
+  ]);
   const [selectedId, setSelectedId] = useState<string>("character-creator");
   const [readiness, setReadiness] = useState<{
     score?: number;
@@ -56,7 +59,9 @@ export function CoDirectorSpecialistStrip() {
         setReadiness({
           score: typeof cov?.score === "number" ? cov.score : undefined,
           nextAction: cov?.next_action || cov?.guidance?.[0] || "",
-          blockers: cov?.critical_blockers || [],
+          blockers: (cov?.critical_blockers || []).filter(
+            (item: string) => !String(item).toLowerCase().startsWith("missing visual references"),
+          ),
           status: cov?.status,
         });
       })
@@ -76,18 +81,14 @@ export function CoDirectorSpecialistStrip() {
     <div className="codirector-specialist-strip" data-testid="codirector-specialist-strip">
       <label className="codirector-specialist-select">
         <span className="muted">Specialist</span>
-        <select
+        <AdeptSelect
           value={selectedId}
           onChange={(e) => setSelectedId(e.target.value)}
           aria-label="Select Co-Director specialist"
           data-testid="codirector-specialist-select"
-        >
-          {specialists.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.displayName}
-            </option>
-          ))}
-        </select>
+          placeholder=""
+          options={specialists.map((s) => ({ value: s.id, label: s.displayName }))}
+        />
       </label>
       {selectedId === "character-creator" && readiness && (
         <div className="codirector-readiness-strip" data-testid="codirector-character-readiness">

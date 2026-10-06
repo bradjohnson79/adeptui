@@ -30,6 +30,7 @@ type MagiLayoutContextValue = {
   setTimelineHeight: (n: number) => void;
   toggleLeftDock: () => void;
   toggleRightDock: () => void;
+  setBothDocksCollapsed: (collapsed: boolean) => void;
   toggleTimeline: () => void;
   movePane: (pane: MagiPaneId, side: "left" | "right") => void;
   reorderPane: (pane: MagiPaneId, direction: "up" | "down") => void;
@@ -131,6 +132,13 @@ export function MagiWorkspaceLayoutProvider({ children }: { children: ReactNode 
         setUserCollapsedRight(true);
         update((p) => ({ ...p, activePreset: "custom", rightDockCollapsed: !p.rightDockCollapsed }));
       },
+      setBothDocksCollapsed: (collapsed) =>
+        update((p) => ({
+          ...p,
+          activePreset: "custom",
+          leftDockCollapsed: collapsed,
+          rightDockCollapsed: collapsed,
+        })),
       toggleTimeline: () =>
         update((p) => ({ ...p, activePreset: "custom", timelineCollapsed: !p.timelineCollapsed })),
       movePane: (pane, side) =>

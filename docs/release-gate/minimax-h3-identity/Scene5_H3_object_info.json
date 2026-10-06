@@ -1,0 +1,40 @@
+{
+  "source": "Comfy MCP nodes(action=get) against live 127.0.0.1:8188",
+  "comfyui_version": "0.34.5",
+  "MiniMaxH3ReferenceToVideo": {
+    "ref_image_size_choices": ["match", "max"],
+    "ref_image_size_default": "match",
+    "required": ["clip", "vae", "audio_vae", "prompt", "width", "height", "length", "ref_image_size"],
+    "optional_autogrow": ["ref_images", "ref_videos", "ref_video_audios", "ref_audios"],
+    "description": "<Picture i> / <Video k> / <Audio j> reference conditioning for MiniMax H3. Use the same tags when prompting."
+  },
+  "BasicScheduler": {
+    "scheduler_includes_simple": true,
+    "steps_default": 20,
+    "model_input": "MODEL"
+  },
+  "BasicGuider": {
+    "inputs": ["model", "conditioning"]
+  },
+  "EasyCache": {
+    "present": true,
+    "required_for_graph": false,
+    "defaults": {
+      "reuse_threshold": 0.2,
+      "start_percent": 0.15,
+      "end_percent": 0.95
+    }
+  },
+  "SamplerCustomAdvanced": {
+    "inputs": ["noise", "guider", "sampler", "sigmas", "latent_image"]
+  },
+  "CreateVideo": {
+    "fps_supported": true,
+    "audio_optional": true
+  },
+  "SaveVideo": {
+    "format_choices": ["auto", "mp4", "mkv", "webm"],
+    "codec_choices": ["auto", "h264", "av1"],
+    "validator_requires_format_codec": true
+  }
+}

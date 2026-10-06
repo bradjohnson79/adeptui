@@ -3,10 +3,13 @@ import { api } from "../../api";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import type { CoDirectorMessage as Msg, CoDirectorMessageExecution } from "./types";
 import { renderAssistantMarkdown } from "./assistantMarkdown";
+import { projectCreatorReply } from "./creatorFacingReply";
 import GenerationQueueCard from "./GenerationQueueCard";
 import SceneProductionCard from "./SceneProductionCard";
 import { CoDirectorMediaCardGrid, type MediaCardItem } from "./CoDirectorMediaCardGrid";
 import { capabilityActionLabel, normalizeJobStatus } from "./liveExecutionSync";
+import { LibraryQuickPreviewModal, type LibraryQuickPreviewAsset } from "../library/LibraryQuickPreviewModal";
+import { OPEN_CONTENT_TAB_EVENT } from "./navEntries";
 
 const MESSAGE_TYPE_LABELS: Record<string, string> = {
   recommendation: "Recommendation",
@@ -115,6 +118,74 @@ function ExecutionSummaryCard({
   );
 }
 
+function GenerationReadyActions({ message }: { message: Msg }) {
+  const ready = message.generationReady;
+  const [preview, setPreview] = useState<LibraryQuickPreviewAsset | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  if (!ready) return null;
+
+  const openAsset = () => {
+    const assetId = String(ready.assetId || "").trim();
+    if (!assetId) {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_CONTENT_TAB_EVENT, { detail: { tab: "library" } }),
+      );
+      return;
+    }
+    const kind =
+      String(ready.previewKind || "").trim() ||
+      (ready.modality === "video" ? "video" : ready.modality === "image" ? "image" : "audio");
+    setPreview({
+      id: assetId,
+      kind,
+      name: ready.actionLabel || "Generated media",
+    });
+  };
+
+  if (ready.outcome === "cancelled") {
+    return null;
+  }
+
+  if (ready.outcome === "failed") {
+    return (
+      <div className="codirector-gen-ready" data-testid="codirector-gen-ready-failed">
+        {ready.actionLabel ? (
+          <button
+            type="button"
+            className="codirector-gen-ready__action ghost"
+            data-testid="codirector-gen-ready-details"
+            onClick={() => setDetailsOpen((v) => !v)}
+          >
+            {ready.actionLabel}
+          </button>
+        ) : null}
+        {detailsOpen && ready.technical ? (
+          <details className="codirector-message-technical" open data-testid="codirector-gen-ready-tech">
+            <summary>Technical details</summary>
+            <pre className="codirector-retrieval-json">{ready.technical}</pre>
+          </details>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="codirector-gen-ready" data-testid="codirector-gen-ready">
+      {ready.actionLabel ? (
+        <button
+          type="button"
+          className="codirector-gen-ready__action"
+          data-testid="codirector-gen-ready-action"
+          onClick={openAsset}
+        >
+          {ready.actionLabel}
+        </button>
+      ) : null}
+      <LibraryQuickPreviewModal asset={preview} onClose={() => setPreview(null)} />
+    </div>
+  );
+}
+
 export function CoDirectorMessage({
   message,
   onRetry,
@@ -141,7 +212,8 @@ export function CoDirectorMessage({
     return MESSAGE_TYPE_LABELS[message.messageType] ?? null;
   })();
   const isAssistant = message.role === "assistant";
-  const html = isAssistant ? renderAssistantMarkdown(message.content) : "";
+  const projected = isAssistant ? projectCreatorReply(message.content || "") : null;
+  const html = projected ? renderAssistantMarkdown(projected.text) : "";
   const isExecutionStatus = message.messageType === "execution_status";
   const isCompletion = message.messageType === "completion";
   const hasExecutionPayload = Boolean(message.execution && message.execution.execution_id);
@@ -193,6 +265,13 @@ export function CoDirectorMessage({
           {message.status === "streaming" && !message.content ? "…" : null}
         </div>
       )}
+      {projected?.technical ? (
+        <details className="codirector-message-technical" data-testid="codirector-message-technical">
+          <summary>Technical details</summary>
+          <pre className="codirector-retrieval-json">{projected.technical}</pre>
+        </details>
+      ) : null}
+      {message.generationReady ? <GenerationReadyActions message={message} /> : null}
       {isCompletion && hasExecutionPayload ? (
         <ExecutionSummaryCard
           execution={message.execution as CoDirectorMessageExecution}

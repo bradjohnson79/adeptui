@@ -48,6 +48,11 @@ def enqueue_job(
     params: dict[str, Any],
     message: str,
 ) -> Job:
+    from ..runtime_session import stamp_runtime_session
+
+    # This process is starting the job. Without a session id the queue drain
+    # treats the row as a previous session and cancels it before work begins.
+    params = stamp_runtime_session(dict(params))
     fingerprint = str(params.get("fingerprint") or "")
     if fingerprint:
         existing = find_active_duplicate(db, project_id, kind, fingerprint)

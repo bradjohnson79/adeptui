@@ -1,0 +1,28 @@
+{
+  "note": "First script walk had poll.status=Failed and ok=true. That is not success. This file records the later Approved LTX result.",
+  "projectId": "0ffe56e2-0d58-4926-91bf-0f947898d02e",
+  "projectName": "SenseNova Integration Lab",
+  "sceneId": "f0b97b96-3456-4ceb-96ce-56bbece7e5b7",
+  "batchId": "bb_c1eb5212d68b",
+  "generatorId": "ltx-local",
+  "status": "Approved",
+  "approvedClipAssetId": "ffd1e38a-ccad-4d5b-9688-c5b485cb652d",
+  "filename": "scene_0_98400655.mp4",
+  "scopedFile": { "status": 200, "contentType": "video/mp4", "bytes": 688043 },
+  "unscopedFile": { "status": 403 },
+  "ffprobe": {
+    "width": 1280,
+    "height": 704,
+    "fps": "24/1",
+    "nb_frames": 113,
+    "durationSec": 4.708333
+  },
+  "runtimeModel": "ltx-2.3-22b-distilled-fp8.safetensors",
+  "workflowKey": "ltx.simple_i2v",
+  "minimax": {
+    "claimed15s": false,
+    "maxDurationSec": 0.20833333333333334,
+    "liveGenerateThisPass": false
+  },
+  "ok": true
+}

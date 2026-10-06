@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api";
-import { findSameTrackIntersection } from "../../timelineMaster/sameTrackNoOverlap";
 import { HelpTip } from "../HelpTip";
 import { Button } from "../ui";
 import "./../../styles/audio-studio/audio-studio.css";
 import { AmbiencePanel } from "./AmbiencePanel";
-import { approvedIdsFromBatches, classifyLibraryAudio, extractCandidates, latestBatchForKind, probeAudioDurationSec } from "./audioStudioCandidates";
+import { approvedIdsFromBatches, extractCandidates, latestBatchForKind } from "./audioStudioCandidates";
 import { audioTabFromSearch, sourceStatusFromProviders, withAudioTab } from "./audioStudioSource";
 import { MusicPanel } from "./MusicPanel";
 import { ProjectAudioPanel } from "./ProjectAudioPanel";
@@ -85,16 +84,16 @@ export function AudioStudioWorkspace({ project, onChange, onGo }: AudioStudioWor
     if (audioProvider.source !== "elevenlabs") return null;
     const health = audioProvider.health;
     if (audioProvider.healthBusy && !health) {
-      return { ready: false, label: "Checking API — ElevenLabs…" };
+      return { ready: false, label: "Checking ElevenLabs…" };
     }
     if (!health?.configured) {
-      return { ready: false, label: "API — ElevenLabs unavailable" };
+      return { ready: false, label: "ElevenLabs API key not configured" };
     }
-    const fail = ["error", "fail", "failed", "unreachable", "offline"].some((s) =>
+    const fail = ["error", "fail", "failed", "unreachable", "offline", "invalid"].some((s) =>
       String(health.connectionStatus || "").toLowerCase().includes(s),
     );
-    if (fail) return { ready: false, label: "API — ElevenLabs route failed" };
-    return { ready: true, label: "API — ElevenLabs" };
+    if (fail) return { ready: false, label: "ElevenLabs unavailable" };
+    return { ready: true, label: "ElevenLabs API" };
   })();
 
   const [musicMood, setMusicMood] = useState("Tense");
@@ -256,14 +255,14 @@ export function AudioStudioWorkspace({ project, onChange, onGo }: AudioStudioWor
     if (audioProvider.source === "elevenlabs") {
       const health = audioProvider.health || (await audioProvider.refreshHealth());
       if (!health?.configured) {
-        setStatus(health?.message || "API — ElevenLabs is unavailable. Configure fal, Kie, or WaveSpeed in Setup Wizard → Hosted Providers. Generation blocked — Local is not used as a silent fallback.");
+        setStatus(health?.message || "ElevenLabs API key not configured.");
         return;
       }
       const fail = ["error", "fail", "failed", "unreachable", "offline"].some((s) =>
         String(health.connectionStatus || "").toLowerCase().includes(s),
       );
       if (fail) {
-        setStatus(health.message || "API — ElevenLabs route failed. Generation blocked — Local is not used as a silent fallback.");
+        setStatus(health.message || "ElevenLabs could not be reached. Generation stays on the provider you selected.");
         return;
       }
     } else {
@@ -618,88 +617,6 @@ export function AudioStudioWorkspace({ project, onChange, onGo }: AudioStudioWor
     }
   };
 
-  const addToTimeline = async (asset: AudioLibraryAsset | AudioCandidate, fallbackTrack: AudioStudioTrack) => {
-    const assetId = asset.assetId || asset.id;
-    if (!assetId) {
-      setStatus("This take needs a saved file before it can go on the Timeline.");
-      return;
-    }
-
-    setBusy(true);
-    setStatus("");
-    try {
-      const classified = classifyLibraryAudio(asset);
-      const track: AudioStudioTrack =
-        classified === "sfx" || classified === "ambience" || classified === "music" ? classified : fallbackTrack;
-      await api.audioStudioPlace(project.id, {
-        assetId,
-        category: track,
-        startMs: 0,
-        loop: Boolean((asset as AudioCandidate).loop || track === "ambience"),
-      });
-      const sceneId = project.scenes?.[0]?.id;
-      if (!sceneId) {
-        setStatus("Approved and saved. This project has no scene yet, so Timeline cannot hold the clip.");
-        return;
-      }
-      // SINGLE-STORE: legacy getDirector no longer needed for clip add.
-      const measured = await probeAudioDurationSec(
-        firstString((asset as AudioCandidate).audioUrl, (asset as AudioLibraryAsset).url) ||
-          (assetId ? api.assetUrl(assetId) : ""),
-      );
-      const duration =
-        firstNumber(asset.durationSec, (asset as AudioLibraryAsset).duration_sec, measured, 5) || 5;
-      const label =
-        firstString(asset.title, (asset as AudioLibraryAsset).tag, (asset as AudioLibraryAsset).filename) ||
-        (track === "sfx" ? "SFX" : track === "ambience" ? "Bed" : "Music");
-      const clip = {
-        id: `clip-${crypto.randomUUID?.() || Math.random().toString(36).slice(2, 10)}`,
-        asset_id: assetId,
-        start: 0,
-        length: duration,
-        label,
-        volume: 1,
-      };
-      // SINGLE-STORE: audio/sfx clips persist to Master batch clip arrays.
-      // PUT /director is retired (410 Gone).
-      const masterResp = await api.directorTimelineMaster(project.id, sceneId);
-      const master = masterResp?.master;
-      const batches = [...(master?.batchBlocks || [])].sort((a, b) => a.order - b.order);
-      const root = batches[0];
-      if (!root) {
-        setStatus("Timeline has no execution windows yet. Rematerialize windows before adding audio.");
-        return;
-      }
-      if (track === "sfx") {
-        const clips = [...(root.sfxClips || [])];
-        clip.start = Math.max(0, ...clips.map((item: any) => Number(item.start || 0) + Number(item.length || 0)), 0);
-        if (findSameTrackIntersection(clips, clip)) {
-          setStatus("Cannot add to Timeline — that time is already occupied on the SFX track.");
-          return;
-        }
-        await api.directorTimelinePatchBatch(project.id, sceneId, root.id, {
-          sfxClips: [...clips, clip],
-        });
-      } else {
-        const clips = [...(root.audioClips || [])];
-        clip.start = Math.max(0, ...clips.map((item: any) => Number(item.start || 0) + Number(item.length || 0)), 0);
-        if (findSameTrackIntersection(clips, clip)) {
-          setStatus("Cannot add to Timeline — that time is already occupied on the Audio track.");
-          return;
-        }
-        await api.directorTimelinePatchBatch(project.id, sceneId, root.id, {
-          audioClips: [...clips, clip],
-        });
-      }
-      setStatus(`Added to the ${track === "sfx" ? "SFX" : "Audio"} track.`);
-      await onChange?.();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Could not add to Timeline.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const currentPanel = (() => {
     if (tab === "music") {
       return (
@@ -747,7 +664,6 @@ export function AudioStudioWorkspace({ project, onChange, onGo }: AudioStudioWor
           }
           onPreview={(candidate) => void selectForPreview(candidate, "music")}
           onApprove={approveAsset}
-          onAddToTimeline={(candidate) => addToTimeline(candidate, "music")}
         />
       );
     }
@@ -797,7 +713,6 @@ export function AudioStudioWorkspace({ project, onChange, onGo }: AudioStudioWor
           }
           onPreview={(candidate) => void selectForPreview(candidate, "sfx")}
           onApprove={approveAsset}
-          onAddToTimeline={(candidate) => addToTimeline(candidate, "sfx")}
         />
       );
     }
@@ -841,7 +756,6 @@ export function AudioStudioWorkspace({ project, onChange, onGo }: AudioStudioWor
           }
           onPreview={(candidate) => void selectForPreview(candidate, "ambience")}
           onApprove={approveAsset}
-          onAddToTimeline={(candidate) => addToTimeline(candidate, "ambience")}
         />
       );
     }
@@ -849,9 +763,7 @@ export function AudioStudioWorkspace({ project, onChange, onGo }: AudioStudioWor
     return (
       <ProjectAudioPanel
         assets={projectAudio}
-        busy={busy}
         approvedAssetIds={approvedAssetIds}
-        onAddToTimeline={(asset) => addToTimeline(asset, classifyLibraryAudio(asset) === "sfx" ? "sfx" : classifyLibraryAudio(asset) === "ambience" ? "ambience" : "music")}
         onGoLibrary={() => onGo("library")}
         onGoTimeline={() => onGo("timeline")}
       />

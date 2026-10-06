@@ -38,10 +38,13 @@ import { isApiKeyCatalogComponent } from "./hostedProviderSetupCopy";
 import { ModelStoragePanel } from "./ModelStoragePanel";
 import { LoRASetupSection } from "./lora/LoRASetupSection";
 import { PanelHeading } from "./HelpTip";
+import { ComfyManager } from "./comfy-manager/ComfyManager";
 import { AddSourceWorkflow } from "./install/AddSourceWorkflow";
 import { InstallProgressCard } from "./install/InstallProgressCard";
 import { PreflightDialog, type PreflightConfirm } from "./install/PreflightDialog";
 import { AiGuidedSetupPanel } from "../setup/lifecycle/AiGuidedSetupPanel";
+import { AdeptSetupDiagnostics, AdeptSetupRecommend, AdeptSetupUpdates } from "../setup/lifecycle/AdeptSetupPlanPanels";
+import SourceManagerPage from "../pages/SourceManager";
 
 const TERMINAL_OPERATION_STATES = new Set(["completed", "failed", "cancelled", "interrupted"]);
 type SetupMode = "guided" | "ai_guided" | "manual";
@@ -1188,12 +1191,27 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   const [preflightFor, setPreflightFor] = useState<SetupComponentStatus | null>(null);
   const [preflightBusy, setPreflightBusy] = useState(false);
   const [setupMode, setSetupMode] = useState<SetupMode>(() => {
-    if (typeof window === "undefined") return "guided";
+    if (typeof window === "undefined") return "ai_guided";
     const params = new URLSearchParams(window.location.search);
     const forced = params.get("setupMode");
     if (forced === "guided" || forced === "ai_guided" || forced === "manual") return forced;
     const saved = window.localStorage.getItem("adept.setup.mode");
-    return saved === "guided" || saved === "ai_guided" || saved === "manual" ? saved : "guided";
+    return saved === "guided" || saved === "ai_guided" || saved === "manual" ? saved : "ai_guided";
+  });
+  const setupSections = ["overview", "ai", "updates", "components", "models", "sources", "storage", "diagnostics", "manual", "comfy"] as const;
+  type SetupSection = (typeof setupSections)[number];
+  const sectionForMode = (mode: SetupMode): SetupSection =>
+    mode === "ai_guided" ? "ai" : mode === "manual" ? "manual" : "components";
+  const [setupSection, setSetupSection] = useState<SetupSection>(() => {
+    if (typeof window === "undefined") return "ai";
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get("setupSection");
+    if (requested && (setupSections as readonly string[]).includes(requested)) return requested as SetupSection;
+    const forced = params.get("setupMode");
+    if (forced === "guided" || forced === "manual" || forced === "ai_guided") return sectionForMode(forced);
+    const saved = window.localStorage.getItem("adept.setup.mode");
+    if (saved === "guided" || saved === "manual" || saved === "ai_guided") return sectionForMode(saved);
+    return "ai";
   });
   const { jobs: installJobs, refresh: refreshInstallJobs } = useInstallJobsPoll(true, 1000, { activeOnly: false });
 
@@ -1205,7 +1223,15 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
     if (forcedSetupMode === "guided" || forcedSetupMode === "ai_guided" || forcedSetupMode === "manual") {
       setSetupMode(forcedSetupMode);
     }
-  }, [forcedSetupMode]);
+    const requested = searchParams.get("setupSection");
+    if (requested && (setupSections as readonly string[]).includes(requested)) {
+      setSetupSection(requested as SetupSection);
+      return;
+    }
+    if (forcedSetupMode === "guided" || forcedSetupMode === "ai_guided" || forcedSetupMode === "manual") {
+      setSetupSection(sectionForMode(forcedSetupMode));
+    }
+  }, [forcedSetupMode, searchParams]);
 
   const refresh = useCallback(async () => {
     const next = await api.setupStatus();
@@ -1628,7 +1654,7 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
     return (
       <div className="page setup-wizard-page">
         <div className="panel">
-          <PanelHeading title="Setup Wizard" tip="Checks the components required for your studio." />
+          <PanelHeading title="Adept Setup" tip="Checks the components required for your studio." />
           <p className="empty" role="status">{message ?? "Checking studio status…"}</p>
           {message && <button type="button" onClick={() => void refresh()}>Try Again</button>}
         </div>
@@ -1663,7 +1689,7 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
 
   return (
     <div className="page setup-wizard-page">
-      <PanelHeading title="Setup Wizard" tip="Checks readiness and prepares required studio components." />
+      <PanelHeading title="Adept Setup" tip="Checks readiness and prepares required studio components." />
       <section className="panel" aria-label="Setup mode">
         <div className="setup-section-heading">
           <div>
@@ -1672,13 +1698,13 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
           </div>
         </div>
         <div className="row-actions">
-          <button type="button" className={setupMode === "guided" ? "primary" : "ghost"} onClick={() => setSetupMode("guided")}>
+          <button type="button" className={setupMode === "guided" ? "primary" : "ghost"} onClick={() => { setSetupMode("guided"); setSetupSection("components"); }}>
             Guided
           </button>
-          <button type="button" className={setupMode === "ai_guided" ? "primary" : "ghost"} onClick={() => setSetupMode("ai_guided")}>
+          <button type="button" className={setupMode === "ai_guided" ? "primary" : "ghost"} onClick={() => { setSetupMode("ai_guided"); setSetupSection("ai"); }}>
             AI-Guided
           </button>
-          <button type="button" className={setupMode === "manual" ? "primary" : "ghost"} onClick={() => setSetupMode("manual")}>
+          <button type="button" className={setupMode === "manual" ? "primary" : "ghost"} onClick={() => { setSetupMode("manual"); setSetupSection("manual"); }}>
             Manual
           </button>
         </div>
@@ -1694,17 +1720,63 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
 
       {message && <div className="setup-message" role="status">{message}</div>}
 
-      {setupMode === "ai_guided" ? (
-        <AiGuidedSetupPanel
-          projectId={projectId}
-          focusComponentId={focusedSetupComponentId}
-          status={status}
-          installJobsByComponent={installJobsByComponent}
-          onInstall={openLifecyclePreflight}
-          onRepair={repairLifecycleComponent}
-          onVerify={verifyLifecycleComponent}
-        />
-      ) : (
+      <nav className="row-actions" aria-label="Adept Setup sections" data-testid="adept-setup-sections">
+        {([
+          ["overview", "Overview"],
+          ["ai", "AI Setup"],
+          ["updates", "Updates"],
+          ["components", "Components"],
+          ["models", "Models"],
+          ["sources", "Sources"],
+          ["storage", "Storage"],
+          ["diagnostics", "Diagnostics"],
+          ["manual", "Manual Setup"],
+          ["comfy", "Comfy Manager"],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={setupSection === id ? "primary" : "ghost"}
+            onClick={() => {
+              setSetupSection(id);
+              if (id === "ai") setSetupMode("ai_guided");
+              if (id === "manual") setSetupMode("manual");
+              if (id === "components") setSetupMode("guided");
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {setupSection === "overview" && (
+        <section className="panel" aria-label="Setup overview" data-testid="adept-setup-overview">
+          <p>
+            {status.overall_label}. Ready {status.counts?.ready ?? 0}. Missing essentials {status.counts?.not_installed ?? 0}. Needs attention {status.counts?.needs_attention ?? 0}.
+          </p>
+        </section>
+      )}
+      {setupSection === "updates" && <AdeptSetupUpdates />}
+      {setupSection === "sources" && <SourceManagerPage embedded />}
+      {setupSection === "models" && <VideoModelLibrary />}
+      {setupSection === "storage" && <ModelStoragePanel onMessage={(m) => setMessage(m)} />}
+      {setupSection === "diagnostics" && <AdeptSetupDiagnostics onMessage={setMessage} />}
+      {setupSection === "comfy" && <ComfyManager />}
+
+      {setupSection === "ai" ? (
+        <>
+          <AdeptSetupRecommend onMessage={setMessage} />
+          <AiGuidedSetupPanel
+            projectId={projectId}
+            focusComponentId={focusedSetupComponentId || searchParams.get("setupMissing")?.split(",")[0]}
+            status={status}
+            installJobsByComponent={installJobsByComponent}
+            onInstall={openLifecyclePreflight}
+            onRepair={repairLifecycleComponent}
+            onVerify={verifyLifecycleComponent}
+          />
+        </>
+      ) : (setupSection === "components" || setupSection === "manual") ? (
         <>
           <DownloadSourcesPanel onMessage={setMessage} />
           <p className="setup-nav-strip">
@@ -1814,7 +1886,7 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
             }}
           />
         </>
-      )}
+      ) : null}
 
       <BackgroundServicesSection comfyuiReady={Boolean(comfyuiReady)} />
 

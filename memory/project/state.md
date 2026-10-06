@@ -1,4 +1,4 @@
-﻿# Current Project State
+# Current Project State
 
 ## Running Services (Beta Backend Manager)
 - **Web (Vercel)**: https://adeptui-5uunxq106-anoint.vercel.app (latest Production deployment, 2026-08-11)
@@ -30,6 +30,19 @@ Full backend suite (Co-Director + voice + spatial + magi + production dock + set
 
 ## Completed Items
 
+- **2026-09-26 to 2026-09-27 session list**: `memory/session-2026-09-26-27-timeline-v2.md`. FilmTimeline cutover, V2 UX, continuity packet, Cancel, and reference tags are in the working tree. Render Shot, Continue, and continuity live runs are NO-GO.
+- **2026-09-24 to 2026-09-25 session list**: `memory/session-2026-09-24-25-codirector-ers.md`. Each completed task:
+  - Co-Director durable single-owner architecture — `GO — CODIRECTOR DURABLE SINGLE-OWNER ARCHITECTURE CERTIFIED`
+  - Co-Director 6-test command acceptance — `GO — CODIRECTOR 6-TEST COMMAND ACCEPTANCE CERTIFIED`
+  - Character Creator and reference sheet — `GO — CODIRECTOR CHARACTER CREATOR + CRS ACCEPTANCE CERTIFIED`
+  - Creator tool completeness — `GO — CODIRECTOR CREATOR TOOL COMPLETENESS CERTIFIED`
+  - ERS legend layout and navigation — `GO — ERS EDIT/INPAINT LEGEND + NAVIGATION CERTIFIED`
+  - ERS zoom, legend colors, and environment scope — `GO — ERS ZOOM + LEGEND COLORS + ENVIRONMENT SCOPE FIX CERTIFIED`
+  - Environment Creator provider binding — `GO — ENVIRONMENT CREATOR PROVIDER BINDING CERTIFIED`
+  - Character name auto-resolution and approval copy — `GO — CHARACTER AUTO-RESOLUTION + FRONTEND BUILD REPAIR CERTIFIED`
+  - Semantic intent authority — `GO — CODIRECTOR SEMANTIC INTENT AUTHORITY CERTIFIED`
+  - Entity resolution and receipt projection — `GO — CODIRECTOR ENTITY RESOLUTION + RECEIPT PROJECTION CERTIFIED`
+  - Approval lifetime — `GO — CODIRECTOR APPROVAL LIFETIME CERTIFIED`
 - **Timeline Retake R2V gate repair**: 2026-09-13 — H3 image-frame Retake uses supportsReferenceToVideo; CREATE t2v leak stopped on Timeline supportsTextToVideo; evidence `theme_walk/timeline_retake_r2v/FIX.md`; unit gates PASS; no live Quarters GO
 - **Storyboard Style dropdown**: Pencil / Low Poly 3D / Image - in Create Project dialog
 - **Preferred Video Generator dropdown**: capability-driven from `/api/knowledge-cards/video-generators` - in Create Project dialog

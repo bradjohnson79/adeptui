@@ -664,6 +664,24 @@ async def asset_list(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
                 "createdAt": a.created_at.isoformat() if a.created_at else None,
             }
         )
+    if query:
+        from ....project_library.codirector import visible_approved_prop_references
+
+        known = {item["assetId"] for item in items}
+        for asset in visible_approved_prop_references(ctx.db, ctx.project_id, query):
+            if asset.id in known:
+                continue
+            known.add(asset.id)
+            items.append(
+                {
+                    "assetId": asset.id,
+                    "name": asset.filename or asset.id,
+                    "assetType": asset.kind,
+                    "previewUrl": None,
+                    "hasPreview": bool(asset.path),
+                    "createdAt": asset.created_at.isoformat() if asset.created_at else None,
+                }
+            )
     page, pagination = _page(items, limit=limit, cursor=args.get("cursor"))
     pagination["appliedFilters"] = {"query": query} if query else {}
     return {

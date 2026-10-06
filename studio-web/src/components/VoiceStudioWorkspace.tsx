@@ -15,7 +15,6 @@ import {
 import { VoiceEnvironmentPanel } from "./voiceStudio/environment/VoiceEnvironmentPanel";
 import { VoiceIdentityPanel } from "./voiceStudio/VoiceIdentityPanel";
 import { isCurrentCharacterRequest } from "./voiceStudio/voiceStudioCharacter";
-
 const DEFAULT_DIALOGUE = "";
 
 type Props = {
@@ -37,12 +36,12 @@ function mapInitialPhase(p?: Props["initialPhase"]): StudioPhase | undefined {
 function mapInitialWorkspaceTab(p?: Props["initialPhase"] | string): VoiceStudioWorkspaceTab {
   const key = String(p || "").trim();
   // ORDER 5 amend: top-level Scene Dialogue + Takes stages removed — both live inside Voice Performance.
+  if (key === "takes") return "takes";
   if (
     key === "performance"
     || key === "voicePerformance"
     || key === "sceneDialogue"
     || key === "dialogue"
-    || key === "takes"
   ) {
     return "performance";
   }
@@ -52,8 +51,8 @@ function mapInitialWorkspaceTab(p?: Props["initialPhase"] | string): VoiceStudio
 }
 
 function coerceWorkspaceTab(tab: string): VoiceStudioWorkspaceTab {
-  if (tab === "sceneDialogue" || tab === "dialogue" || tab === "takes") return "performance";
-  if (tab === "identity" || tab === "performance" || tab === "environment") {
+  if (tab === "sceneDialogue" || tab === "dialogue") return "performance";
+  if (tab === "identity" || tab === "performance" || tab === "takes" || tab === "environment") {
     return tab;
   }
   return "identity";
@@ -66,7 +65,8 @@ function chooseApprovedVoice(voices: any[] | undefined, activeId: string): any |
   if (!list.length) return null;
   const isApproved = (voice: any) => String(voice?.approval_status || "").toLowerCase() === "approved";
   const active = list.find((voice) => voice?.id === activeId);
-  if (active && isApproved(active)) return active;
+  const activeIsElevenLabs = String(active?.provider || "").toLowerCase() === "elevenlabs";
+  if (active && (isApproved(active) || activeIsElevenLabs)) return active;
   const approved = [...list]
     .filter(isApproved)
     .sort((a, b) =>
@@ -98,8 +98,12 @@ export function VoiceStudioWorkspace({
   const [hasSceneDialogue, setHasSceneDialogue] = useState(false);
 
   const [dialogue, setDialogue] = useState(DEFAULT_DIALOGUE);
+  const [environmentAssetId, setEnvironmentAssetId] = useState("");
   const characterIdRef = useRef(characterId);
   characterIdRef.current = characterId;
+  // A deliberate tab choice by the creator must survive the async workspace
+  // load — load() must never yank the creator back to Identity mid-click.
+  const userPickedTabRef = useRef(false);
 
   const persistDraft = useCallback(
     async (patch: Record<string, unknown>) => {
@@ -131,10 +135,12 @@ export function VoiceStudioWorkspace({
     } else if ((data.candidateBatches || []).length) setPhase("select");
     else setPhase("create");
 
-    if (mapped === "performance" || initialPhase === "voicePerformance") {
-      setWorkspaceTab("performance");
-    } else {
-      setWorkspaceTab("identity");
+    if (!userPickedTabRef.current) {
+      if (mapped === "performance" || initialPhase === "voicePerformance") {
+        setWorkspaceTab("performance");
+      } else {
+        setWorkspaceTab("identity");
+      }
     }
 
     if (data.activeVoice?.approval_status === "approved") setReadinessLabel("approved");
@@ -193,8 +199,6 @@ export function VoiceStudioWorkspace({
   );
 
   const characterName = characterNameProp || ws?.characterName || "Character";
-  const voiceProvider = useVoiceStudioProviderSource();
-
   return (
     <section className="panel voice-studio voice-studio-m43" data-testid="character-voice">
       <header className="voice-studio-header" data-testid="voice-creator-header">
@@ -203,16 +207,6 @@ export function VoiceStudioWorkspace({
           tip="Create a character voice, choose one to test, perform dialogue, then approve when ready."
           as="h3"
         />
-        <div style={{ margin: "0.5rem 0 0.75rem" }}>
-          <ProviderSourceSelector
-            id="voice-studio"
-            label="Provider"
-            source={voiceProvider.source}
-            onChange={voiceProvider.setSource}
-            health={voiceProvider.health}
-            healthBusy={voiceProvider.healthBusy}
-          />
-        </div>
         <p className="voice-studio-readiness" data-testid="voice-studio-readiness">
           {READINESS_LABELS[readinessLabel]}
         </p>
@@ -283,10 +277,13 @@ export function VoiceStudioWorkspace({
                   ? "voice-identity-tab"
                   : stage.id === "performance"
                     ? "voice-performance-tab"
-                    : "voice-environment-tab"
+                    : stage.id === "takes"
+                      ? "voice-takes-tab"
+                      : "voice-environment-tab"
               }
               onClick={() => {
                 if (!stageUnlocked) return;
+                userPickedTabRef.current = true;
                 setWorkspaceTab(coerceWorkspaceTab(stage.id));
                 if (stage.id === "identity" && (phase === "performance" || phase === "approve")) {
                   setPhase(testingCandidateId ? "select" : "create");
@@ -329,25 +326,36 @@ export function VoiceStudioWorkspace({
             }
             onMsg={onMsg}
             onSelectStage={(tab) => setWorkspaceTab(coerceWorkspaceTab(tab))}
+            initialLibraryAssetId={environmentAssetId}
           />
         ) : (
           <VoicePerformanceStudio
             projectId={projectId}
             characterId={characterId}
             characterName={characterName}
-            activeView="performance"
+            activeView={workspaceTab === "takes" ? "takes" : "performance"}
             approvedVoiceIdentity={
               approvedVoice?.id
                 ? {
                     id: String(approvedVoice.id),
                     name: String(approvedVoice.name || `${characterName} Voice`),
                     version: approvedVoice.version_number ?? approvedVoice.versionNumber ?? null,
+                    provider: String(approvedVoice.provider || ""),
                   }
                 : null
             }
             initialDialogue={dialogue}
             onMsg={onMsg}
             onOpenVoiceIdentity={() => setWorkspaceTab("identity")}
+            onDialogueChange={(text) => {
+              setDialogue(text);
+              void persistDraft({ dialogue: text });
+            }}
+            onOpenEnvironment={(assetId) => {
+              userPickedTabRef.current = true;
+              setEnvironmentAssetId(assetId);
+              setWorkspaceTab("environment");
+            }}
           />
         )}
       </div>

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useTranslation } from "react-i18next";
 import { api, ApiError } from "../../api";
 import { buildProjectWorkspaceLocation } from "../../navigation/projectWorkspaceNavigation";
 import { describeMagiError } from "../../magiSequence/errors";
@@ -29,15 +28,20 @@ import {
   objectsSlotOf,
   isObjectsTrackKind,
 } from "../../magiSequence";
-import { fetchMagiSequence, saveMagiSequence } from "../../magiSequence/api";
+import { fetchMagiSequence, MagiSaveConflictError, saveMagiSequence } from "../../magiSequence/api";
 import { MagiFocusProvider, useMagiFocus } from "../../magiSequence";
 import { useMagiKeyboard } from "../../magiSequence/useMagiKeyboard";
+import { stepMagiZoom } from "./magiTimelineScale";
+import { TimelineGpuPane } from "../timeline-master/TimelineGpuPane";
+import { TimelineHotKeysPane } from "../timeline-master/TimelineHotKeysPane";
 import { JobPanel } from "../JobPanel";
-import { MagiSequenceTimeline } from "./MagiSequenceTimeline";
+import { MagiSequenceTimeline, type MagiTimelineMedia } from "./MagiSequenceTimeline";
+import { MagiCutPreview } from "./MagiCutPreview";
+import { blendAtPlayhead, blendSourceSeconds, clipEdgeRole, edgeFadeAtPlayhead, maxEdgeFadeSeconds, resolveOutgoingCut, transitionPreviewFrame } from "../../magiSequence/transitions";
 import { MagiWorkspaceStack } from "./MagiWorkspaceStack";
 import { MagiAccordion } from "./layout/MagiAccordion";
 import { MagiWorkspaceLayoutProvider, useMagiLayout } from "./layout/MagiWorkspaceLayoutProvider";
-import type { MagiPaneId, MagiPreset } from "./layout/MagiLayoutPersistence";
+import { nextDualDrawerCollapsed, type MagiPaneId, type MagiPreset } from "./layout/MagiLayoutPersistence";
 import { MagiOverlayLayer } from "./overlays/MagiOverlayLayer";
 import { MagiOverlayInspector } from "./overlays/MagiOverlayInspector";
 import { MagiEditorCommandStack } from "./overlays/MagiEditorCommandStack";
@@ -45,10 +49,31 @@ import { MagiCompareFitMedia, MagiPreviewFitFrame } from "./MagiPreviewFitFrame"
 import { MagiVideoStage } from "./MagiVideoStage";
 import { MagiSplitView } from "./MagiSplitView";
 import { MagiPreviewMixer, audioLaneOwnsPlayback } from "./MagiPreviewMixer";
-import { bindMagiPlaybackStats, secondsToPlayheadFrame } from "./magiPlaybackClock";
+import {
+  advanceTimelineFrame,
+  bindMagiPlaybackStats,
+  timelineFrameFromMediaSeconds,
+} from "./magiPlaybackClock";
 import { AddFromProjectLibraryModal } from "../timeline-master/AddFromProjectLibraryModal";
+import { MagiPreviewTransport } from "./MagiPreviewTransport";
+import {
+  aspectLabel,
+  defaultTargetId,
+  meaningfulTargets,
+  normalizeUpscaleTargetId,
+  resolveUpscaleTarget,
+} from "../../timelineMaster/magiUpscaleTargets";
 import { libraryThumbKind, libraryThumbUrl } from "../library/libraryThumb";
-import { liveGradeCssFilter, liveGradeHasNonLiveChannels } from "../../magiSequence/liveGrade";
+import { composeLiveGrade, liveGradeCssFilter, MAGI_LIGHTING_PRESETS } from "../../magiSequence/liveGrade";
+import {
+  applyFinalRenderJob,
+  buildFinalRenderConfirm,
+  emptyFinalRenderSession,
+  monitorPreviewAssetId,
+  type FinalRenderSession,
+} from "../../magiSequence/finalRenderConfirm";
+import { finalVideoNameMessage, normalizeFinalVideoName, suggestedFinalVideoName } from "../../magiSequence/finalRenderName";
+import { MagiFinalRenderDialog } from "./MagiFinalRenderDialog";
 import { ingestMasterAssetId, resolveSplitOriginalAssetId, resolveSplitProcessed } from "../../magiSequence/splitViewSource";
 import { useMagiOverlayState } from "./overlays/useMagiOverlayState";
 import type { MagiOverlayComposition } from "./overlays/types";
@@ -61,13 +86,30 @@ import {
 } from "../../workspace/fullscreen";
 import { proposeFromCommand } from "./magiCommandParse";
 import "../../styles/timeline-master/timeline-v2-shell.css";
+import "../../styles/film-timeline.css";
 import "./magi-editor.css";
+
+const MAGI_SIDE_TAB_KEY = "adept_magi_side_tab";
+type MagiSideTab = "inspector" | "hotkeys" | "gpu";
+
+function loadMagiSideTab(): MagiSideTab {
+  try {
+    const saved = localStorage.getItem(MAGI_SIDE_TAB_KEY);
+    if (saved === "hotkeys" || saved === "gpu" || saved === "inspector") return saved;
+  } catch {
+    /* keep inspector */
+  }
+  return "inspector";
+}
 
 const PRODUCTION_CORRECTION_RE = /\b(re-?take|inpaint|mask\s*repair|timed\s*prompt)\b/;
 const PRODUCTION_CORRECTION_COPY =
   "That is a production correction. Return to Timeline for Re-Take — MAGI only finishes completed takes.";
 
 type ViewerMode = "viewer" | "compare" | "split" | "histogram" | "vectorscope";
+
+/** Fit, Histogram, and Vectorscope stay in this file for a later MAGI update. */
+const SHOW_SHELVED_MONITOR_CHROME = false;
 
 type ProposalKind =
   | "trim"
@@ -124,7 +166,7 @@ const UNSUPPORTED_PLACEBO_COPY: Record<
     summary:
       "MAGI has no dedicated brighten engine. Use Color grade (Exposure) for real brightness changes.",
     refuseMessage:
-      "Brighten refused: no brighten engine. Use Inspector Color → Exposure / Apply Grade instead.",
+      "Brighten refused: no brighten engine. Use Inspector Color → Exposure instead.",
     chipLabel: "Brighten (unavailable)",
   },
   remove_silence: {
@@ -166,6 +208,28 @@ const RECIPE_PRESETS = [
 
 function StatusBadge({ status }: { status: string }) {
   return <span className={`magi-status-badge ${status}`}>{status}</span>;
+}
+
+function MagiNotice({
+  children,
+  onClose,
+  testId,
+  trailing,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+  testId?: string;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="magi-msg magi-msg--action" role="status" data-testid={testId}>
+      <span className="magi-msg__text">{children}</span>
+      {trailing}
+      <button type="button" className="magi-msg__close" aria-label="Close notice" onClick={onClose}>
+        ×
+      </button>
+    </div>
+  );
 }
 
 function assetKindGroup(asset?: Asset | null): "video" | "image" | "audio" {
@@ -264,32 +328,8 @@ function commandProposal(command: string): PendingProposal | null {
       approveLabel: "Approve shape",
     };
   }
-  if (text.includes("dissolve")) {
-    const copy = UNSUPPORTED_PLACEBO_COPY.add_dissolve;
-    return {
-      kind: "add_dissolve",
-      title: copy.title,
-      summary: copy.summary,
-      approveLabel: "Acknowledge",
-    };
-  }
-  if (text.includes("stabilize")) {
-    const copy = UNSUPPORTED_PLACEBO_COPY.stabilize;
-    return {
-      kind: "stabilize",
-      title: copy.title,
-      summary: copy.summary,
-      approveLabel: "Acknowledge",
-    };
-  }
-  if (text.includes("brighten")) {
-    const copy = UNSUPPORTED_PLACEBO_COPY.brighten;
-    return {
-      kind: "brighten",
-      title: copy.title,
-      summary: copy.summary,
-      approveLabel: "Acknowledge",
-    };
+  if (text.includes("dissolve") || text.includes("wipe") || text.includes("brighten") || text.includes("stabilize")) {
+    return null;
   }
   if (text.includes("silence")) {
     const copy = UNSUPPORTED_PLACEBO_COPY.remove_silence;
@@ -342,7 +382,6 @@ function MagiEditorInner({
   project: Project;
   onChange: () => Promise<void>;
 }) {
-  const { t } = useTranslation("magi");
   const [searchParams, setSearchParams] = useSearchParams();
   const handoffAssetId = String(searchParams.get("assetId") || "").trim();
   const handoffSceneId = String(searchParams.get("sceneId") || "").trim();
@@ -354,6 +393,7 @@ function MagiEditorInner({
     setRightWidth,
     toggleLeftDock,
     toggleRightDock,
+    setBothDocksCollapsed,
     movePane,
     reorderPane,
     applyWorkspacePreset,
@@ -373,28 +413,53 @@ function MagiEditorInner({
   const videos = useMemo(() => project.assets.filter((asset) => assetKindGroup(asset) === "video"), [project.assets]);
   const audioAssets = useMemo(() => project.assets.filter((asset) => assetKindGroup(asset) === "audio"), [project.assets]);
   const mediaAssets = useMemo(() => [...videos, ...images, ...audioAssets], [audioAssets, images, videos]);
+  const timelineMedia = useMemo(() => {
+    const out: Record<string, MagiTimelineMedia> = {};
+    for (const asset of mediaAssets) {
+      const kind = assetKindGroup(asset);
+      out[asset.id] = {
+        kind,
+        thumbUrl: libraryThumbUrl(project.id, asset.id, asset.kind),
+        mediaUrl: api.assetUrl(asset.id),
+      };
+    }
+    return out;
+  }, [mediaAssets, project.id]);
 
   const [sequence, setSequence] = useState<MagiSequenceDocument | null>(null);
   const [selection, setSelection] = useState<string[]>([]);
   const [selectedObjectsSlot, setSelectedObjectsSlot] = useState<1 | 2>(1);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [viewerMode, setViewerMode] = useState<ViewerMode>("viewer");
+  const [sideTab, setSideTab] = useState<MagiSideTab>(loadMagiSideTab);
+  useEffect(() => {
+    try {
+      localStorage.setItem(MAGI_SIDE_TAB_KEY, sideTab);
+    } catch {
+      /* tab still works for this visit */
+    }
+  }, [sideTab]);
   const [viewerAssetId, setViewerAssetId] = useState<string | null>(null);
+  const [previewPinAssetId, setPreviewPinAssetId] = useState<string | null>(null);
+  const [libraryFocusId, setLibraryFocusId] = useState<string | null>(null);
+  const [queueFocusJobId, setQueueFocusJobId] = useState<string | null>(null);
   const [compareAssetId, setCompareAssetId] = useState("");
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const [imageOverlayPickerOpen, setImageOverlayPickerOpen] = useState(false);
   const [previewMuted, setPreviewMuted] = useState(false);
   const [previewVolume, setPreviewVolume] = useState(1);
+  const [volumeOpen, setVolumeOpen] = useState(false);
   const [failedThumbs, setFailedThumbs] = useState<Record<string, boolean>>({});
   const [publishedMasterId, setPublishedMasterId] = useState<string | null>(null);
   const [assetFilter, setAssetFilter] = useState<"all" | "video" | "image" | "audio">("all");
   const [message, setMessage] = useState<string | null>(null);
+  const [hideUnpublishedNotice, setHideUnpublishedNotice] = useState(false);
+  const [hideCompactNotice, setHideCompactNotice] = useState(false);
   const [unpublishedSceneId, setUnpublishedSceneId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [seekGeneration, setSeekGeneration] = useState(0);
   const [command, setCommand] = useState("");
   const [pendingProposal, setPendingProposal] = useState<PendingProposal | null>(null);
-  const [jobRefreshTick, setJobRefreshTick] = useState(0);
   const [, setHistoryTick] = useState(0);
   const [editVersion, setEditVersion] = useState(0);
   const [lastSavedEditVersion, setLastSavedEditVersion] = useState(0);
@@ -477,22 +542,57 @@ function MagiEditorInner({
   // playhead instead of a free-running loop.
   const playheadClip = useMemo(() => {
     if (!sequence) return null;
-    return clipUnderPlayhead(sequence, sequence.playheadFrame);
+    const picture =
+      clipUnderPlayhead(sequence, sequence.playheadFrame, "video") ||
+      clipUnderPlayhead(sequence, sequence.playheadFrame, "image");
+    if (!picture) return null;
+    const track = sequence.tracks.find((item) => item.id === picture.trackId);
+    if (track?.hidden) return null;
+    return picture;
   }, [sequence]);
-  const previewAssetId = playheadClip?.assetId || viewerAssetId;
+  const pictureTrackHidden = useMemo(() => {
+    if (!sequence) return false;
+    const picture =
+      clipUnderPlayhead(sequence, sequence.playheadFrame, "video") ||
+      clipUnderPlayhead(sequence, sequence.playheadFrame, "image");
+    if (!picture) return false;
+    return Boolean(sequence.tracks.find((item) => item.id === picture.trackId)?.hidden);
+  }, [sequence]);
+  const hiddenObjectsSlots = useMemo(() => {
+    const slots = new Set<number>();
+    for (const track of sequence?.tracks || []) {
+      if (!track.hidden) continue;
+      const slot = objectsSlotOf(track);
+      if (slot) slots.add(slot);
+    }
+    return slots;
+  }, [sequence]);
+  const previewAssetId = monitorPreviewAssetId(
+    previewPinAssetId,
+    pictureTrackHidden ? null : playheadClip?.assetId,
+    viewerAssetId,
+  );
   const previewAsset = useMemo(
     () => mediaAssets.find((asset) => asset.id === previewAssetId) || null,
     [mediaAssets, previewAssetId],
   );
+  useEffect(() => {
+    if (!libraryFocusId) return;
+    const node = document.querySelector(`[data-testid="magi-media-${CSS.escape(libraryFocusId)}"]`);
+    if (!(node instanceof HTMLElement)) return;
+    node.scrollIntoView({ block: "nearest", inline: "nearest" });
+    setLibraryFocusId(null);
+  }, [assetFilter, layout.accordionState, layout.leftDockCollapsed, layout.rightDockCollapsed, libraryFocusId, mediaAssets]);
+
   const previewVideoTime = useMemo(() => {
     if (!sequence || !playheadClip) return null;
     const sourceFrame = clipSourceFrame(playheadClip, sequence.playheadFrame);
     if (sourceFrame == null) return null;
     return sourceFrame / Math.max(1, sequence.frameRate);
   }, [playheadClip, sequence]);
-  const [previewSourceSize, setPreviewSourceSize] = useState({ w: 16, h: 9 });
+  const [previewSourceSize, setPreviewSourceSize] = useState({ w: 0, h: 0 });
   useEffect(() => {
-    setPreviewSourceSize({ w: 16, h: 9 });
+    setPreviewSourceSize({ w: 0, h: 0 });
   }, [previewAsset?.id]);
 
   // m2: failed-media tracking — a broken <img>/<video> marks its asset so the
@@ -570,6 +670,9 @@ function MagiEditorInner({
     }
   }, [selection, existingClipIds]);
 
+  const bootstrapAssetsRef = useRef({ mediaAssets, images, videos, audioAssets });
+  bootstrapAssetsRef.current = { mediaAssets, images, videos, audioAssets };
+
   useEffect(() => {
     let cancelled = false;
     setSequence(null);
@@ -594,30 +697,32 @@ function MagiEditorInner({
         setServerRevision(loaded.revision);
         serverRevisionRef.current = loaded.revision;
         lastSavedEditVersionRef.current = 0;
+        const assets = bootstrapAssetsRef.current;
         const published =
           loaded.clips.find((clip) => clip.ingestRole === "published_master")?.assetId || null;
         if (published) setPublishedMasterId(published);
         const firstAssetId =
           published ||
           loaded.clips[0]?.assetId ||
-          mediaAssets[0]?.id ||
-          images[0]?.id ||
-          videos[0]?.id ||
-          audioAssets[0]?.id ||
+          assets.mediaAssets[0]?.id ||
+          assets.images[0]?.id ||
+          assets.videos[0]?.id ||
+          assets.audioAssets[0]?.id ||
           null;
         setViewerAssetId(firstAssetId);
       } catch {
         if (cancelled) return;
         const fallback = migrateToPostProductionTracks(createEmptySequence(project.id, project.fps || 24));
         setSequence(fallback);
-        setViewerAssetId(mediaAssets[0]?.id || null);
+        setViewerAssetId(bootstrapAssetsRef.current.mediaAssets[0]?.id || null);
         setMessage("Started a fresh MAGI sequence locally because no saved sequence was available.");
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [audioAssets, images, mediaAssets, project.fps, project.id, videos]);
+    // Asset list refreshes (Render Queue onDone) must not tear the editor down.
+  }, [project.fps, project.id]);
 
   const saveSequence = useCallback(async () => {
     if (!sequenceRef.current) return;
@@ -643,10 +748,13 @@ function MagiEditorInner({
         setSaveState("saved");
       }
     } catch (error: unknown) {
-      if (nonce === saveNonceRef.current) {
-        setSaveState("error");
-        setSaveError(error instanceof Error ? error.message : "MAGI sequence save failed");
+      if (nonce !== saveNonceRef.current) return;
+      if (error instanceof MagiSaveConflictError && error.currentRevision > 0) {
+        serverRevisionRef.current = error.currentRevision;
+        setServerRevision(error.currentRevision);
       }
+      setSaveState("error");
+      setSaveError(error instanceof Error ? error.message : "MAGI sequence save failed");
     }
   }, [project.id]);
 
@@ -683,22 +791,62 @@ function MagiEditorInner({
     };
   }, [saveSequence]);
 
+  const gapClockRef = useRef<{ wallMs: number; frame: number } | null>(null);
   const followMediaClock = useCallback((seconds: number) => {
     const current = sequenceRef.current;
-    if (!current || !playingRef.current) return;
-    const frame = secondsToPlayheadFrame(seconds, current.frameRate, current.durationFrames);
-    if (current.playheadFrame === frame) return;
-    setSequence((prev) => {
-      if (!prev || prev.playheadFrame === frame) return prev;
-      return { ...prev, playheadFrame: frame };
-    });
+    if (!current || !playingRef.current) {
+      gapClockRef.current = null;
+      return;
+    }
+    const fps = Math.max(1, current.frameRate);
+    const duration = recomputeDuration(current);
+    const picture =
+      clipUnderPlayhead(current, current.playheadFrame, "video") ||
+      clipUnderPlayhead(current, current.playheadFrame, "image");
+    const commit = (frame: number) => {
+      if (frame >= duration) {
+        setPlaying(false);
+        gapClockRef.current = null;
+        const last = Math.max(0, duration - 1);
+        setSequence((prev) => (prev && prev.playheadFrame !== last ? { ...prev, playheadFrame: last } : prev));
+        return;
+      }
+      if (current.playheadFrame === frame) return;
+      setSequence((prev) => {
+        if (!prev || prev.playheadFrame === frame) return prev;
+        return { ...prev, playheadFrame: frame };
+      });
+    };
+    if (picture && picture.durationFrames > 0) {
+      const end = picture.startFrame + picture.durationFrames;
+      // Once the playhead is on the clip's exclusive end, that clip is finished.
+      // The viewer still resolves the last frame there; the clock must not.
+      if (current.playheadFrame < end) {
+        const mapped = timelineFrameFromMediaSeconds(picture, seconds, fps);
+        gapClockRef.current = null;
+        commit(mapped === "past-out" ? end : mapped);
+        return;
+      }
+    }
+    // No picture owns this frame (the trimmed chunk, or the clip just ended).
+    // Keep timeline time. Do not read the file's later timecode as the playhead.
+    const now = performance.now();
+    const anchor = gapClockRef.current;
+    if (!anchor || anchor.frame !== current.playheadFrame) {
+      gapClockRef.current = { wallMs: now, frame: current.playheadFrame };
+      return;
+    }
+    const next = advanceTimelineFrame(current.playheadFrame, (now - anchor.wallMs) / 1000, fps, duration);
+    if (next === current.playheadFrame) return;
+    gapClockRef.current = { wallMs: now, frame: next };
+    commit(next);
   }, []);
 
   const stopAtMediaEnd = useCallback(() => {
     setPlaying(false);
     const current = sequenceRef.current;
     if (!current) return;
-    const last = Math.max(0, current.durationFrames - 1);
+    const last = Math.max(0, recomputeDuration(current) - 1);
     setSequence((prev) => (prev ? { ...prev, playheadFrame: last } : prev));
   }, []);
 
@@ -772,6 +920,22 @@ function MagiEditorInner({
     [captureSnapshot, syncSelectionViewer],
   );
 
+  const toggleTrackControl = useCallback(
+    (trackId: string, control: "mute" | "eye") => {
+      mutateSequence(control, control === "mute" ? "Mute track" : "Show or hide track", (current) => ({
+        doc: {
+          ...current,
+          tracks: current.tracks.map((track) => {
+            if (track.id !== trackId) return track;
+            if (control === "mute") return { ...track, muted: !track.muted };
+            return { ...track, hidden: !track.hidden };
+          }),
+        },
+      }));
+    },
+    [mutateSequence],
+  );
+
   const snapFrame = useCallback(
     (trackId: string, frame: number, ignoreClipId?: string) => {
       const current = sequenceRef.current;
@@ -794,24 +958,85 @@ function MagiEditorInner({
     setMessage("Saved MAGI sequence and overlay state.");
   }, [overlays, saveSequence]);
 
-  // m5 B5: send MAGI timeline clips to the W46 Timeline (first scene) as a
-  // batch-owned export. No regeneration — provenance is recorded server-side.
-  const [timelineExportBusy, setTimelineExportBusy] = useState(false);
   const [finishingJobId, setFinishingJobId] = useState<string | null>(null);
   const [finishingJob, setFinishingJob] = useState<{ status: string; stage: string; message: string; kind: string } | null>(null);
+  const [finalRenderSession, setFinalRenderSession] = useState<FinalRenderSession | null>(null);
+  const [finalOutputName, setFinalOutputName] = useState("");
+  const finalRenderJobRef = useRef<string | null>(null);
+  const finalRenderLock = useRef(false);
   const [gpuReady, setGpuReady] = useState(false);
   const [gpuMessage, setGpuMessage] = useState("GPU Upscaling unavailable. FFmpeg upscale remains available.");
+  const [soundAnalysis, setSoundAnalysis] = useState<{ hasAudio?: boolean; infoLine?: string } | null>(null);
+  const [soundRecommendation, setSoundRecommendation] = useState<{ profile?: string; reason?: string; label?: string } | null>(null);
+  const [soundProfiles, setSoundProfiles] = useState<Array<{ id: string; label: string; available: boolean; unavailableReason?: string }>>([]);
+
+  useEffect(() => {
+    const assetId = currentAsset?.id;
+    if (!project?.id || !assetId) {
+      setSoundAnalysis(null);
+      setSoundRecommendation(null);
+      setSoundProfiles([]);
+      return;
+    }
+    let cancelled = false;
+    api.magi.analyzeUpscaleSound(project.id, assetId).then((result) => {
+      if (cancelled) return;
+      setSoundAnalysis(result.analysis || null);
+      setSoundRecommendation(result.recommendation || null);
+      setSoundProfiles(result.profiles || []);
+    }).catch(() => {
+      if (cancelled) return;
+      setSoundAnalysis(null);
+      setSoundRecommendation(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentAsset?.id, project.id]);
 
   const finishing: MagiFinishingState = sequence?.finishing || {};
   const activeClipId = selectedClip?.id || playheadClip?.id || "";
   const activeGrade = (activeClipId && finishing.clipGrades?.[activeClipId]) || {};
   const gradePreset = activeGrade.presetId || "";
   const gradeParams = activeGrade.params || {};
-  const sliderValue = (key: string) => Math.round(((gradeParams[key] || 0) * 100));
+  const composedGrade = composeLiveGrade(gradePreset, gradeParams);
+  const sliderValue = (key: string) => {
+    const raw = Math.round(Number(composedGrade[key] ?? 0) * 100);
+    if (!Number.isFinite(raw)) return 0;
+    return Math.max(-50, Math.min(50, raw));
+  };
   const audioRange = finishing.audio?.range || "entire";
   const upscaleEngine = finishing.upscale?.engine || "ffmpeg-scale";
   const upscaleModel = finishing.upscale?.model || (upscaleEngine === "ffmpeg-scale" ? "lanczos" : "realesrgan-x4plus");
-  const upscaleTarget = finishing.upscale?.target || "1920x1080";
+  const upscaleTarget = finishing.upscale?.target || "";
+  const upscaleChoices = previewSourceSize.w > 0 && previewSourceSize.h > 0
+    ? meaningfulTargets(previewSourceSize.w, previewSourceSize.h)
+    : meaningfulTargets(2, 1).map((row) => ({ ...row, width: 0, height: 0, aspect: "" }));
+  const normalizedUpscaleTarget = normalizeUpscaleTargetId(upscaleTarget);
+  const activeUpscaleTarget = upscaleChoices.some((row) => row.id === normalizedUpscaleTarget)
+    ? normalizedUpscaleTarget
+    : (previewSourceSize.w > 0 ? defaultTargetId(previewSourceSize.w, previewSourceSize.h) : normalizedUpscaleTarget || "1440p");
+  const resolvedUpscale = previewSourceSize.w > 0 && previewSourceSize.h > 0 && activeUpscaleTarget
+    ? resolveUpscaleTarget(previewSourceSize.w, previewSourceSize.h, activeUpscaleTarget)
+    : null;
+  const recommendedSound = soundRecommendation?.profile || "preserve_original";
+  const rememberedSound = finishing.upscale?.soundSourceAssetId && finishing.upscale.soundSourceAssetId === currentAsset?.id
+    ? finishing.upscale.soundProfile || ""
+    : "";
+  const selectedSound = rememberedSound || recommendedSound;
+  const soundHasAudio = soundAnalysis?.hasAudio !== false && Boolean(soundAnalysis);
+  const soundChoices = soundProfiles.length
+    ? soundProfiles
+    : [
+        { id: "preserve_original", label: "Preserve Original", available: true },
+        { id: "cinematic_stereo", label: "Cinematic Stereo", available: true },
+        { id: "dialogue_enhance", label: "Dialogue Enhance", available: true },
+        { id: "wide_stereo", label: "Wide Stereo", available: true },
+        { id: "clean_restore", label: "Clean & Restore", available: true },
+        { id: "cinema_51", label: "5.1 Cinema Upmix", available: true },
+        { id: "cinema_71", label: "7.1 Cinema Upmix", available: true },
+        { id: "headphone_spatial", label: "Headphone Spatial", available: true },
+      ];
   const splitOriginalId = useMemo(
     () =>
       resolveSplitOriginalAssetId({
@@ -835,8 +1060,7 @@ function MagiEditorInner({
     [finishing, mediaAssets, playheadClip, splitOriginalId],
   );
   const liveFilter = liveGradeCssFilter(gradeParams, gradePreset);
-  const viewerLiveFilter =
-    previewAssetId && previewAssetId === finishing.visualResultAssetId ? "" : liveFilter;
+  const viewerLiveFilter = liveFilter;
   const splitRightFilter = liveFilter;
   const pictureMuted =
     previewMuted || audioLaneOwnsPlayback(sequence, sequence?.playheadFrame || 0);
@@ -847,7 +1071,21 @@ function MagiEditorInner({
       : "image";
   const reloadSequence = useCallback(async () => {
     const raw = await fetchMagiSequence(project.id);
-    setSequence(migrateToPostProductionTracks(raw));
+    const loaded = migrateToPostProductionTracks(raw);
+    const captured = editVersionRef.current;
+    saveNonceRef.current += 1;
+    setServerRevision(loaded.revision);
+    serverRevisionRef.current = loaded.revision;
+    sequenceRef.current = loaded;
+    setSequence(loaded);
+    setSaveError(null);
+    if (captured === editVersionRef.current) {
+      setLastSavedEditVersion(captured);
+      lastSavedEditVersionRef.current = captured;
+      setSaveState("saved");
+    } else {
+      setSaveState((state) => (state === "error" ? "idle" : state));
+    }
   }, [project.id]);
 
   const mergeRemoteClipGrades = useCallback(async () => {
@@ -930,10 +1168,140 @@ function MagiEditorInner({
     (key: string, slider: number) => {
       if (!activeClipId) return;
       const next = { ...gradeParams, [key]: slider / 100 };
-      patchFinishingLive({ clipGrades: { [activeClipId]: { presetId: gradePreset, params: next } } });
+      patchFinishingLive({
+        clipGrades: {
+          [activeClipId]: {
+            presetId: gradePreset,
+            lightingPresetId: activeGrade.lightingPresetId,
+            params: next,
+          },
+        },
+      });
+    },
+    [activeClipId, activeGrade.lightingPresetId, gradeParams, gradePreset, patchFinishingLive],
+  );
+
+  const applyLightingPreset = useCallback(
+    (presetId: string) => {
+      if (!activeClipId) return;
+      const preset = MAGI_LIGHTING_PRESETS[presetId] || {};
+      const next = { ...gradeParams };
+      for (const key of ["brightness", "highlights", "shadows", "temperature"]) {
+        delete next[key];
+      }
+      Object.assign(next, preset);
+      patchFinishingLive({
+        clipGrades: {
+          [activeClipId]: {
+            presetId: gradePreset,
+            lightingPresetId: presetId === "none" ? "" : presetId,
+            params: next,
+          },
+        },
+      });
     },
     [activeClipId, gradeParams, gradePreset, patchFinishingLive],
   );
+
+  const setBoundaryTransition = useCallback(
+    (kind: string, seconds: number) => {
+      const doc = sequenceRef.current;
+      const clipId = selectionRef.current[0];
+      const clip = doc?.clips.find((item) => item.id === clipId);
+      if (!doc || !clip) return;
+      const cut = resolveOutgoingCut(doc, clip);
+      const edge = clipEdgeRole(doc, clip);
+      const opening = edge.last && cut.status === "last" && (kind === "fade" || kind === "none");
+      if (kind !== "none" && !opening && (cut.status !== "cut" || cut.maxSeconds < 0.1)) return;
+      const fps = Math.max(1, doc.frameRate || 24);
+      const limit = cut.status === "cut" ? cut.maxSeconds : maxEdgeFadeSeconds(clip.durationFrames, fps) || 0.1;
+      const clamped = Math.min(limit, Math.max(0.1, seconds));
+      const durationFrames = Math.max(1, Math.round(clamped * fps));
+      const edgeLast = opening;
+      let jumped = false;
+      mutateSequence("ApplyTransition", "Set transition", (current) => {
+        const edited = applyEditCommand(
+          current,
+          {
+            kind: "ApplyTransition",
+            payload: {
+              clipId: clip.id,
+              transitionId: kind,
+              edge: "out",
+              durationFrames,
+            },
+          },
+          [clip.id],
+        );
+        const preview =
+          kind === "none"
+            ? null
+            : transitionPreviewFrame({
+                playheadFrame: current.playheadFrame,
+                clip,
+                durationFrames,
+                edge: "out",
+                cutFrame: edgeLast || cut.status !== "cut" ? null : cut.cutFrame,
+              });
+        if (preview == null) return edited;
+        jumped = true;
+        return { doc: { ...edited.doc, playheadFrame: preview }, selection: edited.selection };
+      });
+      if (jumped) setSeekGeneration((value) => value + 1);
+    },
+    [mutateSequence],
+  );
+
+  const setOpeningFade = useCallback(
+    (kind: string, seconds: number) => {
+      const doc = sequenceRef.current;
+      const clipId = selectionRef.current[0];
+      const clip = doc?.clips.find((item) => item.id === clipId);
+      if (!doc || !clip || !clipEdgeRole(doc, clip).first) return;
+      if (kind !== "none" && kind !== "fade") return;
+      const fps = Math.max(1, doc.frameRate || 24);
+      const limit = maxEdgeFadeSeconds(clip.durationFrames, fps) || 0.1;
+      const clamped = Math.min(limit, Math.max(0.1, seconds));
+      const durationFrames = Math.max(1, Math.round(clamped * fps));
+      let jumped = false;
+      mutateSequence("ApplyTransition", "Set fade in", (current) => {
+        const edited = applyEditCommand(
+          current,
+          {
+            kind: "ApplyTransition",
+            payload: {
+              clipId: clip.id,
+              transitionId: kind,
+              edge: "in",
+              durationFrames,
+            },
+          },
+          [clip.id],
+        );
+        const preview =
+          kind === "none"
+            ? null
+            : transitionPreviewFrame({
+                playheadFrame: current.playheadFrame,
+                clip,
+                durationFrames,
+                edge: "in",
+              });
+        if (preview == null) return edited;
+        jumped = true;
+        return { doc: { ...edited.doc, playheadFrame: preview }, selection: edited.selection };
+      });
+      if (jumped) setSeekGeneration((value) => value + 1);
+    },
+    [mutateSequence],
+  );
+
+  useEffect(() => {
+    const savedId = sequence?.finishing?.compareAssetId;
+    const savedMode = sequence?.finishing?.viewerMode;
+    if (savedId) setCompareAssetId(savedId);
+    if (savedMode === "viewer" || savedMode === "compare" || savedMode === "split") setViewerMode(savedMode);
+  }, [sequence?.finishing?.compareAssetId, sequence?.finishing?.viewerMode]);
 
   useEffect(() => {
     void api.magi.upscaleCapabilities().then((caps) => {
@@ -957,11 +1325,25 @@ function MagiEditorInner({
           message: String(job.message || ""),
           kind: String(job.kind || ""),
         });
+        if (finalRenderJobRef.current && finalRenderJobRef.current === finishingJobId) {
+          setFinalRenderSession((current) => (current ? applyFinalRenderJob(current, job) : current));
+        }
         const status = String(job.status || "");
         if (["done", "failed", "cancelled", "canceled", "timed_out"].includes(status)) {
           setFinishingJobId(null);
           if (status === "done") {
             await reloadSequence();
+            if (finalRenderJobRef.current === finishingJobId) {
+              const finishing = sequenceRef.current?.finishing;
+              const finishedAssetId = String(finishing?.render?.assetId || finishing?.visualResultAssetId || "").trim();
+              if (finishedAssetId) {
+                setFinalRenderSession((current) =>
+                  current
+                    ? { ...current, assetId: current.assetId || finishedAssetId, jobId: current.jobId || finishingJobId }
+                    : current,
+                );
+              }
+            }
           }
           await onChange();
         }
@@ -987,43 +1369,6 @@ function MagiEditorInner({
     setFinishingJobId(jobId);
     setMessage(String(result.message || "Queued."));
   };
-  const handleExportToTimeline = useCallback(async () => {
-    const current = sequenceRef.current;
-    const scene = project.scenes[0];
-    if (!current || !scene) {
-      setMessage("Add a project scene before exporting to the Timeline.");
-      return;
-    }
-    if (!current.clips.length) {
-      setMessage("Add clips to the MAGI timeline before exporting.");
-      return;
-    }
-    if (timelineExportBusy) return;
-    setTimelineExportBusy(true);
-    setSaveError(null);
-    try {
-      const result = await api.magi.exportToTimeline(project.id, scene.id, {
-        label: "MAGI export",
-        clips: current.clips.map((clip) => ({
-          clipId: clip.id,
-          assetId: clip.assetId,
-          name: clip.name,
-          startFrame: clip.startFrame,
-          durationFrames: clip.durationFrames,
-        })),
-      });
-      if (!result.ok) {
-        setMessage("Timeline export did not place all clips.");
-        return;
-      }
-      setMessage(`Exported ${current.clips.length} clip(s) to Timeline batch ${result.batchBlockId}.`);
-    } catch (error: unknown) {
-      setSaveError(error instanceof Error ? error.message : "Timeline export failed");
-    } finally {
-      setTimelineExportBusy(false);
-    }
-  }, [project.id, project.scenes, timelineExportBusy]);
-
   const applySnapshot = useCallback((snapshot: HistorySnapshot) => {
     setSequence(structuredClone(snapshot.sequence));
     setSelection([...snapshot.selection]);
@@ -1065,17 +1410,18 @@ function MagiEditorInner({
     onTogglePlay: () => setPlaying((value) => !value),
     onJog: (dir) => {
       if (!sequenceRef.current) return;
-      seekPlayhead(Math.max(0, sequenceRef.current.playheadFrame + dir * sequenceRef.current.frameRate));
+      const extent = recomputeDuration(sequenceRef.current);
+      seekPlayhead(Math.max(0, Math.min(extent, sequenceRef.current.playheadFrame + dir * sequenceRef.current.frameRate)));
     },
     onShuttle: () => undefined,
     onFrameStep: (delta) => {
       if (!sequenceRef.current) return;
-      seekPlayhead(Math.max(0, sequenceRef.current.playheadFrame + delta));
+      seekPlayhead(Math.max(0, Math.min(recomputeDuration(sequenceRef.current), sequenceRef.current.playheadFrame + delta)));
     },
     onHome: () => seekPlayhead(0),
     onEnd: () => {
       if (!sequenceRef.current) return;
-      seekPlayhead(Math.max(0, sequenceRef.current.durationFrames - 1));
+      seekPlayhead(recomputeDuration(sequenceRef.current));
     },
     onCopy: () => {
       clipboardRef.current = [...selectionRef.current];
@@ -1093,6 +1439,16 @@ function MagiEditorInner({
     },
     onUndo: undo,
     onRedo: redo,
+    onSplit: () => {
+      const clip = selectedClip;
+      const doc = sequenceRef.current;
+      if (!clip || !doc || isGraphicsClipId(clip.id)) return;
+      pushSequenceCommand("Split clip", { kind: "Split", payload: { clipId: clip.id, frame: doc.playheadFrame } });
+    },
+    onCompare: () => setViewerMode("compare"),
+    onSplitView: () => setViewerMode("split"),
+    onOpenHotkeys: () => setSideTab("hotkeys"),
+    onZoom: (dir) => stepMagiZoom(dir),
   });
 
   const handleSelect = useCallback(
@@ -1121,6 +1477,7 @@ function MagiEditorInner({
         return;
       }
       overlays.setSelectedOverlayId(null);
+      setPreviewPinAssetId(null);
       if (first) {
         const clip = sequenceRef.current.clips.find((item) => item.id === first);
         if (clip?.assetId && clip.ingestRole !== "graphic") setViewerAssetId(clip.assetId);
@@ -1131,6 +1488,7 @@ function MagiEditorInner({
 
   const handleSeek = useCallback(
     (frame: number) => {
+      setPreviewPinAssetId(null);
       seekPlayhead(frame);
     },
     [seekPlayhead],
@@ -1559,7 +1917,7 @@ function MagiEditorInner({
         setMessage(PRODUCTION_CORRECTION_COPY);
         return;
       }
-      setMessage("Try commands like replace clip, trim, lower third, or add ambience. Dissolve/brighten/stabilize/silence are unavailable.");
+      setMessage("Try trim, replace, or a lower third. Set blends in Transitions and looks in Lighting. Co-Director runs the edit.");
       return;
     }
     setPendingProposal(next);
@@ -1743,8 +2101,8 @@ function MagiEditorInner({
                 void overlays
                   .renderComposition()
                   .then(async () => {
+                    if (layout.leftDockCollapsed) toggleLeftDock();
                     setRenderQueueOpen(true);
-                    setJobRefreshTick((tick) => tick + 1);
                     setMessage("Overlay render queued.");
                     await onChange();
                   })
@@ -1798,30 +2156,6 @@ function MagiEditorInner({
             <button
               type="button"
               className="magi-chip magi-chip--unavailable"
-              title={UNSUPPORTED_PLACEBO_COPY.add_dissolve.summary}
-              onClick={() => queueProposal("add_dissolve")}
-            >
-              {UNSUPPORTED_PLACEBO_COPY.add_dissolve.chipLabel}
-            </button>
-            <button
-              type="button"
-              className="magi-chip magi-chip--unavailable"
-              title={UNSUPPORTED_PLACEBO_COPY.stabilize.summary}
-              onClick={() => queueProposal("stabilize")}
-            >
-              {UNSUPPORTED_PLACEBO_COPY.stabilize.chipLabel}
-            </button>
-            <button
-              type="button"
-              className="magi-chip magi-chip--unavailable"
-              title={UNSUPPORTED_PLACEBO_COPY.brighten.summary}
-              onClick={() => queueProposal("brighten")}
-            >
-              {UNSUPPORTED_PLACEBO_COPY.brighten.chipLabel}
-            </button>
-            <button
-              type="button"
-              className="magi-chip magi-chip--unavailable"
               title={UNSUPPORTED_PLACEBO_COPY.remove_silence.summary}
               onClick={() => queueProposal("remove_silence")}
             >
@@ -1829,18 +2163,6 @@ function MagiEditorInner({
             </button>
             <button type="button" className="magi-chip" onClick={() => queueProposal("add_ambience")}>Add Ambience</button>
             <button type="button" className="magi-chip" onClick={() => queueProposal("extend_reaction")}>Extend Reaction</button>
-          </div>
-          <p className="magi-group-label">Timeline handoff</p>
-          <div className="magi-actions">
-            <button
-              type="button"
-              className="magi-primary"
-              data-testid="magi-send-to-timeline"
-              disabled={timelineExportBusy || !sequence?.clips.length}
-              onClick={() => void handleExportToTimeline()}
-            >
-              {timelineExportBusy ? "Exporting…" : "Send to Timeline"}
-            </button>
           </div>
         </div>,
       );
@@ -1877,10 +2199,10 @@ function MagiEditorInner({
           ) : finishing ? (
             <div className="magi-tip" data-testid="magi-command-finishing">
               <strong>{finishing.label}</strong>
-              <p>MAGI finishing: {finishing.operation}. Color, upscale, music/SFX, and final render are real. EQ, 5.1, and frame interpolation are not available.</p>
+              <p>MAGI finishing: {finishing.operation}. Color, upscale, music/SFX, and final render are real. Sound enhancement is part of Upscale. EQ and frame interpolation are not available.</p>
             </div>
           ) : (
-            <p className="magi-empty">Command parser supports finishing (color, upscale, audio, render), trims, replacements, ambience, and basic objects. EQ / 5.1 / frame interpolation are not available. Dissolve / brighten / stabilize / silence refuse honestly.</p>
+            <p className="magi-empty">Command parser supports finishing (color, upscale, audio, render), trims, replacements, ambience, and basic objects. Sound enhancement is chosen inside Upscale. EQ and frame interpolation are not available. Dissolve / brighten / stabilize / silence refuse honestly.</p>
           )}
           {pendingProposal ? (
             <div className="magi-tip" data-testid="magi-overlay-proposal">
@@ -1900,48 +2222,74 @@ function MagiEditorInner({
     return null;
   };
 
+  const outgoingCut = sequence ? resolveOutgoingCut(sequence, selectedClip) : { status: "none" as const };
+  const edgeRole = sequence ? clipEdgeRole(sequence, selectedClip) : { first: false, last: false };
+  const playheadBlend = sequence ? blendAtPlayhead(sequence, sequence.playheadFrame) : null;
+  const edgeFade = sequence ? edgeFadeAtPlayhead(sequence, sequence.playheadFrame) : null;
+  const tailFadeReady =
+    edgeRole.last &&
+    outgoingCut.status === "last" &&
+    maxEdgeFadeSeconds(selectedClip?.durationFrames || 0, sequence?.frameRate || 24) >= 0.1;
+  const fadeInReady =
+    edgeRole.first && maxEdgeFadeSeconds(selectedClip?.durationFrames || 0, sequence?.frameRate || 24) >= 0.1;
+  const transitionReady = (outgoingCut.status === "cut" && outgoingCut.maxSeconds >= 0.1) || tailFadeReady;
+  const transitionMaxSeconds =
+    outgoingCut.status === "cut" && outgoingCut.maxSeconds >= 0.1
+      ? outgoingCut.maxSeconds
+      : Math.max(0.1, maxEdgeFadeSeconds(selectedClip?.durationFrames || 0, sequence?.frameRate || 24));
+  const transitionSeconds = (() => {
+    const fps = Math.max(1, sequence?.frameRate || 24);
+    const raw = selectedClip?.transitionDurationFrames || fps;
+    const seconds = Math.round(Math.min(3, Math.max(0.1, raw / fps)) * 10) / 10;
+    return Math.min(transitionMaxSeconds, seconds);
+  })();
+  const previewMediaKind = (assetId: string): "video" | "image" => {
+    const asset = mediaAssets.find((item) => item.id === assetId);
+    return asset && assetKindGroup(asset) === "image" ? "image" : "video";
+  };
+  const transitionNote = (() => {
+    if (!selectedClip || !sequence || outgoingCut.status === "none") {
+      return "Select a picture clip that meets the next clip. Transitions stay on that cut.";
+    }
+    if (outgoingCut.status === "not-picture") return "Transitions stay on picture cuts.";
+    if (outgoingCut.status === "last") return "This is the last clip. Fade out is available. Dissolve and wipe need a following clip.";
+    if (outgoingCut.status === "gap") return "The next clip does not meet this one, so this cut cannot take a transition.";
+    if (!transitionReady) return "These clips are too short for a transition.";
+    const at = frameToTimecode(outgoingCut.cutFrame, sequence.frameRate);
+    const left = selectedClip.name || "Clip";
+    const right = outgoingCut.next.name || "Clip";
+    return `Cut: ${left} → ${right} · ${at}`;
+  })();
+
+  const viewerModes = (
+    [
+      { id: "viewer" as ViewerMode, label: "Viewer", disabled: false, shelved: false },
+      { id: "compare" as ViewerMode, label: "Compare", disabled: false, shelved: false },
+      { id: "split" as ViewerMode, label: "Split View", disabled: false, shelved: false },
+      { id: "histogram" as ViewerMode, label: "Histogram (future)", disabled: true, shelved: true },
+      { id: "vectorscope" as ViewerMode, label: "Vectorscope (future)", disabled: true, shelved: true },
+    ] as const
+  )
+    .filter((mode) => SHOW_SHELVED_MONITOR_CHROME || !mode.shelved)
+    .map(({ id, label, disabled }) => (
+    <button
+      key={id}
+      type="button"
+      role="tab"
+      aria-selected={viewerMode === id}
+      className={`magi-chip${viewerMode === id ? " active" : ""}`}
+      disabled={disabled}
+      data-testid={`magi-viewer-mode-${id}`}
+      onClick={() => setViewerMode(id)}
+    >
+      {label}
+    </button>
+  ));
+
   const viewerControls = (
-    <>
+    <div className="magi-preview-toolbar" data-testid="magi-preview-toolbar">
       <button type="button" title="Save MAGI sequence" aria-label="Save MAGI sequence" onClick={() => void saveAll()}>
         Save
-      </button>
-      <button type="button" title="Undo" aria-label="Undo" onClick={undo} disabled={!historyRef.current.canUndo()}>
-        ↶
-      </button>
-      <button type="button" title="Redo" aria-label="Redo" onClick={redo} disabled={!historyRef.current.canRedo()}>
-        ↷
-      </button>
-      <button
-        type="button"
-        title={playing ? "Pause playback" : "Play playback"}
-        aria-label={playing ? "Pause playback" : "Play playback"}
-        onClick={() => setPlaying((value) => !value)}
-      >
-        {playing ? "❚❚" : "▶"}
-      </button>
-      <button
-        type="button"
-        data-testid="magi-toolbar-mute"
-        title={previewMuted ? "Unmute preview" : "Mute preview"}
-        aria-label={previewMuted ? "Unmute preview" : "Mute preview"}
-        aria-pressed={previewMuted}
-        onClick={() => setPreviewMuted((value) => !value)}
-      >
-        {previewMuted ? "🔇" : "🔊"}
-      </button>
-      <input
-        type="range"
-        min={0}
-        max={1}
-        step={0.05}
-        value={previewVolume}
-        data-testid="magi-preview-volume"
-        aria-label="Preview volume"
-        title="Preview volume"
-        onChange={(event) => setPreviewVolume(Number(event.target.value))}
-      />
-      <button type="button" title="Jump to start" aria-label="Jump to start" onClick={() => handleSeek(0)}>
-        ⏮
       </button>
       <button
         type="button"
@@ -1955,7 +2303,13 @@ function MagiEditorInner({
       >
         {sequence?.snapEnabled ? "Snap On" : "Snap Off"}
       </button>
-    </>
+      <button type="button" className="magi-icon-btn" data-testid="magi-tool-text" aria-label="Add text" title="Add text" onClick={() => createGraphic("text")}>T</button>
+      <button type="button" className="magi-icon-btn" data-testid="magi-tool-lower-third" aria-label="Add lower third" title="Add lower third" onClick={() => createGraphic("lower_third")}>LT</button>
+      <button type="button" className="magi-icon-btn" data-testid="magi-tool-shape" aria-label="Add shape" title="Add shape" onClick={() => createGraphic("shape")}>▢</button>
+      <button type="button" className="magi-icon-btn" data-testid="magi-tool-image" aria-label="Add image overlay" title="Add image overlay from Library" onClick={() => setImageOverlayPickerOpen(true)}>IMG</button>
+      <button type="button" className="magi-icon-btn" data-testid="magi-tool-duplicate" aria-label="Duplicate overlay" title="Duplicate overlay" onClick={() => overlays.duplicateSelected()}>⧉</button>
+      <button type="button" className="magi-icon-btn" data-testid="magi-tool-delete" aria-label="Delete overlay" title="Delete overlay" onClick={() => overlays.deleteSelected()}>⌫</button>
+    </div>
   );
 
   const viewerStage = currentAsset ? api.assetUrl(currentAsset.id) : "";
@@ -1964,59 +2318,7 @@ function MagiEditorInner({
 
   const monitor = (
     <section className="magi-viewer" {...bindRegionProps("viewer")} data-testid="magi-viewer">
-      <div className="magi-viewer-header">
-        <div className="magi-tabs" role="tablist" aria-label="Viewer mode">
-          {[
-            { id: "viewer" as ViewerMode, label: "Viewer", disabled: false },
-            { id: "compare" as ViewerMode, label: "Compare", disabled: false },
-            { id: "split" as ViewerMode, label: "Split View", disabled: false },
-            { id: "histogram" as ViewerMode, label: "Histogram (future)", disabled: true },
-            { id: "vectorscope" as ViewerMode, label: "Vectorscope (future)", disabled: true },
-          ].map(({ id, label, disabled }) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={viewerMode === id}
-              className={viewerMode === id ? "active" : ""}
-              disabled={disabled}
-              onClick={() => setViewerMode(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <StatusBadge status={editorDirty ? "Draft" : "Certified"} />
-        <div className="magi-overlay-toolbar" role="toolbar" aria-label="MAGI viewer tools">
-          <button type="button" className="magi-icon-btn" data-testid="magi-tool-text" aria-label="Add text" title="Add text" onClick={() => createGraphic("text")}>T</button>
-          <button type="button" className="magi-icon-btn" data-testid="magi-tool-lower-third" aria-label="Add lower third" title="Add lower third" onClick={() => createGraphic("lower_third")}>LT</button>
-          <button type="button" className="magi-icon-btn" data-testid="magi-tool-shape" aria-label="Add shape" title="Add shape" onClick={() => createGraphic("shape")}>▢</button>
-          <button type="button" className="magi-icon-btn" data-testid="magi-tool-image" aria-label="Add image overlay" title="Add image overlay from Library" onClick={() => setImageOverlayPickerOpen(true)}>IMG</button>
-          <button type="button" className="magi-icon-btn" data-testid="magi-tool-duplicate" aria-label="Duplicate overlay" title="Duplicate overlay" onClick={() => overlays.duplicateSelected()}>⧉</button>
-          <button type="button" className="magi-icon-btn" data-testid="magi-tool-delete" aria-label="Delete overlay" title="Delete overlay" onClick={() => overlays.deleteSelected()}>⌫</button>
-          <button
-            type="button"
-            className={`magi-chip ${overlays.safeGuides ? "active" : ""}`}
-            data-testid="magi-viewer-guides"
-            aria-pressed={overlays.safeGuides}
-            title={overlays.safeGuides ? "Hide composition guides" : "Show composition guides"}
-            aria-label={overlays.safeGuides ? "Hide composition guides" : "Show composition guides"}
-            onClick={() => overlays.setSafeGuides(!overlays.safeGuides)}
-          >
-            Guides
-          </button>
-          <span
-            className="magi-chip magi-viewer-fit is-active"
-            data-testid="magi-viewer-fit"
-            role="status"
-            title="The full frame stays inside the Preview Monitor"
-            aria-label="Viewer fit: the full frame stays inside the Preview Monitor"
-          >
-            Fit
-          </span>
-        </div>
-      </div>
-      <div className="magi-viewer-stage" data-testid="magi-viewer-stage">
+      <div className="magi-viewer-stage" data-testid="magi-viewer-stage" data-preview-asset={previewAsset?.id || ""}>
         {!currentAsset && !previewAsset && !splitOriginalId ? (
           <p className="magi-empty">Choose media from the Library or select a clip in the timeline.</p>
         ) : viewerMode === "split" ? (
@@ -2026,6 +2328,40 @@ function MagiEditorInner({
               processedSrc={api.assetUrl(splitOriginalId)}
               processedKind={splitProcessedKind}
               processedFilter={splitRightFilter || undefined}
+              processedOpacity={edgeFade?.opacity ?? 1}
+              processedBlend={
+                playheadBlend && sequence ? (
+                  <MagiCutPreview
+                    transition={playheadBlend.kind}
+                    progress={playheadBlend.progress}
+                    driveClock={false}
+                    outgoing={{
+                      clipId: playheadBlend.outgoing.id,
+                      src: api.assetUrl(playheadBlend.outgoing.assetId),
+                      kind: previewMediaKind(playheadBlend.outgoing.assetId),
+                      timeSeconds: blendSourceSeconds(playheadBlend.outgoing, sequence.playheadFrame, sequence.frameRate),
+                    }}
+                    incoming={{
+                      clipId: playheadBlend.incoming.id,
+                      src: api.assetUrl(playheadBlend.incoming.assetId),
+                      kind: previewMediaKind(playheadBlend.incoming.assetId),
+                      timeSeconds: blendSourceSeconds(playheadBlend.incoming, sequence.playheadFrame, sequence.frameRate),
+                    }}
+                    playheadClipId={playheadClip?.id || null}
+                    playing={playing}
+                    muted
+                    filter={splitRightFilter || undefined}
+                    seekGeneration={seekGeneration}
+                    onClock={followMediaClock}
+                    onEnded={stopAtMediaEnd}
+                    onError={(clipId) => {
+                      const failed = sequence.clips.find((item) => item.id === clipId);
+                      if (failed) markMediaFailed(failed.assetId);
+                    }}
+                    onReadySize={() => undefined}
+                  />
+                ) : null
+              }
               timeSeconds={previewVideoTime}
               playing={playing}
               seekGeneration={seekGeneration}
@@ -2045,6 +2381,7 @@ function MagiEditorInner({
                   frameRate={sequence?.frameRate || 24}
                   assetUrl={api.assetUrl}
                   interactive={false}
+                  hiddenObjectsSlots={hiddenObjectsSlots}
                 />
               }
             />
@@ -2054,7 +2391,40 @@ function MagiEditorInner({
         ) : viewerMode === "compare" ? (
           <div className="magi-compare" data-testid="magi-compare-viewer">
             <figure>
-              {currentAsset ? (
+              {playheadBlend && sequence ? (
+                <MagiPreviewFitFrame mediaWidth={previewSourceSize.w} mediaHeight={previewSourceSize.h} guidesVisible={overlays.safeGuides}>
+                  <MagiCutPreview
+                    transition={playheadBlend.kind}
+                    progress={playheadBlend.progress}
+                    outgoing={{
+                      clipId: playheadBlend.outgoing.id,
+                      src: api.assetUrl(playheadBlend.outgoing.assetId),
+                      kind: previewMediaKind(playheadBlend.outgoing.assetId),
+                      timeSeconds: blendSourceSeconds(playheadBlend.outgoing, sequence.playheadFrame, sequence.frameRate),
+                    }}
+                    incoming={{
+                      clipId: playheadBlend.incoming.id,
+                      src: api.assetUrl(playheadBlend.incoming.assetId),
+                      kind: previewMediaKind(playheadBlend.incoming.assetId),
+                      timeSeconds: blendSourceSeconds(playheadBlend.incoming, sequence.playheadFrame, sequence.frameRate),
+                    }}
+                    playheadClipId={playheadClip?.id || null}
+                    playing={playing}
+                    muted={pictureMuted}
+                    filter={viewerLiveFilter || undefined}
+                    seekGeneration={seekGeneration}
+                    onClock={followMediaClock}
+                    onEnded={stopAtMediaEnd}
+                    onError={(clipId) => {
+                      const failed = sequence.clips.find((item) => item.id === clipId);
+                      if (failed) markMediaFailed(failed.assetId);
+                    }}
+                    onReadySize={(width, height) =>
+                      setPreviewSourceSize((prev) => (prev.w === width && prev.h === height ? prev : { w: width, h: height }))
+                    }
+                  />
+                </MagiPreviewFitFrame>
+              ) : currentAsset ? (
                 <MagiCompareFitMedia
                   kind={assetKindGroup(currentAsset) === "video" ? "video" : "image"}
                   src={viewerStage}
@@ -2062,13 +2432,18 @@ function MagiEditorInner({
                   playing={playing}
                   seekGeneration={seekGeneration}
                   clockRole="authority"
+                  filter={viewerLiveFilter || undefined}
+                  opacity={edgeFade?.opacity ?? 1}
                   onClock={followMediaClock}
                   onEnded={stopAtMediaEnd}
                   onError={() => markMediaFailed(currentAsset.id)}
+                  onReadySize={(width, height) =>
+                    setPreviewSourceSize((prev) => (prev.w === width && prev.h === height ? prev : { w: width, h: height }))
+                  }
                   guidesVisible={overlays.safeGuides}
                 />
               ) : null}
-              <figcaption>{currentAsset?.tag || currentAsset?.filename}</figcaption>
+              <figcaption>Current</figcaption>
             </figure>
             <figure>
               {compareAsset ? (
@@ -2082,9 +2457,13 @@ function MagiEditorInner({
                   guidesVisible={overlays.safeGuides}
                 />
               ) : (
-                <div className="magi-viewer-placeholder">Pick a compare asset in Inspector.</div>
+                <div className="magi-viewer-placeholder">Choose Compare with in the inspector.</div>
               )}
-              <figcaption>{compareAsset?.tag || compareAsset?.filename || "Compare"}</figcaption>
+              <figcaption>
+                {compareAssetId && compareAssetId === splitOriginalId
+                  ? "Original"
+                  : compareAsset?.tag || compareAsset?.filename || "Compare with"}
+              </figcaption>
             </figure>
           </div>
         ) : currentAsset && assetKindGroup(currentAsset) === "audio" ? (
@@ -2095,17 +2474,49 @@ function MagiEditorInner({
         ) : (
           <>
             <MagiPreviewFitFrame mediaWidth={previewSourceSize.w} mediaHeight={previewSourceSize.h} guidesVisible={overlays.safeGuides}>
-              {previewAsset && assetKindGroup(previewAsset) === "video" ? (
-                <MagiVideoStage
-                  src={api.assetUrl(previewAsset.id)}
-                  timeSeconds={previewVideoTime}
+              {playheadBlend && sequence && !previewPinAssetId ? (
+                <MagiCutPreview
+                  transition={playheadBlend.kind}
+                  progress={playheadBlend.progress}
+                  outgoing={{
+                    clipId: playheadBlend.outgoing.id,
+                    src: api.assetUrl(playheadBlend.outgoing.assetId),
+                    kind: previewMediaKind(playheadBlend.outgoing.assetId),
+                    timeSeconds: blendSourceSeconds(playheadBlend.outgoing, sequence.playheadFrame, sequence.frameRate),
+                  }}
+                  incoming={{
+                    clipId: playheadBlend.incoming.id,
+                    src: api.assetUrl(playheadBlend.incoming.assetId),
+                    kind: previewMediaKind(playheadBlend.incoming.assetId),
+                    timeSeconds: blendSourceSeconds(playheadBlend.incoming, sequence.playheadFrame, sequence.frameRate),
+                  }}
+                  playheadClipId={playheadClip?.id || null}
                   playing={playing}
                   muted={pictureMuted}
                   filter={viewerLiveFilter || undefined}
-                  clockRole="authority"
                   seekGeneration={seekGeneration}
                   onClock={followMediaClock}
                   onEnded={stopAtMediaEnd}
+                  onError={(clipId) => {
+                    const failed = sequence.clips.find((item) => item.id === clipId);
+                    if (failed) markMediaFailed(failed.assetId);
+                  }}
+                  onReadySize={(width, height) =>
+                    setPreviewSourceSize((prev) => (prev.w === width && prev.h === height ? prev : { w: width, h: height }))
+                  }
+                />
+              ) : previewAsset && assetKindGroup(previewAsset) === "video" ? (
+                <MagiVideoStage
+                  src={api.assetUrl(previewAsset.id)}
+                  timeSeconds={previewPinAssetId ? 0 : previewVideoTime}
+                  playing={previewPinAssetId ? false : playing}
+                  muted={pictureMuted}
+                  filter={previewPinAssetId ? undefined : viewerLiveFilter || undefined}
+                  opacity={previewPinAssetId ? 1 : edgeFade?.opacity ?? 1}
+                  clockRole="authority"
+                  seekGeneration={seekGeneration}
+                  onClock={previewPinAssetId ? undefined : followMediaClock}
+                  onEnded={previewPinAssetId ? undefined : stopAtMediaEnd}
                   onError={() => markMediaFailed(previewAsset.id)}
                   onReadySize={(width, height) =>
                     setPreviewSourceSize((prev) =>
@@ -2117,7 +2528,10 @@ function MagiEditorInner({
                 <img
                   src={api.assetUrl(previewAsset.id)}
                   alt={previewAsset.tag || previewAsset.filename}
-                  style={viewerLiveFilter ? { filter: viewerLiveFilter } : undefined}
+                  style={{
+                    ...(previewPinAssetId || !viewerLiveFilter ? {} : { filter: viewerLiveFilter }),
+                    opacity: previewPinAssetId ? 1 : edgeFade?.opacity ?? 1,
+                  }}
                   onError={() => markMediaFailed(previewAsset.id)}
                   onLoad={(event) => {
                     const image = event.currentTarget;
@@ -2127,6 +2541,7 @@ function MagiEditorInner({
                   }}
                 />
               ) : null}
+              {previewPinAssetId ? null : (
               <MagiOverlayLayer
                 composition={overlays.composition}
                 selectedId={overlays.selectedOverlayId}
@@ -2137,7 +2552,9 @@ function MagiEditorInner({
                 frameRate={sequence?.frameRate || 24}
                 assetUrl={api.assetUrl}
                 interactive
+                hiddenObjectsSlots={hiddenObjectsSlots}
               />
+              )}
             </MagiPreviewFitFrame>
             {previewAsset && failedMedia[previewAsset.id] ? (
               <div className="magi-media-failed" data-testid="magi-media-failed" role="status">
@@ -2168,32 +2585,64 @@ function MagiEditorInner({
           </>
         )}
       </div>
-      <div className="magi-transport">
-        <button type="button" className="magi-icon-btn" aria-label="Previous frame" onClick={() => handleSeek(Math.max(0, (sequence?.playheadFrame || 0) - 1))}>‹</button>
-        <button type="button" className="magi-icon-btn" aria-label={playing ? "Pause" : "Play"} onClick={() => setPlaying((value) => !value)}>
-          {playing ? "❚❚" : "▶"}
-        </button>
-        <button type="button" className="magi-icon-btn" aria-label="Next frame" onClick={() => handleSeek((sequence?.playheadFrame || 0) + 1)}>›</button>
-        <span>{sequence ? frameToTimecode(sequence.playheadFrame, sequence.frameRate) : "00:00:00:00"}</span>
-        <button type="button" className="magi-chip" data-testid="magi-before-after" onClick={() => setViewerMode("split")}>Before / After</button>
-        <button
-          type="button"
-          className="magi-chip"
-          data-testid="magi-preview-mute"
-          aria-pressed={previewMuted}
-          onClick={() => setPreviewMuted((value) => !value)}
-        >
-          {previewMuted ? "Muted" : "Sound"}
-        </button>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={previewVolume}
-          aria-label="Preview volume"
-          onChange={(event) => setPreviewVolume(Number(event.target.value))}
+      <div className="magi-transport" data-testid="magi-transport">
+        <MagiPreviewTransport
+          sequence={sequence}
+          playing={playing}
+          onTogglePlay={() => setPlaying((value) => !value)}
+          onSeekFrame={handleSeek}
         />
+        <span data-testid="magi-transport-timecode">{sequence ? frameToTimecode(sequence.playheadFrame, sequence.frameRate) : "00:00:00:00"}</span>
+        <span className="magi-volume">
+          <button
+            type="button"
+            className="magi-icon-btn"
+            data-testid="magi-preview-mute"
+            aria-pressed={previewMuted}
+            aria-expanded={volumeOpen}
+            title={previewMuted ? "Unmute" : "Sound"}
+            aria-label={previewMuted ? "Unmute" : "Sound"}
+            onClick={() => {
+              if (previewMuted) setPreviewMuted(false);
+              setVolumeOpen((open) => !open);
+            }}
+          >
+            {previewMuted || previewVolume <= 0 ? (
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" />
+                <path d="M16.5 8.5 21 13m0-4.5L16.5 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" />
+                <path d="M16.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+                <path d="M18.8 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+              </svg>
+            )}
+          </button>
+          {volumeOpen ? (
+            <span className="magi-volume__pop">
+              <button type="button" className="magi-chip" data-testid="magi-preview-mute-toggle" onClick={() => setPreviewMuted((value) => !value)}>
+                {previewMuted ? "Unmute" : "Mute"}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={previewVolume}
+                data-testid="magi-preview-volume"
+                aria-label="Preview volume"
+                title="Preview volume"
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setPreviewVolume(next);
+                  if (next > 0 && previewMuted) setPreviewMuted(false);
+                }}
+              />
+            </span>
+          ) : null}
+        </span>
       </div>
     </section>
   );
@@ -2240,9 +2689,22 @@ function MagiEditorInner({
           <select
             data-testid="magi-color-preset"
             value={gradePreset}
+            disabled={!activeClipId}
             onChange={(e) => {
               if (!activeClipId) return;
-              patchFinishingLive({ clipGrades: { [activeClipId]: { presetId: e.target.value, params: {} } } });
+              const kept: Record<string, number> = {};
+              for (const key of ["brightness", "highlights", "shadows", "temperature"]) {
+                if (gradeParams[key] != null) kept[key] = gradeParams[key];
+              }
+              patchFinishingLive({
+                clipGrades: {
+                  [activeClipId]: {
+                    presetId: e.target.value,
+                    lightingPresetId: activeGrade.lightingPresetId,
+                    params: kept,
+                  },
+                },
+              });
             }}
           >
             <option value="">None</option>
@@ -2264,31 +2726,28 @@ function MagiEditorInner({
           </select>
         </div>
         <div className="magi-field">
-          <label>Exposure</label>
-          <input data-testid="magi-color-exposure" type="range" min="-50" max="50" value={sliderValue("brightness")} onChange={(e) => setGradeParam("brightness", Number(e.target.value))} />
+          <label>Exposure <span data-testid="magi-color-exposure-value">{sliderValue("brightness")}</span></label>
+          <input data-testid="magi-color-exposure" type="range" min="-50" max="50" value={sliderValue("brightness")} disabled={!activeClipId} onChange={(e) => setGradeParam("brightness", Number(e.target.value))} />
         </div>
         <div className="magi-field">
-          <label>Contrast</label>
-          <input data-testid="magi-color-contrast" type="range" min="-50" max="50" value={sliderValue("contrast")} onChange={(e) => setGradeParam("contrast", Number(e.target.value))} />
+          <label>Contrast <span data-testid="magi-color-contrast-value">{sliderValue("contrast")}</span></label>
+          <input data-testid="magi-color-contrast" type="range" min="-50" max="50" value={sliderValue("contrast")} disabled={!activeClipId} onChange={(e) => setGradeParam("contrast", Number(e.target.value))} />
         </div>
         <div className="magi-field">
-          <label>Saturation</label>
-          <input data-testid="magi-color-saturation" type="range" min="-50" max="50" value={sliderValue("saturation")} onChange={(e) => setGradeParam("saturation", Number(e.target.value))} />
+          <label>Saturation <span data-testid="magi-color-saturation-value">{sliderValue("saturation")}</span></label>
+          <input data-testid="magi-color-saturation" type="range" min="-50" max="50" value={sliderValue("saturation")} disabled={!activeClipId} onChange={(e) => setGradeParam("saturation", Number(e.target.value))} />
         </div>
         <p className="magi-empty" data-testid="magi-grade-live-hint">
-          Split View shows this look live. Apply Grade saves it for Final Render.
+          {activeClipId
+            ? "This look is on the selected clip. The viewer and Final Render use it."
+            : "Select a clip to adjust the live color look."}
         </p>
-        {liveGradeHasNonLiveChannels(gradeParams, gradePreset) ? (
-          <p className="magi-empty" data-testid="magi-grade-nonlive">
-            Some saved channels (gamma, shadows) appear on the baked render, not in this live preview.
-          </p>
-        ) : null}
         <div className="magi-actions">
           <button
             type="button"
             className="magi-chip"
             data-testid="magi-color-preview"
-            title="Optional 3-second FFmpeg bake for Compare. Split View already shows this look live."
+            title="Optional 3-second FFmpeg bake for Compare. The viewer already shows this look live."
             disabled={!currentAsset}
             onClick={async () => {
               if (!currentAsset) return;
@@ -2298,7 +2757,7 @@ function MagiEditorInner({
                 setCompareAssetId(previewId);
                 setViewerMode("compare");
               }
-              setMessage("Baked compare ready. Split View already showed this look live.");
+              setMessage("Baked compare ready. The viewer already showed this look live.");
               await onChange();
             }}
           >
@@ -2306,33 +2765,11 @@ function MagiEditorInner({
           </button>
           <button
             type="button"
-            className="magi-primary"
-            data-testid="magi-color-apply"
-            title="Commits this look for Final Render. Split View already shows it live."
-            disabled={!currentAsset}
-            onClick={async () => {
-              if (!currentAsset) return;
-              try {
-                const result = await api.magi.applyColorGrade(project.id, currentAsset.id, gradePreset, gradeParams, activeClipId);
-                const gradedId = String(result.output_asset_id || result.assetId || "");
-                if (gradedId) setCompareAssetId(gradedId);
-                setMessage("Color look saved for Final Render. Split View already showed it live.");
-                await reloadSequence();
-                await onChange();
-              } catch (err: any) {
-                setMessage(err?.message || "Color look could not be saved.");
-              }
-            }}
-          >
-            Apply Grade
-          </button>
-          <button
-            type="button"
             className="magi-chip"
             data-testid="magi-color-reset"
             onClick={() => {
               if (!activeClipId) return;
-              patchFinishingLive({ clipGrades: { [activeClipId]: { presetId: "", params: {} } } });
+              patchFinishingLive({ clipGrades: { [activeClipId]: { presetId: "", lightingPresetId: "", params: {} } } });
               setMessage(null);
             }}
           >
@@ -2340,46 +2777,118 @@ function MagiEditorInner({
           </button>
         </div>
       </MagiAccordion>
-      <MagiAccordion id="prompt" title="Prompt" open={Boolean(layout.accordionState.prompt)} onToggle={(next) => setAccordion("prompt", next)}>
-        <div className="magi-field">
-          <label>Direction note</label>
-          <textarea value={command} onChange={(event) => setCommand(event.target.value)} />
-        </div>
-      </MagiAccordion>
       <MagiAccordion id="lighting" title="Lighting" open={Boolean(layout.accordionState.lighting)} onToggle={(next) => setAccordion("lighting", next)}>
-        <p className="magi-empty">Brighten / stabilize engines are not available. Use Color grade for exposure.</p>
-        <div className="magi-actions">
-          <button
-            type="button"
-            className="magi-chip magi-chip--unavailable"
-            title={UNSUPPORTED_PLACEBO_COPY.brighten.summary}
-            onClick={() => queueProposal("brighten")}
+        <div className="magi-field">
+          <label>Preset</label>
+          <select
+            data-testid="magi-lighting-preset"
+            value={activeGrade.lightingPresetId || "none"}
+            disabled={!activeClipId}
+            onChange={(event) => applyLightingPreset(event.target.value)}
           >
-            {UNSUPPORTED_PLACEBO_COPY.brighten.chipLabel}
-          </button>
-          <button
-            type="button"
-            className="magi-chip magi-chip--unavailable"
-            title={UNSUPPORTED_PLACEBO_COPY.stabilize.summary}
-            onClick={() => queueProposal("stabilize")}
-          >
-            {UNSUPPORTED_PLACEBO_COPY.stabilize.chipLabel}
-          </button>
+            <option value="none">None</option>
+            <option value="soft_bright">Soft Bright</option>
+            <option value="warm">Warm</option>
+            <option value="cool">Cool</option>
+            <option value="high_contrast">High Contrast</option>
+            <option value="low_light_lift">Low Light Lift</option>
+          </select>
         </div>
+        <div className="magi-field">
+          <label>Brightness <span data-testid="magi-lighting-brightness-value">{sliderValue("brightness")}</span></label>
+          <input data-testid="magi-lighting-brightness" type="range" min="-50" max="50" value={sliderValue("brightness")} disabled={!activeClipId} onChange={(e) => setGradeParam("brightness", Number(e.target.value))} />
+        </div>
+        <div className="magi-field">
+          <label>Highlights <span data-testid="magi-lighting-highlights-value">{sliderValue("highlights")}</span></label>
+          <input data-testid="magi-lighting-highlights" type="range" min="-50" max="50" value={sliderValue("highlights")} disabled={!activeClipId} onChange={(e) => setGradeParam("highlights", Number(e.target.value))} />
+        </div>
+        <div className="magi-field">
+          <label>Shadows <span data-testid="magi-lighting-shadows-value">{sliderValue("shadows")}</span></label>
+          <input data-testid="magi-lighting-shadows" type="range" min="-50" max="50" value={sliderValue("shadows")} disabled={!activeClipId} onChange={(e) => setGradeParam("shadows", Number(e.target.value))} />
+        </div>
+        <div className="magi-field">
+          <label>Temperature <span data-testid="magi-lighting-temperature-value">{sliderValue("temperature")}</span></label>
+          <input data-testid="magi-lighting-temperature" type="range" min="-50" max="50" value={sliderValue("temperature")} disabled={!activeClipId} onChange={(e) => setGradeParam("temperature", Number(e.target.value))} />
+        </div>
+        <p className="magi-empty">This lighting is on the selected clip. The viewer and Final Render use it.</p>
+        <button type="button" className="magi-chip" data-testid="magi-stabilize-future" disabled title="Stabilize is a future MAGI control.">
+          Stabilize (future)
+        </button>
       </MagiAccordion>
-      <MagiAccordion id="effects" title="Effects" open={Boolean(layout.accordionState.effects)} onToggle={(next) => setAccordion("effects", next)}>
-        <p className="magi-empty">Dissolve has no xfade engine yet — delivery remains hard-cut.</p>
-        <div className="magi-actions">
-          <button
-            type="button"
-            className="magi-chip magi-chip--unavailable"
-            title={UNSUPPORTED_PLACEBO_COPY.add_dissolve.summary}
-            onClick={() => queueProposal("add_dissolve")}
+      <MagiAccordion id="effects" title="Transitions" open={Boolean(layout.accordionState.effects)} onToggle={(next) => setAccordion("effects", next)}>
+        {fadeInReady ? (
+          <div className="magi-field">
+            <label>Fade in</label>
+            <select
+              data-testid="magi-fade-in"
+              value={selectedClip?.transitionInId === "fade" ? "fade" : "none"}
+              onChange={(event) => setOpeningFade(event.target.value, transitionSeconds)}
+            >
+              <option value="none">None</option>
+              <option value="fade">Fade</option>
+            </select>
+          </div>
+        ) : null}
+        {fadeInReady && selectedClip?.transitionInId === "fade" ? (
+          <div className="magi-field">
+            <label>
+              Fade in duration{" "}
+              <span data-testid="magi-fade-in-duration-value">
+                {(
+                  Math.round(
+                    Math.min(
+                      transitionMaxSeconds,
+                      Math.max(0.1, (selectedClip.transitionInDurationFrames || selectedClip.transitionDurationFrames || (sequence?.frameRate || 24)) / (sequence?.frameRate || 24)),
+                    ) * 10,
+                  ) / 10
+                ).toFixed(1)}
+                s
+              </span>
+            </label>
+            <input
+              data-testid="magi-fade-in-duration"
+              type="range"
+              min={0.1}
+              max={transitionMaxSeconds}
+              step={0.1}
+              value={Math.min(
+                transitionMaxSeconds,
+                Math.max(0.1, (selectedClip.transitionInDurationFrames || selectedClip.transitionDurationFrames || (sequence?.frameRate || 24)) / (sequence?.frameRate || 24)),
+              )}
+              onChange={(event) => setOpeningFade("fade", Number(event.target.value))}
+            />
+          </div>
+        ) : null}
+        <div className="magi-field">
+          <label>{tailFadeReady ? "Fade out" : "At this cut"}</label>
+          <select
+            data-testid="magi-transition-kind"
+            value={selectedClip?.transitionOutId || "none"}
+            disabled={!transitionReady}
+            onChange={(event) => setBoundaryTransition(event.target.value, transitionSeconds)}
           >
-            {UNSUPPORTED_PLACEBO_COPY.add_dissolve.chipLabel}
-          </button>
-          <button type="button" className="magi-chip" onClick={() => queueProposal("extend_reaction")}>Extend Reaction</button>
+            <option value="none">None</option>
+            <option value="dissolve" disabled={tailFadeReady}>Dissolve</option>
+            <option value="fade">Fade</option>
+            <option value="wipe" disabled={tailFadeReady}>Wipe</option>
+          </select>
         </div>
+        <div className="magi-field">
+          <label>Duration <span data-testid="magi-transition-duration-value">{transitionSeconds.toFixed(1)}s</span></label>
+          <input
+            data-testid="magi-transition-duration"
+            type="range"
+            min={0.1}
+            max={transitionMaxSeconds}
+            step={0.1}
+            value={transitionSeconds}
+            disabled={!transitionReady || (selectedClip?.transitionOutId || "none") === "none"}
+            onChange={(event) => setBoundaryTransition(selectedClip?.transitionOutId || "dissolve", Number(event.target.value))}
+          />
+        </div>
+        <p className="magi-empty" data-testid="magi-transition-note">
+          {transitionNote}
+        </p>
       </MagiAccordion>
       <MagiAccordion id="audio" title="Audio" open={Boolean(layout.accordionState.audio)} onToggle={(next) => setAccordion("audio", next)}>
         <div className="magi-actions">
@@ -2449,24 +2958,76 @@ function MagiEditorInner({
         {!gpuReady ? <p className="magi-empty">{gpuMessage}</p> : null}
         <div className="magi-field">
           <label>Target</label>
-          <select data-testid="magi-upscale-target" value={upscaleTarget} onChange={(e) => patchFinishing({ upscale: { target: e.target.value, engine: upscaleEngine, model: upscaleModel, enabled: true } })}>
-            <option value="1280x720">720p</option>
-            <option value="1920x1080">1080p</option>
-            <option value="2560x1440">1440p</option>
-            <option value="3840x2160">4K</option>
-            <option value="7680x4320">8K</option>
+          <select data-testid="magi-upscale-target" value={activeUpscaleTarget} onChange={(e) => patchFinishing({ upscale: { target: e.target.value, engine: upscaleEngine, model: upscaleModel, enabled: true } })}>
+            {upscaleChoices.map((row) => (
+              <option key={row.id} value={row.id}>{row.label}</option>
+            ))}
           </select>
+          {resolvedUpscale ? (
+            <p className="magi-empty" data-testid="magi-upscale-resolved">
+              {resolvedUpscale.width} × {resolvedUpscale.height}
+              <br />
+              {resolvedUpscale.aspect || aspectLabel(resolvedUpscale.width, resolvedUpscale.height)}
+            </p>
+          ) : (
+            <p className="magi-empty" data-testid="magi-upscale-resolved">The picture keeps its own shape.</p>
+          )}
+        </div>
+        <div className="magi-field">
+          <label title={soundAnalysis?.infoLine || ""}>Sound Enhancement</label>
+          {soundAnalysis && !soundAnalysis.hasAudio ? (
+            <p className="magi-empty" data-testid="magi-upscale-sound-none">No audio detected</p>
+          ) : (
+            <>
+              <select
+                data-testid="magi-upscale-sound"
+                value={soundChoices.some((row) => row.id === selectedSound) ? selectedSound : "preserve_original"}
+                disabled={!currentAsset || !soundHasAudio}
+                title={soundAnalysis?.infoLine || ""}
+                onChange={(e) => {
+                  if (!currentAsset) return;
+                  patchFinishing({
+                    upscale: {
+                      soundProfile: e.target.value,
+                      soundSourceAssetId: currentAsset.id,
+                      engine: upscaleEngine,
+                      model: upscaleModel,
+                      target: activeUpscaleTarget,
+                      enabled: true,
+                    },
+                  });
+                }}
+              >
+                {soundChoices.map((row) => (
+                  <option key={row.id} value={row.id} disabled={!row.available}>
+                    {row.label}
+                    {soundHasAudio && row.id === recommendedSound ? " ★ Recommended" : ""}
+                    {!row.available ? " — Component unavailable" : ""}
+                  </option>
+                ))}
+              </select>
+              {soundRecommendation?.reason ? (
+                <p className="magi-empty" data-testid="magi-upscale-sound-reason">
+                  {selectedSound === recommendedSound
+                    ? `Recommended because: ${soundRecommendation.reason}`
+                    : "Using your choice for this clip."}
+                </p>
+              ) : (
+                <p className="magi-empty" data-testid="magi-upscale-sound-reason">Reading the soundtrack…</p>
+              )}
+            </>
+          )}
         </div>
         <div className="magi-field">
           <label>Engine</label>
-          <select data-testid="magi-upscale-engine" value={upscaleEngine} onChange={(e) => patchFinishing({ upscale: { engine: e.target.value, target: upscaleTarget, model: e.target.value === "ffmpeg-scale" ? "lanczos" : "realesrgan-x4plus", enabled: true } })}>
+          <select data-testid="magi-upscale-engine" value={upscaleEngine} onChange={(e) => patchFinishing({ upscale: { engine: e.target.value, target: activeUpscaleTarget, model: e.target.value === "ffmpeg-scale" ? "lanczos" : "realesrgan-x4plus", enabled: true } })}>
             <option value="ffmpeg-scale">FFmpeg (fast)</option>
             <option value="realesrgan-ncnn-vulkan" disabled={!gpuReady}>Real-ESRGAN (GPU)</option>
           </select>
         </div>
         <div className="magi-field">
           <label>Model</label>
-          <select data-testid="magi-upscale-model" value={upscaleModel} onChange={(e) => patchFinishing({ upscale: { model: e.target.value, engine: upscaleEngine, target: upscaleTarget, enabled: true } })}>
+          <select data-testid="magi-upscale-model" value={upscaleModel} onChange={(e) => patchFinishing({ upscale: { model: e.target.value, engine: upscaleEngine, target: activeUpscaleTarget, enabled: true } })}>
             <option value="lanczos">Lanczos (general)</option>
             <option value="bicubic">Bicubic (soft)</option>
             <option value="realesrgan-x4plus">General 4x</option>
@@ -2478,12 +3039,17 @@ function MagiEditorInner({
           <button type="button" className="magi-primary" data-testid="magi-upscale-preview" disabled={!currentAsset || Boolean(finishingJobId)} onClick={async () => {
             if (!currentAsset) return;
             try {
-              const result = await api.magi.previewUpscale(project.id, currentAsset.id, "ffmpeg-scale", upscaleEngine === "ffmpeg-scale" ? upscaleModel : "lanczos", upscaleTarget);
+              const soundProfile = soundHasAudio ? selectedSound : "preserve_original";
+              const result = await api.magi.previewUpscale(project.id, currentAsset.id, "ffmpeg-scale", upscaleEngine === "ffmpeg-scale" ? upscaleModel : "lanczos", activeUpscaleTarget, soundProfile);
               if (result.output_asset_id) {
                 setCompareAssetId(String(result.output_asset_id));
                 setViewerMode("compare");
               }
-              setMessage("Upscale preview ready. Source clip is unchanged.");
+              setMessage(
+                soundProfile !== "preserve_original"
+                  ? "Preview is a short sample with the selected sound treatment. Apply Upscale finishes the full clip. Source clip is unchanged."
+                  : "Upscale preview ready. Source clip is unchanged.",
+              );
               await onChange();
             } catch (err: any) {
               setMessage(err?.message || "Upscale preview failed");
@@ -2494,7 +3060,8 @@ function MagiEditorInner({
           <button type="button" className="magi-chip" data-testid="magi-upscale-apply" disabled={!currentAsset || Boolean(finishingJobId) || (upscaleEngine === "realesrgan-ncnn-vulkan" && !gpuReady)} onClick={async () => {
             if (!currentAsset) return;
             try {
-              const result = await api.magi.applyUpscale(project.id, currentAsset.id, upscaleEngine, upscaleModel, upscaleTarget);
+              const soundProfile = soundHasAudio ? selectedSound : "preserve_original";
+              const result = await api.magi.applyUpscale(project.id, currentAsset.id, upscaleEngine, upscaleModel, activeUpscaleTarget, soundProfile);
               waitAccepted(result, "magi_upscale");
             } catch (err: any) {
               setMessage(err?.message || gpuMessage);
@@ -2564,7 +3131,7 @@ function MagiEditorInner({
                   clipId: selectedClip?.id,
                   includeColor: true,
                   includeAudio: true,
-                  upscale: { enabled: true, engine: "ffmpeg-scale", model: "lanczos", target: "1280x720" },
+                  upscale: { enabled: true, engine: "ffmpeg-scale", model: "lanczos", target: activeUpscaleTarget },
                 });
                 waitAccepted(result, "magi_final_render");
               } catch (err: any) {
@@ -2578,76 +3145,199 @@ function MagiEditorInner({
             type="button"
             className="magi-primary"
             data-testid="magi-final-render"
-            disabled={!sequence?.clips.length || Boolean(finishingJobId)}
-            onClick={async () => {
-              try {
-                const result = await api.magi.createRender(project.id, {
-                  profile: "final",
-                  range: audioRange,
-                  clipId: selectedClip?.id,
-                  includeColor: true,
-                  includeAudio: true,
-                  includeOverlays: true,
-                  upscale: { enabled: true, engine: upscaleEngine, model: upscaleModel, target: upscaleTarget },
-                });
-                waitAccepted(result, "magi_final_render");
-              } catch (err: any) {
-                setMessage(err?.message || "Final render failed");
-              }
+            disabled={!sequence?.clips.length || Boolean(finishingJobId) || finalRenderSession !== null}
+            onClick={() => {
+              if (finishingJobId || finalRenderLock.current || finalRenderSession) return;
+              finalRenderJobRef.current = null;
+              const scene = project.scenes.find((item) => item.id === handoffSceneId);
+              setFinalOutputName(suggestedFinalVideoName(scene?.name, project.name));
+              setFocusRegion("modal");
+              setFinalRenderSession(emptyFinalRenderSession());
             }}
           >
             Final Render
-          </button>
-          <button
-            type="button"
-            className="magi-chip"
-            data-testid="magi-inspector-export"
-            disabled={timelineExportBusy || !sequence?.clips.length}
-            onClick={() => void handleExportToTimeline()}
-          >
-            {timelineExportBusy ? "Exporting…" : "Send to Timeline"}
           </button>
         </div>
         <p className="magi-empty">Preview is a short look. Final uses MAGI color grades, MAGI finishing.audio (Music/SFX asset ids from this Audio panel), and upscale settings. Audio Studio mixer is adjacent and is not used by Final Render.</p>
       </MagiAccordion>
       <MagiAccordion id="compare" title="Compare" open={Boolean(layout.accordionState.compare)} onToggle={(next) => setAccordion("compare", next)}>
         <div className="magi-field">
-          <label>Compare asset</label>
-          <select value={compareAssetId} onChange={(event) => setCompareAssetId(event.target.value)}>
-            <option value="">None</option>
-            {compareOptions.map((asset) => (
-              <option key={asset.id} value={asset.id}>
-                {asset.tag || asset.filename}
-              </option>
-            ))}
+          <label>Compare with</label>
+          <select
+            data-testid="magi-compare-with"
+            value={compareAssetId && compareAssetId === splitOriginalId ? "original" : compareAssetId}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === "original") {
+                if (splitOriginalId) setCompareAssetId(splitOriginalId);
+                return;
+              }
+              setCompareAssetId(value);
+            }}
+          >
+            <option value="">Current only</option>
+            {splitOriginalId ? <option value="original">Original</option> : null}
+            {compareOptions
+              .filter((asset) => asset.id !== splitOriginalId)
+              .map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {asset.tag || asset.filename}
+                </option>
+              ))}
           </select>
         </div>
-        <button type="button" className="magi-chip" onClick={() => setViewerMode("compare")}>Open compare view</button>
-      </MagiAccordion>
-      <MagiAccordion id="aiAssist" title="AI Assist" open={Boolean(layout.accordionState.aiAssist)} onToggle={(next) => setAccordion("aiAssist", next)}>
-        <div className="magi-ai-assist">
-          <button type="button" onClick={() => queueProposal("trim")}>Tighten beat</button>
-          <button type="button" onClick={() => queueProposal("replace_clip")}>Replace shot</button>
-          <button
-            type="button"
-            className="magi-chip--unavailable"
-            title={UNSUPPORTED_PLACEBO_COPY.add_dissolve.summary}
-            onClick={() => queueProposal("add_dissolve")}
-          >
-            Smooth cut (unavailable)
+        <p className="magi-empty" data-testid="magi-compare-label">
+          Compare with: {compareAssetId && compareAssetId === splitOriginalId ? "Original" : compareAsset?.tag || compareAsset?.filename || "nothing selected"}
+        </p>
+        <div className="magi-actions">
+          <button type="button" className="magi-chip" data-testid="magi-compare-open" onClick={() => setViewerMode("compare")}>
+            Compare
           </button>
-          <button
-            type="button"
-            className="magi-chip--unavailable"
-            title="Use Inspector Color → Exposure for real brightness changes."
-            onClick={() => queueProposal("brighten")}
-          >
-            Lift exposure (unavailable)
+          <button type="button" className="magi-chip" data-testid="magi-split-open" onClick={() => setViewerMode("split")}>
+            Split View
           </button>
         </div>
+        <p className="magi-empty">Compare shows the current grade beside the source above. Split View divides that pair in one picture.</p>
       </MagiAccordion>
     </div>
   );
+
+  const closeFinalRender = () => {
+    finalRenderJobRef.current = null;
+    finalRenderLock.current = false;
+    setFinalRenderSession(null);
+  };
+
+  const confirmFinalRender = async () => {
+    if (!sequence || finalRenderLock.current || finishingJobId || finalRenderSession?.phase !== "confirm") return;
+    const named = normalizeFinalVideoName(finalOutputName);
+    if (!named || finalVideoNameMessage(finalOutputName, project.assets)) return;
+    const built = buildFinalRenderConfirm({
+      sequence,
+      range: audioRange,
+      selectedClipId: selectedClip?.id,
+      upscaleEnabled: finishing.upscale?.enabled === true,
+      upscaleEngine,
+      upscaleModel,
+      upscaleTarget: activeUpscaleTarget,
+      resolvedUpscale:
+        finishing.upscale?.enabled === true && resolvedUpscale
+          ? {
+              id: resolvedUpscale.id,
+              width: resolvedUpscale.width,
+              height: resolvedUpscale.height,
+              aspect: resolvedUpscale.aspect,
+            }
+          : null,
+      assets: mediaAssets,
+      outputName: named.title,
+    });
+    finalRenderLock.current = true;
+    setFinalRenderSession((current) =>
+      current
+        ? {
+            ...current,
+            phase: "running",
+            progress: 0,
+            stage: "Queued",
+            message: "Queued…",
+            error: null,
+            outputName: named.title,
+            outputFile: named.filename,
+            log: [{ stage: "Queued", message: "Queued…" }],
+          }
+        : current,
+    );
+    try {
+      const result = await api.magi.createRender(project.id, built.request);
+      const jobId = String(result.jobId || (Array.isArray(result.jobIds) ? result.jobIds[0] : "") || "");
+      if (!jobId) {
+        const message = String(result.message || "The studio did not accept this render.");
+        setFinalRenderSession((current) =>
+          current
+            ? {
+                ...current,
+                phase: "failed",
+                stage: "Failed",
+                message,
+                error: message,
+                log: [...current.log, { stage: "Failed", message, failed: true }],
+              }
+            : current,
+        );
+        return;
+      }
+      finalRenderJobRef.current = jobId;
+      setFinalRenderSession((current) =>
+        current ? { ...current, jobId, phase: "running", message: String(result.message || "Queued…") } : current,
+      );
+      waitAccepted(result, "magi_final_render");
+    } catch (err) {
+      const message = describeMagiError(err);
+      setFinalRenderSession((current) =>
+        current
+          ? {
+              ...current,
+              phase: "failed",
+              stage: "Failed",
+              message,
+              error: message,
+              log: [...current.log, { stage: "Failed", message, failed: true }],
+            }
+          : current,
+      );
+    } finally {
+      finalRenderLock.current = false;
+    }
+  };
+
+  const revealLibraryPane = () => {
+    const panes = new Set(["library", "media", "assets"]);
+    const inLeft = layout.leftPaneOrder.some((pane) => panes.has(pane));
+    const inRight = layout.rightPaneOrder.some((pane) => panes.has(pane));
+    if (inLeft && layout.leftDockCollapsed) toggleLeftDock();
+    if ((!inLeft || inRight) && layout.rightDockCollapsed && inRight) toggleRightDock();
+    for (const pane of [...layout.leftPaneOrder, ...layout.rightPaneOrder]) {
+      if (panes.has(pane)) setAccordion(pane, true);
+    }
+  };
+
+  const openFinishedRender = async (where: "viewer" | "library" | "queue") => {
+    const assetId = finalRenderSession?.assetId || null;
+    const jobId = finalRenderSession?.jobId || null;
+    if ((where === "viewer" || where === "library") && !assetId) return;
+    try {
+      await onChange();
+    } catch {
+      /* the finished asset may already be in this project */
+    }
+    if (where === "viewer" && assetId) {
+      setViewerMode("viewer");
+      setViewerAssetId(assetId);
+      setPreviewPinAssetId(assetId);
+      setSeekGeneration((value) => value + 1);
+      setFocusRegion("viewer");
+    }
+    if (where === "library" && assetId) {
+      setViewerAssetId(assetId);
+      setAssetFilter("all");
+      revealLibraryPane();
+      setLibraryFocusId(assetId);
+      setFocusRegion("media_bin");
+    }
+    if (where === "queue") {
+      if (jobId) setQueueFocusJobId(jobId);
+      if (layout.leftDockCollapsed) toggleLeftDock();
+      setRenderQueueOpen(true);
+      setFocusRegion("media_bin");
+    }
+    closeFinalRender();
+  };
+
+  useEffect(() => {
+    if (!layout.renderQueueOpen) return;
+    document.querySelector("[data-testid=magi-render-queue]")?.scrollIntoView({ block: "nearest" });
+  }, [layout.renderQueueOpen, queueFocusJobId]);
 
   if (!sequence) {
     return (
@@ -2665,21 +3355,14 @@ function MagiEditorInner({
       data-viewport-mode={viewportMode}
     >
       <WorkspaceFullscreenBanner visible={workspaceFs.showBanner} />
-      <div className="magi-strip" role="banner" aria-label={t("title")} data-testid="magi-strip">
-        <div className="magi-strip__lava" aria-hidden="true" />
-        <div className="magi-strip__glow" aria-hidden="true" />
-        <div className="magi-strip__track">
-          <span className="magi-strip__copy" data-testid="magi-strip-copy">MAGI Editor — assemble, finish, and protect timing.</span>
-        </div>
-      </div>
 
       <div className="magi-workspace-bar">
         <strong>Workspace</strong>
         <WorkspaceFullscreenControls
           fs={workspaceFs}
-          expandActive={viewportMode === "EXPANDED"}
+          expandActive={layout.leftDockCollapsed && layout.rightDockCollapsed}
           onExpand={() => {
-            setViewportMode((m) => (m === "EXPANDED" ? "STANDARD" : "EXPANDED"));
+            setBothDocksCollapsed(nextDualDrawerCollapsed(layout.leftDockCollapsed, layout.rightDockCollapsed));
           }}
         />
         <select
@@ -2711,16 +3394,57 @@ function MagiEditorInner({
         >
           Reset Workspace
         </button>
-        <span className="magi-workspace-status">
+        <div className="magi-tabs" role="tablist" aria-label="Viewer mode">
+          {viewerModes}
+        </div>
+        <button
+          type="button"
+          className={`magi-chip ${overlays.safeGuides ? "active" : ""}`}
+          data-testid="magi-viewer-guides"
+          aria-pressed={overlays.safeGuides}
+          title={overlays.safeGuides ? "Hide composition guides" : "Show composition guides"}
+          aria-label={overlays.safeGuides ? "Hide composition guides" : "Show composition guides"}
+          onClick={() => overlays.setSafeGuides(!overlays.safeGuides)}
+        >
+          Guides
+        </button>
+        {SHOW_SHELVED_MONITOR_CHROME ? (
+          <span
+            className="magi-chip magi-viewer-fit is-active"
+            data-testid="magi-viewer-fit"
+            role="status"
+            title="The full frame stays inside the Preview Monitor"
+            aria-label="Viewer fit: the full frame stays inside the Preview Monitor"
+          >
+            Fit
+          </span>
+        ) : null}
+        <span className="magi-workspace-status" data-testid="magi-workspace-status">
           <StatusBadge status={saveState === "error" || overlayPersist.error ? "Blocked" : editorDirty ? "Draft" : "Certified"} />
           <span>{saveState === "saving" || overlayPersist.saving ? "Saving…" : editorDirty ? "Unsaved changes" : "Saved"}</span>
+          {saveState === "error" || overlayPersist.error ? (
+            <button
+              type="button"
+              className="magi-msg__close"
+              data-testid="magi-dismiss-blocked"
+              aria-label="Close notice"
+              onClick={() => {
+                setSaveError(null);
+                setSaveState((state) => (state === "error" ? "idle" : state));
+                setOverlayPersist((prev) => (prev.error ? { ...prev, error: null } : prev));
+              }}
+            >
+              ×
+            </button>
+          ) : null}
         </span>
       </div>
 
-      {unpublishedSceneId ? (
-        <div className="magi-msg magi-msg--action" role="status" data-testid="magi-unpublished-master">
-          <span>This scene has not been published from Timeline yet.</span>
-          {(() => {
+      {unpublishedSceneId && !hideUnpublishedNotice ? (
+        <MagiNotice
+          testId="magi-unpublished-master"
+          onClose={() => setHideUnpublishedNotice(true)}
+          trailing={(() => {
             const timeline = buildProjectWorkspaceLocation({
               projectId: project.id,
               tab: "timeline",
@@ -2732,11 +3456,34 @@ function MagiEditorInner({
               </Link>
             ) : null;
           })()}
-        </div>
+        >
+          This scene has not been published from Timeline yet.
+        </MagiNotice>
       ) : null}
-      {message && !String(message).trim().startsWith("{") ? <p className="magi-msg" role="status">{message}</p> : null}
-      {saveError && !String(saveError).trim().startsWith("{") ? <p className="magi-msg" role="status">{saveError}</p> : null}
-      {compactNotice ? <p className="magi-msg" role="status" data-testid="magi-compact-notice">Compact viewport detected. MAGI keeps the viewer forward and leaves bins collapsible.</p> : null}
+      {message && !String(message).trim().startsWith("{") ? (
+        <MagiNotice onClose={() => setMessage(null)}>{message}</MagiNotice>
+      ) : null}
+      {saveError && !String(saveError).trim().startsWith("{") ? (
+        <MagiNotice
+          testId="magi-save-notice"
+          onClose={() => {
+            setSaveError(null);
+            setSaveState((state) => (state === "error" ? "idle" : state));
+          }}
+        >
+          {saveError}
+        </MagiNotice>
+      ) : null}
+      {overlayPersist.error ? (
+        <MagiNotice onClose={() => setOverlayPersist((prev) => ({ ...prev, error: null }))}>
+          {overlayPersist.error}
+        </MagiNotice>
+      ) : null}
+      {compactNotice && !hideCompactNotice ? (
+        <MagiNotice testId="magi-compact-notice" onClose={() => setHideCompactNotice(true)}>
+          Compact viewport detected. MAGI keeps the viewer forward and leaves bins collapsible.
+        </MagiNotice>
+      ) : null}
 
       <div
         className="timeline-v2__body magi-shell__layout"
@@ -2766,7 +3513,34 @@ function MagiEditorInner({
         >
           <div className="timeline-v2__drawer-body">
             <div className="magi-dock-scroll" {...bindRegionProps("media_bin")}>
-              {layout.leftPaneOrder.map((pane) => renderPane(pane))}
+              {layout.leftPaneOrder.flatMap((pane) => {
+                const paneNode = renderPane(pane);
+                if (pane !== "recipes") return [paneNode];
+                return [paneNode, (
+                  <div key="render-queue" className="magi-dock-pane" data-pane="renderQueue" data-testid="magi-render-queue">
+                    <MagiAccordion
+                      id="renderQueue"
+                      title="Render Queue"
+                      open={layout.renderQueueOpen}
+                      onToggle={setRenderQueueOpen}
+                    >
+                      <JobPanel projectId={project.id} focusJobId={queueFocusJobId} onDone={() => void onChange()} />
+                    </MagiAccordion>
+                  </div>
+                )];
+              })}
+              {layout.leftPaneOrder.includes("recipes") ? null : (
+                <div className="magi-dock-pane" data-pane="renderQueue" data-testid="magi-render-queue">
+                  <MagiAccordion
+                    id="renderQueue"
+                    title="Render Queue"
+                    open={layout.renderQueueOpen}
+                    onToggle={setRenderQueueOpen}
+                  >
+                    <JobPanel projectId={project.id} focusJobId={queueFocusJobId} onDone={() => void onChange()} />
+                  </MagiAccordion>
+                </div>
+              )}
             </div>
           </div>
           <div
@@ -2791,7 +3565,7 @@ function MagiEditorInner({
           <MagiWorkspaceStack
             projectId={project.id}
             extraControls={viewerControls}
-            expanded={viewportMode === "EXPANDED"}
+            expanded={false}
             monitor={monitor}
             timeline={
               <div className="magi-timeline-shell">
@@ -2799,8 +3573,6 @@ function MagiEditorInner({
                   <div className="magi-toolbar-group" role="toolbar" aria-label="MAGI timeline tools">
                     <button type="button" className="magi-icon-btn" aria-label="Undo" title="Undo" onClick={undo} disabled={!historyRef.current.canUndo()}>↶</button>
                     <button type="button" className="magi-icon-btn" aria-label="Redo" title="Redo" onClick={redo} disabled={!historyRef.current.canRedo()}>↷</button>
-                    <button type="button" className="magi-icon-btn" aria-label="Home" title="Home" onClick={() => handleSeek(0)}>⏮</button>
-                    <button type="button" className="magi-icon-btn" aria-label="Play" title="Play" onClick={() => setPlaying((value) => !value)}>{playing ? "❚❚" : "▶"}</button>
                     <button type="button" className="magi-icon-btn" aria-label="Split clip" title="Split clip" onClick={() => selectedClip && !isGraphicsClipId(selectedClip.id) && pushSequenceCommand("Split clip", { kind: "Split", payload: { clipId: selectedClip.id, frame: sequence.playheadFrame } })}>✂</button>
                     <button type="button" className="magi-icon-btn" aria-label="Duplicate selection" title="Duplicate selection" onClick={() => selection.length && pushSequenceCommand("Duplicate clips", { kind: "Duplicate", payload: { offsetFrames: Math.max(1, sequence.frameRate) } })}>⧉</button>
                     <button type="button" className="magi-icon-btn" aria-label="Add marker" title="Add marker" onClick={() => pushSequenceCommand("Add marker", { kind: "AddMarker", payload: { frame: sequence.playheadFrame, label: "Beat" } })}>◆</button>
@@ -2816,6 +3588,7 @@ function MagiEditorInner({
                   selection={selection}
                   playing={playing}
                   selectedAssetId={viewerAssetId}
+                  mediaByAssetId={timelineMedia}
                   onSelect={handleSelect}
                   onSeek={handleSeek}
                   onTrim={handleTrim}
@@ -2826,6 +3599,7 @@ function MagiEditorInner({
                   onSelectTrack={handleSelectTrack}
                   onAddObjectsTrack={handleAddObjectsTrack}
                   onRemoveObjectsTrack={handleRemoveObjectsTrack}
+                  onToggleTrackControl={toggleTrackControl}
                 />
               </div>
             }
@@ -2854,7 +3628,34 @@ function MagiEditorInner({
             }}
           />
           <div className="timeline-v2__drawer-body">
-            <div className="magi-dock-scroll">{inspector}</div>
+            <div className="magi-dock-scroll">
+              <div className="film-timeline__tabs" role="tablist" data-testid="magi-side-tabs">
+                {(
+                  [
+                    ["inspector", "Inspector"],
+                    ["hotkeys", "Hot Keys"],
+                    ["gpu", "GPU"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={sideTab === id}
+                    className={sideTab === id ? "is-selected" : ""}
+                    data-testid={`magi-tab-${id}`}
+                    onClick={() => setSideTab(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {sideTab === "inspector" ? inspector : null}
+              {sideTab === "hotkeys" ? <TimelineHotKeysPane workspace="magi" /> : null}
+              {sideTab === "gpu" ? (
+                <TimelineGpuPane project={project} onChange={() => void onChange()} />
+              ) : null}
+            </div>
           </div>
         </aside>
         <button
@@ -2890,22 +3691,48 @@ function MagiEditorInner({
         />
       ) : null}
 
-      <div className="magi-queue" data-testid="magi-render-queue">
-        <button
-          type="button"
-          className="magi-queue__toggle"
-          aria-expanded={layout.renderQueueOpen}
-          onClick={() => setRenderQueueOpen(!layout.renderQueueOpen)}
-        >
-          <span>Render Queue</span>
-          <span>{layout.renderQueueOpen ? "▾" : "▸"}</span>
-        </button>
-        {layout.renderQueueOpen ? (
-          <div className="magi-queue__body" key={jobRefreshTick}>
-            <JobPanel projectId={project.id} onDone={() => void onChange()} />
-          </div>
-        ) : null}
-      </div>
+      {finalRenderSession ? (
+        <MagiFinalRenderDialog
+          summary={
+            buildFinalRenderConfirm({
+              sequence,
+              range: audioRange,
+              selectedClipId: selectedClip?.id,
+              upscaleEnabled: finishing.upscale?.enabled === true,
+              upscaleEngine,
+              upscaleModel,
+              upscaleTarget: activeUpscaleTarget,
+              resolvedUpscale:
+                finishing.upscale?.enabled === true && resolvedUpscale
+                  ? {
+                      id: resolvedUpscale.id,
+                      width: resolvedUpscale.width,
+                      height: resolvedUpscale.height,
+                      aspect: resolvedUpscale.aspect,
+                    }
+                  : null,
+              assets: mediaAssets,
+            }).sections
+          }
+          session={finalRenderSession}
+          busy={finalRenderLock.current}
+          outputName={finalOutputName}
+          nameMessage={finalRenderSession.phase === "confirm" ? finalVideoNameMessage(finalOutputName, project.assets) : null}
+          onOutputNameChange={setFinalOutputName}
+          onCancel={() => {
+            closeFinalRender();
+            setFocusRegion("none");
+          }}
+          onConfirm={() => void confirmFinalRender()}
+          onClose={() => {
+            closeFinalRender();
+            setFocusRegion("none");
+          }}
+          onShowViewer={() => void openFinishedRender("viewer")}
+          onShowLibrary={() => void openFinishedRender("library")}
+          onShowQueue={() => void openFinishedRender("queue")}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,0 +1,66 @@
+.comfy-manager {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+  color: inherit;
+}
+.comfy-manager__kicker {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  margin: 0;
+}
+.comfy-manager h1 {
+  margin: 0.2rem 0;
+  font-size: 1.8rem;
+}
+.comfy-manager__header dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.8rem 0;
+}
+.comfy-manager__header dt {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+.comfy-manager__header dd {
+  margin: 0;
+  font-size: 1rem;
+}
+.comfy-manager__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.6rem 0;
+}
+.comfy-manager__tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin: 1rem 0;
+}
+.comfy-manager__tabs button.is-selected {
+  font-weight: 700;
+}
+.comfy-manager__job {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.7rem;
+}
+.comfy-manager__job h2 {
+  margin: 0 0 0.3rem;
+  font-size: 1.05rem;
+}
+.comfy-manager__details {
+  margin: 0.4rem 0 0.6rem;
+  font-size: 0.85rem;
+}
+.comfy-manager__details p {
+  margin: 0.25rem 0;
+}
+.comfy-manager pre {
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}

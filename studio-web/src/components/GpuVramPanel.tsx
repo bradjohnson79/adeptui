@@ -49,11 +49,32 @@ type ViabilityRow = {
   tier: string;
   verdict: string;
   honestyLabel?: string;
+  adviceLabel?: string;
+  adviceDetail?: string;
+  certification?: string;
   width?: number | null;
   height?: number | null;
   estimatedPeakGb?: number | null;
   reason?: string;
 };
+
+function formatViabilityAdvice(row: ViabilityRow): string {
+  if (row.adviceLabel) return row.adviceLabel;
+  switch (row.verdict) {
+    case "VIABLE":
+      return "Viable";
+    case "VIABLE WITH MODEL UNLOAD":
+      return "Viable with model unload";
+    case "MARGINAL":
+      return "Tight";
+    case "NOT CERTIFIED":
+      return "Not certified";
+    case "NOT NATIVE":
+      return "Not native/certified";
+    default:
+      return "Not viable";
+  }
+}
 
 export function GpuVramPanel({
   project,
@@ -65,6 +86,10 @@ export function GpuVramPanel({
   durationSec,
   fps,
   sceneId,
+  generatorId,
+  genWidth,
+  genHeight,
+  planSource,
 }: {
   project: Project;
   onChange: () => void;
@@ -76,6 +101,14 @@ export function GpuVramPanel({
   fps?: number;
   /** When set, LIVE EXECUTION PLAN uses this scene's dims/fps/engine (Timeline / 1 Frame). */
   sceneId?: string;
+  /** Film Timeline generator id — used for honest H3 Auto Quality fallback on the API. */
+  generatorId?: string;
+  /** Film shot resolvedGeneration width (preferred over Scene canvas). */
+  genWidth?: number;
+  /** Film shot resolvedGeneration height (preferred over Scene canvas). */
+  genHeight?: number;
+  /** Provenance for Live plan dims (resolvedGeneration | h3_auto_quality). */
+  planSource?: string;
 }) {
   const [presets, setPresets] = useState<VramPreset[]>([]);
   const [busy, setBusy] = useState(false);
@@ -100,7 +133,12 @@ export function GpuVramPanel({
 
   const refreshPlan = async () => {
     try {
-      const plan = await api.executionPlan(project.id, sceneId);
+      const plan = await api.executionPlan(project.id, sceneId, {
+        genWidth,
+        genHeight,
+        generatorId,
+        planSource,
+      });
       setPlanText(plan.live_text || plan.summary);
       setSafety({
         unload_after_render: !!plan.safety?.unload_after_render,
@@ -137,7 +175,7 @@ export function GpuVramPanel({
     refreshPlan();
     const id = setInterval(refreshStats, 4000);
     return () => clearInterval(id);
-  }, [project.id, project.vram_gb, project.width, project.height, project.fps, project.preset, sceneId]);
+  }, [project.id, project.vram_gb, project.width, project.height, project.fps, project.preset, sceneId, genWidth, genHeight, generatorId, planSource]);
 
   useEffect(() => {
     const selected = String(engine || "").trim();
@@ -157,7 +195,7 @@ export function GpuVramPanel({
       })
       .then((payload) => {
         setViability(payload.tiers || []);
-        setViabilityEngine(payload.productId || selected);
+        setViabilityEngine(payload.productLabel || payload.productId || selected);
       })
       .catch(() => {
         setViability([]);
@@ -339,7 +377,7 @@ export function GpuVramPanel({
       )}
       {viability.length > 0 && (
         <div className="vram-profile-card" data-testid="gpu-viability-ladder" style={{ marginTop: 10 }}>
-          <strong>{viabilityEngine || engine} resolution fit</strong>
+          <strong>{viabilityEngine || engine} — Resolution Fit</strong>
           <div className="scene-meta">Advice only. Adept will not change your request.</div>
           <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
             {viability.map((row) => (
@@ -347,14 +385,12 @@ export function GpuVramPanel({
                 {row.tier}
                 {row.width && row.height ? ` ${row.width}×${row.height}` : ""}
                 {" — "}
-                {row.verdict === "VIABLE"
-                  ? "Viable"
-                  : row.verdict === "VIABLE WITH MODEL UNLOAD"
-                    ? "Viable with model unload"
-                    : row.verdict === "MARGINAL"
-                      ? "Tight"
-                      : "Not viable"}
-                {row.honestyLabel ? ` · ${row.honestyLabel}` : ""}
+                {formatViabilityAdvice(row)}
+                {row.adviceDetail
+                  ? ` (${row.adviceDetail})`
+                  : row.honestyLabel && !row.adviceLabel
+                    ? ` · ${row.honestyLabel}`
+                    : ""}
               </li>
             ))}
           </ul>

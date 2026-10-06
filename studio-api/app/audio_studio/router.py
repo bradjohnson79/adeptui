@@ -130,7 +130,8 @@ def generate(
     # ORDER 15: explicit ElevenLabs selection must not silently fall back to Local/MMAudio.
     if (body.preferredProvider or "").strip().lower() in ("elevenlabs", "eleven_labs", "el"):
         from ..hosted_providers.elevenlabs_gate import gate_preferred_provider
-        gate_preferred_provider(body.preferredProvider, surface="audio-studio.generate", capability="elevenlabs.sfx")
+        cap = "elevenlabs.music" if (body.kind or "") == "music" else "elevenlabs.sfx"
+        gate_preferred_provider(body.preferredProvider, surface="audio-studio.generate", capability=cap)
     brief = _brief_from_body(body)
     if body.asyncMode:
         batch = service.begin_generate_batch(

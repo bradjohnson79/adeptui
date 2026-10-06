@@ -15,10 +15,21 @@ from .finishing import finishing_of, merge_finishing
 from .sequence.store import get_sequence, save_sequence
 
 
-def _duration_for_range(project_id: str, body: dict[str, Any]) -> float:
+# Ceilings already enforced by the generators. ACE-Step music is 30s.
+# MMAudio effects are 20s. MAGI must not request a shorter bed than that.
+_MUSIC_DURATION_CEILING = 30.0
+_SFX_DURATION_CEILING = 20.0
+
+
+def _duration_ceiling(kind: str) -> float:
+    return _MUSIC_DURATION_CEILING if str(kind or "") == "music" else _SFX_DURATION_CEILING
+
+
+def _duration_for_range(project_id: str, body: dict[str, Any], *, kind: str = "music") -> float:
+    ceiling = _duration_ceiling(kind)
     if body.get("duration"):
         try:
-            return max(1.0, float(body["duration"]))
+            return max(1.0, min(float(body["duration"]), ceiling))
         except (TypeError, ValueError):
             pass
     sequence = get_sequence(project_id)
@@ -28,12 +39,12 @@ def _duration_for_range(project_id: str, body: dict[str, Any]) -> float:
     if range_mode in {"clip", "selected"} and clip_id:
         clip = next((c for c in (sequence.get("clips") or []) if c.get("id") == clip_id), None)
         if clip:
-            return max(1.0, min(int(clip.get("durationFrames") or fps) / fps, 16.0))
+            return max(1.0, min(int(clip.get("durationFrames") or fps) / fps, ceiling))
     clips = [c for c in (sequence.get("clips") or []) if c.get("assetId")]
     if clips:
         end = max(int(c.get("startFrame") or 0) + int(c.get("durationFrames") or 0) for c in clips)
-        return max(1.0, min(end / fps, 16.0))
-    return 8.0
+        return max(1.0, min(end / fps, ceiling))
+    return min(8.0, ceiling)
 
 
 def enqueue_audio(
@@ -45,11 +56,11 @@ def enqueue_audio(
     prompt = str(body.get("prompt") or "")
     user_prompt = prompt
     range_mode = str(body.get("range") or "entire")
-    duration = _duration_for_range(project_id, body)
     kinds = ["music", "sfx"] if kind in {"all", "music+sfx", "both"} else [kind]
     job_ids: list[str] = []
     for one in kinds:
-        fingerprint = f"audio|{one}|{range_mode}|{body.get('clipId') or ''}|{user_prompt[:80]}"
+        duration = _duration_for_range(project_id, body, kind=one)
+        fingerprint = f"audio|{one}|{range_mode}|{body.get('startSeconds') or ''}|{body.get('clipId') or ''}|{user_prompt[:80]}"
         existing = magi_jobs.find_active_duplicate(db, project_id, "magi_audio_generate", fingerprint)
         if existing is not None:
             job_ids.append(existing.id)
@@ -65,6 +76,7 @@ def enqueue_audio(
                 "range": range_mode,
                 "clipId": body.get("clipId") or body.get("selectedClipId"),
                 "duration": duration,
+                "startSeconds": body.get("startSeconds"),
                 "fingerprint": fingerprint,
             },
             message=f"Queued {one} generation",
@@ -156,19 +168,28 @@ def _place_on_sequence(project_id: str, kind: str, asset_id: str, params: dict[s
     if track is None:
         return
     fps = max(int(sequence.get("frameRate") or 24), 1)
-    duration_frames = max(int(round(float(params.get("duration") or 8) * fps)), fps)
+    duration_frames = max(int(round(float(params.get("duration") or 8) * fps)), 1)
     clip_id = params.get("clipId")
     start = 0
-    if clip_id:
+    if params.get("startSeconds") is not None:
+        try:
+            start = max(0, int(round(float(params.get("startSeconds")) * fps)))
+        except (TypeError, ValueError):
+            start = 0
+    elif clip_id:
         host = next((c for c in (sequence.get("clips") or []) if c.get("id") == clip_id), None)
         if host:
             start = int(host.get("startFrame") or 0)
             duration_frames = int(host.get("durationFrames") or duration_frames)
-    clips = [
-        clip
-        for clip in (sequence.get("clips") or [])
-        if not (clip.get("trackId") == track["id"] and clip.get("assetId") == asset_id)
-    ]
+    range_mode = str(params.get("range") or "entire")
+    clips = []
+    for clip in sequence.get("clips") or []:
+        same_track = clip.get("trackId") == track["id"]
+        if same_track and range_mode == "entire" and wanted_kind == "music":
+            continue
+        if same_track and clip.get("assetId") == asset_id:
+            continue
+        clips.append(clip)
     finishing = sequence.get("finishing") if isinstance(sequence.get("finishing"), dict) else {}
     scene_id = str(
         params.get("sceneId")

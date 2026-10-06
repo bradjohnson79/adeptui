@@ -30,7 +30,7 @@ function providerStatusKind(status: string) {
   return "Unknown" as const;
 }
 
-export default function SourceManagerPage() {
+export default function SourceManagerPage({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [overview, setOverview] = useState<SourceManagerOverview | null>(null);
@@ -237,14 +237,16 @@ export default function SourceManagerPage() {
 
   return (
     <div className="source-manager-page" data-testid="source-manager-page">
-      <StudioChrome
-        variant="home"
-        breadcrumbs={[
-          { label: "Home", onClick: () => navigate("/") },
-          { label: "Setup" },
-          { label: "Source Manager" },
-        ]}
-      />
+      {!embedded && (
+        <StudioChrome
+          variant="home"
+          breadcrumbs={[
+            { label: "Home", onClick: () => navigate("/") },
+            { label: "Setup" },
+            { label: "Source Manager" },
+          ]}
+        />
+      )}
       <main className="setup-wizard-page">
         <div className="panel-heading">
           <h2>Source Manager</h2>

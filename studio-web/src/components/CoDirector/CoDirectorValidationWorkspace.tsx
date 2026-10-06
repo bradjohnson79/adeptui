@@ -470,10 +470,11 @@ export function CoDirectorValidationWorkspace({
                   setProposalActingId(null);
                 }
               }}
-              onRequestRevision={async (note) => {
+              onRevise={async () => {
                 setProposalActingId(proposal.id);
                 try {
-                  await api.requestProposalRevision(projectId, proposal.id, { note });
+                  await api.cancelProposal(projectId, proposal.id);
+                  setProposals((prev) => prev.filter((item) => item.id !== proposal.id));
                 } finally {
                   setProposalActingId(null);
                 }

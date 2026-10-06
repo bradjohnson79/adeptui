@@ -1,0 +1,96 @@
+{
+  "id": "fc5e4a55-b417-494d-8ead-d24f1fe66da9",
+  "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+  "toolId": "avatar.inspect",
+  "toolSchemaVersion": 1,
+  "kind": "read",
+  "status": "succeeded",
+  "arguments": {
+    "sessionId": "avs-a10ef709c2"
+  },
+  "result": {
+    "requestId": null,
+    "toolId": "avatar.inspect",
+    "toolVersion": "1",
+    "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+    "status": "success",
+    "summary": "Avatar Studio session inspected.",
+    "data": {
+      "ok": true,
+      "present": true,
+      "sessionId": "avs-a10ef709c2",
+      "sourceKind": "character",
+      "sourceAssetId": "c2ce0cc0-659a-49c3-8aa4-04a6ec5eda59",
+      "sourceCharacterId": "b7086f85-3ee3-44db-a395-ae1a94e37fe1",
+      "mode": "conversation",
+      "speakerA": {
+        "id": "speaker-a",
+        "label": "Korri",
+        "characterId": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+        "hasBbox": false,
+        "voice": {
+          "binding": "none",
+          "audioAssetId": null,
+          "approvedRecordId": null,
+          "approvedTakeId": null
+        }
+      },
+      "speakerB": {
+        "id": "speaker-b",
+        "label": "Anadriya",
+        "characterId": "b7086f85-3ee3-44db-a395-ae1a94e37fe1",
+        "hasBbox": false,
+        "voice": {
+          "binding": "none",
+          "audioAssetId": null,
+          "approvedRecordId": null,
+          "approvedTakeId": null
+        }
+      },
+      "order": "b_then_a",
+      "dialogueA": "Korri's follow-up line only.",
+      "dialogueB": "What can I get started for you?",
+      "voiceA": {
+        "binding": "none",
+        "audioAssetId": null,
+        "approvedRecordId": null,
+        "approvedTakeId": null
+      },
+      "voiceB": {
+        "binding": "none",
+        "audioAssetId": null,
+        "approvedRecordId": null,
+        "approvedTakeId": null
+      },
+      "generator": "infinitetalk-local",
+      "runtimeStatus": "repair_required",
+      "certifiedReady": false,
+      "gateLine": "InfiniteTalk needs repair — Open Runtime Setup",
+      "aspect": "16:9",
+      "lora": null,
+      "directionPrompt": "",
+      "durationClass": "story_section",
+      "presentationStyle": "direct_presenter",
+      "framingChoice": "medium_presenter",
+      "backgroundChoice": "studio_gradient",
+      "activeJobId": "avjob-58db5d1937",
+      "jobStatus": "queued",
+      "resultAssetIds": []
+    },
+    "evidence": [],
+    "pagination": null,
+    "warnings": [],
+    "retrievedAt": "2026-08-18T23:14:16.708122+00:00",
+    "availableSections": [],
+    "unavailableSections": []
+  },
+  "resultTruncated": false,
+  "resultHash": "35d02806a01c3d0b4f98f292ecac0fa7908b69393a0a596409035036f3f163da",
+  "errorCode": null,
+  "errorMessage": null,
+  "proposalId": null,
+  "requestId": null,
+  "durationMs": 5375,
+  "createdBy": "user",
+  "createdAt": "2026-08-18T23:14:16.709120"
+}

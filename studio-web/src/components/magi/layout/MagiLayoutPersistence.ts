@@ -75,7 +75,7 @@ export const DEFAULT_LAYOUT: MagiWorkspaceLayoutV1 = {
     command: false,
     transform: true,
     color: true,
-    prompt: true,
+    prompt: false,
     lighting: false,
     effects: false,
     audio: false,
@@ -114,8 +114,8 @@ function migrateAccordionState(state: Record<string, boolean> | undefined): Reco
   }
   if (typeof next.colorPrompt === "boolean") {
     if (typeof next.color !== "boolean") next.color = next.colorPrompt;
-    if (typeof next.prompt !== "boolean") next.prompt = next.colorPrompt;
   }
+  next.prompt = false;
   if (typeof next.lightRelight === "boolean" && typeof next.lighting !== "boolean") {
     next.lighting = next.lightRelight;
   }
@@ -231,6 +231,11 @@ export function saveMagiLayout(layout: MagiWorkspaceLayoutV1): void {
   }
 }
 
+/** Expand hides both drawers. Retract shows both, including after a one-sided hide. */
+export function nextDualDrawerCollapsed(leftCollapsed: boolean, rightCollapsed: boolean): boolean {
+  return !(leftCollapsed && rightCollapsed);
+}
+
 export function applyPreset(
   preset: MagiWorkspacePreset,
   current: MagiWorkspaceLayoutV1
@@ -259,7 +264,7 @@ export function applyPreset(
           command: true,
           transform: true,
           color: true,
-          prompt: true,
+          prompt: false,
           compare: false,
         },
         timelineHeight: 260,

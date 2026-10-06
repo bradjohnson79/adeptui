@@ -10,6 +10,7 @@ import { IdentityRegistryWorkspace } from "./continuity/IdentityRegistryWorkspac
 import { CharacterCore } from "./character";
 import {
   CHARACTER_PROFILE_SAVED_EVENT,
+  DRAFT_CHARACTER_ID,
   characterLoadIsStale,
   upsertCharacterSummary,
   type CharacterProfileSavedDetail,
@@ -303,10 +304,10 @@ export function CharacterProfileWorkspace({
     const res = await api.listCharacterProfiles(project.id);
     const list = res.items || [];
     setItems(list);
-    if (!selectedId) {
-      const owned = pickOwnedCharacterId(list, project.id);
-      if (owned) setSelectedId(owned);
-    }
+    setSelectedId((prev) => {
+      if (prev) return prev;
+      return pickOwnedCharacterId(list, project.id) || prev;
+    });
   };
 
   const refreshSelected = async (id: string) => {
@@ -390,34 +391,30 @@ export function CharacterProfileWorkspace({
     return () => window.removeEventListener("adept:open-character-voice", onOpenVoice);
   }, []);
 
-  const create = async () => {
-    setBusy(true);
-    setMsg("");
-    try {
-      const created = await api.createCharacterProfile(project.id, { name: "Untitled Character" });
-      setSelectedId(created.id);
-      setAutoFocusNew(true);
-      await refreshList();
-      await onChange?.();
-      setMsg("Started a new character. Type a name to begin.");
-      if (returnWorkspace === "voicestudio" && created?.id) {
-        try {
-          sessionStorage.setItem("adept_selected_character", created.id);
-          const url = new URL(window.location.href);
-          url.searchParams.set("workspace", "voicestudio");
-          url.searchParams.set("characterId", created.id);
-          url.searchParams.delete("returnWorkspace");
-          window.history.pushState({}, "", url.toString());
-          window.dispatchEvent(new PopStateEvent("popstate"));
-        } catch {
-          /* ignore */
-        }
+  const bindCreatedCharacter = (id: string) => {
+    setSelectedId(id);
+    setAutoFocusNew(false);
+    void onChange?.();
+    if (returnWorkspace === "voicestudio" && id) {
+      try {
+        sessionStorage.setItem("adept_selected_character", id);
+        const url = new URL(window.location.href);
+        url.searchParams.set("workspace", "voicestudio");
+        url.searchParams.set("characterId", id);
+        url.searchParams.delete("returnWorkspace");
+        window.history.pushState({}, "", url.toString());
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      } catch {
+        /* ignore */
       }
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Create failed");
-    } finally {
-      setBusy(false);
     }
+  };
+
+  const create = () => {
+    setMsg("");
+    setSelectedId(DRAFT_CHARACTER_ID);
+    setAutoFocusNew(true);
+    setMsg("Type a name, then Save Character.");
   };
 
   const attach = async () => {
@@ -583,6 +580,9 @@ export function CharacterProfileWorkspace({
             data-testid="character-select"
           >
             <option value="">Select a saved character…</option>
+            {selectedId === DRAFT_CHARACTER_ID ? (
+              <option value={DRAFT_CHARACTER_ID}>Unsaved character</option>
+            ) : null}
             {items.map((i) => (
               <option key={i.id} value={i.id}>
                 {i.name}
@@ -600,7 +600,7 @@ export function CharacterProfileWorkspace({
           mode="standard"
           autoFocusName={autoFocusNew}
           onGoTab={onGo}
-          onCreated={setSelectedId}
+          onCreated={bindCreatedCharacter}
           onDeleted={() => {
             setSelectedId("");
             void refreshList();

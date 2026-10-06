@@ -63,17 +63,28 @@ async def inspect_character_profile(ctx: ToolContext, args: dict[str, Any]) -> d
     _require(ctx)
     character_id = str(args.get("characterId") or "").strip()
     if not character_id:
-        raise ValueError("characterId is required")
+        name = str(args.get("characterName") or args.get("name") or "").strip()
+        if name:
+            row = ci.resolve_character_by_name(ctx.db, ctx.project_id, name)
+            if row is not None:
+                character_id = str(row.id)
+        if not character_id:
+            raise ValueError(
+                "I couldn't find that character in the current project or global character list."
+                if name
+                else "Tell me the character's name."
+            )
     profile = ci.get_profile(ctx.db, ctx.project_id, character_id).model_dump()
     coverage = profile.get("coverage") or {}
     missing = coverage.get("missing_roles") or []
     notes = list(coverage.get("guidance") or [])
     if missing:
         notes.append(
-            "Do not claim this identity pack is complete. Missing roles: " + ", ".join(missing)
+            "The identity pack is not complete yet. These views are not required before the front reference is created: "
+            + ", ".join(missing)
         )
     if not coverage.get("ready_for_generation"):
-        notes.append("Profile is not READY_FOR_GENERATION.")
+        notes.append("The front reference can still be created from this profile.")
     return {
         "ok": True,
         "profile": profile,
@@ -107,7 +118,17 @@ async def inspect_character_voice(ctx: ToolContext, args: dict[str, Any]) -> dic
                 "A voice reference may be present, but synthetic-use consent is not confirmed. "
                 "Cloning cannot begin until that record is completed."
             )
-    return {"ok": True, "voiceProfiles": items}
+    authority = ci.active_voice_authority(ctx.db, ctx.project_id, character_id)
+    reference_asset_id = str(authority.get("approvedVoiceReferenceAssetId") or "")
+    return {
+        "ok": True,
+        "voiceProfiles": items,
+        "voiceProvider": authority.get("provider") or "local",
+        "voiceName": authority.get("voiceName") or "",
+        "approvedVoiceReferenceAssetId": reference_asset_id,
+        "approvedVoiceReferenceAssetName": str(authority.get("approvedVoiceReferenceAssetName") or ""),
+        "hasApprovedVoiceReference": bool(reference_asset_id),
+    }
 
 
 def preview_approve_character_candidate(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:

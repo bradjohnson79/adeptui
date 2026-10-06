@@ -99,21 +99,15 @@ test.describe("M3.2e Aurora Theme @DETERMINISTIC", () => {
     await page.screenshot({ path: path.join(SHOT_DIR, "05-source-manager.png"), fullPage: false });
   });
 
-  test("M32E-THEME-06 Template carousel falls back to aurora plates without scrollbar", async ({
+  test("M32E-THEME-06 Projects header replaces the template carousel", async ({
     page,
     request,
   }) => {
     await waitForAppReady(request);
     await page.goto("/");
-    const carousel = page.getByTestId("template-carousel");
-    await expect(carousel).toBeVisible({ timeout: 30_000 });
-    const overflow = await carousel.locator(".gs-carousel__viewport").evaluate((el) => {
-      const s = getComputedStyle(el);
-      return { x: s.overflowX, y: s.overflowY };
-    });
-    expect(overflow.x === "hidden" || overflow.x === "clip").toBeTruthy();
-    await expect(carousel.locator(".aurora-plate, .cinematic-media-fallback").first()).toBeVisible();
-    await page.screenshot({ path: path.join(SHOT_DIR, "06-carousel-plates.png"), fullPage: false });
+    await expect(page.getByTestId("projects-hero")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("template-carousel")).toHaveCount(0);
+    await page.screenshot({ path: path.join(SHOT_DIR, "06-projects-hero.png"), fullPage: false });
   });
 
   test("M32E-THEME-07 Co-Director shell remains cinematic dark", async ({ page, request }) => {
@@ -224,11 +218,12 @@ test.describe("M3.2e Aurora Theme @DETERMINISTIC", () => {
     expect(tones.every((t) => t.length > 0)).toBeTruthy();
   });
 
-  test("M32E-THEME-17 Home hero remains local artwork", async ({ page, request }) => {
+  test("M32E-THEME-17 Home hero uses the local emblem", async ({ page, request }) => {
     await waitForAppReady(request);
     await page.goto("/");
-    const src = await page.getByTestId("generation-studio-hero-image").getAttribute("src");
-    expect(src || "").toMatch(/\/images\/hero\//);
+    const src = await page.getByTestId("generation-studio-hero-logo").getAttribute("src");
+    expect(src || "").toMatch(/\/brand\/adept-ui-emblem\.webp/);
+    await expect(page.getByTestId("generation-studio-hero-image")).toHaveCount(0);
   });
 
   test("M32E-THEME-18 Create project control still available", async ({ page, request }) => {

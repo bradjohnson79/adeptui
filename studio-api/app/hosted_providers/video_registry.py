@@ -95,16 +95,19 @@ _LTX_25_NODES = ("UNETLoader", "LTXVBaseSampler", "LTXVScheduler", "LTXVImgToVid
 _LTX_25_SAMPLER_ALTERNATES = frozenset({"LTXVBaseSampler", "SamplerCustomAdvanced"})
 _H3_NODES = ("MiniMaxH3ReferenceToVideo", "UNETLoader", "CLIPLoader", "VAELoader", "LoadImage")
 
-# Canonical Adept UI local video architecture: MiniMax H3 + LTX 2.5 only.
+# Canonical Adept UI local video: Standard H3, H3 Base Optimized, LTX 2.5,
+# and HunyuanVideo 1.5 Distilled. Retired Hunyuan ids stay in the retired set.
 # API / hosted video products are a separate catalog and must stay intact.
-SUPPORTED_LOCAL_VIDEO_FAMILIES = frozenset({"minimax", "ltx"})
+SUPPORTED_LOCAL_VIDEO_FAMILIES = frozenset({"minimax", "ltx", "hunyuan"})
 SUPPORTED_LOCAL_VIDEO_GENERATOR_IDS = frozenset(
     {
         "minimax-h3",
         "minimax-h3-i2v-local",
+        "minimax-h3-base-optimized",
         "ltx-2.5-full",
         "ltx-2.5-distilled",
         "ltx-2.5-comfy",
+        "hunyuan-video-1.5-distilled",
     }
 )
 RETIRED_LOCAL_VIDEO_GENERATOR_IDS = frozenset(
@@ -277,6 +280,57 @@ CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
         executable_default=False,
         exposed=True,
     ),
+    VideoGeneratorRegistration(
+        product_id="minimax-h3-base-optimized",
+        label="MiniMax H3 Base Optimized",
+        family="minimax",
+        locality="local",
+        audio=True,
+        live_submit=True,
+        adapter_id="minimax-h3-base-optimized",
+        aliases=("h3-base-optimized",),
+        setup_components=("minimax_h3_base_optimized",),
+        required_nodes=_H3_NODES + ("LoraLoaderModelOnly",),
+        surface_workflows={"r2v": "h3.ref2v"},
+        capability="Available",
+        supports=("reference_to_video", "native_audio"),
+        does_not_support=("text_to_video", "start_frame", "start_end_frame"),
+        gpu=True,
+        executable_default=True,
+        exposed=True,
+    ),
+    VideoGeneratorRegistration(
+        product_id="hunyuan-video-1.5-distilled",
+        label="HunyuanVideo 1.5 Distilled",
+        family="hunyuan",
+        version="1.5",
+        locality="local",
+        audio=False,
+        live_submit=True,
+        adapter_id="hunyuan-video-1.5-distilled",
+        aliases=("hunyuan-video-1.5-distilled",),
+        setup_components=("hunyuan_video_1_5_distilled",),
+        required_nodes=(
+            "DualCLIPLoader",
+            "UNETLoader",
+            "VAELoader",
+            "EmptyHunyuanVideo15Latent",
+            "HunyuanVideo15ImageToVideo",
+            "CLIPVisionLoader",
+            "ModelSamplingSD3",
+            "CFGGuider",
+        ),
+        surface_workflows={
+            "t2v": "hunyuan15.distilled.t2v",
+            "i2v": "hunyuan15.distilled.i2v",
+        },
+        capability="Available",
+        supports=("text_to_video", "start_frame", "continuation_start_image"),
+        does_not_support=("start_end_frame", "semantic_references"),
+        gpu=True,
+        executable_default=True,
+        exposed=True,
+    ),
     # -- Video — hosted ----------------------------------------------------
     VideoGeneratorRegistration(
         product_id="kling-kie",
@@ -313,6 +367,7 @@ CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
         create_engine_label="Kling",
         create_engine_group="hosted",
         adapter_only=("kling-api",),
+        live_submit=True,
         capability="Unavailable",
         supports=("text_to_video", "image_to_video"),
         exposed=True,
@@ -332,7 +387,7 @@ CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
         duration_min_sec=4.0,
         duration_max_sec=15.0,
         durations_sec=(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
-        resolutions=("480p", "720p"),
+        resolutions=("480p", "720p", "1080p", "4k"),
         audio=True,
         live_submit=True,
         create_live=True,
@@ -436,7 +491,7 @@ CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
         duration_min_sec=4.0,
         duration_max_sec=30.0,
         durations_sec=tuple(range(4, 31)),
-        resolutions=("480p", "720p"),
+        resolutions=("480p", "720p", "1080p"),
         audio=True,
         live_submit=True,
         create_live=True,
@@ -488,6 +543,7 @@ CORE_VIDEO_REGISTRY: tuple[VideoGeneratorRegistration, ...] = (
         create_engine_label="Veo",
         create_engine_group="hosted",
         adapter_only=("veo-api",),
+        live_submit=True,
         capability="Unavailable",
         supports=("text_to_video",),
         exposed=True,

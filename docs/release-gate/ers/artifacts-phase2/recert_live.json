@@ -1,0 +1,13 @@
+{
+  "prompt_id": "e38c7ad9-7285-432c-b928-a9f99ba54b31",
+  "hash": "sha256:ba9be1bbc4e37f8c6110e85a0680dc77a1e9c0d971e1f7821099cedb23a51c8a",
+  "steps": 50,
+  "cfg": 4.0,
+  "neg": "CLIPTextEncode",
+  "files": [
+    "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\ers\\artifacts-phase2\\ers_recert_qwen2512_ers_phase2_recert_00001_.png"
+  ],
+  "status": "success",
+  "pixelResult": "pure black 2560x1440 meanRGB (0,0,0); 31683 bytes",
+  "disposition": "REVERTED — CLIPTextEncode negative is incompatible with Qwen Image Edit positive; node 7 restored to TextEncodeQwenImageEdit"
+}

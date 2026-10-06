@@ -156,6 +156,7 @@ def prompt_text_implies_speech(text: str) -> bool:
     """True when Timed Prompt text looks like dialogue / screenplay speech.
 
     Owner law: missing cue metadata must not authorize silent success.
+    Shot headings like [WIDE SHOT] are visual direction, not speech cues.
     """
     blob = (text or "").strip()
     if not blob:
@@ -175,7 +176,9 @@ def prompt_text_implies_speech(text: str) -> bool:
             continue
         if not s.isupper():
             continue
-        if s.startswith(("INT.", "EXT.", "EST.", "I/E.")):
+        if s.startswith(("INT.", "EXT.", "EST.", "I/E.", "[", "(")):
+            continue
+        if re.search(r"\b(SHOT|LENS|CLOSE\s*UP|DOLLY|PAN|TILT|ORBIT)\b", s):
             continue
         nxt = lines[idx + 1].strip()
         if nxt and not nxt.isupper() and not nxt.startswith("("):
@@ -441,6 +444,7 @@ def _lipsync_covering(timeline: DirectorTimeline, start: float, end: float) -> l
     ]
 
 
+
 def compile_speech_windows(
     timeline: DirectorTimeline | None,
     *,
@@ -701,7 +705,7 @@ def apply_compiled_speech(
                 project_id=str(project_id),
                 scene_id=str(scene_id),
                 batch=batch,
-                master=None,
+                master=master,
             )
         except Exception as exc:
             # REBUILD LAW (dialogue authority): a failed fresh compile must

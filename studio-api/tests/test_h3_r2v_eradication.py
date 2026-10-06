@@ -119,7 +119,8 @@ def test_check_duration_14s_fails_on_r2v_passes_on_i2v():
 
 def test_cutover_fail_closed_markers_preserved():
     src = QW.read_text(encoding="utf-8")
-    assert "Director cutover (fail-closed)" in src
-    assert "H3_DIRECTOR_REQUIRED" in src
+    assert "H3 fast renderer (fail-closed)" in src
+    assert "H3_FAST_RENDERER_REQUIRED" in src
     assert "H3_LEGACY_REF2V_RETIRED" in src
+    assert "_build_and_run_h3_fast" in src
     assert _is_local_h3("minimax-h3-i2v-local")

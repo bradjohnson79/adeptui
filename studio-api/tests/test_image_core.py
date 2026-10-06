@@ -384,9 +384,28 @@ def test_fal_edit_args_and_capability_allow_nano_banana_edit() -> None:
         seed=0,
         image_urls=["https://example.com/ref.png"],
     )
-    assert gpt["image_size"] == "landscape_16_9"
+    # 1080 is not a multiple of 16 — fal edit uses auto rather than an illegal custom size.
+    assert gpt["image_size"] == "auto"
     assert gpt["image_urls"] == ["https://example.com/ref.png"]
+    assert gpt["quality"] == "high"
+    assert gpt["output_format"] == "png"
     assert "seed" not in gpt
+    gpt_custom = build_fal_image_arguments(
+        model_id="openai/gpt-image-2/edit",
+        prompt="ers sheet",
+        width=2560,
+        height=1440,
+        image_urls=["https://example.com/ref.png"],
+    )
+    assert gpt_custom["image_size"] == {"width": 2560, "height": 1440}
+    gpt_auto = build_fal_image_arguments(
+        model_id="openai/gpt-image-2/edit",
+        prompt="nudge",
+        width=1024,
+        height=576,
+        image_urls=["https://example.com/ref.png"],
+    )
+    assert gpt_auto["image_size"] == "auto"
     from app.fal_catalog import fal_still_edit_model_id
 
     assert fal_still_edit_model_id("openai/gpt-image-2") == "openai/gpt-image-2/edit"

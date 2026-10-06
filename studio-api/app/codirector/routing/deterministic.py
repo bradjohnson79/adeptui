@@ -14,6 +14,8 @@ _NEGATION_PATTERN = re.compile(
     re.I,
 )
 
+_SEND_TO_MAGI_PATTERN = re.compile(r"\bsend\b.+\bmagi\b", re.I)
+
 _NAVIGATE_PATTERN = re.compile(
     r"(?:"
     r"\b(?:open|show|switch to|take me to|go to|bring up|launch|load)\b.*\b(?:"
@@ -546,6 +548,17 @@ def classify_deterministic(
     # 1.5 Production-orchestrator commands (mission): explicit production verbs
     # run BEFORE the approve/reject checks so phrases like "put it at the start of
     # Timeline" (which contains the approve word "start") route to execution.
+    if _SEND_TO_MAGI_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="film_timeline.send_to_magi",
+            confidence=0.95,
+            executionLane="operator",
+            writeAllowed=False,
+            destructive=False,
+            evidence=["Send this scene to MAGI uses the published-stitch gate"],
+        )
+
     if _ERS_TO_SCENE_PATTERN.search(message) or _CAMERA_SHOTS_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,

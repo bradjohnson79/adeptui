@@ -240,8 +240,16 @@ def generate_segments(
         raise _err("VOICE_NOT_APPROVED", "Character voice must be approved before generation.", 400)
 
     segments = [PerformanceSegmentOut(**s) for s in _loads(row.segments_json, [])]
-    provider = "qwen3-tts" if (voice.get("provider") or "").startswith("qwen") else "kokoro"
-    translation = translate_plan(provider_key=provider, voice=voice, segments=segments)
+    from ..character_identity.service import provider_voice_binding
+
+    elevenlabs_binding = provider_voice_binding(voice)
+    elevenlabs_voice = (voice.get("provider") or "").strip().lower() == "elevenlabs" or bool(elevenlabs_binding)
+    if elevenlabs_voice:
+        provider = "elevenlabs"
+        translation = {"unsupported_features": [], "fallback_directives": []}
+    else:
+        provider = "qwen3-tts" if (voice.get("provider") or "").startswith("qwen") else "kokoro"
+        translation = translate_plan(provider_key=provider, voice=voice, segments=segments)
     updated: list[dict[str, Any]] = []
     any_failed = False
 
@@ -297,6 +305,54 @@ def generate_segments(
                 data["status"] = "failed"
                 data["error"] = "Empty speech segment"
                 any_failed = True
+            elif elevenlabs_voice:
+                if not elevenlabs_binding:
+                    data["status"] = "failed"
+                    data["error"] = "This character does not have an ElevenLabs voice yet. Assign one before generating."
+                    any_failed = True
+                else:
+                    try:
+                        from ..generation_tools.lineage import register_derived_asset
+                        from ..hosted_providers.adapters.elevenlabs_routed import generate_tts_routed
+
+                        el = generate_tts_routed(
+                            text=text,
+                            voice_id=elevenlabs_binding["providerVoiceId"],
+                            model_id=elevenlabs_binding.get("providerModelId") or None,
+                            surface="codirector.voice",
+                        )
+                        proven = dict(el.get("provenance") or {})
+                        asset = register_derived_asset(
+                            db,
+                            project_id=row.project_id,
+                            source_path=el["path"],
+                            kind="audio",
+                            tag="voice",
+                            parent_asset_id=None,
+                            op="voice_generate_elevenlabs",
+                            model=str(el.get("model") or ""),
+                            prompt_meta={
+                                "prompt": text,
+                                "localProvider": False,
+                                "cloudPaid": True,
+                                "libraryClass": "audio",
+                                "audioRole": "voice",
+                                **proven,
+                            },
+                            library_key="audio.voice",
+                        )
+                        data["outputAssetId"] = asset.id
+                        data["status"] = "ready"
+                        data["provider"] = "elevenlabs"
+                        data["supportMode"] = "Native"
+                    except Exception as exc:
+                        data["status"] = "failed"
+                        detail = getattr(exc, "detail", None)
+                        if isinstance(detail, dict) and detail.get("message"):
+                            data["error"] = detail["message"]
+                        else:
+                            data["error"] = "ElevenLabs could not generate this line."
+                        any_failed = True
             else:
                 # Append prompt guidance without mutating stored source_text
                 guidance = []
@@ -657,15 +713,28 @@ def place_on_timeline(
                 "track": "dialogue",
             }
         )
-    settings = _loads(getattr(project, "settings_json", None) or "{}", {})
-    tl = settings.setdefault("timeline", {})
-    dialogue = tl.setdefault("dialogueTracks", [])
-    track = next((t for t in dialogue if t.get("id") == (timeline_id or "dialogue-main")), None)
-    if not track:
-        track = {"id": timeline_id or "dialogue-main", "name": "Dialogue", "clips": []}
-        dialogue.append(track)
-    track.setdefault("clips", []).extend(clips)
-    project.settings_json = json.dumps(settings, ensure_ascii=False)
+    from ..film_timeline.insertion import add_to_timeline
+    from ..scene_service import list_scenes
+
+    scenes = list_scenes(db, row.project_id)
+    if not scenes:
+        raise _err("SCENE_REQUIRED", "Open a scene on Timeline before placing dialogue.", 409)
+    scene_id = scenes[0].id
+    for clip in clips:
+        if not clip.get("assetId"):
+            continue
+        add_to_timeline(
+            db,
+            row.project_id,
+            scene_id,
+            media_type="dialogue",
+            asset_id=str(clip["assetId"]),
+            target_track_type="voice",
+            start_time=float(clip.get("startMs") or 0) / 1000.0,
+            duration_sec=float(clip.get("durationMs") or 0) / 1000.0,
+            label="Dialogue",
+            metadata={"assemblyId": assembly_id, "source": "voice-performance"},
+        )
     project.updated_at = _now()
     row.timeline_clip_ids_json = json.dumps([c["id"] for c in clips])
     row.status = "placed"

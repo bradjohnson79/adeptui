@@ -30,6 +30,12 @@ SEEDANCE_FAST_ALIASES = frozenset({"seedance-2.0-fast", "seedance-fast", "fal_se
 _HOSTED_JOBS: dict[str, dict[str, Any]] = {}
 
 
+def _resolutions_for(product_id: str) -> list[str]:
+    from ....fal_catalog import SEEDANCE_RESOLUTIONS
+
+    return list(SEEDANCE_RESOLUTIONS.get(product_id, ("480p", "720p")))
+
+
 def _capabilities(
     product_id: str,
     version: str,
@@ -53,16 +59,19 @@ def _capabilities(
         supportsMultipleImageReferences=True,
         supportsVideoReferences=True,
         supportsAudioReferences=False,
+        audio_generation=True,
+        qualityControl="seedance_resolution",
         maximumReferenceImages=4,
         maximumReferenceVideos=1,
         maximumReferenceAudio=0,
         supportedDurations=dur,
-        supportedResolutions=["480p", "720p"],
+        supportedResolutions=_resolutions_for(product_id),
         supportedAspectRatios=["16:9", "9:16", "1:1", "4:3", "21:9", "3:4", "auto"],
         supportsSeed=True,
         supportsNegativePrompt=False,
         supportsCameraControls=False,
         executable=True,
+        continuationMode="soft" if product_id == SEEDANCE_MINI_ID else "hard",
         notes=(
             (
                 "Hosted Seedance 2.0 Mini via fal.ai reference-to-video only "
@@ -119,10 +128,25 @@ def _run_live(internal: str, request: TimelineGenerationRequest, *, product_id: 
             _HOSTED_JOBS[internal] = rec
             return
 
+        from ....film_timeline.render_status import hold_api_preparation
+
+        if not hold_api_preparation(rec):
+            _HOSTED_JOBS[internal] = rec
+            return
+        _HOSTED_JOBS[internal] = rec
+
         draft = bool(request.providerOptions.get("draftMode"))
-        resolution = request.resolution if request.resolution in ("480p", "720p") else (
-            "480p" if draft else "720p"
-        )
+        from ....fal_catalog import normalize_seedance_resolution
+
+        opts = request.providerOptions or {}
+        if "generate_audio" in opts:
+            generate_audio = bool(opts.get("generate_audio"))
+        elif "audio_generation" in opts:
+            generate_audio = bool(opts.get("audio_generation"))
+        else:
+            generate_audio = True
+        asked = request.resolution or ("480p" if draft else "720p")
+        resolution = normalize_seedance_resolution(product_id, asked)
         aspect = request.aspectRatio or "16:9"
         seed = int(request.seed) if request.seed is not None else -1
 
@@ -136,7 +160,14 @@ def _run_live(internal: str, request: TimelineGenerationRequest, *, product_id: 
             end_path = _asset_path(request.endImageAssetId)
             if end_path:
                 end_url = await upload_file_to_fal(end_path, api_key)
-            video_path = _asset_path(request.videoReferenceAssetId)
+            # A continuation start image is the generation state. The previous
+            # clip is not uploaded with it: that clip repeats the earlier line
+            # and gives the model a different opening.
+            continuation = (
+                str(request.continuityStrategy or "") == "last_frame_chain"
+                and bool(str(request.startImageAssetId or "").strip())
+            )
+            video_path = None if continuation else _asset_path(request.videoReferenceAssetId)
             if video_path:
                 video_url_in = await upload_file_to_fal(video_path, api_key)
 
@@ -156,7 +187,17 @@ def _run_live(internal: str, request: TimelineGenerationRequest, *, product_id: 
                 if extra_path:
                     image_urls.append(await upload_file_to_fal(extra_path, api_key))
             video_urls = [video_url_in] if video_url_in else []
-            use_mini_r2v = str(product_id) == "seedance-2.0-mini"
+            from ....fal_catalog import seedance_continuation_route
+
+            route = seedance_continuation_route(
+                product_id,
+                has_start_image=bool(image_url),
+                has_video=bool(video_url_in),
+            )
+            rec["continuationRoute"] = route
+            use_mini_r2v = route == "reference_image" or (
+                str(product_id) == "seedance-2.0-mini" and route != "image_to_video"
+            )
             # Mini: always fal mini/reference-to-video when any image or video ref exists.
             # Full 2.0/2.5: keep prior gate (R2V only when video ref attached).
             if use_mini_r2v:
@@ -172,6 +213,7 @@ def _run_live(internal: str, request: TimelineGenerationRequest, *, product_id: 
                     aspect_ratio=aspect,
                     resolution=resolution,
                     seed=seed,
+                    generate_audio=generate_audio,
                     engine=product_id,
                 )
             elif video_url_in:
@@ -183,6 +225,7 @@ def _run_live(internal: str, request: TimelineGenerationRequest, *, product_id: 
                     aspect_ratio=aspect,
                     resolution=resolution,
                     seed=seed,
+                    generate_audio=generate_audio,
                     engine=product_id,
                 )
             else:
@@ -198,11 +241,19 @@ def _run_live(internal: str, request: TimelineGenerationRequest, *, product_id: 
                     seed=seed,
                     aspect_ratio=aspect,
                     resolution=resolution,
+                    generate_audio=generate_audio,
                 )
             rec["falModelId"] = model_id
             rec["falArgs"] = {k: v for k, v in args.items() if k not in ("image_url", "image_urls", "video_urls", "end_image_url")}
-            rec["progress"] = 0.3
-            _HOSTED_JOBS[internal] = rec
+            import time as _time
+
+            from ....film_timeline.render_status import begin_api_generation, note_api_render_progress
+
+            started = _time.monotonic()
+
+            def _note(message: str) -> None:
+                note_api_render_progress(rec, message=message, elapsed_sec=_time.monotonic() - started)
+                _HOSTED_JOBS[internal] = rec
 
             async def on_submit_meta(meta: dict[str, Any]) -> None:
                 rec["falCancelUrl"] = meta.get("cancel_url")
@@ -230,11 +281,22 @@ def _run_live(internal: str, request: TimelineGenerationRequest, *, product_id: 
                 except Exception:
                     pass
 
+            async def on_progress(_progress: float, message: str) -> None:
+                _note(message or "fal in progress")
+
+            if str(rec.get("status") or "") == "cancelled":
+                _HOSTED_JOBS[internal] = rec
+                return
+            begin_api_generation(rec)
+            _HOSTED_JOBS[internal] = rec
+
             result = await run_fal_model(
                 model_id, args, api_key,
                 on_submit_meta=on_submit_meta,
                 on_request_id=on_request_id,
+                on_progress=on_progress,
             )
+            _note("fal completed — downloading")
             out_url = extract_video_url(result)
             dest_dir = settings.data_dir / "projects" / request.projectId / "renders"
             dest_dir.mkdir(parents=True, exist_ok=True)
@@ -330,6 +392,9 @@ class _SeedanceVersionAdapter:
             record["outputAssetIds"] = list(inject.get("outputAssetIds") or [])
         _HOSTED_JOBS[internal] = record
         if not isinstance(inject, dict):
+            from ....film_timeline.render_status import note_api_render_progress
+
+            note_api_render_progress(record, message="preparing", elapsed_sec=0)
             thread = threading.Thread(
                 target=_run_live,
                 args=(internal, request),
@@ -388,6 +453,12 @@ class _SeedanceVersionAdapter:
         # Regression / test fixture path (no remote call).
         if rec.get("testInject"):
             rec["status"] = "cancelled"
+            return
+
+        # Preparation has not called the provider yet. Cancel locally.
+        if str(rec.get("apiPhase") or "") != "generating":
+            rec["status"] = "cancelled"
+            rec.pop("cancelRejected", None)
             return
 
         # Live hosted path: call fal's documented queue cancel endpoint.

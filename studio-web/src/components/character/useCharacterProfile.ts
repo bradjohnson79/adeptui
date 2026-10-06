@@ -124,6 +124,58 @@ export function characterLoadIsStale(loadGeneration: number, currentGeneration: 
   return loadGeneration !== currentGeneration;
 }
 
+/**
+ * Local-only selection for a character that has not been created yet.
+ * It is never sent to the API. The first Save POSTs the visible form.
+ */
+export const DRAFT_CHARACTER_ID = "__draft_character__";
+
+const PLACEHOLDER_CHARACTER_NAME = /^(?:new character|untitled character)$/i;
+
+export function isUnsavedCharacterId(id: string | null | undefined): boolean {
+  const value = String(id || "").trim();
+  return !value || value === DRAFT_CHARACTER_ID;
+}
+
+/** Server id for load/save. A draft selection has no row yet. */
+export function serverCharacterId(id: string | null | undefined): string | null {
+  const value = String(id || "").trim();
+  if (!value || value === DRAFT_CHARACTER_ID) return null;
+  return value;
+}
+
+export function isPlaceholderCharacterName(name: string | null | undefined): boolean {
+  return PLACEHOLDER_CHARACTER_NAME.test(String(name || "").trim());
+}
+
+/** Fields the Character Profile form owns. A reference reload must not replace these while they are unsaved. */
+export function characterProfileFingerprint(
+  profile: Partial<CharacterProfile> | null | undefined,
+): string {
+  return JSON.stringify({
+    name: String(profile?.name ?? ""),
+    gender_presentation: String(profile?.gender_presentation ?? ""),
+    visual_style: String(profile?.visual_style ?? ""),
+    description: String(profile?.description ?? ""),
+    is_global: Boolean(profile?.is_global || profile?.isGlobal),
+  });
+}
+
+/**
+ * Apply a server profile without letting a placeholder row replace unsaved form fields.
+ * Reset passes force=true and takes the server row.
+ */
+export function profileAfterServerLoad(args: {
+  local: CharacterProfile | null;
+  loaded: CharacterProfile | null;
+  committedFingerprint: string;
+  force: boolean;
+}): CharacterProfile | null {
+  if (args.force || !args.local) return args.loaded;
+  if (characterProfileFingerprint(args.local) !== args.committedFingerprint) return args.local;
+  return args.loaded;
+}
+
 export function applyLoadedCharacterState(args: {
   requestedCharacterId: string;
   currentCharacterId: string | null;
@@ -171,7 +223,7 @@ export function characterSaveIntent(args: {
   if (!args.projectId.trim()) {
     return { ok: false, error: "This project is missing, so the character cannot be saved." };
   }
-  const cid = (args.characterId || "").trim();
+  const cid = serverCharacterId(args.characterId) || "";
   const pending = pendingPatchForCurrentCharacter(args.pending || null, cid || null);
   const merged = {
     ...definedFields(pending),
@@ -186,12 +238,15 @@ export function characterSaveIntent(args: {
   }
   const storedName = String(args.profile?.name ?? "").trim();
   let name = String(merged.name ?? storedName).trim();
-  if (
+  // A placeholder already stored on the row must not replace the name in the form.
+  if (name && !isPlaceholderCharacterName(name)) {
+    merged.name = name;
+  } else if (
     cid &&
     storedName &&
     name &&
-    /^new character$/i.test(name) &&
-    !/^new character$/i.test(storedName)
+    isPlaceholderCharacterName(name) &&
+    !isPlaceholderCharacterName(storedName)
   ) {
     name = storedName;
     merged.name = storedName;
@@ -246,9 +301,11 @@ export function useCharacterProfile(
   projectId: string,
   characterId: string | null,
 ): UseCharacterProfileResult {
-  const [profile, setProfile] = useState<CharacterProfile | null>(null);
+  const [profile, setProfile] = useState<CharacterProfile | null>(() =>
+    characterId === DRAFT_CHARACTER_ID ? { id: "", name: "" } : null,
+  );
   const [references, setReferences] = useState<CharacterReference[]>([]);
-  const [loading, setLoading] = useState(() => Boolean(String(characterId || "").trim()));
+  const [loading, setLoading] = useState(() => Boolean(serverCharacterId(characterId)));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -256,19 +313,32 @@ export function useCharacterProfile(
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<PendingCharacterPatch | null>(null);
   const loadGenRef = useRef(0);
-  const idRef = useRef<string | null>(characterId);
-  idRef.current = characterId;
+  const forceProfileRef = useRef(false);
+  const committedFingerprintRef = useRef(
+    characterId === DRAFT_CHARACTER_ID ? characterProfileFingerprint({ id: "", name: "" }) : "",
+  );
+  const idRef = useRef<string | null>(serverCharacterId(characterId));
+  const draftSeededRef = useRef(false);
+  idRef.current = serverCharacterId(characterId);
 
   const refresh = useCallback(async () => {
     const cid = idRef.current;
     const gen = ++loadGenRef.current;
     if (!projectId || !cid) {
-      setProfile(null);
-      setReferences([]);
+      if (forceProfileRef.current && characterId === DRAFT_CHARACTER_ID) {
+        const blank = { id: "", name: "" } as CharacterProfile;
+        committedFingerprintRef.current = characterProfileFingerprint(blank);
+        setProfile(blank);
+        setReferences([]);
+      }
+      forceProfileRef.current = false;
+      setLoading(false);
       return;
     }
     setLoading(true);
     setError("");
+    const force = forceProfileRef.current;
+    forceProfileRef.current = false;
     try {
       const [p, refs] = await Promise.all([
         api.getCharacterProfile(projectId, cid),
@@ -282,8 +352,19 @@ export function useCharacterProfile(
         references: (refs as { items?: CharacterReference[] }).items,
       });
       if (applied === "stale") return;
-      setProfile(applied.profile);
       setReferences(applied.references);
+      setProfile((prev) => {
+        const next = profileAfterServerLoad({
+          local: prev,
+          loaded: applied.profile,
+          committedFingerprint: committedFingerprintRef.current,
+          force,
+        });
+        if (next === applied.profile) {
+          committedFingerprintRef.current = characterProfileFingerprint(applied.profile);
+        }
+        return next;
+      });
     } catch (e) {
       if (characterLoadIsStale(gen, loadGenRef.current)) return;
       setError(e instanceof Error ? e.message : "Failed to load character.");
@@ -298,10 +379,30 @@ export function useCharacterProfile(
       timerRef.current = null;
     }
     pendingRef.current = null;
+    if (characterId === DRAFT_CHARACTER_ID) {
+      if (!draftSeededRef.current) {
+        draftSeededRef.current = true;
+        const blank = { id: "", name: "" } as CharacterProfile;
+        committedFingerprintRef.current = characterProfileFingerprint(blank);
+        setProfile(blank);
+        setReferences([]);
+      }
+      setLoading(false);
+      setError("");
+      return;
+    }
+    draftSeededRef.current = false;
+    if (!serverCharacterId(characterId)) {
+      setProfile(null);
+      setReferences([]);
+      setLoading(false);
+      return;
+    }
+    committedFingerprintRef.current = "";
     setProfile(null);
     setReferences([]);
     void refresh();
-  }, [refresh]);
+  }, [refresh, characterId]);
 
   const flushPending = useCallback(async () => {
     const cid = idRef.current;
@@ -339,6 +440,7 @@ export function useCharacterProfile(
         const created = await api.createCharacterProfile(projectId, { name: name.trim(), ...(extra || {}) });
         const p = created as CharacterProfile;
         idRef.current = p.id;
+        committedFingerprintRef.current = characterProfileFingerprint(p);
         setProfile(p);
         pendingRef.current = null;
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -387,6 +489,7 @@ export function useCharacterProfile(
           });
           const p = created as CharacterProfile;
           idRef.current = p.id;
+          committedFingerprintRef.current = characterProfileFingerprint(p);
           setProfile(p);
           pendingRef.current = null;
           if (timerRef.current) clearTimeout(timerRef.current);
@@ -408,6 +511,7 @@ export function useCharacterProfile(
           ...(updated || {}),
           id: (updated as CharacterProfile | null)?.id || intent.characterId,
         } as CharacterProfile;
+        committedFingerprintRef.current = characterProfileFingerprint(savedProfile);
         setProfile(savedProfile);
         setSavedAt(new Date().toISOString());
         notifyCharacterProfileSaved(projectId, savedProfile);
@@ -431,8 +535,17 @@ export function useCharacterProfile(
   const reset = useCallback(() => {
     pendingRef.current = null;
     if (timerRef.current) clearTimeout(timerRef.current);
+    forceProfileRef.current = true;
+    if (isUnsavedCharacterId(characterId)) {
+      const blank = { id: "", name: "" } as CharacterProfile;
+      committedFingerprintRef.current = characterProfileFingerprint(blank);
+      setProfile(characterId === DRAFT_CHARACTER_ID ? blank : null);
+      setReferences([]);
+      forceProfileRef.current = false;
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [characterId, refresh]);
 
   const remove = useCallback(async (opts?: { confirmCrossProject?: boolean }): Promise<boolean> => {
     const cid = idRef.current;

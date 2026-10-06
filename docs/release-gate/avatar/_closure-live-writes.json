@@ -1,0 +1,379 @@
+{
+  "plan": {
+    "id": "f27f7ce2-172e-4f01-8368-06fab70c83cc",
+    "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+    "bibleId": null,
+    "basedOnVersionId": null,
+    "basedOnVersionNumber": null,
+    "proposalType": "tool_call",
+    "title": "Avatar: create presentation plan",
+    "summary": "Create or refresh the Avatar Studio presentation plan for this session.",
+    "payload": {
+      "entityMutations": [],
+      "factMutations": [],
+      "summary": "",
+      "changeReason": ""
+    },
+    "toolCall": {
+      "toolId": "avatar.create_plan",
+      "toolSchemaVersion": 1,
+      "arguments": {
+        "sessionId": "avs-a10ef709c2",
+        "speakerADialogue": "Absolutely not."
+      },
+      "capabilitySnapshot": {
+        "project": {
+          "key": "project",
+          "available": true,
+          "status": "ready",
+          "configured": true,
+          "reason": "",
+          "proposalReady": true,
+          "executionBlocked": false,
+          "toolReadiness": {
+            "tool": "avatar.create_plan",
+            "status": "locally_verified",
+            "callable": true,
+            "missingCapabilities": [],
+            "proposalReady": true,
+            "executionBlocked": false,
+            "requiredCapabilities": [
+              "project.read",
+              "project.scenes.read"
+            ],
+            "detail": {
+              "capabilityKey": "project"
+            }
+          }
+        }
+      },
+      "preview": {
+        "summary": "Create or refresh the Avatar Studio presentation plan for this session.",
+        "lines": [
+          "sessionId: avs-a10ef709c2",
+          "sections planned: 1",
+          "target section length: 6.0s",
+          "Updates creator-facing planning notes only. Does not start generation."
+        ],
+        "resourceKind": "project",
+        "resourceId": "2347bf46-3762-4763-86c5-4a6032522278",
+        "warnings": []
+      },
+      "inputHash": "75579ec4b875360129203c56e3ccc5ca4065b311ab6a52702503a308df4c6506",
+      "baseResourceVersions": {
+        "project:2347bf46-3762-4763-86c5-4a6032522278": "2026-08-17T23:49:30.942972"
+      }
+    },
+    "status": "pending",
+    "requestId": "closure-write-korri-line",
+    "createdBy": "assistant",
+    "createdAt": "2026-08-18T23:36:50.804012",
+    "updatedAt": "2026-08-18T23:36:50.804012",
+    "isStale": false
+  },
+  "job": {
+    "id": "0318d600-b916-4478-9940-7aa64fd136af",
+    "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+    "bibleId": null,
+    "basedOnVersionId": null,
+    "basedOnVersionNumber": null,
+    "proposalType": "tool_call",
+    "title": "Avatar: create long-form job",
+    "summary": "Create a long-form Avatar Studio job from the current presenter session.",
+    "payload": {
+      "entityMutations": [],
+      "factMutations": [],
+      "summary": "",
+      "changeReason": ""
+    },
+    "toolCall": {
+      "toolId": "avatar.create_job",
+      "toolSchemaVersion": 1,
+      "arguments": {
+        "sessionId": "avs-a10ef709c2",
+        "startImmediately": true,
+        "generatorId": "infinitetalk-local"
+      },
+      "capabilitySnapshot": {
+        "project": {
+          "key": "project",
+          "available": true,
+          "status": "ready",
+          "configured": true,
+          "reason": "",
+          "proposalReady": true,
+          "executionBlocked": false,
+          "toolReadiness": {
+            "tool": "avatar.create_job",
+            "status": "locally_verified",
+            "callable": true,
+            "missingCapabilities": [],
+            "proposalReady": true,
+            "executionBlocked": false,
+            "requiredCapabilities": [
+              "project.read",
+              "project.scenes.read"
+            ],
+            "detail": {
+              "capabilityKey": "project"
+            }
+          }
+        }
+      },
+      "preview": {
+        "summary": "Create a long-form Avatar Studio job from the current presenter session.",
+        "lines": [
+          "sessionId: avs-a10ef709c2",
+          "providerId: infinitetalk-local",
+          "planned sections: 1",
+          "Creates a new long-form job only after approval."
+        ],
+        "resourceKind": "project",
+        "resourceId": "2347bf46-3762-4763-86c5-4a6032522278",
+        "warnings": []
+      },
+      "inputHash": "3c867e06d0782a04e7f016dccdc2dcc696057776ef5311cfccb26693a65931ea",
+      "baseResourceVersions": {
+        "project:2347bf46-3762-4763-86c5-4a6032522278": "2026-08-17T23:49:30.942972"
+      }
+    },
+    "status": "pending",
+    "requestId": "closure-generate-infinitetalk",
+    "createdBy": "assistant",
+    "createdAt": "2026-08-18T23:36:50.848736",
+    "updatedAt": "2026-08-18T23:36:50.848736",
+    "isStale": false
+  },
+  "provider": {
+    "requestId": null,
+    "toolId": "avatar.get_provider_status",
+    "toolVersion": "1",
+    "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+    "status": "success",
+    "summary": "InfiniteTalk needs repair — Open Runtime Setup",
+    "data": {
+      "ok": true,
+      "sessionId": "avs-a10ef709c2",
+      "providerId": "infinitetalk-local",
+      "runtime": {
+        "componentId": "infinitetalk-local",
+        "providerId": "infinitetalk-local",
+        "displayName": "InfiniteTalk",
+        "runtimeRoot": "<path>",
+        "codeRoot": "<path>",
+        "modelsRoot": "<path>",
+        "venvPython": "<path>",
+        "launchPath": "<path>",
+        "logPaths": [],
+        "installed": true,
+        "runtimeReady": false,
+        "healthState": "repair_required",
+        "benchmarkState": "unsupported",
+        "message": "Runtime is incomplete or missing required files.",
+        "codePresent": true,
+        "venvPresent": true,
+        "launchPresent": false,
+        "importProbeOk": true,
+        "importProbeMessage": "ok",
+        "models": [
+          {
+            "repoId": "MeiGen-AI/InfiniteTalk",
+            "revision": "[redacted]",
+            "destination": "<path>",
+            "present": false,
+            "missing": [
+              "README.md"
+            ],
+            "estimatedBytes": 12884901888
+          },
+          {
+            "repoId": "Wan-AI/Wan2.1-I2V-14B-480P",
+            "revision": "[redacted]",
+            "destination": "<path>",
+            "present": false,
+            "missing": [
+              "README.md"
+            ],
+            "estimatedBytes": 22548578304
+          },
+          {
+            "repoId": "TencentGameMate/chinese-wav2vec2-base",
+            "revision": "refs/pr/1",
+            "destination": "<path>",
+            "present": false,
+            "missing": [
+              "model.safetensors"
+            ],
+            "estimatedBytes": 1610612736
+          }
+        ],
+        "gpu": {
+          "available": false,
+          "device": null,
+          "vramGb": null,
+          "cuda": false,
+          "message": "GPU preflight unavailable: No module named 'torch'"
+        },
+        "codeRevision": "[redacted]",
+        "pinnedCodeRevision": "[redacted]",
+        "modelRevisions": {
+          "MeiGen-AI/InfiniteTalk": "[redacted]",
+          "Wan-AI/Wan2.1-I2V-14B-480P": "[redacted]",
+          "TencentGameMate/chinese-wav2vec2-base": "refs/pr/1"
+        },
+        "updateAvailable": false,
+        "blockers": [
+          "Windows is not documented by the official upstream.",
+          "Exact total storage and VRAM floor remain upstream unknowns."
+        ],
+        "notes": [
+          "Official repo includes a ComfyUI branch, but this installer isolates a direct runtime.",
+          "Total storage still needs live confirmation from a full upstream run."
+        ],
+        "officialOs": [
+          "linux"
+        ],
+        "windowsDocumented": false,
+        "listedAsAvatarGenerator": true,
+        "supportsSpeakerSelection": false,
+        "supportsConversation": true,
+        "supportsNativeMultiSpeaker": false,
+        "supportsAudio": true,
+        "supportsLoRA": false,
+        "supportedAspectRatios": [
+          "16:9",
+          "9:16",
+          "1:1",
+          "4:5",
+          "3:2",
+          "21:9"
+        ],
+        "loraModelFamily": "wan",
+        "certifiedReady": false
+      },
+      "certifiedReady": false,
+      "supportsLiveGeneration": false,
+      "runtimeGate": "InfiniteTalk needs repair — Open Runtime Setup",
+      "generators": [
+        {
+          "id": "longcat-video-avatar-1-5-local",
+          "displayName": "LongCat Avatar 1.5",
+          "listedAsAvatarGenerator": true,
+          "supportsSpeakerSelection": false,
+          "supportsConversation": true,
+          "supportsNativeMultiSpeaker": false,
+          "supportsAudio": true,
+          "supportsLoRA": false,
+          "supportedAspectRatios": [
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:5",
+            "3:2",
+            "21:9"
+          ],
+          "loraModelFamily": "longcat",
+          "certifiedReady": false
+        },
+        {
+          "id": "infinitetalk-local",
+          "displayName": "InfiniteTalk",
+          "listedAsAvatarGenerator": true,
+          "supportsSpeakerSelection": false,
+          "supportsConversation": true,
+          "supportsNativeMultiSpeaker": false,
+          "supportsAudio": true,
+          "supportsLoRA": false,
+          "supportedAspectRatios": [
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:5",
+            "3:2",
+            "21:9"
+          ],
+          "loraModelFamily": "wan",
+          "certifiedReady": false
+        }
+      ]
+    },
+    "evidence": [],
+    "pagination": null,
+    "warnings": [],
+    "retrievedAt": "2026-08-18T23:36:58.053184+00:00",
+    "availableSections": [],
+    "unavailableSections": []
+  },
+  "sessionTurns": [
+    {
+      "speakerId": "speaker-a",
+      "dialogue": "Korri's follow-up line only."
+    },
+    {
+      "speakerId": "speaker-b",
+      "dialogue": "Fresh pot, coming up."
+    }
+  ],
+  "inspect": {
+    "ok": true,
+    "present": true,
+    "sessionId": "avs-a10ef709c2",
+    "sourceKind": "character",
+    "sourceAssetId": "c2ce0cc0-659a-49c3-8aa4-04a6ec5eda59",
+    "sourceCharacterId": "b7086f85-3ee3-44db-a395-ae1a94e37fe1",
+    "mode": "conversation",
+    "speakerA": {
+      "id": "speaker-a",
+      "label": "Korri",
+      "characterId": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+      "hasBbox": false,
+      "voice": {
+        "binding": "none",
+        "audioAssetId": null,
+        "approvedRecordId": null,
+        "approvedTakeId": null
+      }
+    },
+    "speakerB": {
+      "id": "speaker-b",
+      "label": "Anadriya",
+      "characterId": "b7086f85-3ee3-44db-a395-ae1a94e37fe1",
+      "hasBbox": false,
+      "voice": {
+        "binding": "none",
+        "audioAssetId": null,
+        "approvedRecordId": null,
+        "approvedTakeId": null
+      }
+    },
+    "order": "b_then_a",
+    "dialogueA": "Korri's follow-up line only.",
+    "dialogueB": "Fresh pot, coming up.",
+    "voiceA": {
+      "binding": "none",
+      "audioAssetId": null,
+      "approvedRecordId": null,
+      "approvedTakeId": null
+    },
+    "voiceB": {
+      "binding": "none",
+      "audioAssetId": null,
+      "approvedRecordId": null,
+      "approvedTakeId": null
+    },
+    "generator": "infinitetalk-local",
+    "runtimeStatus": "repair_required",
+    "certifiedReady": false,
+    "gateLine": "InfiniteTalk needs repair — Open Runtime Setup",
+    "aspect": "16:9",
+    "lora": null,
+    "directionPrompt": "",
+    "durationClass": "story_section",
+    "presentationStyle": "direct_presenter",
+    "framingChoice": "medium_presenter",
+    "backgroundChoice": "studio_gradient",
+    "activeJobId": "avjob-58db5d1937",
+    "jobStatus": "queued",
+    "resultAssetIds": []
+  }
+}

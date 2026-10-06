@@ -1,0 +1,15 @@
+{
+  "entry_keys": [
+    "prompt",
+    "outputs",
+    "status",
+    "meta"
+  ],
+  "prompt_type": "list",
+  "prompt_len": 5,
+  "prompt_first_item_type": "int",
+  "prompt_first_item_repr": "0",
+  "outputs_keys": [
+    "11"
+  ]
+}

@@ -44,6 +44,7 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportsMultipleImageReferences=True,
         supportsReferenceToVideo=True,
         supportsVideoReferences=True,
+        continuationMode="hard",
         supportsAudioReferences=True,
         maximumReferenceImages=9,
         maximumReferenceVideos=3,

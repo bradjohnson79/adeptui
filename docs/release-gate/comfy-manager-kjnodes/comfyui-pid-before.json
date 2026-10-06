@@ -1,0 +1,15 @@
+{
+  "pid": 26520,
+  "cmd": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI\\ComfyUI\\.venv\\Scripts\\python.exe -s ComfyUI\\main.py --listen 127.0.0.1 --port 8188 --disable-auto-launch --enable-manager --extra-model-paths-config C:\\Users\\bradj\\AppData\\Roaming\\Adept\\Comfy\\extra_model_paths.yaml --input-directory C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\input --output-directory C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\output",
+  "owned": true,
+  "written_at": "2026-09-08T04:53:37.407725+00:00",
+  "started_at": "2026-09-08T04:53:37.407725+00:00",
+  "last_exit": "",
+  "restart_count": 0,
+  "last_restart_reason": "",
+  "executable": "",
+  "cwd": "",
+  "log_path": "",
+  "health": "",
+  "state": ""
+}

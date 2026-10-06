@@ -1,0 +1,587 @@
+{
+  "at": "2026-08-24T04:11:43.089492+00:00",
+  "comfy": "http://127.0.0.1:8188",
+  "validate": {
+    "character_qwen_front_t2i.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_front_t2i.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_qwen_front_ref.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_front_ref.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_qwen_back_from_front.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_back_from_front.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_flux_front_ref.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_flux_front_ref.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_flux_back_from_front.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_flux_back_from_front.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_sdxl_front_t2i.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_sdxl_front_t2i.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_zimage_front_t2i.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_front_t2i.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_zimage_front_ref.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_front_ref.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_zimage_back_from_front.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_back_from_front.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_flux_front_t2i.json": {
+      "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_flux_front_t2i.json",
+      "valid": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "partner_nodes": [],
+      "spends_credits": false,
+      "object_info_source": {
+        "mode": "local",
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    }
+  },
+  "deps": {
+    "character_qwen_front_t2i.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    },
+    "character_qwen_front_ref.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    },
+    "character_qwen_back_from_front.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    },
+    "character_flux_front_ref.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    },
+    "character_flux_back_from_front.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    },
+    "character_sdxl_front_t2i.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    },
+    "character_zimage_front_t2i.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    },
+    "character_zimage_front_ref.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    },
+    "character_zimage_back_from_front.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    },
+    "character_flux_front_t2i.json": {
+      "custom_nodes": {},
+      "unknown_nodes": []
+    }
+  },
+  "free": {
+    "requested": {
+      "unload_models": true,
+      "free_memory": true
+    },
+    "note": "applies when the queue worker next iterates \u2014 immediate if idle, after the current job if busy; does not interrupt a running job"
+  },
+  "runs": {
+    "character_qwen_front_t2i.json": {
+      "submit": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_front_t2i.json",
+        "status": "queued",
+        "prompt_id": "6190fba4-f546-4514-ae7b-eb04466f095c",
+        "client_id": "0e86dca2-6f48-44a2-b969-d69417b1bc92",
+        "outputs": [],
+        "elapsed_seconds": null,
+        "host": "127.0.0.1",
+        "port": 8188,
+        "state_file": "C:\\Users\\bradj\\AppData\\Local\\comfy-cli\\jobs\\6190fba4-f546-4514-ae7b-eb04466f095c.json",
+        "watcher_spawned": false
+      },
+      "prompt_id": "6190fba4-f546-4514-ae7b-eb04466f095c",
+      "wait": {
+        "prompt_id": "6190fba4-f546-4514-ae7b-eb04466f095c",
+        "status": "completed",
+        "workflow_size": null,
+        "outputs": [
+          "http://127.0.0.1:8188/view?filename=qwen2512_front_t2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+        ],
+        "outputs_by_node": {
+          "10": [
+            "http://127.0.0.1:8188/view?filename=qwen2512_front_t2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+          ]
+        },
+        "outputs_by_item": {},
+        "text_outputs": {},
+        "error": null,
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_qwen_front_ref.json": {
+      "submit": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_front_ref.json",
+        "status": "queued",
+        "prompt_id": "407e46a4-bde6-43b9-9931-ed51471d7502",
+        "client_id": "4ea99fdb-1ad8-4af8-8419-6fa73b19f9f9",
+        "outputs": [],
+        "elapsed_seconds": null,
+        "host": "127.0.0.1",
+        "port": 8188,
+        "state_file": "C:\\Users\\bradj\\AppData\\Local\\comfy-cli\\jobs\\407e46a4-bde6-43b9-9931-ed51471d7502.json",
+        "watcher_spawned": false
+      },
+      "prompt_id": "407e46a4-bde6-43b9-9931-ed51471d7502",
+      "wait": {
+        "prompt_id": "407e46a4-bde6-43b9-9931-ed51471d7502",
+        "status": "completed",
+        "workflow_size": null,
+        "outputs": [
+          "http://127.0.0.1:8188/view?filename=qwen2512_front_i2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+        ],
+        "outputs_by_node": {
+          "11": [
+            "http://127.0.0.1:8188/view?filename=qwen2512_front_i2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+          ]
+        },
+        "outputs_by_item": {},
+        "text_outputs": {},
+        "error": null,
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_flux_front_t2i.json": {
+      "submit": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_flux_front_t2i.json",
+        "status": "queued",
+        "prompt_id": "6d1f1070-6c76-4ae2-8a9a-9b47cb80d99b",
+        "client_id": "4aff8da9-aa7b-4a98-830e-d0a63fc3f4ef",
+        "outputs": [],
+        "elapsed_seconds": null,
+        "host": "127.0.0.1",
+        "port": 8188,
+        "state_file": "C:\\Users\\bradj\\AppData\\Local\\comfy-cli\\jobs\\6d1f1070-6c76-4ae2-8a9a-9b47cb80d99b.json",
+        "watcher_spawned": false
+      },
+      "prompt_id": "6d1f1070-6c76-4ae2-8a9a-9b47cb80d99b",
+      "wait": {
+        "prompt_id": "6d1f1070-6c76-4ae2-8a9a-9b47cb80d99b",
+        "status": "completed",
+        "workflow_size": null,
+        "outputs": [
+          "http://127.0.0.1:8188/view?filename=flux_front_t2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+        ],
+        "outputs_by_node": {
+          "8": [
+            "http://127.0.0.1:8188/view?filename=flux_front_t2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+          ]
+        },
+        "outputs_by_item": {},
+        "text_outputs": {},
+        "error": null,
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_sdxl_front_t2i.json": {
+      "submit": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_sdxl_front_t2i.json",
+        "status": "queued",
+        "prompt_id": "9125ac67-4f7f-4de2-8119-f30985096ceb",
+        "client_id": "dbdfbd4e-bbbe-49f9-9fb0-eb2448ef0dd6",
+        "outputs": [],
+        "elapsed_seconds": null,
+        "host": "127.0.0.1",
+        "port": 8188,
+        "state_file": "C:\\Users\\bradj\\AppData\\Local\\comfy-cli\\jobs\\9125ac67-4f7f-4de2-8119-f30985096ceb.json",
+        "watcher_spawned": false
+      },
+      "prompt_id": "9125ac67-4f7f-4de2-8119-f30985096ceb",
+      "wait": {
+        "prompt_id": "9125ac67-4f7f-4de2-8119-f30985096ceb",
+        "status": "completed",
+        "workflow_size": null,
+        "outputs": [
+          "http://127.0.0.1:8188/view?filename=illustrious_xl_front_t2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+        ],
+        "outputs_by_node": {
+          "7": [
+            "http://127.0.0.1:8188/view?filename=illustrious_xl_front_t2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+          ]
+        },
+        "outputs_by_item": {},
+        "text_outputs": {},
+        "error": null,
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_zimage_front_t2i.json": {
+      "submit": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_front_t2i.json",
+        "status": "queued",
+        "prompt_id": "aef8fce5-3ac1-4e89-9f79-bf350a97ac12",
+        "client_id": "c3dbabd2-8d51-454f-b09b-ebaa7ee38e21",
+        "outputs": [],
+        "elapsed_seconds": null,
+        "host": "127.0.0.1",
+        "port": 8188,
+        "state_file": "C:\\Users\\bradj\\AppData\\Local\\comfy-cli\\jobs\\aef8fce5-3ac1-4e89-9f79-bf350a97ac12.json",
+        "watcher_spawned": false
+      },
+      "prompt_id": "aef8fce5-3ac1-4e89-9f79-bf350a97ac12",
+      "wait": {
+        "prompt_id": "aef8fce5-3ac1-4e89-9f79-bf350a97ac12",
+        "status": "completed",
+        "workflow_size": null,
+        "outputs": [
+          "http://127.0.0.1:8188/view?filename=zimage_front_t2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+        ],
+        "outputs_by_node": {
+          "10": [
+            "http://127.0.0.1:8188/view?filename=zimage_front_t2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+          ]
+        },
+        "outputs_by_item": {},
+        "text_outputs": {},
+        "error": null,
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    },
+    "character_zimage_front_ref.json": {
+      "submit": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_front_ref.json",
+        "status": "queued",
+        "prompt_id": "bf683630-b32b-4927-953c-16b687969cb0",
+        "client_id": "6b00f4bd-0721-47d0-aa97-c39333f819b1",
+        "outputs": [],
+        "elapsed_seconds": null,
+        "host": "127.0.0.1",
+        "port": 8188,
+        "state_file": "C:\\Users\\bradj\\AppData\\Local\\comfy-cli\\jobs\\bf683630-b32b-4927-953c-16b687969cb0.json",
+        "watcher_spawned": false
+      },
+      "prompt_id": "bf683630-b32b-4927-953c-16b687969cb0",
+      "wait": {
+        "prompt_id": "bf683630-b32b-4927-953c-16b687969cb0",
+        "status": "completed",
+        "workflow_size": null,
+        "outputs": [
+          "http://127.0.0.1:8188/view?filename=zimage_front_i2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+        ],
+        "outputs_by_node": {
+          "12": [
+            "http://127.0.0.1:8188/view?filename=zimage_front_i2i_00001_.png&subfolder=studio%5Ccharacter_creator&type=output"
+          ]
+        },
+        "outputs_by_item": {},
+        "text_outputs": {},
+        "error": null,
+        "host": "127.0.0.1",
+        "port": 8188
+      }
+    }
+  },
+  "server": {
+    "python": {
+      "version": "3.11.15",
+      "executable": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\venvs\\mcp\\Scripts\\python.exe",
+      "virtualenv": null,
+      "conda_env": null
+    },
+    "config": {
+      "path": "C:\\Users\\bradj\\AppData\\Local\\comfy-cli\\config.ini",
+      "default_workspace": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI\\ComfyUI",
+      "default_launch_extras": null,
+      "recent_workspace": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI\\ComfyUI",
+      "tracking_enabled": false,
+      "background": null
+    },
+    "server": {
+      "running": true,
+      "url": "http://127.0.0.1:8188"
+    },
+    "hardware": {
+      "os": "Windows",
+      "os_version": "10",
+      "arch": "AMD64",
+      "cpu": "AMD64",
+      "ram_bytes": 68135153664,
+      "gpu": {
+        "vendor": "nvidia",
+        "model": "NVIDIA GeForce RTX 5090",
+        "vram_bytes": 34190458880,
+        "unified_memory": false
+      }
+    },
+    "workspace": {
+      "path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI\\ComfyUI",
+      "type": "default",
+      "manager_mode": "enable-gui",
+      "manager_detected": "venv-package",
+      "uv_compile_default": false
+    },
+    "compatibility": {
+      "comfy_cli_version": "1.17.0",
+      "min_comfy_cli_version": null,
+      "envelope_schema_major": 1,
+      "warnings": [],
+      "envelope_schema": "envelope/1"
+    },
+    "freshness": {
+      "core": {
+        "installed": "v0.32.0",
+        "commit": "c2bcbecd",
+        "latest": "v0.33.3",
+        "outdated": true
+      },
+      "packs": [
+        {
+          "name": "ComfyMath",
+          "source": "git",
+          "installed": "c01177221c31b8e5fbc062778fc8254aeb541638",
+          "latest": "c01177221c31b8e5fbc062778fc8254aeb541638",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-easy-use",
+          "source": "registry",
+          "installed": "1.3.6",
+          "latest": "1.3.6",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-hunyuanvideowrapper",
+          "source": "registry",
+          "installed": "1.0.8",
+          "latest": "1.0.8",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-impact-pack",
+          "source": "registry",
+          "installed": "8.28.3",
+          "latest": "8.28.3",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-kjnodes",
+          "source": "registry",
+          "installed": "1.4.7",
+          "latest": "1.5.0",
+          "outdated": true
+        },
+        {
+          "name": "ComfyUI-LTXVideo",
+          "source": "git",
+          "installed": "ac4d99839020b983e956a8ab67ec38aec1b6e65a",
+          "latest": "15d09abb5a187a8dcaea2fc31fe51ee96e6c9d0d",
+          "outdated": true
+        },
+        {
+          "name": "comfyui-manager",
+          "source": "registry",
+          "installed": "3.41",
+          "latest": "3.0.1",
+          "outdated": false
+        },
+        {
+          "name": "ComfyUI-MelBandRoFormer",
+          "source": "registry",
+          "installed": "1.0.2",
+          "latest": "1.0.2",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-videohelpersuite",
+          "source": "registry",
+          "installed": "1.7.9",
+          "latest": "1.7.9",
+          "outdated": false
+        },
+        {
+          "name": "ComfyUI-WanVideoWrapper",
+          "source": "registry",
+          "installed": "1.4.7",
+          "latest": "1.4.7",
+          "outdated": false
+        },
+        {
+          "name": "comfyui_controlnet_aux",
+          "source": "registry",
+          "installed": "1.1.5",
+          "latest": "1.1.5",
+          "outdated": false
+        },
+        {
+          "name": "comfyui_essentials",
+          "source": "registry",
+          "installed": "1.1.0",
+          "latest": "1.1.0",
+          "outdated": false
+        },
+        {
+          "name": "ComfyUI_LatentSync",
+          "source": "git",
+          "installed": "7c08a475d4eb9cd5ef48b69aafbf5549f813b011",
+          "latest": "7c08a475d4eb9cd5ef48b69aafbf5549f813b011",
+          "outdated": false
+        },
+        {
+          "name": "rgthree-comfy",
+          "source": "registry",
+          "installed": "1.0.2606200020",
+          "latest": "1.0.2608210019",
+          "outdated": true
+        },
+        {
+          "name": "WhatDreamsCost-ComfyUI",
+          "source": "registry",
+          "installed": "2.0.5",
+          "latest": "2.0.5",
+          "outdated": false
+        },
+        {
+          "name": "WhatDreamsCost-CSGlide",
+          "source": "git",
+          "installed": "9f933b3c21128ca587f2144f4bb899e7fada12c8",
+          "latest": "9f933b3c21128ca587f2144f4bb899e7fada12c8",
+          "outdated": false
+        }
+      ],
+      "checked_at": "2026-08-24T04:11:48.235383+00:00"
+    }
+  },
+  "files": {
+    "character_qwen_front_t2i.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_front_t2i.json",
+    "character_qwen_front_ref.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_front_ref.json",
+    "character_qwen_back_from_front.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_back_from_front.json",
+    "character_flux_front_ref.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_flux_front_ref.json",
+    "character_flux_back_from_front.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_flux_back_from_front.json",
+    "character_sdxl_front_t2i.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_sdxl_front_t2i.json",
+    "character_zimage_front_t2i.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_front_t2i.json",
+    "character_zimage_front_ref.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_front_ref.json",
+    "character_zimage_back_from_front.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_back_from_front.json",
+    "character_flux_front_t2i.json": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_flux_front_t2i.json"
+  }
+}

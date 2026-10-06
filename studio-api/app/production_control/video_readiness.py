@@ -284,6 +284,15 @@ def _route_a_ready() -> tuple[bool, str]:
     return result
 
 
+def _fal_live_product_ids() -> frozenset[str]:
+    """fal products whose Timeline adapter actually submits to fal.ai."""
+    return frozenset(
+        row.product_id
+        for row in video_registry.CORE_VIDEO_REGISTRY
+        if row.provider == "fal" and row.live_submit and row.adapter_id
+    )
+
+
 def _adapter_registered(adapter_id: str | None) -> bool:
     if not adapter_id:
         return False
@@ -324,7 +333,10 @@ def collect_video_facts(model_id: str, *, locality: str, estimated_vram_gb: floa
         facts.credentials_ok = _secret_configured(secret)
         if not facts.credentials_ok:
             facts.credentials_reason = "Provider API Key Missing"
-        if product not in {"seedance-2.0", "seedance-2.0-mini", "seedance-2.5"}:
+        # A shared adapter id (Kling, Veo) must not mark the Kie row live just
+        # because the fal row calls fal. Only fal products with live_submit
+        # keep the provider call.
+        if product not in _fal_live_product_ids():
             facts.live_submit = False
 
     if product.startswith("minimax-h3"):

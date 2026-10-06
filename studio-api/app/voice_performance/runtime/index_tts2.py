@@ -1317,14 +1317,31 @@ def generate_take(db: Any = None, **kwargs: Any) -> dict[str, Any]:
     performance_plan = kwargs.get("performance_plan") or {}
     emotion_text = " ".join(
         str(performance_plan.get(key) or "").strip()
-        for key in ("summary", "delivery", "notes")
+        for key in ("summary", "delivery", "notes", "breath", "pacing")
         if str(performance_plan.get(key) or "").strip()
     ).strip()
+    mannerism_emo = str(kwargs.get("mannerism_emo_text") or kwargs.get("mannerismEmoText") or "").strip()
+    if not mannerism_emo:
+        from ..mannerism_cues import build_mannerism_emo_text, merge_structured_cues
+        plan_cues = merge_structured_cues(
+            performance_plan.get("mannerismCues") or [],
+            kwargs.get("mannerism_cues") or [],
+        )
+        mannerism_emo = build_mannerism_emo_text(plan_cues)
+    if mannerism_emo:
+        emotion_text = f"{emotion_text}; {mannerism_emo}".strip("; ").strip()
+    from ..mannerism_cues import sanitize_for_tts as _sanitize_for_tts
+    _raw_text = str(kwargs.get("dialogue_text") or kwargs.get("text") or "")
+    _safe = _sanitize_for_tts(
+        _raw_text,
+        structured_cues=kwargs.get("mannerism_cues") or performance_plan.get("mannerismCues") or [],
+    )
+    tts_text = _safe["spokenText"]
     result = manager.generate_take(
         {
             "jobId": kwargs.get("take_id") or f"m410_{uuid.uuid4().hex[:12]}",
             "projectId": kwargs.get("project_id"),
-            "text": kwargs.get("dialogue_text") or kwargs.get("text") or "",
+            "text": tts_text,
             "referenceAudioPath": reference_audio,
             "emotionAudioPath": kwargs.get("emotion_audio_path") or kwargs.get("emotionAudioPath"),
             "emotionText": emotion_text or None,

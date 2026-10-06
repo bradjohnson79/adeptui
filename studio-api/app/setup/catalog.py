@@ -47,6 +47,7 @@ _VERIFIER_TO_DEP_TYPE: dict[str, str] = {
     "qwen_image_2512_files": DEPENDENCY_TYPE_MODEL,
     "krea2_files": DEPENDENCY_TYPE_MODEL,
     "linked_files": DEPENDENCY_TYPE_MODEL,
+    "staged_video_pack": DEPENDENCY_TYPE_MODEL,
     "comfy_extension_nodes": DEPENDENCY_TYPE_CUSTOM_NODE,
     "comfy_service": DEPENDENCY_TYPE_RUNTIME,
     "ollama_service": DEPENDENCY_TYPE_RUNTIME,
@@ -153,6 +154,30 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         ("comfyui",),
         "hunyuan_files",
         "huggingface_snapshot",
+        category="Video Models",
+    ),
+    ComponentDefinition(
+        "minimax_h3_base_optimized",
+        "MiniMax H3 Base Optimized",
+        "Installed. Existing files detected. Optional reference-to-video profile using the MiniMax H3 weights already on this computer. No download.",
+        False,
+        0,
+        0,
+        ("comfyui",),
+        "staged_video_pack",
+        "detect_only",
+        category="Video Models",
+    ),
+    ComponentDefinition(
+        "hunyuan_video_1_5_distilled",
+        "HunyuanVideo 1.5 Distilled",
+        "Optional · Fast Local Video. Fast distilled local video generation for Text-to-Video and Start-Frame workflows. Recommended for systems with lower VRAM.",
+        False,
+        0,
+        0,
+        ("comfyui",),
+        "staged_video_pack",
+        "detect_only",
         category="Video Models",
     ),
     ComponentDefinition(
@@ -557,9 +582,9 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
     ComponentDefinition(
         "qwen2_5_omni_7b",
         "Qwen2.5-Omni 7B",
-        "Recommended Media Intelligence for Co-Director: end-to-end multimodal "
-        "(text/image/audio/video in, text+speech out) via the Adept Media Intelligence "
-        "Service. Optional — core Adept stays usable if absent (not a boot blocker).",
+        "Recommended for full Timeline continuity review and Co-Director media "
+        "intelligence. Timeline Generate and Continue still run when this model is "
+        "absent. It is not a generation blocker and not a boot blocker.",
         False,
         26000 * MB,
         28000 * MB,

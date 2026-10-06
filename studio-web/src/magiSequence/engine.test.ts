@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyEditCommand,
   createEmptySequence,
+  recomputeDuration,
   type MagiClip,
   type MagiSequenceDocument,
 } from "./engine";
@@ -109,6 +110,24 @@ describe("engine command lineage + id integrity (m4/m1 A6)", () => {
     const { doc: next } = applyEditCommand(doc, { kind: "SetPlayhead", payload: { frame: 30 } }, []);
     expect(next.playheadFrame).toBe(30);
     expect(next.clips).toHaveLength(1);
+  });
+
+  it("duration follows the furthest clip and keeps 10s only while empty", () => {
+    const empty = createEmptySequence("proj-a", 24);
+    empty.clips = [];
+    expect(recomputeDuration(empty)).toBe(24 * 10);
+    const doc = seededSequence();
+    doc.clips = [
+      { ...doc.clips[0], id: "a", startFrame: 0, durationFrames: 15 * 24 },
+      { ...doc.clips[0], id: "b", startFrame: 15 * 24, durationFrames: 15 * 24 },
+      { ...doc.clips[0], id: "c", startFrame: 30 * 24, durationFrames: 15 * 24 },
+    ];
+    expect(recomputeDuration(doc)).toBe(45 * 24);
+    doc.clips = doc.clips.slice(0, 2);
+    expect(recomputeDuration(doc)).toBe(30 * 24);
+    const long = seededSequence();
+    long.clips = [{ ...long.clips[0], startFrame: 0, durationFrames: 125 * 24 }];
+    expect(recomputeDuration(long)).toBe(125 * 24);
   });
 
   it("Trim preserves lineage on the trimmed clip", () => {

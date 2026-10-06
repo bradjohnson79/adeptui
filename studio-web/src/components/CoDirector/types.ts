@@ -72,6 +72,21 @@ export type LastBoundProjectSuggestion = {
 export type CoDirectorMessageStatus = "streaming" | "cancelled" | "interrupted" | "degraded";
 
 /** M2.4 assistant message kinds — user-safe labels, not internal agent names. */
+export type CoDirectorGenerationReadyOutcome = "ready" | "failed" | "cancelled";
+
+/** Durable generation-completion notice (server-authored; Law #39 safe). */
+export type CoDirectorGenerationReady = {
+  messageId: string;
+  executionId: string;
+  outcome: CoDirectorGenerationReadyOutcome;
+  modality: string;
+  actionLabel?: string | null;
+  assetId?: string | null;
+  previewKind?: "image" | "video" | "audio" | string | null;
+  technical?: string | null;
+  content?: string;
+};
+
 export type CoDirectorAssistantMessageType =
   | "answer"
   | "recommendation"
@@ -313,7 +328,17 @@ export interface CoDirectorMessage {
   messageType?: CoDirectorAssistantMessageType;
   /** Workstream H — execution payload for execution_status / completion messages. */
   execution?: CoDirectorMessageExecution;
+  /** Generation ready / fail / cancel notice (server-authored, exactly-once). */
+  generationReady?: CoDirectorGenerationReady;
+  /** Stable approval / proposal identity for chat event dedupe (not shown in UI). */
+  approvalId?: string;
+  proposalId?: string;
+  clientRequestId?: string;
+  requestId?: string;
+  workflowId?: string;
+  workflowSeq?: number;
 }
+
 
 /**
  * What Co-Director is doing with a bounded read tool this turn (M2.2).
@@ -440,6 +465,20 @@ function sanitizeMessagesForCache(messages: CoDirectorMessage[]): CoDirectorMess
       status: m.status,
       messageType: m.messageType,
     };
+    const gr = m.generationReady;
+    if (gr && typeof gr === "object" && typeof gr.messageId === "string") {
+      sanitized.generationReady = {
+        messageId: gr.messageId.slice(0, 64),
+        executionId: typeof gr.executionId === "string" ? gr.executionId.slice(0, 120) : "",
+        outcome: gr.outcome === "failed" || gr.outcome === "cancelled" ? gr.outcome : "ready",
+        modality: typeof gr.modality === "string" ? gr.modality.slice(0, 32) : "image",
+        actionLabel: typeof gr.actionLabel === "string" ? gr.actionLabel.slice(0, 64) : null,
+        assetId: typeof gr.assetId === "string" ? gr.assetId.slice(0, 120) : null,
+        previewKind: typeof gr.previewKind === "string" ? gr.previewKind.slice(0, 16) : null,
+        technical: typeof gr.technical === "string" ? gr.technical.slice(0, 4000) : null,
+        content: typeof gr.content === "string" ? gr.content.slice(0, 500) : undefined,
+      };
+    }
     // Workstream H — preserve execution payload for execution_status / completion
     // messages so the compact progress card survives reload. Bound child_jobs to
     // avoid unbounded payloads; never carry arbitrary nested technical_evidence.

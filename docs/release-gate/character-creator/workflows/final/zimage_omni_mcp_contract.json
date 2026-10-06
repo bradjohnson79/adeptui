@@ -1,0 +1,360 @@
+{
+  "comfy": "http://127.0.0.1:8188",
+  "ok": true,
+  "server_url": "http://127.0.0.1:8188",
+  "TextEncodeZImageOmni": {
+    "name": "TextEncodeZImageOmni",
+    "category": "model/conditioning/z-image",
+    "pack": "core",
+    "description": null,
+    "inputs": [
+      {
+        "name": "clip",
+        "type": "CLIP",
+        "required": true,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      },
+      {
+        "name": "prompt",
+        "type": "STRING",
+        "required": true,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      },
+      {
+        "name": "auto_resize_images",
+        "type": "BOOLEAN",
+        "required": true,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      },
+      {
+        "name": "image_encoder",
+        "type": "CLIP_VISION",
+        "required": false,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      },
+      {
+        "name": "vae",
+        "type": "VAE",
+        "required": false,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      },
+      {
+        "name": "image1",
+        "type": "IMAGE",
+        "required": false,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      },
+      {
+        "name": "image2",
+        "type": "IMAGE",
+        "required": false,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      },
+      {
+        "name": "image3",
+        "type": "IMAGE",
+        "required": false,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "CONDITIONING",
+        "type": "CONDITIONING"
+      }
+    ],
+    "raw_keys": [
+      "category",
+      "cloud_disabled",
+      "deprecated",
+      "description",
+      "display_name",
+      "id",
+      "inputs",
+      "is_api_node",
+      "labels",
+      "name",
+      "output_node",
+      "output_types",
+      "outputs",
+      "pack"
+    ]
+  },
+  "CLIPTextEncode": {
+    "name": "CLIPTextEncode",
+    "category": "model/conditioning",
+    "pack": "core",
+    "description": "Encodes a text prompt using a CLIP model into an embedding that can be used to guide the diffusion model towards generating specific images.",
+    "inputs": [
+      {
+        "name": "text",
+        "type": "STRING",
+        "required": true,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      },
+      {
+        "name": "clip",
+        "type": "CLIP",
+        "required": true,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "CONDITIONING",
+        "type": "CONDITIONING"
+      }
+    ],
+    "raw_keys": [
+      "category",
+      "cloud_disabled",
+      "deprecated",
+      "description",
+      "display_name",
+      "id",
+      "inputs",
+      "is_api_node",
+      "labels",
+      "name",
+      "output_node",
+      "output_types",
+      "outputs",
+      "pack"
+    ]
+  },
+  "VAEEncode": {
+    "name": "VAEEncode",
+    "category": "model/latent",
+    "pack": "core",
+    "description": null,
+    "inputs": [
+      {
+        "name": "pixels",
+        "type": "IMAGE",
+        "required": true,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      },
+      {
+        "name": "vae",
+        "type": "VAE",
+        "required": true,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "LATENT",
+        "type": "LATENT"
+      }
+    ],
+    "raw_keys": [
+      "category",
+      "cloud_disabled",
+      "deprecated",
+      "description",
+      "display_name",
+      "id",
+      "inputs",
+      "is_api_node",
+      "labels",
+      "name",
+      "output_node",
+      "output_types",
+      "outputs",
+      "pack"
+    ]
+  },
+  "LoadImage": {
+    "name": "LoadImage",
+    "category": "image",
+    "pack": "core",
+    "description": null,
+    "inputs": [
+      {
+        "name": "image",
+        "type": "COMBO",
+        "required": true,
+        "optional": null,
+        "default": null,
+        "tooltip": null,
+        "keys": [
+          "choices",
+          "is_link",
+          "name",
+          "options",
+          "required",
+          "section",
+          "type"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "IMAGE",
+        "type": "IMAGE"
+      },
+      {
+        "name": "MASK",
+        "type": "MASK"
+      }
+    ],
+    "raw_keys": [
+      "category",
+      "cloud_disabled",
+      "deprecated",
+      "description",
+      "display_name",
+      "id",
+      "inputs",
+      "is_api_node",
+      "labels",
+      "name",
+      "output_node",
+      "output_types",
+      "outputs",
+      "pack"
+    ]
+  },
+  "templates_zimage": {
+    "total": 0,
+    "shown": 0,
+    "offset": 0,
+    "rows": [],
+    "unmatched_query_words": [
+      "zimage"
+    ],
+    "hint": "No template matched every word. These matched nothing in the gallery: zimage. Drop or reword them and search again \u2014 all query words must match, so each extra word only narrows the result."
+  }
+}

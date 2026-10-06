@@ -16,7 +16,15 @@ from .hosted_providers.video_registry import (
     is_retired_local_video,
 )
 
-LOCAL_I2V_ENGINES = frozenset({"minimax-h3", "ltx-2.5", "ltx-2.5-distilled", "ltx-2.5-full", "ltx-2.5-comfy"})
+LOCAL_I2V_ENGINES = frozenset({
+    "minimax-h3",
+    "minimax-h3-base-optimized",
+    "ltx-2.5",
+    "ltx-2.5-distilled",
+    "ltx-2.5-full",
+    "ltx-2.5-comfy",
+    "hunyuan-video-1.5-distilled",
+})
 RETIRED_LOCAL_ENGINES = RETIRED_LOCAL_VIDEO_GENERATOR_IDS | RETIRED_LOCAL_VIDEO_ALIASES
 LOCAL_START_FRAME_REQUIRED = "LOCAL_START_FRAME_REQUIRED"
 PAID_FAL_APPROVAL_REQUIRED = "PAID_FAL_APPROVAL_REQUIRED"

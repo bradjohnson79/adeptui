@@ -221,6 +221,11 @@ def _pin_resolved_capability(body: dict[str, Any]) -> dict[str, Any]:
     elif provider == "fal" and official:
         body["falImageModelId"] = official
         body.pop("kieImageModelId", None)
+    elif provider == "wavespeed" and official:
+        body["wavespeedImageModelId"] = official
+        body["provider"] = "wavespeed"
+        body.pop("kieImageModelId", None)
+        body.pop("falImageModelId", None)
     elif provider == "local" and official and not body.get("modelFamilyPreference"):
         body["modelFamilyPreference"] = official
     return body
@@ -867,6 +872,100 @@ def _ers_i2i_workflow_key() -> str:
         return ""
     return "qwen2512.ref"
 
+def _looks_like_fal_endpoint(model_id: str, dock_id: str = "") -> bool:
+    """True when this id is a fal still endpoint, not a Kie Market id."""
+    pin = str(model_id or "").strip()
+    dock = str(dock_id or "").strip()
+    blob = f"{pin} {dock}".lower()
+    if dock.lower().endswith("-fal"):
+        return True
+    if pin.startswith(("fal-ai/", "openai/", "krea/")) or "fal-ai/" in blob:
+        if "text-to-image" in pin or "image-to-image" in pin:
+            return False
+        return True
+    try:
+        from ....fal_catalog import FAL_IMAGE_ENDPOINT_BY_DOCK, fal_image_model_id_for_dock
+    except Exception:
+        return False
+    if pin and pin in set(FAL_IMAGE_ENDPOINT_BY_DOCK.values()):
+        return True
+    mapped = fal_image_model_id_for_dock(dock) or fal_image_model_id_for_dock(pin)
+    return bool(mapped)
+
+
+def _fal_still_endpoint(model_id: str, dock_id: str = "") -> str:
+    """Return a fal endpoint. A Kie Market id is never treated as a fal model."""
+    pin = str(model_id or "").strip()
+    dock = str(dock_id or "").strip()
+    if pin and not pin.lower().endswith("-fal"):
+        lowered = pin.lower()
+        if "text-to-image" not in lowered and "image-to-image" not in lowered:
+            if pin.startswith(("fal-ai/", "openai/", "krea/")):
+                return pin
+            try:
+                from ....fal_catalog import FAL_IMAGE_ENDPOINT_BY_DOCK
+
+                if pin in set(FAL_IMAGE_ENDPOINT_BY_DOCK.values()):
+                    return pin
+            except Exception:
+                pass
+    try:
+        from ....fal_catalog import fal_image_model_id_for_dock
+    except Exception:
+        return ""
+    return str(fal_image_model_id_for_dock(dock) or fal_image_model_id_for_dock(pin) or "").strip()
+
+
+def _preflight_hosted_ers_start(
+    *,
+    requested_provider: str = "",
+    requestedProvider: str = "",
+    provider: str = "",
+    provider_kind: str = "",
+    providerKind: str = "",
+    hosted_model_id: str = "",
+    hostedModelId: str = "",
+    model: str = "",
+    fal_image_model_id: str = "",
+    falImageModelId: str = "",
+    kie_image_model_id: str = "",
+    kieImageModelId: str = "",
+    wavespeedImageModelId: str = "",
+    wavespeed_image_model_id: str = "",
+) -> None:
+    """Fail closed before any ERS sheet write when the hosted route cannot start."""
+    from ....image_product.compile import explicit_hosted_provider
+
+    requested = explicit_hosted_provider(
+        {
+            "requested_provider": requested_provider or requestedProvider,
+            "provider": provider,
+            "providerKind": provider_kind or providerKind,
+        }
+    )
+    dock = str(hosted_model_id or hostedModelId or model or "").strip()
+    fal_pin = str(fal_image_model_id or falImageModelId or "").strip()
+    kie_pin = str(kie_image_model_id or kieImageModelId or "").strip()
+    wavespeed_pin = str(wavespeedImageModelId or wavespeed_image_model_id or "").strip()
+    if not requested and _looks_like_fal_endpoint(fal_pin, dock):
+        requested = "fal"
+    elif not requested and wavespeed_pin and not fal_pin:
+        requested = "wavespeed"
+    if requested == "fal":
+        endpoint = _fal_still_endpoint(fal_pin, dock)
+        if not endpoint:
+            raise RuntimeError("fal.ai could not start this environment generation.")
+    elif requested == "wavespeed":
+        if not (wavespeed_pin or dock):
+            raise RuntimeError("wavespeed.ai could not start this environment generation.")
+    elif requested == "kie":
+        # Legacy GPT Image 2 on kie is resolved later; only hard-fail empty hosted pins.
+        gpt_blob = " ".join([dock, kie_pin, str(model or "")]).lower()
+        legacy_gpt = "gpt-image-2" in gpt_blob and "2.5" not in gpt_blob
+        if not legacy_gpt and not (kie_pin or dock):
+            raise RuntimeError("kie.ai could not start this environment generation.")
+
+
 def _is_explicit_gpt_image_2(creator_model: dict[str, Any]) -> bool:
     """True only when the creator explicitly selected GPT Image 2 (Kie)."""
     blob = " ".join(
@@ -929,6 +1028,10 @@ def handle(
     props: list | None = None,
     isGlobal: bool = False,
     is_global: bool = False,
+    requested_provider: str = "",
+    requestedProvider: str = "",
+    wavespeedImageModelId: str = "",
+    wavespeed_image_model_id: str = "",
 ) -> dict[str, Any]:
     """Enqueue ONE Image Core job (purpose=environment_reference_sheet) and persist the asset.
 
@@ -992,29 +1095,63 @@ def handle(
             or (str(scene_intent.summary).strip() if scene_intent is not None else "")
             or _GENERIC_SHEET_DESCRIPTION
         )
-        from ....creator_scope.contract import normalize_is_global
+        from ....creator_scope.contract import CreatorScopeError, normalize_is_global
         from ....environment_reference_sheet.store import (
             check_environment_tag_collision,
+            find_reusable_environment_draft,
             sync_environment_scope,
         )
 
+        # ENVIRONMENT_DRAFT_ERS_SEPARATION: never mint a new ERS row when the
+        # hosted provider cannot start. Validate before create_sheet.
+        _preflight_hosted_ers_start(
+            requested_provider=requested_provider,
+            requestedProvider=requestedProvider,
+            provider=provider,
+            provider_kind=provider_kind,
+            providerKind=providerKind,
+            hosted_model_id=hosted_model_id,
+            hostedModelId=hostedModelId,
+            model=model,
+            fal_image_model_id=fal_image_model_id,
+            falImageModelId=falImageModelId,
+            kie_image_model_id=kie_image_model_id,
+            kieImageModelId=kieImageModelId,
+            wavespeedImageModelId=wavespeedImageModelId,
+            wavespeed_image_model_id=wavespeed_image_model_id,
+        )
         next_global = normalize_is_global(isGlobal if isGlobal else is_global)
-        try:
-            check_environment_tag_collision(
-                db,
-                project_id=project_id,
-                name=sheet_name,
-                making_global=next_global,
-            )
-        except ValueError as exc:
-            raise RuntimeError(str(exc)) from exc
-        sheet = create_sheet(
+        reusable = find_reusable_environment_draft(
+            existing_sheets,
             project_id=project_id,
             name=sheet_name,
-            description=sheet_description,
-            scene_id=scene_id or None,
-            is_global=next_global,
         )
+        if reusable is not None:
+            sheet = reusable
+            if sheet_description.strip():
+                sheet.description = sheet_description
+                profile = getattr(sheet, "profile", None)
+                if profile is not None:
+                    profile.description = sheet_description
+        else:
+            try:
+                check_environment_tag_collision(
+                    db,
+                    project_id=project_id,
+                    name=sheet_name,
+                    making_global=next_global,
+                )
+            except CreatorScopeError as exc:
+                raise RuntimeError(exc.message) from exc
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
+            sheet = create_sheet(
+                project_id=project_id,
+                name=sheet_name,
+                description=sheet_description,
+                scene_id=scene_id or None,
+                is_global=next_global,
+            )
 
     # Populate the EnvironmentProfile from the Scene Intent when the profile
     # still carries generic defaults (never stomp curated fields).
@@ -1075,14 +1212,49 @@ def handle(
     planning_prompt = str(
         environmentPrompt or prompt or name or description or ""
     ).strip()
-    # ERS = GPT Image 2 API exclusively. Qwen local is not an ERS path.
+    # Creator-selected Qwen uses the existing local workflows.
+    # An explicit Environment Creator provider is strict. Unset still uses
+    # GPT Image 2 on kie for the older Spatial Map caller.
+    from ....image_product.compile import explicit_hosted_provider
+
+    requested = explicit_hosted_provider(
+        {
+            "requested_provider": requested_provider or requestedProvider,
+            "provider": provider,
+            "providerKind": provider_kind or providerKind,
+        }
+    )
+    wavespeed_model = str(
+        wavespeedImageModelId
+        or wavespeed_image_model_id
+        or creator_model.get("wavespeedImageModelId")
+        or ""
+    ).strip()
+    fal_pin = str(creator_model.get("falImageModelId") or "").strip()
+    kie_pin = str(creator_model.get("kieImageModelId") or "").strip()
+    dock_id = str(creator_model.get("hostedModelId") or creator_model.get("model") or "").strip()
+    if not requested and _looks_like_fal_endpoint(fal_pin, dock_id):
+        requested = "fal"
+    elif not requested and wavespeed_model and not fal_pin:
+        requested = "wavespeed"
+    # GPT Image 2 on kie keeps the certified Market image-to-image / text-to-image ids.
+    # A fal or wavespeed model id must not flip that decision, and fal's own
+    # GPT Image 2 endpoint must not enter the Kie path.
+    gpt_parts = [dock_id, str(creator_model.get("model") or "")]
+    if requested in {"", "kie"}:
+        gpt_parts.append(kie_pin)
+    gpt_blob = " ".join(gpt_parts).lower()
+    selected_is_gpt = requested != "fal" and "gpt-image-2" in gpt_blob and "2.5" not in gpt_blob
+    legacy_gpt_kie = selected_is_gpt and requested in {"", "kie"}
+    hosted_selected = requested in {"fal", "wavespeed"} or (requested == "kie" and not legacy_gpt_kie)
     qwen_selected = _is_qwen2512_selection(creator_model)
-    gpt_selected = _is_explicit_gpt_image_2(creator_model)
+    gpt_selected = _is_explicit_gpt_image_2(creator_model) and not hosted_selected
     unspecified = not qwen_selected and not gpt_selected and not any(
         str(creator_model.get(k) or "").strip()
         for k in ("model", "modelFamilyPreference", "hostedModelId", "kieImageModelId", "falImageModelId")
     )
     qwen_i2i = False
+    qwen_t2i = False
     gpt_i2i = False
     gpt_t2i = False
     if not source_pixels and not planning_prompt:
@@ -1091,12 +1263,63 @@ def handle(
             "Provide a source/reference environment asset, or describe the environment in text. "
             "Spatial Map is optional."
         )
-    if qwen_selected:
-        raise RuntimeError(
-            "Environment Reference Sheets use GPT Image 2 API only. "
-            "Qwen local cannot generate an ERS. Configure GPT Image 2 to continue."
-        )
-    if gpt_selected or unspecified:
+    if qwen_selected and source_pixels:
+        qwen_i2i = True
+        creator_model = {
+            **creator_model,
+            "model": "qwen2512",
+            "modelFamilyPreference": "qwen2512",
+            "source": "local",
+            "providerKind": "local",
+            "forceWorkflowKey": "qwen2512.ref",
+            "lockModelFamily": True,
+        }
+    elif qwen_selected and planning_prompt:
+        qwen_t2i = True
+        creator_model = {
+            **creator_model,
+            "model": "qwen2512",
+            "modelFamilyPreference": "qwen2512",
+            "source": "local",
+            "providerKind": "local",
+            "forceWorkflowKey": "qwen2512.txt2img",
+            "lockModelFamily": True,
+        }
+    elif hosted_selected:
+        official_fal = str(creator_model.get("falImageModelId") or "").strip()
+        official_kie = str(creator_model.get("kieImageModelId") or "").strip()
+        official_wavespeed = wavespeed_model
+        dock = str(creator_model.get("hostedModelId") or creator_model.get("model") or "").strip()
+        creator_model = {
+            **creator_model,
+            "hostedModelId": dock,
+            "source": "api",
+            "providerKind": requested,
+            "provider": requested,
+        }
+        if requested == "fal":
+            endpoint = _fal_still_endpoint(official_fal, dock)
+            if not endpoint:
+                raise RuntimeError("fal.ai could not start this environment generation.")
+            creator_model["falImageModelId"] = endpoint
+            creator_model["requested_provider"] = "fal"
+            creator_model.pop("kieImageModelId", None)
+            creator_model.pop("wavespeedImageModelId", None)
+        elif requested == "wavespeed":
+            if not (official_wavespeed or dock):
+                raise RuntimeError("wavespeed.ai could not start this environment generation.")
+            creator_model["wavespeedImageModelId"] = official_wavespeed or dock
+            creator_model["requested_provider"] = "wavespeed"
+            creator_model.pop("kieImageModelId", None)
+            creator_model.pop("falImageModelId", None)
+        else:
+            if not (official_kie or dock):
+                raise RuntimeError("kie.ai could not start this environment generation.")
+            creator_model["kieImageModelId"] = official_kie or dock
+            creator_model["requested_provider"] = "kie"
+            creator_model.pop("falImageModelId", None)
+            creator_model.pop("wavespeedImageModelId", None)
+    elif gpt_selected or unspecified:
         creator_model = {
             **creator_model,
             "hostedModelId": "gpt-image-2-kie",
@@ -1122,7 +1345,7 @@ def handle(
             # No source_pixels but environmentPrompt (or name/description/prompt) → GPT T2I.
             gpt_t2i = True
             creator_model["kieImageModelId"] = _gpt_t2i_official_id()
-    if not gpt_i2i and not gpt_t2i:
+    if not qwen_i2i and not qwen_t2i and not gpt_i2i and not gpt_t2i and not hosted_selected:
         raise RuntimeError(
             "Environment Reference Sheets use GPT Image 2 API only. "
             "This generator is not authorized for ERS. Configure GPT Image 2 image-to-image "
@@ -1147,7 +1370,7 @@ def handle(
     from ...knowledgebase.multimodal_continuity.provenance import stamp_continuity_packet
 
     requested_panel = str(panel_task or panelTask or "whole_sheet").strip() or "whole_sheet"
-    provider_name = "qwen" if qwen_i2i else ("gpt-image-2" if (gpt_i2i or gpt_t2i) else "")
+    provider_name = "qwen" if (qwen_i2i or qwen_t2i) else ("gpt-image-2" if (gpt_i2i or gpt_t2i) else "")
     scene_title = ""
     location_type = ""
     if scene_intent is not None:
@@ -1175,7 +1398,8 @@ def handle(
         )
     except ContinuityCompileError as exc:
         # Map-less prompt-only ERS: continuity is enrichment, not a hard gate.
-        if gpt_t2i and not map_id and planning_prompt:
+        # This includes an explicit fal / kie / wavespeed selection, not only the legacy Kie GPT path.
+        if (gpt_t2i or qwen_t2i or hosted_selected) and not map_id and planning_prompt:
             logger.info("ERS prompt-only skipped continuity compile: %s", exc)
             continuity_packet = None
         else:
@@ -1244,6 +1468,48 @@ def handle(
             "workflow": _ers_i2i_workflow_key(),
             "authoritativeSourceAssetId": source_pixels,
         }
+    elif qwen_t2i:
+        body["forceWorkflowKey"] = "qwen2512.txt2img"
+        body["allow_force_workflow_key"] = True
+        body["lockModelFamily"] = True
+        body["model"] = "qwen2512"
+        body["modelFamilyPreference"] = "qwen2512"
+        body.pop("sourceAssetId", None)
+        body.pop("source_asset_id", None)
+        body.pop("referenceImage", None)
+        body.pop("reference_image", None)
+        body.pop("input_urls", None)
+        body["creativeContext"]["operationIntent"] = "image.generate"
+        body["creativeContext"]["referenceGrounding"] = {
+            "mode": "text",
+            "workflow": "qwen2512.txt2img",
+        }
+    elif hosted_selected:
+        body["hostedModelId"] = str(creator_model.get("hostedModelId") or "")
+        body["providerKind"] = requested
+        body["provider"] = requested
+        body["requested_provider"] = requested
+        body["source"] = "api"
+        body["lockModelFamily"] = True
+        body.pop("forceWorkflowKey", None)
+        if requested == "fal":
+            body["falImageModelId"] = str(creator_model.get("falImageModelId") or "")
+            body.pop("kieImageModelId", None)
+            body.pop("wavespeedImageModelId", None)
+        elif requested == "wavespeed":
+            body["wavespeedImageModelId"] = str(creator_model.get("wavespeedImageModelId") or "")
+            body.pop("kieImageModelId", None)
+            body.pop("falImageModelId", None)
+        else:
+            body["kieImageModelId"] = str(creator_model.get("kieImageModelId") or "")
+            body.pop("falImageModelId", None)
+            body.pop("wavespeedImageModelId", None)
+        if not source_pixels:
+            body.pop("sourceAssetId", None)
+            body.pop("source_asset_id", None)
+            body.pop("referenceImage", None)
+            body.pop("reference_image", None)
+            body.pop("input_urls", None)
     elif gpt_i2i:
         body["hostedModelId"] = "gpt-image-2-kie"
         body["kieImageModelId"] = _gpt_i2i_official_id()
@@ -1338,6 +1604,12 @@ def handle(
                 f"(asset {reference_id}); not pixel image-to-image.",
                 "",
             ).strip()
+    elif qwen_t2i:
+        body.pop("input_urls", None)
+        body["forceWorkflowKey"] = "qwen2512.txt2img"
+        body["lockModelFamily"] = True
+        ctx["operationIntent"] = "image.generate"
+        ctx["referenceGrounding"] = {"mode": "text", "workflow": "qwen2512.txt2img"}
     elif gpt_t2i:
         body.pop("input_urls", None)
         ctx["operationIntent"] = "image.generate"
@@ -1357,6 +1629,16 @@ def handle(
     except Exception as exc:
         logger.info("ERS Image Core compile used seed prompt: %s", exc)
     body = _pin_resolved_capability(body)
+    if qwen_t2i:
+        body["forceWorkflowKey"] = "qwen2512.txt2img"
+        body["allow_force_workflow_key"] = True
+        body["lockModelFamily"] = True
+        body["model"] = "qwen2512"
+        body["modelFamilyPreference"] = "qwen2512"
+        ctx = body.setdefault("creativeContext", {})
+        if isinstance(ctx, dict):
+            ctx["resolvedWorkflowKey"] = "qwen2512.txt2img"
+            ctx["workflowKey"] = "qwen2512.txt2img"
     if gpt_i2i:
         official = str(
             body.get("kieImageModelId")
@@ -1377,6 +1659,46 @@ def handle(
         # Prefer T2I Market id for prompt-only; do not invent new persist schema.
         if official and "image-to-image" in official and "text-to-image" not in official:
             body["kieImageModelId"] = _gpt_t2i_official_id()
+    if requested == "fal":
+        endpoint = _fal_still_endpoint(
+            str(body.get("falImageModelId") or ""),
+            str(body.get("hostedModelId") or ""),
+        )
+        if not endpoint:
+            raise RuntimeError("fal.ai could not start this environment generation.")
+        body["falImageModelId"] = endpoint
+        body["provider"] = "fal"
+        body["providerKind"] = "fal"
+        body["requested_provider"] = "fal"
+        body.pop("kieImageModelId", None)
+        body.pop("wavespeedImageModelId", None)
+    elif requested == "wavespeed":
+        if not str(body.get("wavespeedImageModelId") or "").strip():
+            raise RuntimeError("wavespeed.ai could not start this environment generation.")
+        body["provider"] = "wavespeed"
+        body["providerKind"] = "wavespeed"
+        body["requested_provider"] = "wavespeed"
+        body.pop("kieImageModelId", None)
+        body.pop("falImageModelId", None)
+    elif requested == "kie" and not (gpt_i2i or gpt_t2i):
+        body["provider"] = "kie"
+        body["requested_provider"] = "kie"
+        body.pop("falImageModelId", None)
+        body.pop("wavespeedImageModelId", None)
+
+    dispatch_provider = requested or ("kie" if (gpt_i2i or gpt_t2i) else "")
+    dispatch_model = str(
+        body.get("falImageModelId")
+        or body.get("wavespeedImageModelId")
+        or body.get("kieImageModelId")
+        or body.get("hostedModelId")
+        or ""
+    )
+    logger.info(
+        "Environment Creator provider=%s model=%s",
+        dispatch_provider or "unspecified",
+        dispatch_model,
+    )
 
     package = EnvironmentReferencePackage(
         project_id=project_id,

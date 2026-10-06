@@ -106,6 +106,11 @@ RESULT_NOT_REGISTERED_MESSAGE = (
     "into the Library. The render itself did not fail."
 )
 
+ENGINE_STOPPED_BEFORE_SAVE = (
+    "This shot stopped before a video was saved. Nothing was added to the Library. "
+    "Start the shot again."
+)
+
 WORKER_LOST_PROMPT_MESSAGE = (
     "The studio worker lost this job before a result was saved. The local picture engine "
     "is still reachable, but it is not working on this prompt anymore."
@@ -121,6 +126,21 @@ _NEVER_STARTED_LIVE_SEC = 180
 _STALE_RUNNING_SEC = 60
 
 _DEFAULT_RECOVERY_MAX_AGE_HOURS = 24.0
+
+
+def comfy_history_activity(status: dict) -> str | None:
+    """Map a Comfy history status onto done | failed.
+
+    An interrupted or errored prompt has status_str "error" and did not finish
+    a video. Only a completed success may be harvested.
+    """
+    if not isinstance(status, dict) or not status:
+        return None
+    if status.get("completed") is True or status.get("status_str") == "success":
+        return "done"
+    if status.get("status_str") == "error":
+        return "failed"
+    return None
 
 
 def _recovery_max_age_hours() -> float:
@@ -238,6 +258,16 @@ class JobQueue:
         self._cancel: set[str] = set()
         self._active_prompt: dict[str, str] = {}
         self._heavy_local_active: Optional[str] = None
+        self.adept_submissions_paused = False
+
+    def pause_adept_submissions(self) -> dict[str, bool]:
+        """Hold new Adept submissions. The job already inside Comfy keeps running."""
+        self.adept_submissions_paused = True
+        return {"paused": True}
+
+    def resume_adept_submissions(self) -> dict[str, bool]:
+        self.adept_submissions_paused = False
+        return {"paused": False}
 
     def start(self) -> None:
         if self._task is None:
@@ -414,6 +444,8 @@ class JobQueue:
         *,
         on_progress: Any = None,
         preview_engine: str | None = None,
+        progress_graph: str | None = None,
+        sage_attention: str | None = None,
     ) -> dict:
         """Wait for Comfy with cancel observation + prompt binding. Optionally
         publish live low-res preview frames to the preview bus."""
@@ -444,6 +476,7 @@ class JobQueue:
             # spans wait_for_prompt and deadlocks the SessionLocal commit below,
             # stranding MiniMax H3 at writing_output/done with a finished Comfy
             # file and no studio ingest.
+            init_stalled = False
             db = SessionLocal()
             try:
                 row = db.get(Job, job.id)
@@ -451,6 +484,7 @@ class JobQueue:
                     if row.status in ("cancelling", "cancel_requested", "cancelled", "cancel_failed_runtime_active"):
                         return
                     from .video_runtime.progress_telemetry import (
+                        INIT_STALL_LABEL,
                         apply_heartbeat,
                         extract_progress_telemetry,
                         is_grounded_progress_message,
@@ -472,17 +506,33 @@ class JobQueue:
                         node=node,
                         job_status=row.status or "running",
                         grounded=grounded,
+                        graph=progress_graph,
+                        sage_attention=sage_attention,
                     )
-                    if grounded or float(p or 0) >= 1.0:
-                        row.progress = p
-                    row.message = text[:4000]
-                    if stage:
-                        row.stage = str(stage)[:64]
+                    init_stalled = bool(tel.get("initStalled"))
+                    if init_stalled:
+                        row.message = INIT_STALL_LABEL[:4000]
+                        row.progress = 0
+                        row.stage = "stalled"
+                    else:
+                        if grounded or float(p or 0) >= 1.0:
+                            row.progress = p
+                        row.message = text[:4000]
+                        if stage:
+                            row.stage = str(stage)[:64]
                     row.history_json = merge_progress_telemetry(row.history_json, tel)
                     row.updated_at = datetime.utcnow()
                     db.commit()
             finally:
                 db.close()
+            if init_stalled:
+                from .video_runtime.progress_telemetry import INIT_STALL_LABEL
+
+                try:
+                    await comfy.interrupt()
+                except Exception:
+                    logging.getLogger(__name__).warning("Comfy interrupt after init stall failed", exc_info=True)
+                raise RuntimeError(INIT_STALL_LABEL)
             if on_progress:
                 try:
                     result = on_progress(p, msg)
@@ -718,6 +768,8 @@ class JobQueue:
                     abandoned.append(job.id)
                     continue
                 to_start.append(job.id)
+            if self.adept_submissions_paused:
+                to_start = []
             if abandoned:
                 db.commit()
         finally:
@@ -767,12 +819,9 @@ class JobQueue:
                 hist = client.get(f"{base}/history/{pid}")
                 if hist.status_code == 200:
                     entry = (hist.json() or {}).get(pid) or {}
-                    status = entry.get("status") or {}
-                    if status.get("completed") is True or status.get("status_str") in {
-                        "success",
-                        "error",
-                    }:
-                        return "done"
+                    activity = comfy_history_activity(entry.get("status") or {})
+                    if activity:
+                        return activity
                 queue = client.get(f"{base}/queue")
                 if queue.status_code == 200:
                     payload = queue.json() or {}
@@ -976,6 +1025,13 @@ class JobQueue:
                     continue
                 activity = self._comfy_prompt_activity(prompt_id)
                 if activity == "active" or activity == "unknown":
+                    continue
+                if activity == "failed":
+                    job.status = "failed"
+                    job.stage = "failed"
+                    job.message = ENGINE_STOPPED_BEFORE_SAVE[:4000]
+                    job.updated_at = datetime.utcnow()
+                    failed.append(job.id)
                     continue
                 if activity == "done":
                     if self._harvest_completed_local_comfy_job(db, job):
@@ -1349,6 +1405,11 @@ class JobQueue:
             job_id = await self._q.get()
             self._enqueued.discard(job_id)
             try:
+                if self.adept_submissions_paused:
+                    self._enqueued.add(job_id)
+                    await self._q.put(job_id)
+                    await asyncio.sleep(1.0)
+                    continue
                 if job_id in self._cancel:
                     self._cancel.discard(job_id)
                     self._set_status(job_id, "cancelled", 0, "Cancelled")
@@ -1858,11 +1919,14 @@ class JobQueue:
                 "fal_kling",
                 "fal_veo",
                 "fal_runway",
+                "hunyuan-video-1.5-distilled",
             }:
                 scene.engine = pref
             gen_pref = str(_tl_params.get("generatorId") or "").strip().lower()
             if gen_pref.startswith("minimax-h3"):
                 scene.engine = "minimax-h3"
+            if gen_pref == "hunyuan-video-1.5-distilled":
+                scene.engine = gen_pref
         resolved_engine = resolve_engine_id(scene.engine, project, scene)
         scene.engine = resolved_engine
         job.stage = "preparing"
@@ -1945,6 +2009,29 @@ class JobQueue:
                 _req_dur = _job_params.get("requestedDurationSec")
                 if isinstance(_req_dur, (int, float)) and float(_req_dur) > 0:
                     _spec_length_seconds = float(_req_dur)
+            from .video_runtime.local_video_profiles import is_hunyuan_15_distilled
+            from .workflows.hunyuan15_distilled_builder import hunyuan_size
+
+            if is_hunyuan_15_distilled(
+                str(_job_params.get("generatorId") or _job_params.get("engine") or resolved_engine)
+            ):
+                width, height = hunyuan_size(str(_job_params.get("aspectRatio") or "16:9"))
+                plan_width, plan_height = width, height
+            from .video_runtime.workflow_resolver import is_ltx_25_generator
+
+            if bool(_job_params.get("timelineGeneration")) and is_ltx_25_generator(
+                str(_job_params.get("generatorId") or _job_params.get("variant") or resolved_engine)
+            ):
+                # Whole seconds stay on the shot. Execution uses the nearest 8n+1 count.
+                from .video_runtime.legal_canvas import ltx_execution_frames
+                import json as _json
+
+                _legal = ltx_execution_frames(_spec_length_seconds, int(plan_fps))
+                length = _legal
+                _spec_length_seconds = _legal / float(plan_fps or 24)
+                _job_params["legalFrameCount"] = _legal
+                job.params_json = _json.dumps(_job_params)
+                db.commit()
             _spec = preflight_spec(
                 str(resolved_engine),
                 width=width,
@@ -1989,14 +2076,21 @@ class JobQueue:
                         _sec = float(_req) if isinstance(_req, (int, float)) and float(_req) > 0 else float(bd)
                         length = int(round(_sec * float(plan_fps or 24)))
                     else:
-                        from .video_runtime.legal_canvas import assert_legal_duration
+                        from .video_runtime.workflow_resolver import is_ltx_25_generator
 
-                        length = assert_legal_duration(
-                            str(resolved_engine),
-                            float(bd),
-                            int(plan_fps),
-                            surface="r2v",
-                        )
+                        if is_ltx_25_generator(str(params.get("generatorId") or params.get("variant") or resolved_engine)):
+                            from .video_runtime.legal_canvas import ltx_execution_frames
+
+                            length = ltx_execution_frames(float(bd), int(plan_fps))
+                        else:
+                            from .video_runtime.legal_canvas import assert_legal_duration
+
+                            length = assert_legal_duration(
+                                str(resolved_engine),
+                                float(bd),
+                                int(plan_fps),
+                                surface="r2v",
+                            )
                 bseed = params.get("seed")
                 if isinstance(bseed, int) and bseed >= 0:
                     seed = bseed
@@ -2036,9 +2130,24 @@ class JobQueue:
             prefix = f"{prefix}/job_{job.id[:8]}"
             # TIMELINE_BATCH_LTX: override start frame with the per-batch
             # startImageAssetId when present (BATCH_ISOLATION).
-            if is_timeline_batch:
+            from .video_runtime.workflow_resolver import is_ltx_25_generator
+
+            ltx_timeline = is_timeline_batch and is_ltx_25_generator(
+                str(params.get("generatorId") or params.get("variant") or resolved_engine)
+            )
+            if ltx_timeline and str(params.get("ltxMode") or "") == "three_frame":
+                raise RuntimeError(
+                    "LTX_THREE_FRAME_UNSUPPORTED: LTX 2.5 on Timeline does not take a third frame. "
+                    "Use Text to Video, Start Frame, or Start + End Frame."
+                )
+            if ltx_timeline and str(params.get("generationMode") or "") == "text_to_video":
+                start = ""
+                middle = ""
+                end = ""
+                params["startImageAssetId"] = None
+            elif is_timeline_batch:
                 b_start_id = params.get("startImageAssetId")
-                if not b_start_id:
+                if not b_start_id and not ltx_timeline:
                     r2v = params.get("r2v") if isinstance(params.get("r2v"), dict) else {}
                     b_start_id = str(r2v.get("mappedStartAssetId") or "").strip() or None
                     if not b_start_id:
@@ -2052,28 +2161,64 @@ class JobQueue:
                                 break
                     if b_start_id:
                         params["startImageAssetId"] = b_start_id
+                if ltx_timeline and not b_start_id:
+                    raise RuntimeError(
+                        "LTX_START_FRAME_REQUIRED: Choose a start picture for this LTX shot."
+                    )
                 if b_start_id:
                     b_start_asset = self._get_asset(db, b_start_id)
+                    if ltx_timeline and (b_start_asset is None or str(getattr(b_start_asset, "kind", "") or "") != "image"):
+                        raise RuntimeError(
+                            "LTX_FRAME_INPUT_INVALID: The LTX start frame must be a still image in this project's Library."
+                        )
                     if b_start_asset:
                         start = await self._ensure_comfy_image(b_start_asset)
+                    if ltx_timeline:
+                        middle = ""
+                        if str(params.get("ltxMode") or "") != "start_end":
+                            end = ""
+                            params["endImageAssetId"] = None
                 b_end_id = params.get("endImageAssetId")
-                if b_end_id:
+                if b_end_id and str(params.get("ltxMode") or "") == "start_end":
+                    b_end_asset = self._get_asset(db, b_end_id)
+                    if ltx_timeline and (b_end_asset is None or str(getattr(b_end_asset, "kind", "") or "") != "image"):
+                        raise RuntimeError(
+                            "LTX_FRAME_INPUT_INVALID: The LTX end frame must be a still image in this project's Library."
+                        )
+                    if b_end_asset:
+                        end = await self._ensure_comfy_image(b_end_asset)
+                elif b_end_id and not ltx_timeline:
                     b_end_asset = self._get_asset(db, b_end_id)
                     if b_end_asset:
                         end = await self._ensure_comfy_image(b_end_asset)
-            if is_timeline_batch and _timeline_job_is_h3(params, resolved_engine):
-                # Director cutover (fail-closed): Film Timeline MiniMax H3 Local
-                # uses ONLY the MiniMaxH3Director bridge. Missing/false useDirector
-                # is a human Timeline error — NEVER silent legacy ref2v. If Director
-                # raises, the error propagates (no catch→ref2v fallback).
-                if not params.get("useDirector"):
+                if ltx_timeline and str(params.get("ltxMode") or "") == "start_end" and not end:
                     raise RuntimeError(
-                        "H3_DIRECTOR_REQUIRED: Film Timeline MiniMax H3 Local needs "
-                        "Director mode (useDirector=true). This shot cannot run on the "
-                        "legacy Reference-to-Video path. Re-submit from Film Timeline "
-                        "so Director is selected, or contact support if this keeps happening."
+                        "LTX_END_FRAME_REQUIRED: Choose an end picture for this LTX shot."
                     )
-                dest = await self._build_and_run_h3_director(
+            if is_timeline_batch and _timeline_job_is_h3(params, resolved_engine):
+                # H3 fast renderer (fail-closed): Film Timeline MiniMax H3 Local
+                # uses only h3_fast_renderer. Missing the flag is a submit error.
+                # Director and the retired ref2v builder are not fallbacks.
+                if not params.get("useH3FastRenderer"):
+                    raise RuntimeError(
+                        "H3_FAST_RENDERER_REQUIRED: MiniMax H3 — Local could not start. "
+                        "Submit the shot again from the timeline."
+                    )
+                dest = await self._build_and_run_h3_fast(
+                    db,
+                    project,
+                    scene,
+                    job,
+                    positive=positive,
+                    prefix=prefix,
+                    params=params,
+                    seed=seed,
+                )
+                scene.output_path = str(dest)
+                db.commit()
+                return dest
+            if is_timeline_batch and str(params.get("generatorId") or "").strip().lower() == "hunyuan-video-1.5-distilled":
+                dest = await self._build_and_run_hunyuan(
                     db,
                     project,
                     scene,
@@ -2137,11 +2282,18 @@ class JobQueue:
             from .video_runtime.job_model import merge_video_runtime_history
 
             intent = "shot_render" if job.kind == "render_shot" else "scene_render"
+            ltx_text = ltx_timeline and str(params.get("generationMode") or "") == "text_to_video"
+            if ltx_text:
+                resolve_start = None
+            elif ltx_timeline:
+                resolve_start = params.get("startImageAssetId")
+            else:
+                resolve_start = scene.start_asset_id or params.get("startImageAssetId")
             contract = resolve_from_scene_params(
                 engine=scene.engine,
-                start_asset_id=scene.start_asset_id or params.get("startImageAssetId"),
-                middle_asset_id=scene.middle_asset_id,
-                end_asset_id=scene.end_asset_id or params.get("endImageAssetId"),
+                start_asset_id=resolve_start,
+                middle_asset_id=None if ltx_timeline else scene.middle_asset_id,
+                end_asset_id=None if ltx_timeline else (scene.end_asset_id or params.get("endImageAssetId")),
                 audio_asset_id=scene.audio_asset_id,
                 paid_fal_approved=bool(params.get("paidFallbackApproved")),
                 intent=intent,
@@ -2163,7 +2315,7 @@ class JobQueue:
                 {"workflowContract": contract.to_dict(), "modelIdentity": identity},
             )
             db.commit()
-            if is_timeline_batch and str(contract.leaf_workflow_key or "").endswith(".t2v"):
+            if is_timeline_batch and str(contract.leaf_workflow_key or "").endswith(".t2v") and not ltx_text:
                 raise RuntimeError(
                     "TIMELINE_R2V_REQUIRED: Timeline does not generate text-to-video. "
                     "Assign a character, place, or previous-take picture first."
@@ -2824,6 +2976,430 @@ class JobQueue:
             )
         except Exception:
             logging.getLogger(__name__).warning("Failed to register audio provenance", exc_info=True)
+        db.commit()
+        return dest
+
+    async def _build_and_run_hunyuan(
+        self,
+        db: Session,
+        project: Project,
+        scene: Scene,
+        job: Job,
+        *,
+        positive: str,
+        prefix: str,
+        params: dict,
+        seed: int,
+    ) -> Path:
+        """HunyuanVideo 1.5 Distilled. Text to Video, or a real Start Frame. No frame paste."""
+
+        from .video_runtime.job_model import merge_video_runtime_history
+        from .workflows.hunyuan15_distilled_builder import (
+            I2V_STEPS,
+            T2V_STEPS,
+            build_hunyuan_distilled_workflow,
+            hunyuan_frames,
+            hunyuan_size,
+        )
+
+        mode = str(params.get("generationMode") or "text_to_video")
+        i2v = mode == "image_to_video"
+        start_name = ""
+        if i2v:
+            asset_id = str(params.get("startImageAssetId") or "").strip()
+            asset = self._get_asset(db, asset_id) if asset_id else None
+            if asset is None or str(getattr(asset, "kind", "") or "") != "image":
+                raise RuntimeError("Choose a start picture for this Hunyuan shot.")
+            start_name = await self._ensure_comfy_image(asset)
+            if not start_name:
+                raise RuntimeError("HunyuanVideo 1.5 Distilled could not prepare the start picture.")
+        width, height = hunyuan_size(str(params.get("aspectRatio") or "16:9"))
+        resolved = params.get("resolvedGeneration") if isinstance(params.get("resolvedGeneration"), dict) else {}
+        if resolved.get("width") and resolved.get("height"):
+            width = int(resolved["width"])
+            height = int(resolved["height"])
+        duration = float(params.get("requestedDurationSec") or params.get("duration") or 5.0)
+        prompt = str(params.get("prompt") or positive or "").strip()
+        if not prompt:
+            raise RuntimeError("This shot needs a description before HunyuanVideo 1.5 Distilled can run.")
+        steps = I2V_STEPS if i2v else T2V_STEPS
+        wf = build_hunyuan_distilled_workflow(
+            mode="i2v" if i2v else "t2v",
+            prompt=prompt,
+            filename_prefix=prefix,
+            seed=int(seed),
+            width=width,
+            height=height,
+            duration_sec=duration,
+            start_image=start_name,
+        )
+        try:
+            await comfy.free_memory(unload_models=True, free_memory=True)
+        except Exception:
+            logging.getLogger(__name__).warning("Comfy free_memory before Hunyuan failed", exc_info=True)
+        job.message = "Preparing HunyuanVideo 1.5 Distilled"
+        job.history_json = merge_video_runtime_history(
+            job.history_json,
+            {
+                "hunyuanDistilled": {
+                    "mode": "start_frame" if i2v else "text_to_video",
+                    "unet": wf["2"]["inputs"]["unet_name"],
+                    "width": width,
+                    "height": height,
+                    "frames": hunyuan_frames(duration),
+                    "steps": steps,
+                    "cfg": 1,
+                    "startImage": bool(start_name),
+                    "resolutionClass": "480p",
+                }
+            },
+        )
+        db.commit()
+        prompt_id = await comfy.queue_prompt(wf)
+        job.comfy_prompt_id = prompt_id
+        job.stage = "preparing_model"
+        job.message = "Preparing model"
+        self.bind_prompt(job.id, prompt_id)
+        db.commit()
+        history = await self._wait_comfy(job, prompt_id, on_progress=None, preview_engine="hunyuan-video-1.5-distilled")
+        db.expire_all()
+        job = db.get(Job, job.id) or job
+        files = comfy.find_output_files(history)
+        if not files:
+            raise RuntimeError("HunyuanVideo 1.5 Distilled finished, but the video was not saved.")
+        dest_dir = settings.data_dir / "projects" / project.id / "renders"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"scene_{scene.index}_{uuid.uuid4().hex[:8]}{files[0].suffix}"
+        shutil.copy2(files[0], dest)
+        from .video_runtime.output_gate import validate_video_output
+
+        gate = validate_video_output(dest, asset_registered=False)
+        if not gate.passed:
+            raise RuntimeError(gate.message or "The finished video could not be saved.")
+        job.history_json = merge_video_runtime_history(job.history_json, {"outputGate": gate.to_dict()})
+        db.commit()
+        return dest
+
+    async def _build_and_run_h3_fast(
+        self,
+        db: Session,
+        project: Project,
+        scene: Scene,
+        job: Job,
+        *,
+        positive: str,
+        prefix: str,
+        params: dict,
+        seed: int,
+    ) -> Path:
+        """MiniMax H3 Local — attached Ref2Video graph. Not Director."""
+
+        from .film_timeline.director_refs import slots_from_params
+        from .film_timeline.h3_fast_renderer import MECHANISM, build_h3_fast_workflow, plan_references
+        from .video_runtime.job_model import merge_video_runtime_history
+
+        if str(params.get("generationMode") or "") != "reference":
+            raise RuntimeError(
+                "MiniMax H3 — Local needs a character, place, or previous finished part. "
+                "Words alone are not enough for this shot."
+            )
+        continuity = params.get("continuity") if isinstance(params.get("continuity"), dict) else {}
+        planned = plan_references(slots_from_params(params), continuity)
+        mode = continuity.get("h3Continuity") if isinstance(continuity.get("h3Continuity"), dict) else {}
+        tail_info: dict = {}
+        tail_seconds = mode.get("tailSeconds")
+        if mode.get("orientation") == "prepend" and planned["videos"]:
+            from pathlib import Path
+
+            from .film_timeline.continuity import extract_continuity_opening, store_continuity_tail
+            from .film_timeline.h3_fast_renderer import legal_tail_frame_count
+
+            source_asset = self._get_asset(db, planned["videos"][0]["assetId"])
+            source_path = Path(source_asset.path) if source_asset and source_asset.path else None
+            if source_path is None or not source_path.is_file():
+                raise RuntimeError("MiniMax H3 — Local could not find the scene this shot has to lead into.")
+            start_frame = int(mode.get("openingStartFrame") or 0)
+            end_frame = mode.get("openingEndFrame")
+            span = None if end_frame is None else max(0, int(end_frame) - start_frame)
+            frames = legal_tail_frame_count(float(mode.get("openingSeconds") or 2))
+            if span is not None:
+                frames = min(frames, span)
+                if frames >= 5:
+                    frames = frames - ((frames - 5) % 17)
+            if frames < 5:
+                raise RuntimeError("The opening of this scene is too short to use as the arrival picture.")
+            opening_path = source_path.parent / "film-continuity" / f"{job.id[:8]}-opening-{frames}.mp4"
+            opening_info = extract_continuity_opening(
+                source_path,
+                opening_path,
+                frame_count=frames,
+                start_frame=start_frame,
+            )
+            opening_id = store_continuity_tail(db, project.id, opening_path)
+            db.commit()
+            planned["videos"][0] = {"assetId": opening_id, "label": "Opening"}
+            tail_info = opening_info
+            if not opening_info.get("audio"):
+                mode = {**mode, "pairAudio": False}
+        elif tail_seconds and planned["videos"]:
+            from pathlib import Path
+
+            from .film_timeline.continuity import extract_continuity_tail, store_continuity_tail
+            from .film_timeline.h3_fast_renderer import legal_tail_frame_count
+
+            source_asset = self._get_asset(db, planned["videos"][0]["assetId"])
+            source_path = Path(source_asset.path) if source_asset and source_asset.path else None
+            if source_path is None or not source_path.is_file():
+                raise RuntimeError("MiniMax H3 — Local could not find the previous finished part.")
+            frames = legal_tail_frame_count(float(tail_seconds), at_least=float(tail_seconds) >= 3)
+            tail_path = source_path.parent / "film-continuity" / f"{job.id[:8]}-tail-{frames}.mp4"
+            window_end = mode.get("windowEndFrame")
+            tail_info = extract_continuity_tail(
+                source_path,
+                tail_path,
+                frame_count=frames,
+                end_frame=int(window_end) if window_end is not None else None,
+            )
+            tail_id = store_continuity_tail(db, project.id, tail_path)
+            db.commit()
+            planned["videos"][0] = {"assetId": tail_id, "label": "Ending"}
+        if not planned["images"] and not planned["videos"]:
+            raise RuntimeError(
+                "MiniMax H3 — Local needs a character, place, or previous finished part before it can run."
+            )
+
+        async def _stage_image(asset_id: str, role: str, label: str) -> str:
+            asset = self._get_asset(db, asset_id)
+            if not asset:
+                raise RuntimeError(f"MiniMax H3 — Local could not find {label or 'that picture'}.")
+            from .director_timeline_w46.generation.direct_reference import has_direct_reference_authority
+
+            if has_direct_reference_authority(params=params):
+                staged = await self._stage_direct_visual_asset(asset)
+            else:
+                staged = await self._stage_h3_visual_asset(asset, role)
+            name = staged.comfy_name if staged is not None else None
+            if not name:
+                raise RuntimeError(f"MiniMax H3 — Local could not prepare {label or 'that picture'}.")
+            return name
+
+        image_names: list[str] = []
+        image_labels: list[str] = []
+        for item in planned["images"]:
+            image_names.append(await _stage_image(item["assetId"], "reference", item["label"]))
+            image_labels.append(item["label"])
+
+        video_names: list[str] = []
+        video_labels: list[str] = []
+        for item in planned["videos"]:
+            asset = self._get_asset(db, item["assetId"])
+            if not asset:
+                raise RuntimeError("MiniMax H3 — Local could not find the previous finished part.")
+            staged_name = await self._stage_library_asset(asset)
+            if not staged_name:
+                raise RuntimeError("MiniMax H3 — Local could not prepare the previous finished part.")
+            video_names.append(staged_name)
+            video_labels.append(item["label"])
+
+        audio_names: list[str] = []
+        audio_labels: list[str] = []
+        for item in planned["audios"]:
+            asset = self._get_asset(db, item["assetId"])
+            if not asset:
+                continue
+            staged_name = await self._stage_library_asset(asset)
+            if staged_name:
+                audio_names.append(staged_name)
+                audio_labels.append(item["label"])
+
+        duration = int(params.get("requestedDurationSec") or float(params.get("duration") or 5.0))
+        prompt = str(params.get("prompt") or positive or "").strip()
+        if not prompt:
+            raise RuntimeError("This shot needs a description before MiniMax H3 — Local can run.")
+        width = int(params.get("width") or 1152)
+        height = int(params.get("height") or 640)
+        resolved = params.get("resolvedGeneration") if isinstance(params.get("resolvedGeneration"), dict) else {}
+        if resolved.get("width") and resolved.get("height"):
+            width = int(resolved["width"])
+            height = int(resolved["height"])
+
+        pair_audio = True if "pairAudio" not in mode else bool(mode.get("pairAudio"))
+        spoken = params.get("spokenLanguage") if isinstance(params.get("spokenLanguage"), dict) else {}
+        spoken_name = str(spoken.get("label") or "").strip()
+        boundary = ""
+        if mode.get("includeOmni"):
+            boundary = str(continuity.get("boundary") or "").strip()
+        from .video_runtime.local_video_profiles import (
+            BO_DEFAULT_STEPS,
+            BO_LORA_NAME,
+            bo_execution_profile,
+            is_h3_base_optimized,
+        )
+
+        base_optimized = is_h3_base_optimized(str(params.get("generatorId") or "")) or str(params.get("h3Profile") or "") == "base_optimized"
+        bo_profile = bo_execution_profile(has_ending_clip=bool(video_names)) if base_optimized else None
+        wf = build_h3_fast_workflow(
+            prompt=prompt,
+            filename_prefix=prefix,
+            seed=int(seed),
+            width=width,
+            height=height,
+            duration_sec=duration,
+            image_names=image_names,
+            image_labels=image_labels,
+            video_names=video_names,
+            video_labels=video_labels,
+            audio_names=audio_names,
+            audio_labels=audio_labels,
+            continuation=bool(mode.get("continuation")),
+            pair_video_audio=pair_audio,
+            boundary=boundary,
+            prepend=mode.get("orientation") == "prepend",
+            spoken_language=spoken_name,
+            steps=BO_DEFAULT_STEPS if base_optimized else None,
+            lora_name=BO_LORA_NAME if base_optimized else None,
+            sage_attention=(bo_profile or {}).get("sageAttention"),
+        )
+
+        try:
+            await comfy.free_memory(unload_models=True, free_memory=True)
+        except Exception:
+            logging.getLogger(__name__).warning("Comfy free_memory before MiniMax H3 failed", exc_info=True)
+
+        job.message = "Preparing MiniMax H3"
+        job.history_json = merge_video_runtime_history(
+            job.history_json,
+            {
+                "h3FastRenderer": {
+                    "mechanism": "h3_base_optimized" if base_optimized else MECHANISM,
+                    "steps": BO_DEFAULT_STEPS if base_optimized else 20,
+                    "lora": BO_LORA_NAME if base_optimized else "",
+                    "unet": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+                    "width": width,
+                    "height": height,
+                    "duration_sec": duration,
+                    "ref_images": len(image_names),
+                    "ref_videos": len(video_names),
+                    "ref_audios": len(audio_names),
+                    "pairVideoAudio": pair_audio,
+                    "continuation": bool(mode.get("continuation")),
+                    "boProfile": (bo_profile or {}).get("profile") or "",
+                    "sageAttention": str(wf["6"]["inputs"].get("sage_attention") or ""),
+                    "tail": tail_info,
+                    "prompt": str(wf["10"]["inputs"].get("value") or "")[:800],
+                    "runtime": "adept-comfy-8188",
+                    "directorInvoked": False,
+                }
+            },
+        )
+        params = {
+            **params,
+            "useH3FastRenderer": True,
+            "resolvedRuntimeModel": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        }
+        params.pop("director", None)
+        job.params_json = json.dumps(params)
+        db.commit()
+
+        from .video_runtime.progress_telemetry import apply_heartbeat, extract_progress_telemetry, merge_progress_telemetry
+
+        prompt_id = await comfy.queue_prompt(wf)
+        job.comfy_prompt_id = prompt_id
+        job.stage = "preparing_model"
+        job.message = "Preparing model"
+        job.history_json = merge_progress_telemetry(
+            job.history_json,
+            apply_heartbeat(
+                extract_progress_telemetry(job.history_json),
+                progress=0.0,
+                message="Preparing model",
+                stage="preparing_model",
+                job_status="running",
+                grounded=False,
+            ),
+        )
+        self.bind_prompt(job.id, prompt_id)
+        db.commit()
+        history = await self._wait_comfy(
+            job,
+            prompt_id,
+            on_progress=None,
+            preview_engine="minimax-h3",
+            progress_graph="h3_fast",
+            sage_attention=str(wf["6"]["inputs"].get("sage_attention") or "") if base_optimized else None,
+        )
+        db.expire_all()
+        job = db.get(Job, job.id) or job
+        job.message = "Saving the finished video"
+        job.stage = "writing_output"
+        job.progress = max(float(job.progress or 0), 0.97)
+        job.updated_at = datetime.utcnow()
+        db.commit()
+
+        files = comfy.find_output_files(history)
+        if not files:
+            raise RuntimeError("MiniMax H3 finished, but the video was not saved.")
+
+        dest_dir = settings.data_dir / "projects" / project.id / "renders"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"scene_{scene.index}_{uuid.uuid4().hex[:8]}{files[0].suffix}"
+        shutil.copy2(files[0], dest)
+
+        from .video_runtime.output_gate import validate_video_output
+
+        gate = validate_video_output(dest, asset_registered=False)
+        if not gate.passed:
+            raise RuntimeError(gate.message or "The finished video could not be saved.")
+        job.history_json = merge_video_runtime_history(
+            job.history_json, {"outputGate": gate.to_dict()}
+        )
+        if duration > 0:
+            from .media_clip import trim_video_to_seconds
+
+            trimmed = trim_video_to_seconds(dest, duration)
+            if trimmed:
+                job.history_json = merge_video_runtime_history(
+                    job.history_json,
+                    {"durationTrim": {"requestedDurationSec": duration, "trimmed": True}},
+                )
+        try:
+            from .minimax_h3.audio_import import register_native_audio_provenance
+
+            ffprobe = shutil.which("ffprobe")
+            audio_meta: dict[str, Any] = {}
+            if ffprobe:
+                probe_proc = subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-show_entries",
+                        "stream=codec_type,codec_name,channels,sample_rate",
+                        "-of",
+                        "json",
+                        str(dest),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+                if probe_proc.returncode == 0:
+                    probe_data = json.loads(probe_proc.stdout or "{}")
+                    for stream in probe_data.get("streams") or []:
+                        if stream.get("codec_type") == "audio":
+                            sample_rate = stream.get("sample_rate")
+                            audio_meta = {
+                                "channels": stream.get("channels"),
+                                "sampleRateHz": int(sample_rate) if sample_rate else None,
+                            }
+                            break
+            provenance = register_native_audio_provenance({}, audio_meta)
+            job.history_json = merge_video_runtime_history(
+                job.history_json, {"audioProvenance": provenance.get("audio", {})}
+            )
+        except Exception:
+            logging.getLogger(__name__).warning("Failed to register MiniMax H3 audio", exc_info=True)
         db.commit()
         return dest
 
@@ -5284,13 +5860,71 @@ class JobQueue:
 
         params = self._job_params(job)
         edit_op = params.get("edit_op") or ("generate" if job.kind == "imagegen" else "edit")
-        fal_image_model = str(params.get("falImageModelId") or "").strip()
-        if fal_image_model:
-            await self._imagegen_fal(db, job, project, params, fal_image_model, edit_op=edit_op)
+        from .image_product.resolve import choose_imagegen_adapter
+
+        adapter = choose_imagegen_adapter(params)
+        ers_job = str(params.get("purpose") or "") == "environment_reference_sheet"
+        if ers_job:
+            dispatch_model = str(
+                params.get("falImageModelId")
+                or params.get("wavespeedImageModelId")
+                or params.get("kieImageModelId")
+                or params.get("hostedModelId")
+                or ""
+            )
+            logger.info(
+                "Environment Creator provider=%s model=%s",
+                adapter or "unspecified",
+                dispatch_model,
+            )
+
+        async def _run_hosted(provider_id: str, model_id: str) -> None:
+            labels = {"fal": "fal.ai", "kie": "kie.ai", "wavespeed": "wavespeed.ai"}
+            label = labels.get(provider_id, provider_id)
+            resolved = str(model_id or "").strip()
+            if provider_id == "fal":
+                from .fal_catalog import resolve_fal_still_endpoint
+
+                resolved = resolve_fal_still_endpoint(
+                    resolved,
+                    str(params.get("hostedModelId") or params.get("model") or ""),
+                ) or resolved
+            if ers_job and not resolved:
+                raise RuntimeError(
+                    f"{label} could not start this environment generation."
+                )
+            try:
+                if provider_id == "wavespeed":
+                    await self._imagegen_wavespeed(db, job, project, params, resolved, edit_op=edit_op)
+                elif provider_id == "fal":
+                    await self._imagegen_fal(db, job, project, params, resolved, edit_op=edit_op)
+                elif provider_id == "kie":
+                    await self._imagegen_kie(db, job, project, params, resolved, edit_op=edit_op)
+            except Exception as exc:
+                if not ers_job or provider_id == "kie":
+                    raise
+                cause = str(exc).strip()
+                # Keep the creator-facing start line, but preserve the real provider
+                # error for Technical details / job message (do not invent success).
+                if cause and label not in cause:
+                    raise RuntimeError(
+                        f"{label} could not start this environment generation. {cause}"
+                    ) from exc
+                raise RuntimeError(
+                    f"{label} could not start this environment generation."
+                ) from exc
+
+        if adapter == "wavespeed":
+            await _run_hosted("wavespeed", str(params.get("wavespeedImageModelId") or params.get("hostedModelId") or "").strip())
             return
-        kie_image_model = str(params.get("kieImageModelId") or "").strip()
-        if kie_image_model:
-            await self._imagegen_kie(db, job, project, params, kie_image_model, edit_op=edit_op)
+        if adapter == "fal":
+            await _run_hosted(
+                "fal",
+                str(params.get("falImageModelId") or params.get("hostedModelId") or "").strip(),
+            )
+            return
+        if adapter == "kie":
+            await _run_hosted("kie", str(params.get("kieImageModelId") or "").strip())
             return
 
         # Retry path: reuse validated but unregistered output (no silent regeneration)
@@ -5982,6 +6616,93 @@ class JobQueue:
             db.commit()
             raise RuntimeError(f"output_valid_but_unregistered: {reg_exc}") from reg_exc
 
+
+    async def _imagegen_wavespeed(
+        self,
+        db: Session,
+        job: Job,
+        project: Project,
+        params: dict,
+        model_id: str,
+        *,
+        edit_op: str = "generate",
+    ) -> None:
+        """Dispatch a still-image job through the existing WaveSpeed enqueue. Not Comfy."""
+        import time
+
+        import httpx
+
+        from .hosted_providers.adapters.wavespeed_adapter import enqueue_wavespeed
+        from .image_runtime.job_model import ImageJobStage
+        from .image_runtime.output_gate import validate_image_output
+
+        api_key = get_secret("wavespeed_api_key")
+        if not api_key:
+            raise RuntimeError("This provider is currently unavailable. Choose another configured provider.")
+        prompt = str(params.get("prompt") or "").strip()
+        if not prompt and isinstance(params.get("imageIntent"), dict):
+            prompt = str(params["imageIntent"].get("prompt") or "").strip()
+        if not prompt:
+            raise RuntimeError("This provider is currently unavailable. Choose another configured provider.")
+        official = str(model_id or params.get("wavespeedImageModelId") or "").strip()
+        width = int(params.get("width") or 1024)
+        height = int(params.get("height") or 1024)
+        enq = await enqueue_wavespeed(
+            api_key,
+            official,
+            {"prompt": prompt, "width": width, "height": height, "size": f"{width}*{height}"},
+        )
+        if not enq.get("ok") or not enq.get("predictionId"):
+            raise RuntimeError("This provider is currently unavailable. Choose another configured provider.")
+        pred_id = str(enq["predictionId"])
+        job.stage = ImageJobStage.SAMPLING.value
+        job.message = "wavespeed.ai"
+        job.comfy_prompt_id = pred_id[:64]
+        db.commit()
+        url_status = f"https://api.wavespeed.ai/api/v3/predictions/{pred_id}/result"
+        image_url = ""
+        deadline = time.time() + 180
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while time.time() < deadline:
+                resp = await client.get(url_status, headers={"Authorization": f"Bearer {api_key}"})
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {}
+                inner = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
+                status = str((inner or {}).get("status") or (data or {}).get("status") or "").lower() if isinstance(inner, dict) or isinstance(data, dict) else ""
+                outputs = (inner or {}).get("outputs") if isinstance(inner, dict) else None
+                if isinstance(outputs, list) and outputs and isinstance(outputs[0], str):
+                    image_url = outputs[0]
+                if status in {"completed", "succeeded", "success"} and image_url:
+                    break
+                if status in {"failed", "error"}:
+                    raise RuntimeError("This provider is currently unavailable. Choose another configured provider.")
+                await asyncio.sleep(2)
+        if not image_url:
+            raise RuntimeError("This provider is currently unavailable. Choose another configured provider.")
+        dest = settings.data_dir / "projects" / project.id / "assets"
+        dest.mkdir(parents=True, exist_ok=True)
+        tmp_path = dest / f"{job.id}.pending.png"
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            downloaded = await client.get(image_url)
+            downloaded.raise_for_status()
+            tmp_path.write_bytes(downloaded.content)
+        gate = validate_image_output(str(tmp_path), expected_aspect=params.get("aspect"), generate_previews=True)
+        if not gate.ok:
+            raise RuntimeError("This provider is currently unavailable. Choose another configured provider.")
+        await self._imagegen_commit_asset(
+            db,
+            job,
+            project,
+            params,
+            tmp_path,
+            gate,
+            edit_op=edit_op,
+            prompt=prompt,
+            model=official,
+            note="wavespeed.ai",
+        )
 
     async def _imagegen_kie(
         self,

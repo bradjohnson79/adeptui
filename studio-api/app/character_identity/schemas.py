@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ProfileStatus = Literal["DRAFT", "INCOMPLETE", "READY_FOR_GENERATION", "APPROVED", "LOCKED", "ARCHIVED"]
 ApprovalStatus = Literal["draft", "review", "approved", "rejected"]
-VoiceSourceMode = Literal["DESIGN", "CLONE", "UPLOAD", "PRESET", "UNASSIGNED"]
+VoiceSourceMode = Literal["DESIGN", "CLONE", "UPLOAD", "PRESET", "PROVIDER", "LIBRARY", "UNASSIGNED"]
 VoiceStatus = Literal[
     "DRAFT",
     "VALIDATING",

@@ -27,6 +27,18 @@ const IMAGE_PIPELINE_STAGES = [
   "Completed",
 ] as const;
 
+function renderQueueTitle(job: Job): string {
+  if (job.kind !== "magi_final_render") return job.kind;
+  try {
+    const params = JSON.parse(job.params_json || "{}") as { outputTitle?: unknown; outputName?: unknown };
+    const title = String(params.outputTitle || params.outputName || "").trim();
+    if (title) return title;
+  } catch {
+    /* The stage stays on the message line. */
+  }
+  return job.kind;
+}
+
 function isImageProductJob(job: Job): boolean {
   return job.kind === "imagegen" || job.kind === "imagegen_edit";
 }
@@ -147,11 +159,14 @@ export function JobPanel({
   onDone,
   onSelectJob,
   onViewInDirector,
+  focusJobId,
 }: {
   projectId: string;
   onDone: () => void;
   onSelectJob?: (id: string) => void;
   onViewInDirector?: (sceneId: string, jobId: string) => void;
+  /** Existing queue row to scroll into view. Omitted callers keep the current list. */
+  focusJobId?: string | null;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => loadDismissedRenderJobIds(projectId));
@@ -212,6 +227,18 @@ export function JobPanel({
     (j) => isTerminalJobStatus(j.status) && !isActiveJobStatus(j.status) && !dismissedIds.has(j.id),
   ).length;
 
+  const shownJobs = visibleJobs.slice(0, 8);
+  if (focusJobId && !shownJobs.some((job) => job.id === focusJobId)) {
+    const focused = visibleJobs.find((job) => job.id === focusJobId);
+    if (focused) shownJobs.unshift(focused);
+  }
+
+  useEffect(() => {
+    if (!focusJobId) return;
+    const node = document.querySelector(`[data-job-id="${CSS.escape(focusJobId)}"]`);
+    if (node instanceof HTMLElement) node.scrollIntoView({ block: "nearest" });
+  }, [focusJobId, jobs]);
+
   return (
     <div className="panel ds-surface">
       <PanelHeading
@@ -233,10 +260,13 @@ export function JobPanel({
         </Button>
       </PanelHeading>
       {visibleJobs.length === 0 && <EmptyState kind="first-use" title="No jobs yet" description="Render a scene or run a generation tool to see work here." />}
-      {visibleJobs.slice(0, 8).map((j) => (
+      {shownJobs.map((j) => (
         <div
           className="job-item"
           key={j.id}
+          data-job-id={j.id}
+          data-focused={focusJobId === j.id ? "true" : undefined}
+          style={focusJobId === j.id ? { outline: "2px solid #c4b5fd", borderRadius: 8, paddingInline: 8 } : undefined}
           role={onSelectJob ? "button" : undefined}
           tabIndex={onSelectJob ? 0 : undefined}
           onClick={() => onSelectJob?.(j.id)}
@@ -245,7 +275,7 @@ export function JobPanel({
           }}
         >
           <div className="scene-head">
-            <strong>{j.kind}</strong>
+            <strong>{renderQueueTitle(j)}</strong>
             <StatusBadge kind={mapJobStatus(j.status)} label={j.status} compact />
           </div>
           <div className="scene-meta">{formatJobMessage(j.message, j.status)}</div>

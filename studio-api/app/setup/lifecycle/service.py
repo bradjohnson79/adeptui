@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -305,6 +304,27 @@ _LOCAL_IMAGE_COMPONENTS: dict[str, dict[str, Any]] = {
 }
 
 _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
+    "minimax_h3_base_optimized": {
+        "group": "Video",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Video"],
+        "downloadSizeLabel": "Existing files",
+        "badges": ["Installed", "Existing Files"],
+        "bestFor": ["Faster local reference-to-video"],
+        "capabilityTags": ["video", "local", "reference"],
+        "lifecycleActions": {"install": False, "repair": False, "calibrate": False, "certify": False},
+    },
+    "hunyuan_video_1_5_distilled": {
+        "group": "Video",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Video"],
+        "downloadSizeLabel": "Existing files",
+        "vramRecommendationGb": 14,
+        "badges": ["Fast Local Video", "480p"],
+        "bestFor": ["Text to Video", "Start Frame", "Lower VRAM"],
+        "capabilityTags": ["video", "local", "fast"],
+        "lifecycleActions": {"install": False, "repair": False, "calibrate": False, "certify": False},
+    },
     "fal_key": {
         "group": "API Providers",
         "subgroup": "Credentials",
@@ -629,6 +649,17 @@ def component_metadata(component_id: str) -> dict[str, Any]:
         "surfaceEntryPoints": {"dock": False, "coDirector": False},
     }
     payload.update(override)
+    if component_id == "hunyuan_video_1_5_distilled":
+        try:
+            gpu = query_gpu_stats()
+            gpus = gpu.get("gpus") or []
+            total_mib = float((gpus[0] or {}).get("memory_total_mib") or 0) if gpus else 0
+        except Exception:
+            total_mib = 0
+        badges = list(payload.get("badges") or [])
+        if total_mib and total_mib < 24 * 1024 and "Recommended" not in badges:
+            badges.append("Recommended")
+        payload["badges"] = badges
     if payload.get("group") == "Image Generation":
         payload["group"] = "Image"
     if payload.get("group") == "Video Generation":
@@ -695,16 +726,36 @@ def get_certification(component_id: str) -> ProviderCertificationRecord | None:
 
 
 def inspect_hardware() -> dict[str, Any]:
+    """Disk free space for the model root. Windows has no os.statvfs."""
+    import shutil
+
+    from ..paths import default_models_root
+
     gpu = query_gpu_stats()
+    models_root = default_models_root()
     free_bytes = None
+    total_bytes = None
+    scanned_path = str(models_root)
     try:
-        free_bytes = os.statvfs(str(settings.data_dir)).f_bavail * os.statvfs(str(settings.data_dir)).f_frsize
-    except Exception:
-        free_bytes = None
+        usage = shutil.disk_usage(scanned_path)
+        free_bytes = int(usage.free)
+        total_bytes = int(usage.total)
+    except OSError:
+        scanned_path = str(settings.data_dir)
+        try:
+            usage = shutil.disk_usage(scanned_path)
+            free_bytes = int(usage.free)
+            total_bytes = int(usage.total)
+        except OSError:
+            free_bytes = None
+            total_bytes = None
     return {
         "gpu": gpu,
         "dataDir": str(settings.data_dir),
+        "modelsRoot": str(models_root),
+        "diskPath": scanned_path,
         "freeBytes": free_bytes,
+        "totalBytes": total_bytes,
     }
 
 

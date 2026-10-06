@@ -31,12 +31,12 @@ test("API Providers accordion is the input surface, catalog category stays hidde
   assert.equal(catalogApiProvidersHiddenFromOptional(), "API Providers");
 });
 
-test("three cards have password input + Update + Remove", () => {
-  assert.deepEqual(API_KEY_PROVIDER_IDS, ["kie", "wavespeed", "fal"]);
-  assert.deepEqual(API_KEY_PROVIDER_TITLES, ["Kie.ai", "WaveSpeed.ai", "fal.ai"]);
-  assert.equal(SETUP_PROVIDERS.length, 3);
+test("API key cards have password input + Update + Remove", () => {
+  assert.deepEqual(API_KEY_PROVIDER_IDS, ["kie", "wavespeed", "fal", "elevenlabs"]);
+  assert.deepEqual(API_KEY_PROVIDER_TITLES, ["Kie.ai", "WaveSpeed.ai", "fal.ai", "ElevenLabs"]);
+  assert.equal(SETUP_PROVIDERS.length, 4);
   const cards = apiKeyProviderCardContract();
-  assert.equal(cards.length, 3);
+  assert.equal(cards.length, 4);
   for (const card of cards) {
     assert.equal(card.inputType, "password");
     assert.equal(API_KEY_INPUT_TYPE, "password");

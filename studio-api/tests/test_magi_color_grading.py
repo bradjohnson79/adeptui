@@ -90,12 +90,12 @@ class TestFilterCompilation:
         assert result.startswith("eq=")
         assert "contrast=" in result
 
-    def test_single_colorbalance_filter(self):
-        """Single temperature param should produce a colorbalance filter."""
+    def test_temperature_matches_viewer_hue(self):
+        """Temperature uses the viewer hue rotation, not a second lighting pass."""
         params = {"temperature": 0.1}
         result = compile_filter_string(params)
-        assert result.startswith("colorbalance=")
-        assert "rs=" in result
+        assert result == "hue=h=-2.80"
+        assert "colorbalance=" not in result
 
     def test_merged_eq_filters(self):
         """Multiple eq params should merge into one eq filter."""
@@ -105,26 +105,23 @@ class TestFilterCompilation:
         assert result.startswith("eq=")
         assert "contrast=" in result
         assert "saturation=" in result
-        assert "gamma=" in result
-        # Only one eq, no comma
+        assert "gamma=" not in result
         assert result.count("eq=") == 1
 
-    def test_merged_colorbalance_filters(self):
-        """Multiple colorbalance params should merge into one filter."""
+    def test_lighting_folds_into_the_viewer_channels(self):
+        """Shadows and highlights fold once into brightness, contrast, and hue."""
         params = {"temperature": 0.1, "shadows": -0.05, "highlights": 0.03}
         result = compile_filter_string(params)
-        assert result.startswith("colorbalance=") or "colorbalance=" in result
-        assert "rs=" in result
-        assert "rh=" in result
+        assert "colorbalance=" not in result
+        assert "gamma=" not in result
+        assert "hue=h=-2.80" in result
+        assert "eq=" in result
 
-    def test_mixed_eq_and_colorbalance(self):
-        """Both eq and colorbalance params should produce two filters."""
+    def test_mixed_contrast_and_hue(self):
+        """Contrast and temperature stay one chain, in viewer order."""
         params = {"contrast": 0.2, "temperature": 0.1}
         result = compile_filter_string(params)
-        # Should have both eq and colorbalance, comma-separated
-        assert "eq=" in result
-        assert "colorbalance=" in result
-        assert "," in result
+        assert result == "eq=contrast=1.200,hue=h=-2.80"
 
     def test_contrast_scale(self):
         """Contrast 0.0 should produce eq=contrast=1.0."""
@@ -155,15 +152,13 @@ class TestFilterCompilation:
         # So saturation=0.9 → 1.9, saturation=-0.2 → 0.8
         pass
 
-    def test_gamma_inverted(self):
-        """Gamma should be inverted (higher param = lower gamma)."""
-        params = {"gamma": 0.95}
-        result = compile_filter_string(params)
-        # gamma = 1.0 + (p * -1) = 1.0 + (0.95 * -1) = 0.05
-        # Wait that's wrong. Let me check: eq_gamma = max(0.1, 1.0 + (p * -1))
-        # For p=0.95: 1.0 + (0.95 * -1) = 0.05 → clamped to 0.1
-        # For p=-0.05: 1.0 + (-0.05 * -1) = 1.05
-        pass
+    def test_gamma_is_not_a_second_display_transform(self):
+        """Preset gamma must not collapse to the FFmpeg 0.1 floor."""
+        assert compile_filter_string({"gamma": 0.95}) == ""
+        dreamy = compile_filter_string(COLOR_PRESETS["dreamy"]["params"])
+        assert "gamma=" not in dreamy
+        assert "colorbalance=" not in dreamy
+        assert "saturation=1.750" in dreamy
 
 
 class TestDescribeGrade:

@@ -279,3 +279,58 @@ def lifecycle_clear_cloud_provider_key(provider_id: str):
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
 
+
+class RecommendPlanBody(BaseModel):
+    componentIds: list[str] | None = None
+    action: str = "install"
+
+
+class ApprovePlanBody(BaseModel):
+    componentIds: list[str]
+    confirm: bool = False
+    confirmDownloadModels: bool = False
+    action: str = "install"
+    destinationRoot: str | None = None
+
+
+@router.get("/scan")
+def lifecycle_scan():
+    from ..unification import scan_machine
+
+    return scan_machine(persist=True)
+
+
+@router.post("/recommend-plan")
+def lifecycle_recommend_plan(body: RecommendPlanBody):
+    from ..unification import build_recommendation_plan
+
+    try:
+        return build_recommendation_plan(body.componentIds, action=body.action)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/approve-plan")
+def lifecycle_approve_plan(body: ApprovePlanBody):
+    from ..unification import approve_recommendation_plan
+
+    try:
+        return approve_recommendation_plan(
+            body.componentIds,
+            confirm=body.confirm,
+            confirm_download_models=body.confirmDownloadModels,
+            destination_root=body.destinationRoot,
+            action=body.action,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/updates")
+def lifecycle_updates(force: bool = False):
+    from ..unification import check_update_plan
+
+    return check_update_plan(force=force)
+

@@ -1011,6 +1011,7 @@ def project_library(
     system_key: str = "",
     limit: int = 100,
     offset: int = 0,
+    ids: str = "",
     db: Session = Depends(get_db),
 ):
     from ..asset_graph import count_assets, search_assets
@@ -1019,6 +1020,23 @@ def project_library(
     project = db.get(Project, project_id)
     if not project and scope != "global":
         raise HTTPException(404, "Project not found")
+
+    wanted = [part.strip() for part in (ids or "").split(",") if part.strip()][:64]
+    if wanted and scope != "global":
+        from ..scene_references.reference_eligibility import annotate_library_items
+
+        rows = db.query(Asset).filter(Asset.project_id == project_id, Asset.id.in_(wanted)).all()
+        items = [enrich_library_item(asset) for asset in rows]
+        annotate_library_items(db, project_id, items)
+        return {
+            "items": items,
+            "tree": None,
+            "librarySchemaVersion": None,
+            "folderMap": {},
+            "totalMatches": len(items),
+            "limit": len(items),
+            "offset": 0,
+        }
 
     page_size = max(1, min(limit, 500))
     page_offset = max(0, offset)
@@ -1034,6 +1052,10 @@ def project_library(
         if scope == "project":
             rows = [a for a in rows if a.project_id == project_id]
     items = [enrich_library_item(a) for a in rows]
+    if scope != "global" and project_id:
+        from ..scene_references.reference_eligibility import annotate_library_items
+
+        annotate_library_items(db, project_id, items)
 
     if scope == "global" and not project:
         # Cross-project browse without a host project: no project tree to attach.

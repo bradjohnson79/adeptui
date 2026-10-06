@@ -11,6 +11,17 @@ function ExpandIcon() {
   );
 }
 
+function RetractIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M6 2.5V5H3.5V3.5H5V2.5H6zm4 0h1v1H12.5V5H14V2.5h-4zM3.5 11H6v2.5H5V12H3.5v-1zM12.5 11H14v2.5h-4V12h1v-1h1.5z"
+      />
+    </svg>
+  );
+}
+
 function EnterFullscreenIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -54,13 +65,13 @@ export function WorkspaceFullscreenControls({
           type="button"
           className="workspace-fs-btn"
           data-testid="workspace-expand"
-          title="Expand workspace"
-          aria-label="Expand workspace"
+          title={expandActive ? "Retract workspace" : "Expand workspace"}
+          aria-label={expandActive ? "Retract workspace" : "Expand workspace"}
           aria-pressed={expandActive}
           onClick={onExpand}
         >
-          <ExpandIcon />
-          <span className="workspace-fs-btn__label">{expandActive ? "Collapse" : "Expand"}</span>
+          {expandActive ? <RetractIcon /> : <ExpandIcon />}
+          <span className="workspace-fs-btn__label">{expandActive ? "Retract" : "Expand"}</span>
         </button>
       ) : null}
       <button

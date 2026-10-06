@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import Project, Scene, SessionLocal
 from ..script_storyboard import ScriptSegmentRow, StoryboardPanelRow, ensure_script_tables
+from .aspect import normalize_storyboard_aspect
 from .contracts import TimelinePrepProposal, TimelinePrepShotProposal
 from .documents import get_document, ensure_document
 
@@ -156,6 +157,7 @@ def prepare_timeline_from_storyboard(
         id=str(uuid.uuid4()),
         projectId=project_id,
         documentId=doc.id,
+        aspectRatio=normalize_storyboard_aspect(getattr(doc, "aspectRatio", None)),
         shots=shots,
         status="draft",
         createdAt=_now(),
@@ -211,6 +213,7 @@ def confirm_timeline_proposal(
                 prompt=(shot.prompt or "")[:4000],
                 duration_sec=float(shot.durationEst or 3.0),
                 start_asset_id=shot.assetId,
+                aspect_ratio=normalize_storyboard_aspect(proposal.aspectRatio),
                 camera_note=(
                     f"storyboard:{shot.panelId}; continuity:{shot.continuitySessionId or ''}; "
                     f"{shot.cameraNote or ''}"
@@ -262,6 +265,7 @@ def confirm_timeline_proposal(
                     "spatialMapVersion": shot.spatialMapVersion,
                     "label": shot.label,
                     "prompt": shot.prompt,
+                    "aspectRatio": normalize_storyboard_aspect(proposal.aspectRatio),
                 }
             )
         project.updated_at = datetime.utcnow()

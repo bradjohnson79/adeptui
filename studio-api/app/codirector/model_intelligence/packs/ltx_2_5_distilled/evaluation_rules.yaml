@@ -1,0 +1,5 @@
+rules:
+  - id: artifact_required
+    description: Approve only when a real artifact file exists
+  - id: music_probe
+    description: When music prohibited, flag probable music if probe available

@@ -75,20 +75,43 @@ export function clipUnderPlayhead(
     if (!trackKind) return clip;
     if (track?.kind === trackKind) return clip;
   }
-  return null;
+  // The exclusive sequence end still belongs to the clip that finishes there,
+  // so the viewer stays on the last frame instead of dropping the picture.
+  let ending: MagiClip | null = null;
+  for (const clip of doc.clips) {
+    if (clipEnd(clip) !== frame) continue;
+    const track = doc.tracks.find((t) => t.id === clip.trackId);
+    const graphic =
+      clip.ingestRole === "graphic" ||
+      clip.overlayId ||
+      track?.kind === "graphics" ||
+      track?.kind === "objects";
+    if (graphic) {
+      if (trackKind === "graphics" || trackKind === "objects") return clip;
+      continue;
+    }
+    if (trackKind && track?.kind !== trackKind) continue;
+    if (!ending || (track?.kind === "video" && ending)) ending = clip;
+    if (!trackKind) return clip;
+  }
+  return ending;
 }
 
 /** m3: timeline-relative source time for a clip at a given playhead frame
  * (in media frames). Returns null when the playhead is outside the clip. */
 export function clipSourceFrame(clip: MagiClip, playheadFrame: number): number | null {
-  if (playheadFrame < clip.startFrame || playheadFrame >= clipEnd(clip)) return null;
+  const end = clipEnd(clip);
+  if (playheadFrame < clip.startFrame || playheadFrame > end) return null;
+  if (playheadFrame === end) return Math.max(0, clip.outPoint - 1, clip.inPoint);
   const offset = playheadFrame - clip.startFrame;
   return Math.max(0, clip.inPoint + offset);
 }
 
+/** Furthest occupied frame. Empty sequences keep a 10s editing range; that floor is not a ceiling. */
 export function recomputeDuration(doc: MagiSequenceDocument): number {
   const maxClip = doc.clips.reduce((acc, clip) => Math.max(acc, clipEnd(clip)), 0);
-  return Math.max(doc.frameRate * 10, maxClip + doc.frameRate);
+  if (maxClip <= 0) return Math.max(1, doc.frameRate) * 10;
+  return maxClip;
 }
 
 export function applyEditCommand(
@@ -293,13 +316,32 @@ export function applyEditCommand(
 
   if (kind === "ApplyTransition") {
     const clipId = String(payload.clipId || selection[0] || "");
-    const transitionId = String(payload.transitionId || "crossfade");
+    const transitionId = String(payload.transitionId || "dissolve");
     const edge = String(payload.edge || "out");
+    const durationFrames = Number(payload.durationFrames);
     const clips = doc.clips.map((clip) => {
       if (clip.id !== clipId) return clip;
-      return edge === "in"
-        ? { ...clip, transitionInId: transitionId }
-        : { ...clip, transitionOutId: transitionId };
+      if (!transitionId || transitionId === "none") {
+        return edge === "in"
+          ? { ...clip, transitionInId: null, transitionInDurationFrames: null }
+          : { ...clip, transitionOutId: null, transitionDurationFrames: null };
+      }
+      if (edge === "in") {
+        return {
+          ...clip,
+          transitionInId: transitionId,
+          transitionInDurationFrames: Number.isFinite(durationFrames)
+            ? Math.max(1, Math.round(durationFrames))
+            : clip.transitionInDurationFrames,
+        };
+      }
+      return {
+        ...clip,
+        transitionOutId: transitionId,
+        transitionDurationFrames: Number.isFinite(durationFrames)
+          ? Math.max(1, Math.round(durationFrames))
+          : clip.transitionDurationFrames,
+      };
     });
     return { doc: bump(doc, { clips }), selection };
   }

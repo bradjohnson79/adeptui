@@ -89,6 +89,7 @@ def create_preview(body: PreviewRenderRequest, db: Session = Depends(get_db)):
             performance_record_id=body.performanceRecordId,
             performance_take_id=body.performanceTakeId,
             environment_profile_id=body.environmentProfileId,
+            library_asset_id=body.libraryAssetId,
             preview=True,
         ).model_dump()
     )
@@ -104,6 +105,7 @@ def create_render(body: PreviewRenderRequest, db: Session = Depends(get_db)):
             performance_record_id=body.performanceRecordId,
             performance_take_id=body.performanceTakeId,
             environment_profile_id=body.environmentProfileId,
+            library_asset_id=body.libraryAssetId,
             preview=False,
         ).model_dump()
     )

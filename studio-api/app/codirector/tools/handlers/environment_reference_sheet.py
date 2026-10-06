@@ -291,6 +291,13 @@ def apply_approve_direction(ctx: ToolContext, args: dict[str, Any]) -> dict[str,
         selected_candidate_id=candidate_id or None,
     )
     store.save_sheet(sheet)
+    if getattr(ctx, "db", None) is not None and asset_id:
+        from ....db import Asset
+        from ....scene_references.reference_eligibility import stamp_aligned_role
+
+        approved_asset = ctx.db.get(Asset, asset_id)
+        if approved_asset is not None:
+            stamp_aligned_role(approved_asset, "environment")
     return {
         "ok": True,
         "sheetId": sheet.sheetId,
@@ -620,3 +627,60 @@ def apply_delete_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]
     confirm = bool(args.get("confirmCrossProject") or args.get("confirm_cross_project"))
     result = delete_environment_sheet(ctx.db, ctx.project_id, sheet.sheetId, confirm_cross_project=confirm)
     return {"ok": True, "deleted": result.get("deleted"), "sheetId": sheet.sheetId, "name": result.get("name")}
+
+
+def preview_generate(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    name = _text(args, "name") or "this environment"
+    source = _text(args, "sourceAssetId")
+    if source:
+        line = "Uses the approved environment image."
+    else:
+        line = "No environment image is attached, so Qwen Image creates the first view."
+    return ToolPreview(
+        summary=f"Create the environment image for {name}.",
+        lines=[line, "Uses the existing Environment Creator generator."],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_generate(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Call the existing ers.generate handler. Do not start a second generator."""
+
+    import uuid
+
+    from ....codirector.capabilities.handlers.ers_generate import handle
+
+    source = _text(args, "sourceAssetId")
+    prompt = _text(args, "environmentPrompt") or _text(args, "prompt") or _text(args, "description")
+    model = _text(args, "model")
+    family = _text(args, "modelFamilyPreference")
+    workflow = _text(args, "forceWorkflowKey")
+    if not source and not model:
+        model = "qwen2512"
+        family = "qwen2512"
+        workflow = "qwen2512.txt2img"
+    result = handle(
+        ctx.db,
+        _project_id(ctx),
+        str(uuid.uuid4()),
+        name=_text(args, "name") or "Environment",
+        description=_text(args, "description") or prompt,
+        prompt=prompt,
+        environmentPrompt=prompt,
+        source_asset_id=source,
+        sourceAssetId=source,
+        model=model,
+        modelFamilyPreference=family,
+        forceWorkflowKey=workflow,
+        lockModelFamily=bool(model),
+        source="local" if model == "qwen2512" else "",
+        providerKind="local" if model == "qwen2512" else "",
+    )
+    if not isinstance(result, dict):
+        return {"ok": False, "message": "The starting image was not created."}
+    job_ids = [str(item) for item in (result.get("job_ids") or []) if item]
+    job_id = job_ids[0] if job_ids else ""
+    if not job_id:
+        return {"ok": False, "message": "The starting image was not created."}
+    return {**result, "ok": True, "jobId": job_id}

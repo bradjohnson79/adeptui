@@ -40,7 +40,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     activity,
     approveProposal,
     rejectProposal,
-    requestProposalRevision,
+    reviseProposal,
     cancelProposal,
     productionCapable,
     send,
@@ -208,7 +208,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
             productionCapable={productionCapable}
             onApprove={() => void approveProposal(proposal.id)}
             onReject={(note) => void rejectProposal(proposal.id, note)}
-            onRequestRevision={(note) => void requestProposalRevision(proposal.id, note)}
+            onRevise={(correction) => void reviseProposal(proposal.id, correction)}
             onCancel={() => void cancelProposal(proposal.id)}
           />
         ))}

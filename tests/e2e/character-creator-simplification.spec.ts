@@ -144,9 +144,12 @@ test.describe("Character Creator Simplification", () => {
     const variantsBtn = page.getByTestId("character-advanced-variants");
     // CharacterCore renders advanced buttons only via renderAdvanced; they appear once saved.
 
-    // Type a name (debounced save) → character becomes valid.
+    // One Save persists the name. Create itself does not write a placeholder row.
     await page.getByTestId("character-field-name").fill("E2E Simplified Hero");
-    await page.waitForTimeout(1200); // debounce
+    await page.getByTestId("character-save").click();
+    await expect(page.getByTestId("character-select").locator("option:checked")).toHaveText("E2E Simplified Hero", {
+      timeout: 15000,
+    });
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "char-simple-02-named.png") });
 
     // Legacy 23 tabs must NOT be in primary nav; only behind Advanced / More.
@@ -239,7 +242,10 @@ test.describe("Character Creator Simplification", () => {
     await page.getByTestId("character-create").click();
     await expect(page.getByTestId("character-core")).toBeVisible({ timeout: 15000 });
     await page.getByTestId("character-field-name").fill("E2E Gen Hero");
-    await page.waitForTimeout(1200); // debounce save
+    await page.getByTestId("character-save").click();
+    await expect(page.getByTestId("character-select").locator("option:checked")).toHaveText("E2E Gen Hero", {
+      timeout: 15000,
+    });
 
     // Enable Local generator + pick Auto Select (style routing).
     const localEnable = page.getByTestId("generator-local-enable");
@@ -295,7 +301,10 @@ test.describe("Character Creator Simplification", () => {
     await page.getByTestId("character-create").click();
     await expect(page.getByTestId("character-core")).toBeVisible({ timeout: 15000 });
     await page.getByTestId("character-field-name").fill("E2E Qwen Hero");
-    await page.waitForTimeout(1200);
+    await page.getByTestId("character-save").click();
+    await expect(page.getByTestId("character-select").locator("option:checked")).toHaveText("E2E Qwen Hero", {
+      timeout: 15000,
+    });
 
     // Enable Local generator; NO reference attached.
     const localEnable = page.getByTestId("generator-local-enable");

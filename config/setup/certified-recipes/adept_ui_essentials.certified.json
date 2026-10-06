@@ -1,0 +1,27 @@
+{
+  "recipeId": "adept_ui_essentials.local.certified",
+  "componentId": "videochat3_4b",
+  "title": "Adept UI Essentials Pack",
+  "capabilityTags": ["essentials", "local", "co-director", "selection", "video-intelligence"],
+  "providerKind": "local",
+  "installStrategy": "essentials_pack",
+  "certifiedVersion": "2026.08",
+  "certifiedDate": "2026-08-20",
+  "source": {
+    "providerId": "catalog",
+    "repository": "adept-ui-essentials",
+    "trustBoundary": "source_manager",
+    "channel": "local_essentials"
+  },
+  "requirements": {
+    "dependencies": ["python"],
+    "recommendedVramGb": 8
+  },
+  "calibrationDefaults": {},
+  "notes": [
+    "Pack ESSENTIAL: VideoChat3, SAM 2.1, Grounding DINO Tiny.",
+    "Pack RECOMMENDED: V-JEPA 2, InternVideo3, Depth Anything V2 Small.",
+    "Does not block generation. TimeLens and VGGT are excluded.",
+    "Use GET /api/setup/lifecycle/essentials — do not treat this recipe as a Hunyuan install."
+  ]
+}

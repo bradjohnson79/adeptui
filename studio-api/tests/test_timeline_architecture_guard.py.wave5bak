@@ -1,0 +1,337 @@
+"""Timeline batch architecture protection fences.
+
+Owner-protected invariants (charter:
+docs/release-gate/timeline/TIMELINE_BATCH_ARCHITECTURE_PROTECTION_CHARTER.md).
+
+These tests pin the 12B-model batch architecture that Take Q certified live
+(30s / 2 batches, 2026-09-18). Any agent/LLM change to the protected symbols
+that breaks an invariant fails here — restore the invariant or obtain the
+owner's explicit authorization AND update these pins in the same change.
+
+NOTE FOR AGENTS: a failure in this file is a STOP signal, not a prompt to
+adapt production code to new behavior. See the charter's §6 protocol.
+"""
+
+from __future__ import annotations
+
+import ast
+import inspect
+from pathlib import Path
+
+import pytest
+
+API = Path(__file__).resolve().parents[1]
+
+
+def _module_node(rel: str) -> ast.Module:
+    return ast.parse((API / rel).read_text(encoding="utf-8"))
+
+
+def _func_src(rel: str, name: str) -> str:
+    """Exact source of a top-level function (ast-located, not name-suffix)."""
+    tree = _module_node(rel)
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return ast.get_source_segment((API / rel).read_text(encoding="utf-8"), node) or ""
+    raise AssertionError(f"{name} not found in {rel} — protected symbol renamed/moved?")
+
+
+# ---------------------------------------------------------------------------
+# Invariant 1: prompt-window ownership = start containment (reconcile.py)
+# ---------------------------------------------------------------------------
+
+
+def test_window_ownership_is_start_containment():
+    from app.director_timeline_w46.reconcile import _in_window
+
+    # Whole-scene segment (0-30) belongs to the ROOT window only.
+    assert _in_window(0.0, 30.0, 0.0, 15.0) is True
+    assert _in_window(0.0, 30.0, 15.0, 30.0) is False
+    # Boundary start belongs to the LATER batch.
+    assert _in_window(15.0, 15.0, 15.0, 30.0) is True
+    assert _in_window(15.0, 15.0, 0.0, 15.0) is False
+    # Just below the boundary belongs to the earlier window.
+    assert _in_window(15.0 - 2e-6, 15.0, 0.0, 15.0) is True
+    assert _in_window(15.0 - 2e-6, 15.0, 15.0, 30.0) is False
+    # No span-overlap ownership: a long segment must not leak into later windows.
+    assert _in_window(0.0, 45.0, 30.0, 45.0) is False
+
+
+def test_reconcile_does_not_duplicate_scene_prompt_into_later_batches():
+    """The Take P defect: midpoint matching copied the scene-level Timed Prompt
+    into Batch 2, so `_is_extension_batch` skipped continuation framing."""
+    src = _func_src("app/director_timeline_w46/reconcile.py", "_in_window")
+    assert "_midpoint" not in src, (
+        "_in_window must not use midpoint matching — it duplicated the scene-level "
+        "Timed Prompt into extension batches (Take P '15-second scene twice' regression)"
+    )
+
+
+def test_is_render_window_batch_semantics_preserved():
+    """Render-window = no own prompt text + CD production metadata with batch
+    index > 0. Batch index alone must never skip projection (Take N regression)."""
+    from app.director_timeline_w46.contracts import (
+        BatchBlock,
+        DurationState,
+        TimelinePromptSegment,
+    )
+    from app.director_timeline_w46.reconcile import _is_render_window_batch
+
+    def mk(meta, text=""):
+        segs = (
+            [TimelinePromptSegment(start=15.0, length=15.0, text=text)] if text else []
+        )
+        return BatchBlock(
+            id="b",
+            sceneId="s",
+            label="B",
+            order=1,
+            duration=DurationState(plannedDuration=15.0),
+            promptSegments=segs,
+            migrationMetadata=meta,
+        )
+
+    # Own text -> NOT a render window (it owns its prompt).
+    assert _is_render_window_batch(mk({"codirectorSceneProduction": True, "sourceProductionBatchIndex": 1}, text="Seconds: 15-30…")) is False
+    # CD batch index > 0 + no own text -> render window.
+    assert _is_render_window_batch(mk({"codirectorSceneProduction": True, "sourceProductionBatchIndex": 1})) is True
+    # Batch index alone (no CD production marker) -> NOT a render window.
+    assert _is_render_window_batch(mk({})) is False
+    assert _is_render_window_batch(mk({"sourceProductionBatchIndex": 1})) is False
+
+
+# ---------------------------------------------------------------------------
+# Invariant 2+3: extension adaptation + root scoping exist and never ship
+# full-scene framing on later batches
+# ---------------------------------------------------------------------------
+
+
+def test_extension_batch_classifier_requires_bridge_and_empty_segments():
+    from app.director_timeline_w46.contracts import (
+        BatchBlock,
+        DurationState,
+        TimelinePromptSegment,
+    )
+    from app.director_timeline_w46.generation.request_builder import _is_extension_batch
+
+    def mk(order, text=""):
+        segs = (
+            [TimelinePromptSegment(start=0.0, length=30.0, text=text)] if text else []
+        )
+        return BatchBlock(
+            id="b",
+            sceneId="s",
+            label="B",
+            order=order,
+            duration=DurationState(plannedDuration=30.0),
+            promptSegments=segs,
+        )
+
+    assert _is_extension_batch(mk(1), object()) is True
+    assert _is_extension_batch(mk(1), None) is False  # no bridge -> not extension
+    assert _is_extension_batch(mk(0), object()) is False  # root is never extension
+    assert _is_extension_batch(mk(1, text="own segment"), object()) is False
+
+
+def test_adapt_scene_prompt_reframes_full_scene_duration_line():
+    from app.director_timeline_w46.generation.request_builder import (
+        _adapt_scene_prompt_for_extension,
+    )
+
+    scene_prompt = (
+        "Duration:\nSeconds: 0-30. This segment is a 30 second scene.\n\n"
+        "ACTION\nCade approaches the sealed door."
+    )
+    out = _adapt_scene_prompt_for_extension(
+        scene_prompt, batch_order=1, window_start=15.0, window_end=30.0
+    )
+    assert "Seconds: 15-30" in out
+    assert "continues the scene" in out
+    assert "Seconds: 0-30" not in out
+    assert "CONTINUATION" in out
+    # Creator intent preserved verbatim.
+    assert "Cade approaches the sealed door." in out
+    # Root batches are never adapted.
+    assert _adapt_scene_prompt_for_extension(
+        scene_prompt, batch_order=0, window_start=0.0, window_end=15.0
+    ) == scene_prompt
+
+    scene_prompt = (
+        "Duration:\nSeconds: 0-30. This segment is a 30 second scene.\n\n"
+        "ACTION\nCade approaches the sealed door."
+    )
+    out = _adapt_scene_prompt_for_extension(
+        scene_prompt, batch_order=1, window_start=15.0, window_end=30.0
+    )
+    assert "Seconds: 15-30" in out
+    assert "continues the scene" in out
+    assert "Seconds: 0-30" not in out
+    assert "CONTINUATION" in out
+    # Creator intent preserved verbatim.
+    assert "Cade approaches the sealed door." in out
+    # Root batches are never adapted.
+    assert _adapt_scene_prompt_for_extension(
+        scene_prompt, batch_order=0, window_start=0.0, window_end=15.0
+    ) == scene_prompt
+
+
+def test_adapt_scene_prompt_weaves_qwen_observed_state_additively():
+    from app.codirector.video_intelligence.contracts import (
+        Continuation,
+        ExitState,
+        ImportantEvent,
+        TemporalContinuityPacket,
+    )
+    from app.director_timeline_w46.generation.request_builder import (
+        _adapt_scene_prompt_for_extension,
+    )
+
+    packet = TemporalContinuityPacket(
+        availability="ready",
+        continuation=Continuation(
+            preserve=["lighting", "wardrobe"],
+            continue_=["advance through the corridor"],
+            avoid=["restart camera"],
+        ),
+        exitState=ExitState(summary="The door has a large jagged hole and red light appears."),
+        importantEvents=[ImportantEvent(phase="late", label="hole opened in door")],
+    )
+    out = _adapt_scene_prompt_for_extension(
+        "Duration:\nSeconds: 0-30. This segment is a 30 second scene.\n\nACTION\nCade advances.",
+        batch_order=1,
+        window_start=15.0,
+        window_end=30.0,
+        observed_end_state=packet,
+    )
+    # Qwen observation is additive, creator text untouched.
+    assert "Cade advances." in out
+    assert "hole" in out.lower()
+    # Observation, not authorship: directives stay labeled as continuity lines.
+    assert "- Preserve: lighting" in out
+    assert "- Avoid: restart camera" in out
+
+
+def test_extension_classifier_and_scope_helpers_still_exist():
+    """The whole scoping path silently no-ops when these helpers vanish
+    (Take O silent-ImportError class). Guard the wiring, not just behavior."""
+    from app.director_timeline_w46.generation import request_builder as rb
+
+    for name in (
+        "_is_extension_batch",
+        "_extension_window",
+        "_adapt_scene_prompt_for_extension",
+        "_scope_root_batch_prompt",
+        "_frames_full_scene",
+        "_batch_windows_for_prompt",
+    ):
+        assert hasattr(rb, name), f"protected helper missing: request_builder.{name}"
+
+
+def test_batch_windows_helper_imports_store_from_parent_package():
+    """Take O regression: `from . import store` inside generation/ silently
+    disabled ALL scoping via a swallowed ImportError."""
+    src = _func_src(
+        "app/director_timeline_w46/generation/request_builder.py",
+        "_batch_windows_for_prompt",
+    )
+    assert "from . import store" not in src
+
+
+# ---------------------------------------------------------------------------
+# Invariant 2: capability-driven batch planning (no hardcoded model checks)
+# ---------------------------------------------------------------------------
+
+
+def test_batch_plan_partial_final_window_no_padding():
+    from app.codirector.production.generator_capability import capability_batch_plan
+
+    # 37s on a 15s generator -> 15/15/7 (never 15/15/15).
+    assert capability_batch_plan(
+        duration_seconds=37.0, max_single_generation_seconds=15.0
+    ) == [(0.0, 15.0), (15.0, 30.0), (30.0, 37.0)]
+    # Exact multiple -> no empty tail batch.
+    assert capability_batch_plan(
+        duration_seconds=30.0, max_single_generation_seconds=15.0
+    ) == [(0.0, 15.0), (15.0, 30.0)]
+    # Single-pass scene stays single-pass.
+    assert capability_batch_plan(
+        duration_seconds=12.0, max_single_generation_seconds=15.0
+    ) == [(0.0, 12.0)]
+
+
+def test_capability_resolver_refuses_to_guess():
+    from types import SimpleNamespace
+
+    from app.codirector.production.generator_capability import (
+        GeneratorCapabilityError,
+        certified_single_generation_seconds,
+    )
+
+    with pytest.raises(GeneratorCapabilityError):
+        certified_single_generation_seconds(SimpleNamespace(maxDurationSec=None, supportedDurations=[]))
+
+
+def test_capability_module_has_no_model_name_batching():
+    """Charter invariant: batching decisions come from the capability registry,
+    never from `if 'minimax' in ...` style model-name checks."""
+    src = (API / "app/codirector/production/generator_capability.py").read_text(encoding="utf-8")
+    lowered = src.lower()
+    for model in ("minimax", "seedance", "ltx", "wan", "kling"):
+        assert model not in lowered, (
+            f"generator_capability.py must not hardcode model name '{model}' — "
+            "batch planning is capability-registry-driven only"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Invariant 4: Qwen Omni temporal gate resolves predecessor from current take
+# ---------------------------------------------------------------------------
+
+
+def test_packet_gate_uses_current_take_asset_resolution():
+    """Take O gate-bypass regression: checking approvedClip.assetId let Batch 2
+    submit with no packet because the predecessor asset lived in the current
+    take's members."""
+    src = _func_src(
+        "app/codirector/video_intelligence/service.py", "packet_blocks_submit"
+    )
+    assert "current_source_batch_asset_id" in src, (
+        "packet gate must resolve predecessor via current_source_batch_asset_id "
+        "(current-take membership), not approvedClip"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Invariant 5: visual track placement + take pointer healing
+# ---------------------------------------------------------------------------
+
+
+def test_place_approved_batches_stamps_media_type_and_source_batch():
+    src = _func_src(
+        "app/director_timeline_w46/generation/completion.py",
+        "place_approved_batches_on_timeline",
+    )
+    assert 'media_type="video"' in src
+    assert "sourceBatchId" in src
+    # REBUILD LAW (track identity): every placed clip also carries the current
+    # scene take id — take binding is explicit, never frontend inference.
+    assert "sceneTakeId" in src
+
+
+def test_heal_pointer_never_steals_healthy_current():
+    src = _func_src("app/director_timeline_w46/scene_takes.py", "_heal_current_take_pointer")
+    # The healing rule only yields cancelled current, or strictly-newer ready
+    # take over incomplete current — a healthy current must be preserved.
+    assert "cancelled" in src and "incomplete" in src
+
+
+# ---------------------------------------------------------------------------
+# Invariant 5: stitch order A then B (member order), with provenance
+# ---------------------------------------------------------------------------
+
+
+def test_assemble_take_result_stitches_in_member_order_with_provenance():
+    src = _func_src("app/director_timeline_w46/scene_takes.py", "assemble_take_result")
+    assert "sorted(take.batches, key=lambda x: int(x.order or 0))" in src
+    assert "sourceAssetIds" in src
+    assert "scene_take_stitch" in src

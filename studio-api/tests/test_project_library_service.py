@@ -93,7 +93,7 @@ def test_usd_assign_is_deferred_version_1_2_not_failure(client, isolated_data_di
         assert meta.classification.subtype == "DEFERRED_VERSION_1_2"
         assert meta.folder_system_key == "miscellaneous"
         assert meta.canonical_folder_id == system_folder_id("miscellaneous")
-        assert "Version 1.2" in meta.classification.reason
+        assert "PoseCraft" in meta.classification.reason
 
         reloaded = read_asset_library_meta(db.get(Asset, asset_id))
         assert reloaded.classification.subtype == "DEFERRED_VERSION_1_2"

@@ -1,0 +1,52 @@
+{
+  "verdict": "NO-GO — MINIMAX H3 COMFY PARITY",
+  "phase4": "direct Comfy template graph executed; identities not preserved",
+  "timelineModified": false,
+  "builderReplaced": false,
+  "directReferenceUntouched": true,
+  "scoredRun": {
+    "prompt_id": "9d24fab9-b03a-4c78-8cfd-898f5ccde165",
+    "elapsed_seconds": 71.747,
+    "cached_nodes": ["1", "3", "4", "6", "7", "8"],
+    "h3_node_executed": true,
+    "sampler_executed": true,
+    "loadimage_executed": true,
+    "output": "http://127.0.0.1:8188/view?filename=h3_comfy_parity_00001_.mp4&subfolder=identity_test&type=output",
+    "resolution": "864x480",
+    "duration_seconds": 5.167,
+    "audio": "aac stereo"
+  },
+  "graph": {
+    "promptSyntax": "<Picture 1> / <Picture 2> only; no <Subject N>",
+    "ref_image_0": "studio/91b82df6-6c5a-410a-bdb8-6cd3f79753c7.jpeg",
+    "ref_image_1": "studio/a42e77e0-dfe3-4ac9-85af-ab98dfc510e5.jpeg",
+    "ref_image_size": "match",
+    "scheduler": "simple",
+    "steps": 20,
+    "sampler": "res_multistep",
+    "easyCache": false,
+    "lora": false
+  },
+  "observed": {
+    "addex": "messy dark hair, orange/black high-collar sci-fi uniform, black trousers — not black henley + khaki pants",
+    "korri": "auburn chin-length bob, teal/black matching uniform — not sandy blonde, purple eyes, pointed ears, white crop, denim shorts, circuitry tattoo"
+  },
+  "scores": {
+    "addex_face": "fail",
+    "addex_hair": "fail",
+    "addex_clothing": "fail",
+    "addex_overall": "fail",
+    "korri_face": "fail",
+    "korri_hair": "fail",
+    "korri_clothing": "fail",
+    "korri_pointed_ears": "fail",
+    "korri_overall": "fail",
+    "action": "pass-couch-hold-hands",
+    "dialogue_audio": "present"
+  },
+  "remainingDifference": {
+    "adeptVsTemplateArchitecture": "Phase 4 ran the flattened proven template path. Architecture is not the leftover gap.",
+    "referenceMediaForm": "Template example LoadImages are single-subject stills (superboy rooftop, mech-kaiju). Phase 4 replaced them with the original multi-panel Addex/Korri CRS JPEGs as specified. Those CRS documents still did not lock identity.",
+    "vsAnadriyaOwnerPass": "Anadriya corridor PASS used named Front stills plus a place still at 768x448 Quality. This run used two CRS sheets, no place, 864x480, ref_image_size=match."
+  }
+}

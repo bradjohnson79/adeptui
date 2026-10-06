@@ -1,0 +1,54 @@
+{
+  "job_id": "588fc5ac-252e-4b12-89d2-0d7a35dd183d",
+  "prompt_id": "496c9b44-d7f6-4259-91b8-cb6c09d17224",
+  "entry_keys": [
+    "prompt",
+    "outputs",
+    "status",
+    "meta"
+  ],
+  "outputs": {
+    "11": {
+      "images": [
+        {
+          "filename": "2347bf46_imagegen_00281_.png",
+          "subfolder": "studio",
+          "type": "output"
+        }
+      ]
+    }
+  },
+  "status": {
+    "status_str": "success",
+    "completed": true,
+    "messages": [
+      [
+        "execution_start",
+        {
+          "prompt_id": "496c9b44-d7f6-4259-91b8-cb6c09d17224",
+          "timestamp": 1786902056713
+        }
+      ],
+      [
+        "execution_cached",
+        {
+          "nodes": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "prompt_id": "496c9b44-d7f6-4259-91b8-cb6c09d17224",
+          "timestamp": 1786902056718
+        }
+      ],
+      [
+        "execution_success",
+        {
+          "prompt_id": "496c9b44-d7f6-4259-91b8-cb6c09d17224",
+          "timestamp": 1786902192678
+        }
+      ]
+    ]
+  }
+}

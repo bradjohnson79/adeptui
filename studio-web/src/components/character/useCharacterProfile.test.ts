@@ -15,14 +15,18 @@ import { candidateSelectionLabel } from "./types";
 import type { CharacterProfile, CharacterReference } from "./types";
 import {
   CHARACTER_PROFILE_SAVED_EVENT,
+  DRAFT_CHARACTER_ID,
   applyLoadedCharacterState,
   characterLoadIsStale,
+  characterProfileFingerprint,
   characterSaveIntent,
   getHeroIdentity,
   getPendingHeroIdentity,
   notifyCharacterProfileSaved,
   pendingPatchForCurrentCharacter,
+  profileAfterServerLoad,
   replaceCharacterProfile,
+  serverCharacterId,
   upsertCharacterSummary,
 } from "./useCharacterProfile";
 
@@ -272,6 +276,68 @@ describe("characterSaveIntent", () => {
     });
   });
 
+  it("first save of a populated new character posts the entered fields, not New Character", () => {
+    const description = "Renkoka keeps the ridge watch. She is not replaced by a placeholder.";
+    const intent = characterSaveIntent({
+      projectId: "proj-1",
+      characterId: DRAFT_CHARACTER_ID,
+      fields: {
+        name: "Renkoka",
+        gender_presentation: "female",
+        visual_style: "live_action",
+        description,
+        is_global: false,
+        isGlobal: false,
+      },
+      profile: {
+        id: "",
+        name: "New Character",
+        gender_presentation: "",
+        visual_style: "",
+        description: "",
+      },
+    });
+    expect(intent.ok).toBe(true);
+    if (!intent.ok) return;
+    expect(intent.method).toBe("POST");
+    if (intent.method !== "POST") return;
+    expect(intent.name).toBe("Renkoka");
+    expect(intent.name).not.toBe("New Character");
+    expect(intent.extra).toEqual({
+      gender_presentation: "female",
+      visual_style: "live_action",
+      description,
+      is_global: false,
+      isGlobal: false,
+    });
+    expect(intent.extra.description).toBe(description);
+  });
+
+  it("does not let a stored placeholder name replace the name in the form", () => {
+    const intent = characterSaveIntent({
+      projectId: "proj-1",
+      characterId: "char-1",
+      fields: {
+        name: "Renkoka",
+        gender_presentation: "female",
+        visual_style: "cinematic",
+        description: "The first save keeps this profile.",
+      },
+      profile: { id: "char-1", name: "New Character", project_id: "proj-1", description: "" },
+    });
+    expect(intent).toEqual({
+      ok: true,
+      method: "PATCH",
+      characterId: "char-1",
+      fields: {
+        name: "Renkoka",
+        gender_presentation: "female",
+        visual_style: "cinematic",
+        description: "The first save keeps this profile.",
+      },
+    });
+  });
+
   it("does not serialize New Character onto an existing named profile", () => {
     const intent = characterSaveIntent({
       projectId: "proj-1",
@@ -297,6 +363,64 @@ describe("characterSaveIntent", () => {
     expect(intent.ok).toBe(false);
     if (intent.ok) return;
     expect(intent.error).toMatch(/project that created them/i);
+  });
+});
+
+describe("profileAfterServerLoad (reference reload must not restore the placeholder)", () => {
+  const entered = {
+    id: "char-1",
+    name: "Renkoka",
+    gender_presentation: "female",
+    visual_style: "live_action",
+    description: "Renkoka keeps the ridge watch. The second sentence is still here.",
+  };
+  const placeholder = {
+    id: "char-1",
+    name: "New Character",
+    gender_presentation: "",
+    visual_style: "",
+    description: "",
+  };
+
+  it("keeps the unsaved form when a reference reload returns New Character", () => {
+    const loaded = profileAfterServerLoad({
+      local: entered,
+      loaded: placeholder,
+      committedFingerprint: characterProfileFingerprint(placeholder),
+      force: false,
+    });
+    expect(loaded?.name).toBe("Renkoka");
+    expect(loaded?.name).not.toBe("New Character");
+    expect(loaded?.gender_presentation).toBe("female");
+    expect(loaded?.visual_style).toBe("live_action");
+    expect(loaded?.description).toBe(entered.description);
+  });
+
+  it("accepts the server row after the form has been saved", () => {
+    const loaded = profileAfterServerLoad({
+      local: entered,
+      loaded: entered,
+      committedFingerprint: characterProfileFingerprint(entered),
+      force: false,
+    });
+    expect(loaded?.name).toBe("Renkoka");
+    expect(loaded?.description).toBe(entered.description);
+  });
+
+  it("reset still replaces the form with the server row", () => {
+    const loaded = profileAfterServerLoad({
+      local: entered,
+      loaded: placeholder,
+      committedFingerprint: characterProfileFingerprint(placeholder),
+      force: true,
+    });
+    expect(loaded?.name).toBe("New Character");
+  });
+
+  it("treats the draft selection as unsaved so the first save is a create", () => {
+    expect(serverCharacterId(DRAFT_CHARACTER_ID)).toBeNull();
+    expect(serverCharacterId("")).toBeNull();
+    expect(serverCharacterId("char-1")).toBe("char-1");
   });
 });
 
@@ -411,6 +535,14 @@ describe("instant dropdown refresh wiring (source assertions)", () => {
     expect(expressSrc).toMatch(/mode="express"/);
     expect(standardSrc).toMatch(/<CharacterCore/);
     expect(standardSrc).toMatch(/mode="standard"/);
+  });
+
+  it("Create opens a draft and does not persist New Character or Untitled Character first", () => {
+    expect(expressSrc).toMatch(/DRAFT_CHARACTER_ID/);
+    expect(standardSrc).toMatch(/DRAFT_CHARACTER_ID/);
+    expect(expressSrc).not.toMatch(/createCharacterProfile\(/);
+    expect(standardSrc).not.toMatch(/name:\s*"Untitled Character"/);
+    expect(expressSrc).not.toMatch(/name:\s*"New Character"/);
   });
 
   it("Standard drops a profile reload that started before Save", () => {

@@ -40,18 +40,18 @@ def _category_readiness(
         visual_blockers.append("Physical details (skin/hair/body) not defined")
     visual_score = max(0.0, 1.0 - len(visual_blockers) / max(len(REQUIRED_COVERAGE_ROLES) + 1, 1))
     visual_ready = len(missing_roles) == 0 and has_physical_details
+    # Side, back, and the other sheet views are outputs of the sheet. They are
+    # completeness notes, not a reason the front reference cannot be created.
     categories.append(
         CategoryReadiness(
             category="VisualIdentity",
             score=round(visual_score, 3),
             ready=visual_ready,
             blockers=visual_blockers,
-            next_action="Generate or attach required reference roles" if visual_blockers else "",
-            critical=bool(missing_roles),
+            next_action="The reference sheet can be created from this profile." if missing_roles else "",
+            critical=False,
         )
     )
-    if missing_roles:
-        critical_blockers.append(f"Missing visual references: {', '.join(missing_roles[:3])}")
 
     personality_ready = has_personality
     categories.append(

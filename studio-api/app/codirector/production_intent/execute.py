@@ -476,19 +476,35 @@ def _enqueue_non_video(db: Session, intent: ProductionIntent) -> dict[str, Any]:
         )
 
     asset_id = result.get("assetId") or result.get("asset_id")
+    jobs = result.get("jobs") if isinstance(result.get("jobs"), list) else []
+    first_job = jobs[0] if jobs and isinstance(jobs[0], dict) else {}
+    job_id = result.get("jobId") or first_job.get("jobId")
+    workflow_key = result.get("workflowKey") or first_job.get("workflowKey")
     store.update_state(
         intent.projectId,
         intent.intentId,
         execution_state="completed" if result.get("ok") else "failed",
         approval_policy="approved",
+        job_id=str(job_id) if job_id else None,
+        workflow_key=str(workflow_key) if workflow_key else None,
         metadata_patch={"result": result, "assetId": asset_id},
     )
-    return {
+    binding: dict[str, Any] = {
         "ok": bool(result.get("ok", True)),
         "intentId": intent.intentId,
         "result": result,
         "completed": bool(result.get("ok", True)),
     }
+    # Image Product returns the job id inside its own payload. The tool
+    # receipt and approval check read it from this binding, the same way
+    # video enqueue does.
+    if job_id:
+        binding["jobId"] = job_id
+    if workflow_key:
+        binding["workflowKey"] = workflow_key
+    if result.get("queued") or result.get("status"):
+        binding["status"] = result.get("status") or "queued"
+    return binding
 
 
 def _place_asset(db: Session, intent: ProductionIntent) -> dict[str, Any]:
@@ -749,6 +765,15 @@ def _image_generate(db: Session, intent: ProductionIntent) -> dict[str, Any]:
             "height": meta.get("height"),
             "refs": meta.get("refs") or list(intent.references or []),
         }
+        if intent.sourceAssets and intent.operation != "image.edit":
+            # The stored reference is the canonical asset. Do not copy it
+            # into this project. The existing reference compiler binds it.
+            body["sourceAssetId"] = intent.sourceAssets[0]
+            body["referenceImage"] = intent.sourceAssets[0]
+            body["referenceAssetIds"] = [str(asset_id) for asset_id in intent.sourceAssets if asset_id]
+            # Certified reference stills use this purpose. A free-text purpose
+            # such as "Cinematic shot" would otherwise be treated as an edit.
+            body["purpose"] = "codirector_image_generate"
         if intent.operation == "image.edit" and intent.sourceAssets:
             body["operation"] = "image.edit"
             body["sourceAssetId"] = intent.sourceAssets[0]

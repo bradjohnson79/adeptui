@@ -16,8 +16,7 @@ import {
   voiceStudioSearchForCharacter,
 } from "./voiceStudio/voiceStudioCharacter";
 import { VoiceStudioWorkspace } from "./VoiceStudioWorkspace";
-import { ProviderSourceSelector } from "./audioProvider/ProviderSourceSelector";
-import { useVoiceStudioProviderSource } from "../audioProvider/useProviderSource";
+import { VoiceEngineLabel } from "./voiceStudio/VoiceEngineLabel";
 
 type VoiceStudioShellProps = {
   project: Project;
@@ -40,7 +39,8 @@ function chooseApprovedVoice(voices: any[] | undefined, activeId?: string): any 
   const list = Array.isArray(voices) ? voices : [];
   const isApproved = (voice: any) => String(voice?.approval_status || "").toLowerCase() === "approved";
   const active = list.find((voice) => voice?.id === activeId);
-  if (active && isApproved(active)) return active;
+  const activeIsElevenLabs = String(active?.provider || "").toLowerCase() === "elevenlabs";
+  if (active && (isApproved(active) || activeIsElevenLabs)) return active;
   const approved = [...list]
     .filter(isApproved)
     .sort((a, b) =>
@@ -80,8 +80,6 @@ export function VoiceStudioShell({
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const restoredRef = useRef(false);
-  const voiceProvider = useVoiceStudioProviderSource();
-
   const load = useCallback(async () => {
     setLoading(true);
     setMessage("");
@@ -268,14 +266,7 @@ export function VoiceStudioShell({
           tip="Pick a character to build their voice identity, direct dialogue performances, and shape how the line lives inside the scene."
         />
         <div style={{ margin: "0.75rem 0" }}>
-          <ProviderSourceSelector
-            id="voice-studio-shell"
-            label="Provider"
-            source={voiceProvider.source}
-            onChange={voiceProvider.setSource}
-            health={voiceProvider.health}
-            healthBusy={voiceProvider.healthBusy}
-          />
+          <VoiceEngineLabel id="voice-studio-shell" />
         </div>
         <p className="muted">
           Start with a character, then shape the voice, direct the performance, build the scene acoustic, and approve the take you want to carry forward.

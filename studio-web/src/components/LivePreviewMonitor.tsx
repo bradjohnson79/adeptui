@@ -76,7 +76,7 @@ function formatSceneClock(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function PreviewPublishBarEyeIcon({ hidden }: { hidden: boolean }) {
+export function PreviewPublishBarEyeIcon({ hidden }: { hidden: boolean }) {
   return (
     <svg
       className="live-preview-publish-bar__eye-icon"
@@ -107,7 +107,7 @@ function PreviewPublishBarEyeIcon({ hidden }: { hidden: boolean }) {
   );
 }
 
-function PreviewPublishBarVisibilityToggle({
+export function PreviewPublishBarVisibilityToggle({
   visible,
   attention,
   onToggle,

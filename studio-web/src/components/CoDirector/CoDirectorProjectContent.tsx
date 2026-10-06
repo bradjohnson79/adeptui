@@ -148,7 +148,7 @@ function ApprovalsList({ projectId }: { projectId: string }) {
     proposalActingId,
     approveProposal,
     rejectProposal,
-    requestProposalRevision,
+    reviseProposal,
     cancelProposal,
     productionCapable,
   } = useCoDirectorSession();
@@ -210,7 +210,7 @@ function ApprovalsList({ projectId }: { projectId: string }) {
           productionCapable={productionCapable}
           onApprove={() => void approveProposal(proposal.id)}
           onReject={(note) => void rejectProposal(proposal.id, note)}
-          onRequestRevision={(note) => void requestProposalRevision(proposal.id, note)}
+          onRevise={(correction) => void reviseProposal(proposal.id, correction)}
           onCancel={() => void cancelProposal(proposal.id)}
         />
       ))}

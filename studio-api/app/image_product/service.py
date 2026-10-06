@@ -106,6 +106,22 @@ def generate_images(
                 or compiled.get("falImageModelId")
                 or body.get("falImageModelId")
             ),
+            "wavespeedImageModelId": (
+                (pinned or {}).get("wavespeedImageModelId")
+                or compiled.get("wavespeedImageModelId")
+                or body.get("wavespeedImageModelId")
+            ),
+            "provider": str(
+                (pinned or {}).get("provider")
+                or body.get("provider")
+                or body.get("requested_provider")
+                or ""
+            ),
+            "requested_provider": str(
+                body.get("requested_provider")
+                or (pinned or {}).get("provider")
+                or ""
+            ),
             "providerPreference": intent.get("providerPreference") or body.get("providerPreference"),
             # Reference-fidelity strength (img2img / ref_edit). Lower denoise =
             # more of the reference latent preserved. Character Creator passes a
@@ -144,13 +160,49 @@ def generate_images(
                 else None
             ),
         }
-        pin_provider = str((pinned or {}).get("provider") or "").strip().lower()
-        if pin_provider == "fal" or params.get("falImageModelId"):
+        pin_provider = str((pinned or {}).get("provider") or params.get("provider") or "").strip().lower()
+        if pin_provider == "wavespeed":
             params["cloudPaid"] = True
+            params["provider"] = "wavespeed"
+            params["requested_provider"] = "wavespeed"
+            params["providerPreference"] = "cloud"
+            params["wavespeedImageModelId"] = params.get("wavespeedImageModelId") or (pinned or {}).get("officialModelId")
+            params.pop("kieImageModelId", None)
+            params.pop("falImageModelId", None)
+        elif pin_provider == "fal":
+            params["cloudPaid"] = True
+            params["provider"] = "fal"
+            params["requested_provider"] = "fal"
             params["providerPreference"] = "cloud"
             params["falImageModelId"] = params.get("falImageModelId") or (pinned or {}).get("officialModelId")
             params.pop("kieImageModelId", None)
-        elif pin_provider == "kie" or params.get("kieImageModelId"):
+            params.pop("wavespeedImageModelId", None)
+        elif pin_provider == "kie":
+            params["cloudPaid"] = True
+            params["provider"] = "kie"
+            params["requested_provider"] = "kie"
+            params["providerPreference"] = "cloud"
+            params.pop("falImageModelId", None)
+            params.pop("wavespeedImageModelId", None)
+            from ..secrets_store import get_secret
+
+            if not get_secret("kie_api_key"):
+                raise RuntimeError(
+                    "Kie.ai API key required. Open Setup → AI Providers and add a Kie.ai key."
+                )
+        elif params.get("wavespeedImageModelId"):
+            params["cloudPaid"] = True
+            params["provider"] = "wavespeed"
+            params["providerPreference"] = "cloud"
+            params.pop("kieImageModelId", None)
+            params.pop("falImageModelId", None)
+        elif params.get("falImageModelId"):
+            params["cloudPaid"] = True
+            params["provider"] = "fal"
+            params["providerPreference"] = "cloud"
+            params["falImageModelId"] = params.get("falImageModelId") or (pinned or {}).get("officialModelId")
+            params.pop("kieImageModelId", None)
+        elif params.get("kieImageModelId"):
             params["cloudPaid"] = True
             params["providerPreference"] = "cloud"
             from ..secrets_store import get_secret

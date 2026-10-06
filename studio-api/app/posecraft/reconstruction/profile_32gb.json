@@ -1,0 +1,13 @@
+{
+  "name": "adept_local_fire3d_32gb_v1",
+  "skip_render": true,
+  "object_batch_size": 1,
+  "ss_shape_object_batch_size": 1,
+  "pbr_object_batch_size": 1,
+  "appearance_decode_object_chunk_size": 1,
+  "mesh_postprocess_object_batch_size": 1,
+  "anyup_frame_batch_size": 1,
+  "continue_on_error": true,
+  "sequential_objects": true,
+  "notes": "Config overlay only. Do not fork Fire3D. Official defaults are 16/16/8 for 96 GB."
+}

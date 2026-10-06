@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../api";
-import { addToTimeline } from "../../filmTimeline/addToTimeline";
 import { previewActionsEnabled, resolveFilmTimelinePreviewMedia } from "../../filmTimeline/resolveFilmTimelinePreviewMedia";
-import { filmTimelineHasCancellableJob } from "../../filmTimeline/filmTimelineCancelVisibility";
+import { filmTimelineCancelPresentation, filmTimelineHasCancellableJob } from "../../filmTimeline/filmTimelineCancelVisibility";
 import type { Asset, Project, Scene } from "../../types";
 import { isTimelineMediaAsset } from "../../timelineMediaTypes";
-import { isEditableTarget, loadHotkeys, matchHotkey } from "../../timelineMaster/timelineHotkeys";
+import { isEditableTarget, loadHotkeys, matchHotkey, registerWorkspaceKeyHandler } from "../../timelineMaster/timelineHotkeys";
 import {
   clampViewerHeight,
   loadProjectPreviewHeightRatio,
@@ -13,10 +13,20 @@ import {
   saveProjectPreviewHeightRatio,
   saveTimelineWorkspaceLayout,
 } from "../../timelineMaster/workspaceLayout";
-import { closedVideoRetakeSession, type VideoRetakeSession } from "../../timelineMaster/videoRetake";
+import { closedVideoRetakeSession, canSubmitVideoRetake, type VideoRetakeSession } from "../../timelineMaster/videoRetake";
 import { usePreviewFullscreen } from "../../workspace/fullscreen/usePreviewFullscreen";
 import { PromptToolbar } from "../../filmTimeline/promptGuides/PromptToolbar";
-import { FilmReferenceModal, type FilmReference } from "./FilmReferenceModal";
+import { canonicalSceneBatches, nextShotNumber, pendingSceneBatch, previewShotIdentity, shotTag, trackHasBatches } from "../../filmTimeline/sceneBatches";
+import { fileTimeForWindow, sceneLocalFromFile, stitchCoversClips, windowReachedEnd } from "../../filmTimeline/scenePlayback";
+import { clipAtTime, sceneDuration, sceneTimeFromPreview, skipSceneTime, visualWindows, type VisualClip } from "../../filmTimeline/visualTrack";
+import { buildProjectWorkspaceLocation } from "../../navigation/projectWorkspaceNavigation";
+import { VisualTrack } from "./VisualTrack";
+import { SPOKEN_LANGUAGES } from "../../filmTimeline/spokenLanguage";
+import { FilmReferenceModal, type FilmReference, type FilmReferenceSave } from "./FilmReferenceModal";
+import { publishableSceneAsset } from "../../filmTimeline/publishableSceneAsset";
+import { LibraryReferenceControl } from "./LibraryReferenceControl";
+import type { ImageRole } from "./referenceRole";
+import { libraryAfterClassification, mergeLibraryPage } from "./referenceLibrary";
 import { filmReferenceChipLabel } from "./filmReferenceChipLabel";
 import { AddFromProjectLibraryModal } from "../timeline-master/AddFromProjectLibraryModal";
 import { GeneratorQualityControls } from "../timeline-master/GeneratorCapabilityControls";
@@ -26,11 +36,21 @@ import {
 } from "../../timelineMaster/draftCapabilities";
 import { normalizeProductionAspect } from "../../workspacePrefs";
 import { LTX_DEFAULT_QUALITY, type LtxTimelineQuality } from "../../timelineMaster/legalCanvas";
-import { MagiUpscaleChooser } from "../timeline-master/MagiUpscaleChooser";
+import { ltxTimelineFrameCount } from "../../video/legalCanvas";
 import { PreviewFullscreenTransport } from "../timeline-master/PreviewFullscreenTransport";
+import {
+  TransportBatchEndIcon,
+  TransportBatchStartIcon,
+  TransportForward5Icon,
+  TransportPauseIcon,
+  TransportPlayIcon,
+  TransportRewind5Icon,
+  TransportSceneEndIcon,
+  TransportSceneStartIcon,
+} from "../timeline-master/previewTransportIcons";
 import { PreviewVideoActionMenu } from "../timeline-master/PreviewVideoActionMenu";
 import { TimelineGpuPane } from "../timeline-master/TimelineGpuPane";
-import { renderNoticeForSegments, resolveFilmTimelinePlanDims, visibleRenderNotice, visibleSegmentError } from "../../filmTimeline/filmTimelinePresentation";
+import { displayLtxMode, filmTimelineRenderHud, filmTimelineRenderLine, foldLegacyProductionSelection, renderNoticeForSegments, resolveFilmTimelinePlanDims, visibleRenderNotice, visibleSegmentError, type FilmRenderHudModel } from "../../filmTimeline/filmTimelinePresentation";
 import { TimelineHotKeysPane } from "../timeline-master/TimelineHotKeysPane";
 import { TimelineRetakeOverlay } from "../timeline-master/TimelineRetakeOverlay";
 import { PreviewPublishBarVisibilityToggle } from "../LivePreviewMonitor";
@@ -49,7 +69,22 @@ type Segment = {
   timedPrompt: string;
   assetId?: string | null;
   error?: string | null;
-  generationMetadata?: { continuity?: { seam?: { warning?: string | null } }; resolvedGeneration?: Record<string, unknown> | null; legalCanvas?: Record<string, unknown> | null };
+  compositionRole?: string | null;
+  sourceSegmentId?: string | null;
+  origin?: string | null;
+  trimInSec?: number | null;
+  trimOutSec?: number | null;
+  shotNumber?: number | null;
+  lastFrameAssetId?: string | null;
+    generationMetadata?: {
+    compositionHold?: boolean;
+    segmentedRetake?: { sourceSegmentId?: string } | null;
+    prepend?: { targetSegmentId?: string } | null;
+    continuity?: { seam?: { warning?: string | null } };
+    resolvedGeneration?: Record<string, unknown> | null;
+    legalCanvas?: Record<string, unknown> | null;
+    renderStatus?: { progress?: number; progressGrounded?: boolean; phaseLabel?: string; elapsedSec?: number; status?: string };
+  };
 };
 type Shot = {
   id: string;
@@ -59,7 +94,7 @@ type Shot = {
   timedPrompt: string;
   status: string;
   segments: Segment[];
-  state: { references: Reference[]; firstFrameAssetId?: string | null; stitchAssetId?: string | null; stitchStatus?: string | null; modelId?: string | null; resolvedGeneration?: Record<string, unknown> | null };
+  state: { references: Reference[]; firstFrameAssetId?: string | null; stitchAssetId?: string | null; stitchStatus?: string | null; stitchSegmentIds?: string[] | null; modelId?: string | null; resolvedGeneration?: Record<string, unknown> | null; spokenLanguage?: string | null; spokenLanguageCustom?: string | null; dialogueAuthority?: string | null };
 };
 type Clip = { id: string; label: string; assetId: string; startSec: number; durationSec: number; role?: string };
 type Film = {
@@ -71,9 +106,12 @@ type Film = {
   sfx: Clip[];
   videoClips: Clip[];
   publishedAssetId?: string | null;
+  publishedSourceAssetId?: string | null;
+  highestShotNumber?: number | null;
 };
-type ModelRow = { id: string; label: string; local: boolean; available: boolean; unavailableReason: string; supportedDurations?: number[]; maxDurationSec?: number; qualityControl?: string; supportedAspectRatios?: string[] };
+type ModelRow = { id: string; label: string; local: boolean; available: boolean; unavailableReason: string; supportedDurations?: number[]; maxDurationSec?: number; qualityControl?: string; supportedAspectRatios?: string[]; continuationMode?: "hard" | "soft" | "none"; supportsTextToVideo?: boolean; supportsStartFrame?: boolean; supportsEndFrame?: boolean; supportsThreeFrame?: boolean; supportsReferenceToVideo?: boolean; notes?: string };
 type LeftTab = "inspector" | "hotkeys" | "gpu";
+type WorkspaceTab = "prompt" | "track";
 
 type Props = {
   project: Project;
@@ -85,20 +123,6 @@ type Props = {
 const LEFT_TAB_KEY = "adept_film_timeline_left_tab";
 const LEFT_COLLAPSE_KEY = "adept_film_timeline_left_collapsed";
 const V2_HOTKEYS = new Set(["playPause", "fullscreen", "generateScene", "retake", "openHotkeys", "escape"]);
-
-function overlaps(a: Clip, b: Clip) {
-  return a.startSec < b.startSec + (b.durationSec || 1) && b.startSec < a.startSec + (a.durationSec || 1);
-}
-
-function audioRows(clips: Clip[]): Clip[][] {
-  const rows: Clip[][] = [];
-  for (const clip of [...clips].sort((a, b) => a.startSec - b.startSec)) {
-    const row = rows.find((items) => items.every((item) => !overlaps(item, clip)));
-    if (row) row.push(clip);
-    else rows.push([clip]);
-  }
-  return rows;
-}
 
 function assetLabel(asset: Asset) {
   return asset.tag || asset.filename || asset.id;
@@ -143,6 +167,97 @@ function PanelChevron({ direction }: { direction: "left" | "right" }) {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+function RenderMeter({ model }: { model: FilmRenderHudModel }) {
+  const set = model.bar === "live" || model.bar === "held";
+  return (
+    <i
+      className={set ? "is-set" : undefined}
+      style={set && model.percent !== null ? { width: `${model.percent}%` } : undefined}
+      data-testid="film-timeline-render-meter"
+    />
+  );
+}
+
+function PreviewTransport({
+  clips,
+  playheadSec,
+  playing,
+  onTogglePlay,
+  onSeek,
+}: {
+  clips: VisualClip[];
+  playheadSec: number;
+  playing: boolean;
+  onTogglePlay: () => void;
+  onSeek: (sceneTime: number) => void;
+}) {
+  const piece = clipAtTime(clips, playheadSec);
+  const sceneEnd = sceneDuration(clips);
+  const hasPicture = clips.length > 0;
+  const playLabel = playing ? "Pause" : "Play";
+  const skip = (delta: number) => onSeek(skipSceneTime(playheadSec, delta, sceneEnd));
+  return (
+    <div className="film-preview-transport" data-testid="film-timeline-transport" role="toolbar" aria-label="Preview transport">
+      <button type="button" className="preview-transport-btn" title="Beginning of Scene" aria-label="Beginning of Scene" disabled={!hasPicture} onClick={() => onSeek(0)}>
+        <TransportSceneStartIcon />
+      </button>
+      <button type="button" className="preview-transport-btn" title="Start of Batch" aria-label="Start of Batch" disabled={!piece} onClick={() => piece && onSeek(piece.start)}>
+        <TransportBatchStartIcon />
+      </button>
+      <button type="button" className="preview-transport-btn" data-testid="film-timeline-skip-back" title="Back 5 seconds" aria-label="Back 5 seconds" disabled={!hasPicture} onClick={() => skip(-5)}>
+        <TransportRewind5Icon />
+      </button>
+      <button type="button" className="preview-transport-btn preview-transport-play" title={playLabel} aria-label={playLabel} aria-pressed={playing} disabled={!hasPicture} onClick={onTogglePlay}>
+        {playing ? <TransportPauseIcon /> : <TransportPlayIcon />}
+      </button>
+      <button type="button" className="preview-transport-btn" data-testid="film-timeline-skip-forward" title="Forward 5 seconds" aria-label="Forward 5 seconds" disabled={!hasPicture} onClick={() => skip(5)}>
+        <TransportForward5Icon />
+      </button>
+      <button type="button" className="preview-transport-btn" title="End of Batch" aria-label="End of Batch" disabled={!piece} onClick={() => piece && onSeek(piece.end)}>
+        <TransportBatchEndIcon />
+      </button>
+      <button type="button" className="preview-transport-btn" title="End of Scene" aria-label="End of Scene" disabled={!hasPicture} onClick={() => onSeek(sceneEnd)}>
+        <TransportSceneEndIcon />
+      </button>
+    </div>
+  );
+}
+
+function FilmTimelineRenderHud({ model, onDismiss }: { model: FilmRenderHudModel; onDismiss: () => void }) {
+  const [compact, setCompact] = useState(false);
+  const terminal = model.kind === "cancelled" || model.kind === "failed";
+  return (
+    <div className={`film-timeline__hud${compact ? " is-compact" : ""}`} data-testid="film-timeline-render-hud" aria-live="polite">
+      <div className="film-timeline__hud-head">
+        <strong data-testid="film-timeline-render-headline">{filmTimelineRenderLine(model)}</strong>
+        <span className="film-timeline__hud-tools">
+          <button type="button" className="film-timeline__hud-fold" aria-label={compact ? "Expand render status" : "Collapse render status"} onClick={() => setCompact((value) => !value)}>
+            {compact ? "+" : "−"}
+          </button>
+          {terminal ? (
+            <button type="button" className="film-timeline__remove" aria-label="Dismiss notice" data-testid="film-timeline-hud-dismiss" onClick={onDismiss}>
+              ×
+            </button>
+          ) : null}
+        </span>
+      </div>
+      {compact ? null : (
+        <>
+          {model.model ? <p>{model.model}</p> : null}
+          {model.place ? <p>{model.place}</p> : null}
+          {model.elapsed ? <p>{`Elapsed ${model.elapsed}`}</p> : null}
+          {model.detail ? <p>{model.detail}</p> : null}
+          {model.bar !== "none" ? (
+            <div className="film-timeline__hud-bar">
+              <RenderMeter model={model} />
+            </div>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -195,27 +310,55 @@ function FilmDesk({
   );
 }
 
+const UNPUBLISHED_MAGI = "Your scene must be published before it can be sent to MAGI.";
+const STALE_MAGI = "Update Published before this scene can be sent to MAGI.";
+/** Visual lifetime of the top-action notification beneath the publish bar. */
+const TIMELINE_TOP_ACTION_NOTE_MS = 10_000;
+
 export function FilmTimelineShell({ project, selectedScene, setSelectedScene, refresh }: Props) {
+  const navigate = useNavigate();
   const sceneId = selectedScene || project.scenes[0]?.id || "";
   const scene = project.scenes.find((item) => item.id === sceneId) as Scene | undefined;
   const activeByScene = useRef<Record<string, string>>({});
+  // Scene id of the film currently held in state. During a scene switch there
+  // is one render where the NEW sceneId meets the OLD film; scene-scoped shot
+  // reads (dialogue, etc.) must not fire for that stale pairing.
+  const filmSceneRef = useRef<string>("");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const pendingSeek = useRef<number | null>(null);
+  const [playheadSec, setPlayheadSec] = useState(0);
   const fullscreen = usePreviewFullscreen();
   const [film, setFilm] = useState<Film | null>(null);
   const [shotId, setShotId] = useState("");
   const [segmentId, setSegmentId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [duration, setDuration] = useState(10);
+  const [spokenLanguage, setSpokenLanguage] = useState("en");
+  const [spokenCustom, setSpokenCustom] = useState("");
+  const [dialogueAuthority, setDialogueAuthority] = useState("native_model");
+  const [dialogueNote, setDialogueNote] = useState("");
+  const [workspace, setWorkspace] = useState<WorkspaceTab>("prompt");
+  const [addIntent, setAddIntent] = useState<"append" | "prepend" | null>(null);
   const [modelId, setModelId] = useState("");
   const [models, setModels] = useState<ModelRow[]>([]);
   const [productionAspects, setProductionAspects] = useState<string[]>([]);
   const [h3Aspects, setH3Aspects] = useState<string[]>([]);
   const [h3Resolution, setH3Resolution] = useState<{ mode: "auto" | "manual"; megapixels: number }>({ mode: "auto", megapixels: 0.7 });
   const [ltxQuality, setLtxQuality] = useState<LtxTimelineQuality>(LTX_DEFAULT_QUALITY);
+  const [ltxMode, setLtxMode] = useState<"text" | "one_frame" | "start_end">("text");
+  const [ltxStartAssetId, setLtxStartAssetId] = useState("");
+  const [ltxEndAssetId, setLtxEndAssetId] = useState("");
+  const [seedanceResolution, setSeedanceResolution] = useState<string>("720p");
   const [message, setMessage] = useState("");
   const [stickyErrorHidden, setStickyErrorHidden] = useState(false);
   const [dismissedNoticeKey, setDismissedNoticeKey] = useState("");
+  const [completeKey, setCompleteKey] = useState("");
+  const sawGenerating = useRef(false);
+  const batchesAtStart = useRef(0);
   const [busy, setBusy] = useState(false);
+  const publishLock = useRef(false);
+  const [publishPhase, setPublishPhase] = useState<null | "publish" | "update">(null);
+  const [creatingScene, setCreatingScene] = useState(false);
   const [tab, setTab] = useState<LeftTab>(() => {
     const stored = localStorage.getItem(LEFT_TAB_KEY);
     return stored === "hotkeys" || stored === "gpu" || stored === "inspector" ? stored : "inspector";
@@ -231,28 +374,59 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     const ratio = loadProjectPreviewHeightRatio(project.id) ?? 0.48;
     setPreviewPx(clampViewerHeight(node.clientHeight * ratio, node.clientHeight, window.innerWidth));
   }, [fullscreen.isFullscreen, project.id]);
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState<null | "references" | "visual" | "ltx-frame" | "ltx-end">(null);
   const [referenceOpen, setReferenceOpen] = useState<{ assetId?: string; editId?: string } | null>(null);
   const [libraryItems, setLibraryItems] = useState<Asset[]>([]);
+  const [classifyingId, setClassifyingId] = useState("");
+  const [classifyError, setClassifyError] = useState<{ assetId: string; message: string } | null>(null);
+  const classifyStamp = useRef(0);
   const [libraryAssetIds, setLibraryAssetIds] = useState<string[]>([]);
   const libraryAssetIdsRef = useRef<string[]>([]);
   libraryAssetIdsRef.current = libraryAssetIds;
   const [publishBar, setPublishBar] = useState(() => loadTimelineWorkspaceLayout().previewPublishBarVisible);
   const [retake, setRetake] = useState<VideoRetakeSession>(closedVideoRetakeSession());
-  const [magiOpen, setMagiOpen] = useState(false);
-  const [magiLoading, setMagiLoading] = useState(false);
-  const [magiError, setMagiError] = useState<string | null>(null);
-  const [magiEngine, setMagiEngine] = useState("ffmpeg-scale");
-  const [magiModel, setMagiModel] = useState("lanczos");
-  const [magiTarget, setMagiTarget] = useState("");
-  const [magiOpts, setMagiOpts] = useState<{
-    honesty?: string;
-    sourceWidth?: number;
-    sourceHeight?: number;
-    realesrganReady?: boolean;
-    engines?: Array<{ id: string; label?: string; available?: boolean; models?: Array<{ id: string; label?: string }> }>;
-    targets?: Array<{ id: string; label: string; width: number; height: number }>;
-  } | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [stitching, setStitching] = useState(false);
+  const [stitchNote, setStitchNote] = useState("");
+  const continueScene = useRef(false);
+  // Top-action notification (Publish / Update Published / Send to MAGI): purely
+  // event-driven with one shared 10-second auto-dismiss lifetime. The publish
+  // gate state still drives button disabled/title — it no longer pins text
+  // beneath the bar. `key` re-arms the CSS fade and the timer on re-trigger.
+  const [magiNote, setMagiNote] = useState<{ text: string; key: number }>({ text: "", key: 0 });
+  const magiNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retakeAwaiting = useRef("");
+  const trackScrollByScene = useRef<Record<string, number>>({});
+
+  const clearMagiNoteTimer = useCallback(() => {
+    if (magiNoteTimer.current != null) {
+      clearTimeout(magiNoteTimer.current);
+      magiNoteTimer.current = null;
+    }
+  }, []);
+
+  const showMagiNote = useCallback(
+    (text: string) => {
+      const note = String(text || "").trim();
+      if (!note) return;
+      clearMagiNoteTimer();
+      setMagiNote((current) => ({ text: note, key: current.key + 1 }));
+      magiNoteTimer.current = setTimeout(() => {
+        magiNoteTimer.current = null;
+        setMagiNote((current) => ({ ...current, text: "" }));
+      }, TIMELINE_TOP_ACTION_NOTE_MS);
+    },
+    [clearMagiNoteTimer],
+  );
+
+  // Scene/shot switch clears any stale top-action note so a message from one
+  // scene can never linger over another. Unmount (leaving Timeline) clears the
+  // timer so no ghost message can fire later.
+  useEffect(() => {
+    clearMagiNoteTimer();
+    setMagiNote({ text: "", key: 0 });
+  }, [sceneId, shotId, clearMagiNoteTimer]);
+  useEffect(() => () => clearMagiNoteTimer(), [clearMagiNoteTimer]);
 
   useEffect(() => {
     localStorage.setItem(LEFT_TAB_KEY, tab);
@@ -272,6 +446,20 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     return film.shots.find((item) => item.id === shotId);
   }, [film, shotId]);
 
+  const magiGate = useMemo(() => {
+    const stitchId = publishableSceneAsset(shot);
+    const stitchReady = Boolean(stitchId);
+    const published = String(film?.publishedAssetId || "");
+    const source = String(film?.publishedSourceAssetId || "");
+    if (!published) {
+      return { state: "unpublished" as const, stitchId, stitchReady, note: UNPUBLISHED_MAGI };
+    }
+    if (!stitchReady || source !== stitchId) {
+      return { state: "stale" as const, stitchId, stitchReady, note: STALE_MAGI };
+    }
+    return { state: "current" as const, stitchId, stitchReady, note: "" };
+  }, [film?.publishedAssetId, film?.publishedSourceAssetId, shot?.state.stitchAssetId, shot?.state.stitchStatus, shot?.segments]);
+
   const referenced = useMemo(() => {
     const ids = new Set<string>();
     for (const ref of film?.references || []) if (ref.assetId) ids.add(ref.assetId);
@@ -288,7 +476,8 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     segments: shot?.segments,
   });
   const activeReferences = shot?.state.references?.length ? shot.state.references : film?.references || [];
-  const cancellable = filmTimelineHasCancellableJob(shot?.segments);
+  const cancelUi = filmTimelineCancelPresentation(shot?.segments);
+  const cancellable = cancelUi.armed;
   const rawSegmentError = (shot?.segments || []).find((item) => item.status === "failed" && item.error)?.error || "";
   const _gidForErr = String(modelId || film?.generatorId || "").toLowerCase();
   const h3DirectorSelected = _gidForErr.includes("minimax-h3") && _gidForErr.includes("local");
@@ -308,15 +497,34 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     [modelId, film?.generatorId, shot?.state?.resolvedGeneration, shot?.segments, h3Resolution, scene?.aspect_ratio],
   );
   const actionsOn = previewActionsEnabled(preview);
-  const completed = (shot?.segments || []).some((item) => item.status === "completed" && item.assetId);
-  const generating = cancellable;
-  const modelLabel = models.find((item) => item.id === modelId)?.label || modelId || "Model";
+  const previewShotLabel = useMemo(
+    () => previewShotIdentity(shot?.segments, playheadSec, segmentId),
+    [shot?.segments, playheadSec, segmentId],
+  );
+  const renderHud = useMemo(
+    () =>
+      filmTimelineRenderHud({
+        segments: shot?.segments,
+        stitchStatus: stitching ? "stitching" : shot?.state.stitchStatus,
+        modelLabel: models.find((item) => item.id === modelId)?.label || "",
+        sceneName: scene?.name,
+        shotName: previewShotLabel,
+        showComplete: Boolean(completeKey) && renderNotice?.key === completeKey,
+        showTerminal: renderNotice?.status === "failed" || renderNotice?.status === "cancelled",
+      }),
+    [shot?.segments, shot?.state.stitchStatus, stitching, models, modelId, scene?.name, previewShotLabel, completeKey, renderNotice],
+  );
 
   const selectedModel = useMemo(() => models.find((item) => item.id === modelId) || null, [models, modelId]);
   // LTX-only quality: H3 and other generators must not receive ltxQuality.
   const ltxSelected = Boolean(
     selectedModel && (String(selectedModel.id).includes("ltx-2.5") || selectedModel.qualityControl === "ltx_quality"),
   );
+  const frameModeModel = Boolean(
+    selectedModel?.supportsTextToVideo && (selectedModel.supportsStartFrame || selectedModel.supportsEndFrame),
+  );
+  const showSemanticReferences = selectedModel?.supportsReferenceToVideo !== false;
+  const seedanceSelected = Boolean(selectedModel && selectedModel.qualityControl === "seedance_resolution");
   const durationOptions = useMemo(() => {
     const cap = selectedModel;
     if (cap?.supportedDurations && cap.supportedDurations.length) return cap.supportedDurations;
@@ -364,6 +572,7 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     next.videoClips = next.videoClips || [];
     next.references = next.references || [];
     next.shots = next.shots || [];
+    filmSceneRef.current = sceneId;
     setFilm(next);
     setShotId((current) => {
       const remembered = activeByScene.current[sceneId];
@@ -373,6 +582,26 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
       return latest?.id || "";
     });
   }, [project.id, sceneId]);
+
+  // A scene switch must never paint the previous scene's film under the new id.
+  // Clear the scene-local film while the new scene's canonical state loads; the
+  // monitor shows its empty state instead of stale Shot labels or a stale stitch.
+  useEffect(() => {
+    filmSceneRef.current = "";
+    setFilm(null);
+    setShotId("");
+    setSegmentId("");
+    setPlayheadSec(0);
+    continueScene.current = false;
+    pendingSeek.current = null;
+    videoRef.current?.pause();
+    setPlaying(false);
+    setRetake(closedVideoRetakeSession());
+    setReferenceOpen(null);
+    setLibraryOpen(null);
+    setDismissedNoticeKey("");
+    setStitchNote("");
+  }, [sceneId]);
 
   useEffect(() => {
     if (sceneId && shotId) activeByScene.current[sceneId] = shotId;
@@ -400,12 +629,21 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
             supportedAspectRatios: Array.isArray((item as any).supportedAspectRatios)
               ? (item as any).supportedAspectRatios.map(String)
               : [],
+            continuationMode: String(item.continuationMode || "") === "hard" ? "hard" : String(item.continuationMode || "") === "soft" ? "soft" : "none",
+            supportsTextToVideo: Boolean(item.supportsTextToVideo),
+            supportsStartFrame: Boolean(item.supportsStartFrame),
+            supportsEndFrame: Boolean(item.supportsEndFrame),
+            supportsThreeFrame: Boolean(item.supportsThreeFrame),
+            supportsReferenceToVideo: Boolean(item.supportsReferenceToVideo),
+            notes: String(item.notes || ""),
           })),
       );
     });
+    const stampAtLoad = classifyStamp.current;
     void api.library(project.id, { scope: "project", limit: 48, offset: 0 }).then((payload) => {
+      if (stampAtLoad !== classifyStamp.current) return;
       const rows = ((payload.items || []) as Asset[]).filter((item) => isTimelineMediaAsset(item));
-      setLibraryItems(rows);
+      setLibraryItems((current) => mergeLibraryPage(current, rows));
     });
   }, [load, project.id]);
 
@@ -430,14 +668,38 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     };
   }, [project.id, sceneId]);
 
+  const missingTrayIds = libraryAssetIds.filter((id) => !libraryItems.some((item) => item.id === id)).join(",");
+  useEffect(() => {
+    if (!missingTrayIds) return;
+    const stampAtFetch = classifyStamp.current;
+    let cancelled = false;
+    void api.library(project.id, { scope: "project", ids: missingTrayIds, limit: 64 }).then((payload) => {
+      if (cancelled || stampAtFetch !== classifyStamp.current) return;
+      const rows = ((payload.items || []) as Asset[]).filter((item) => isTimelineMediaAsset(item));
+      setLibraryItems((current) => mergeLibraryPage(current, rows));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [missingTrayIds, project.id]);
+
   useEffect(() => {
     if (!shot) return;
     setPrompt(shot.timedPrompt || "");
+    const storedLanguage = String(shot.state?.spokenLanguage || "en");
+    setSpokenLanguage(SPOKEN_LANGUAGES.some((item) => item.code === storedLanguage) ? storedLanguage : "en");
+    setSpokenCustom(String(shot.state?.spokenLanguageCustom || ""));
+    const storedDialogue = String(shot.state?.dialogueAuthority || "native_model");
+    setDialogueAuthority(storedDialogue === "character_voice" ? "character_voice" : "native_model");
+    setDialogueNote("");
+    setWorkspace(trackHasBatches(shot.segments) ? "track" : "prompt");
     const stored = shot.state?.modelId || film?.generatorId || "";
-    const nextModelId = stored.includes("minimax-h3") && stored.includes("local") ? "minimax-h3-i2v-local" : stored;
+    const rg = shot.state?.resolvedGeneration;
+    const storedMode = rg && typeof rg === "object" && !Array.isArray(rg) ? String(rg.ltxMode || "") : "";
+    const folded = foldLegacyProductionSelection(stored, storedMode);
+    const nextModelId = folded.modelId.includes("minimax-h3") && folded.modelId.includes("local") ? "minimax-h3-i2v-local" : folded.modelId;
     setModelId(nextModelId);
     // Restore persisted output resolution settings
-    const rg = shot.state?.resolvedGeneration;
     if (rg && typeof rg === "object" && !Array.isArray(rg)) {
       if (rg.h3Resolution && typeof rg.h3Resolution === "object" && !Array.isArray(rg.h3Resolution)) {
         const h3 = rg.h3Resolution as Record<string, unknown>;
@@ -446,10 +708,58 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
       if (typeof rg.ltxQuality === "string") {
         setLtxQuality(rg.ltxQuality as LtxTimelineQuality);
       }
+      if (typeof rg.seedanceResolution === "string" && rg.seedanceResolution) {
+        setSeedanceResolution(rg.seedanceResolution);
+      }
     }
+    const storedFrame = rg && typeof rg === "object" && !Array.isArray(rg) ? rg.ltxStartAssetId : "";
+    const storedEnd = rg && typeof rg === "object" && !Array.isArray(rg) ? rg.ltxEndAssetId : "";
+    const startId = typeof storedFrame === "string" ? storedFrame : "";
+    const endId = typeof storedEnd === "string" ? storedEnd : "";
+    setLtxMode(displayLtxMode(folded.ltxMode, startId));
+    setLtxStartAssetId(startId);
+    setLtxEndAssetId(endId);
     setSegmentId("");
+    setAddIntent(null);
     setStickyErrorHidden(false);
+    setCompleteKey("");
+    sawGenerating.current = false;
   }, [shot?.id]);
+
+  useEffect(() => {
+    if (!sceneId || !shot?.id || dialogueAuthority !== "character_voice") return;
+    // Stale-pair guard: during a scene switch the outgoing scene's film is
+    // still in state for one render; never ask the NEW scene about the OLD shot.
+    if (filmSceneRef.current !== sceneId) return;
+    let cancelled = false;
+    void api.filmTimelineDialogue(project.id, sceneId, shot.id).then((saved) => {
+      if (!cancelled) setDialogueNote(String(saved.message || ""));
+    }).catch(() => {
+      if (!cancelled) setDialogueNote("");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, sceneId, shot?.id, dialogueAuthority]);
+
+  useEffect(() => {
+    const sourceId = retakeAwaiting.current;
+    if (!sourceId || !shot) return;
+    const hold = shot.segments.some(
+      (item) => item.generationMetadata?.segmentedRetake && item.status !== "failed" && item.status !== "cancelled",
+    );
+    const source = shot.segments.some((item) => item.id === sourceId);
+    if (!source && !hold) {
+      retakeAwaiting.current = "";
+      setRetake(closedVideoRetakeSession());
+      return;
+    }
+    const failed = shot.segments.find((item) => item.generationMetadata?.segmentedRetake && item.status === "failed" && item.error);
+    if (failed && !hold) {
+      retakeAwaiting.current = "";
+      setRetake((current) => ({ ...current, busy: false, error: failed.error || "The original picture was kept." }));
+    }
+  }, [shot]);
 
   useEffect(() => {
     if (!shot || shot.status !== "generating") return;
@@ -458,6 +768,26 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     }, 4000);
     return () => window.clearInterval(timer);
   }, [shot?.id, shot?.status, project.id, sceneId, load]);
+
+  useEffect(() => {
+    if (shot?.status === "generating") sawGenerating.current = true;
+  }, [shot?.status, shot?.id]);
+
+  useEffect(() => {
+    if (shot?.status === "generating") return;
+    if (!sawGenerating.current || renderNotice?.status !== "completed") return;
+    sawGenerating.current = false;
+    setCompleteKey(renderNotice.key);
+    const finishedId = String(renderNotice.key || "").split(":")[0];
+    const finished = visualWindows(canonicalSceneBatches(shot?.segments)).find((item) => item.id === finishedId);
+    if (finished) {
+      setSegmentId(finished.id);
+      setPlayheadSec((current) => (current >= finished.start && current < finished.end ? current : finished.start));
+    }
+    if (batchesAtStart.current >= 1) setWorkspace("track");
+    const timer = window.setTimeout(() => setCompleteKey(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [renderNotice?.key, renderNotice?.status, shot?.status, shot?.segments]);
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -473,20 +803,67 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     }
   }
 
-  async function removeClip(clipId: string) {
-    if (!sceneId) return;
-    await run(() => api.filmTimelineDeleteClip(project.id, sceneId, clipId));
-  }
-
   async function removeVideoItem(item: { id: string; kind?: "segment" | "clip" }) {
     if (!sceneId) return;
     if (item.kind === "segment") {
       if (!shot) return;
       await run(() => api.filmTimelineDeleteSegment(project.id, sceneId, shot.id, item.id));
       if (segmentId === item.id) setSegmentId("");
-      return;
     }
-    await removeClip(item.id);
+  }
+
+  function generationBody() {
+    const body: Record<string, unknown> = {
+      durationSec: duration,
+      timedPrompt: prompt,
+      generatorId: modelId || undefined,
+      spokenLanguage,
+      spokenLanguageCustom: spokenLanguage === "custom" ? spokenCustom : "",
+      dialogueAuthority,
+    };
+    const providerOpts: Record<string, unknown> = {};
+    if (h3Resolution.mode === "manual") providerOpts["h3Resolution"] = h3Resolution;
+    if (ltxSelected && ltxQuality) providerOpts["ltxQuality"] = ltxQuality;
+    if (frameModeModel) {
+      providerOpts["ltxMode"] = ltxMode;
+      providerOpts["ltxStartAssetId"] = ltxStartAssetId;
+      providerOpts["ltxEndAssetId"] = ltxEndAssetId;
+    }
+    if (seedanceSelected && seedanceResolution) providerOpts["seedanceResolution"] = seedanceResolution;
+    if (Object.keys(providerOpts).length) body["providerOptions"] = providerOpts;
+    return body;
+  }
+
+  async function persistDialogue(mode: string) {
+    if (!sceneId) return;
+    setDialogueAuthority(mode);
+    setDialogueNote("");
+    try {
+      const id = shot?.id || (await ensureShot());
+      if (!id) return;
+      const saved = await api.filmTimelineSetDialogue(project.id, sceneId, id, { dialogueAuthority: mode });
+      setDialogueNote(String(saved.message || ""));
+      await load();
+    } catch (error) {
+      setDialogueNote(error instanceof Error ? error.message : "Timeline could not save Dialogue.");
+    }
+  }
+
+  async function persistLanguage(code: string, custom: string) {
+    if (!sceneId) return;
+    setSpokenLanguage(code);
+    setSpokenCustom(custom);
+    try {
+      const id = shot?.id || (await ensureShot());
+      if (!id) return;
+      await api.filmTimelineSetSpokenLanguage(project.id, sceneId, id, {
+        spokenLanguage: code,
+        spokenLanguageCustom: code === "custom" ? custom : "",
+      });
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "That language could not be saved.");
+    }
   }
 
   async function removeTimedPrompt() {
@@ -512,65 +889,165 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
   }
 
   async function generate() {
-    // Phase 10: do not keep stale segment failures as current Generate truth.
     setStickyErrorHidden(true);
     setMessage("");
+    setAddIntent(null);
+    batchesAtStart.current = canonicalSceneBatches(shot?.segments).length;
     const id = await ensureShot();
     if (!id) return;
-    const body: Record<string, unknown> = { durationSec: duration, timedPrompt: prompt, generatorId: modelId || undefined };
-    const providerOpts: Record<string, unknown> = {};
-    if (h3Resolution.mode === "manual") providerOpts["h3Resolution"] = h3Resolution;
-    if (ltxSelected && ltxQuality) providerOpts["ltxQuality"] = ltxQuality;
-    if (Object.keys(providerOpts).length) body["providerOptions"] = providerOpts;
-    await run(() => api.filmTimelineGenerate(project.id, sceneId, id, body));
+    await run(() => api.filmTimelineGenerate(project.id, sceneId, id, generationBody()));
   }
 
   async function continueShot() {
     if (!shot) return;
     setStickyErrorHidden(false);
     setMessage("");
-    const body: Record<string, unknown> = { durationSec: duration, timedPrompt: prompt, generatorId: modelId || undefined };
-    const providerOpts: Record<string, unknown> = {};
-    if (h3Resolution.mode === "manual") providerOpts["h3Resolution"] = h3Resolution;
-    if (ltxSelected && ltxQuality) providerOpts["ltxQuality"] = ltxQuality;
-    if (Object.keys(providerOpts).length) body["providerOptions"] = providerOpts;
-    await run(() => api.filmTimelineContinue(project.id, sceneId, shot.id, body));
+    setAddIntent(null);
+    batchesAtStart.current = canonicalSceneBatches(shot.segments).length;
+    await run(() => api.filmTimelineContinue(project.id, sceneId, shot.id, generationBody()));
   }
 
-  async function reviewExtend() {
+  async function prependShot() {
     if (!shot) return;
     setStickyErrorHidden(false);
     setMessage("");
-    const body: Record<string, unknown> = { durationSec: duration, timedPrompt: prompt, generatorId: modelId || undefined };
-    const providerOpts: Record<string, unknown> = {};
-    if (h3Resolution.mode === "manual") providerOpts["h3Resolution"] = h3Resolution;
-    if (ltxSelected && ltxQuality) providerOpts["ltxQuality"] = ltxQuality;
-    if (Object.keys(providerOpts).length) body["providerOptions"] = providerOpts;
-    await run(() => api.filmTimelineReviewExtend(project.id, sceneId, shot.id, body));
+    setAddIntent(null);
+    batchesAtStart.current = canonicalSceneBatches(shot.segments).length;
+    await run(() => api.filmTimelinePrepend(project.id, sceneId, shot.id, generationBody()));
   }
 
-  function place(asset: Asset, mode: "reference" | "timeline") {
-    if (mode === "reference") {
-      setReferenceOpen({ assetId: asset.id });
+  function addNextBatch() {
+    setAddIntent(trackHasBatches(shot?.segments) ? "append" : null);
+    setWorkspace("prompt");
+    setPrompt("");
+    setSegmentId("");
+  }
+
+  function addPreviousBatch() {
+    setAddIntent("prepend");
+    setWorkspace("prompt");
+    setPrompt("");
+    setSegmentId("");
+  }
+
+  function importVideo(assetIds: string[]) {
+    const assetId = assetIds[0];
+    if (!assetId || !sceneId) return;
+    setLibraryOpen(null);
+    void (async () => {
+      const id = await ensureShot();
+      if (!id) return;
+      await run(() => api.filmTimelineImportVideo(project.id, sceneId, id, assetId));
+      setWorkspace("track");
+    })().catch((error) => setMessage(error instanceof Error ? error.message : "That video could not be added."));
+  }
+
+  function sceneStitchCurrent(windows = currentClips()) {
+    return stitchCoversClips(shot?.state.stitchStatus, shot?.state.stitchAssetId, shot?.state.stitchSegmentIds, windows.map((clip) => clip.id));
+  }
+
+  function stopAtSceneEnd(windows = currentClips()) {
+    continueScene.current = false;
+    setPlayheadSec(sceneDuration(windows));
+    videoRef.current?.pause();
+  }
+
+  function showClipAt(clip: VisualClip, fileTime: number, windows = currentClips()) {
+    setPlayheadSec(Math.min(clip.end, Math.max(clip.start, clip.start + sceneLocalFromFile(clip.trimInSec, fileTime))));
+    const video = videoRef.current;
+    if (video && preview.assetId === clip.assetId && (segmentId === clip.id || preview.source !== "stitch")) {
+      video.currentTime = fileTime;
+      if (segmentId !== clip.id) setSegmentId(clip.id);
+      if (continueScene.current) void video.play();
       return;
     }
-    const kind = String(asset.kind || "image").toLowerCase();
-    void run(async () =>
-      addToTimeline(project.id, sceneId, {
-        mediaType: kind,
-        assetId: asset.id,
-        shotId: shot?.id || undefined,
-        label: assetLabel(asset),
-      }),
-    );
+    pendingSeek.current = fileTime;
+    setSegmentId(clip.id);
+    void windows;
   }
 
-  async function saveReference(body: { assetId: string; type: string; label: string; tag: string; referenceId?: string }) {
+  function advancePast(clip: VisualClip) {
+    const windows = currentClips();
+    const index = windows.findIndex((item) => item.id === clip.id);
+    if (!continueScene.current || index < 0 || index >= windows.length - 1) {
+      stopAtSceneEnd(windows);
+      return;
+    }
+    const next = windows[index + 1];
+    showClipAt(next, fileTimeForWindow(next.trimInSec, 0), windows);
+  }
+
+  function togglePlay() {
+    const video = videoRef.current;
+    if (!video) return;
+    if (!video.paused && !video.ended) {
+      continueScene.current = false;
+      video.pause();
+      return;
+    }
+    const windows = currentClips();
+    const atEnd = playheadSec >= sceneDuration(windows) - 0.05;
+    const time = atEnd ? 0 : playheadSec;
+    if (atEnd) setPlayheadSec(0);
+    continueScene.current = true;
+    if (sceneStitchCurrent(windows)) {
+      if (preview.source !== "stitch") {
+        pendingSeek.current = time;
+        setSegmentId("");
+        return;
+      }
+      if (Math.abs(video.currentTime - time) > 0.2) video.currentTime = time;
+      void video.play();
+      return;
+    }
+    const clip = clipAtTime(windows, Math.min(time, Math.max(0, sceneDuration(windows) - 0.001)));
+    if (!clip) return;
+    showClipAt(clip, fileTimeForWindow(clip.trimInSec, Math.max(0, time - clip.start)), windows);
+  }
+
+  function place(asset: Asset) {
+    setReferenceOpen({ assetId: asset.id });
+  }
+
+  async function classifyReference(asset: Asset, approvedAs: ImageRole | null) {
+    const stamp = ++classifyStamp.current;
+    setClassifyingId(asset.id);
+    setClassifyError(null);
+    setMessage("");
+    try {
+      const updated = await api.setReferenceClassification(project.id, asset.id, approvedAs);
+      if (stamp !== classifyStamp.current) return;
+      const confirmed = { ...asset, ...updated, id: asset.id };
+      setLibraryItems((current) => libraryAfterClassification(current, confirmed, true));
+      try {
+        const payload = await api.library(project.id, { scope: "project", limit: 48, offset: 0 });
+        if (stamp !== classifyStamp.current) return;
+        const rows = ((payload.items || []) as Asset[]).filter((item) => isTimelineMediaAsset(item));
+        setLibraryItems((current) => libraryAfterClassification(mergeLibraryPage(current, rows), confirmed, true));
+      } catch {
+        // The confirmed response is already in the shared library list.
+      }
+    } catch (error) {
+      if (stamp !== classifyStamp.current) return;
+      const text = error instanceof Error ? error.message : "That reference role could not be saved.";
+      setClassifyError({ assetId: asset.id, message: text });
+      setMessage(text);
+    } finally {
+      if (stamp === classifyStamp.current) setClassifyingId("");
+    }
+  }
+
+  async function saveReference(body: FilmReferenceSave) {
     const id = await ensureShot();
     if (!id) throw new Error("Choose a shot before adding a reference.");
-    const result = (await api.filmTimelineAttachReference(project.id, sceneId, id, body)) as { ok?: boolean; message?: string; film?: Film };
-    if (result && result.ok === false) throw new Error(result.message || "That reference could not be saved.");
-    if (result.film) setFilm(result.film);
+    const frames = body.frames?.length ? body.frames : [body];
+    let film: Film | undefined;
+    for (const frame of frames) {
+      const result = (await api.filmTimelineAttachReference(project.id, sceneId, id, frame)) as { ok?: boolean; message?: string; film?: Film };
+      if (result && result.ok === false) throw new Error(result.message || "That reference could not be saved.");
+      if (result.film) film = result.film;
+    }
+    if (film) setFilm(film);
     else await load();
     setReferenceOpen(null);
   }
@@ -582,20 +1059,37 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
   }
 
   async function createScene() {
-    setBusy(true);
+    // Single-flight and atomic: the UI stays on the current scene until the new
+    // scene exists in the project payload AND its canonical film has loaded.
+    if (creatingScene || busy) return;
+    setCreatingScene(true);
+    setMessage("");
     try {
       const created = await api.addScene(project.id, {
         name: `Scene ${project.scenes.length + 1}`,
         engine: "auto",
         duration_sec: duration,
-        prompt,
+        prompt: "",
       });
+      const newId = String(created?.id || "");
+      if (!newId) throw new Error("Could not create scene");
+      // Hydrate the new scene's canonical state BEFORE switching selection so a
+      // transient film-timeline read cannot race the transition.
+      await api.filmTimelineGet(project.id, newId);
       await refresh();
-      if (created?.id) setSelectedScene(created.id);
+      // Final transition step: commit selection and the sceneId query param in
+      // the same tick. Selection must never lead the URL — ProjectEditor keeps
+      // URL↔selection effects that treat a disagreement as a canonicalize
+      // conflict and ping-pong sceneId old↔new (a request storm whose transport
+      // errors trip the global Studio API Offline banner).
+      setSelectedScene(newId);
+      const params = new URLSearchParams(window.location.search);
+      params.set("sceneId", newId);
+      navigate({ search: `?${params.toString()}` }, { replace: true });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "A new scene could not be created.");
+      setMessage(error instanceof Error ? error.message : "Could not create scene");
     } finally {
-      setBusy(false);
+      setCreatingScene(false);
     }
   }
 
@@ -606,73 +1100,140 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
   }
 
   async function publish(update: boolean) {
-    if (!actionsOn) return;
-    await run(() => api.filmTimelinePublish(project.id, sceneId, { assetId: preview.assetId, update }));
-  }
-
-  async function openMagi() {
-    if (!actionsOn) return;
-    setMagiOpen(true);
-    setMagiLoading(true);
-    setMagiError(null);
+    if (publishLock.current || busy || publishPhase) return;
+    if (!actionsOn || !shot || !magiGate.stitchReady) return;
+    if (update ? magiGate.state !== "stale" : magiGate.state !== "unpublished") return;
+    publishLock.current = true;
+    setPublishPhase(update ? "update" : "publish");
     try {
-      const options = (await api.filmTimelineMagiOptions(project.id, sceneId, preview.assetId)) as {
-        ok?: boolean;
-        message?: string;
-        honesty?: string;
-        sourceWidth?: number;
-        sourceHeight?: number;
-        realesrganReady?: boolean;
-        engines?: Array<{ id: string; label?: string; available?: boolean; models?: Array<{ id: string; label?: string }> }>;
-        targets?: Array<{ id: string; label: string; width: number; height: number }>;
-        defaultEngine?: string;
-        defaultModel?: string;
-        defaultTarget?: string;
-      };
-      if (options.ok === false) {
-        setMagiError(options.message || "MAGI could not read this video.");
-        return;
-      }
-      setMagiOpts(options);
-      setMagiEngine(options.defaultEngine || "ffmpeg-scale");
-      setMagiModel(options.defaultModel || "lanczos");
-      setMagiTarget(options.defaultTarget || "");
-    } catch (error) {
-      setMagiError(error instanceof Error ? error.message : "MAGI could not read this video.");
+      await run(async () => {
+        const result = await api.filmTimelinePublish(project.id, sceneId, {
+          assetId: magiGate.stitchId,
+          update,
+          shotId: shot.id,
+        });
+        if (result && result.ok !== false) {
+          setMessage(update ? "Published version updated." : "Scene published.");
+        }
+        return result;
+      });
     } finally {
-      setMagiLoading(false);
+      publishLock.current = false;
+      setPublishPhase(null);
     }
   }
 
-  async function confirmMagi() {
-    if (!actionsOn) return;
-    setMagiOpen(false);
-    await run(() =>
-      api.filmTimelineMagi(project.id, sceneId, {
-        assetId: preview.assetId,
-        engine: magiEngine,
-        model: magiModel,
-        targetResolution: magiTarget,
-      }),
-    );
+  function sendToMagi() {
+    if (magiGate.state !== "current") {
+      showMagiNote(magiGate.note);
+      return;
+    }
+    const location = buildProjectWorkspaceLocation({ projectId: project.id, tab: "magi", sceneId });
+    if (!location) return;
+    navigate({ pathname: location.pathname, search: location.search });
+  }
+
+  function currentClips() {
+    return visualWindows(canonicalSceneBatches(shot?.segments));
   }
 
   function mark(which: "in" | "out") {
-    const time = videoRef.current?.currentTime ?? 0;
+    const local = videoRef.current?.currentTime ?? 0;
+    const time = sceneTimeFromPreview(preview.source, local, currentClips(), preview.assetId);
     setRetake((current) => ({ ...current, rangeStart: which === "in" ? time : current.rangeStart, rangeEnd: which === "out" ? time : current.rangeEnd, error: null }));
+  }
+
+  function seekScene(sceneTime: number) {
+    const windows = currentClips();
+    const limit = sceneDuration(windows);
+    const time = Math.max(0, Math.min(sceneTime, limit));
+    setPlayheadSec(time);
+    const video = videoRef.current;
+    if (sceneStitchCurrent(windows)) {
+      if (preview.source === "stitch" && video) {
+        video.currentTime = time;
+        return;
+      }
+      pendingSeek.current = time;
+      if (segmentId) setSegmentId("");
+      return;
+    }
+    const clip = clipAtTime(windows, time);
+    if (!clip) return;
+    const fileTime = fileTimeForWindow(clip.trimInSec, Math.max(0, time - clip.start));
+    if (preview.assetId === clip.assetId && video && segmentId === clip.id) {
+      video.currentTime = fileTime;
+      return;
+    }
+    pendingSeek.current = fileTime;
+    setSegmentId(clip.id);
+  }
+
+  async function moveClip(clip: VisualClip, direction: "earlier" | "later") {
+    if (!shot) return;
+    setStitchNote("");
+    try {
+      const result = (await api.filmTimelineReorder(project.id, sceneId, shot.id, { segmentId: clip.id, direction })) as { ok?: boolean; film?: Film; message?: string };
+      if (result.film) setFilm(result.film);
+      else await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "That clip could not be moved.");
+    }
+  }
+
+  async function stitchScene() {
+    if (!shot || stitching) return;
+    setStitching(true);
+    setStitchNote("");
+    try {
+      const result = (await api.filmTimelineStitch(project.id, sceneId, shot.id)) as { ok?: boolean; film?: Film; message?: string; error?: string };
+      if (result.film) setFilm(result.film);
+      else await load();
+      if (result.ok === false) {
+        setStitchNote("Stitch failed");
+        return;
+      }
+      setSegmentId("");
+      setStitchNote("Scene stitched");
+    } catch (error) {
+      setStitchNote("Stitch failed");
+      setMessage(error instanceof Error ? error.message : "Stitch failed");
+    } finally {
+      setStitching(false);
+    }
+  }
+
+  function selectClip(clip: VisualClip) {
+    const inside = playheadSec >= clip.start && playheadSec <= clip.end;
+    pendingSeek.current = inside ? Math.max(0, playheadSec - clip.start) : 0;
+    if (!inside) setPlayheadSec(clip.start);
+    setSegmentId(clip.id);
   }
 
   async function submitRetake() {
     if (!shot || !actionsOn) return;
+    const ready = canSubmitVideoRetake(retake);
+    if (!ready.ok) {
+      setRetake((current) => ({ ...current, error: ready.error }));
+      return;
+    }
+    const markIn = Math.min(retake.rangeStart ?? 0, retake.rangeEnd ?? 0);
+    const markOut = Math.max(retake.rangeStart ?? 0, retake.rangeEnd ?? 0);
     setRetake((current) => ({ ...current, busy: true, error: null }));
     try {
       const result = (await api.filmTimelineRetake(project.id, sceneId, shot.id, {
-        markIn: retake.rangeStart,
-        markOut: retake.rangeEnd,
-        timedPrompt: retake.prompt || prompt,
-      })) as { ok?: boolean; message?: string; error?: string };
+        markIn,
+        markOut,
+        timedPrompt: retake.prompt.trim(),
+      })) as { ok?: boolean; message?: string; error?: string; mode?: string; sourceSegmentId?: string };
       if (result.ok === false) {
         setRetake((current) => ({ ...current, busy: false, error: result.message || result.error || "Re-Take could not start." }));
+        return;
+      }
+      if (result.mode === "partial") {
+        retakeAwaiting.current = String(result.sourceSegmentId || "");
+        setRetake((current) => ({ ...current, busy: false, error: null }));
+        await load();
         return;
       }
       setRetake(closedVideoRetakeSession());
@@ -682,26 +1243,24 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
     }
   }
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target)) return;
-      const binding = matchHotkey(event, loadHotkeys());
-      if (!binding || !V2_HOTKEYS.has(binding.actionId)) return;
-      event.preventDefault();
-      if (binding.actionId === "playPause") {
-        const video = videoRef.current;
-        if (!video) return;
-        if (video.paused) void video.play();
-        else video.pause();
-      } else if (binding.actionId === "fullscreen" && actionsOn) void fullscreen.toggleFullscreen();
-      else if (binding.actionId === "generateScene" && prompt.trim() && !busy) void generate();
-      else if (binding.actionId === "retake" && actionsOn) setRetake((current) => ({ ...closedVideoRetakeSession(), open: !current.open }));
-      else if (binding.actionId === "openHotkeys") setTab("hotkeys");
-      else if (binding.actionId === "escape") setRetake(closedVideoRetakeSession());
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+  const timelineKeyRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  timelineKeyRef.current = (event: KeyboardEvent) => {
+    if (isEditableTarget(event.target)) return;
+    const binding = matchHotkey(event, loadHotkeys());
+    if (!binding || !V2_HOTKEYS.has(binding.actionId)) return;
+    event.preventDefault();
+    if (binding.actionId === "playPause") {
+      const video = videoRef.current;
+      if (!video) return;
+      if (video.paused) void video.play();
+      else video.pause();
+    } else if (binding.actionId === "fullscreen" && actionsOn) void fullscreen.toggleFullscreen();
+    else if (binding.actionId === "generateScene" && prompt.trim() && !busy) void generate();
+    else if (binding.actionId === "retake" && actionsOn) setRetake((current) => ({ ...closedVideoRetakeSession(), open: !current.open }));
+    else if (binding.actionId === "openHotkeys") setTab("hotkeys");
+    else if (binding.actionId === "escape") setRetake(closedVideoRetakeSession());
+  };
+  useEffect(() => registerWorkspaceKeyHandler("timeline", (event) => timelineKeyRef.current(event)), []);
 
   const handleAddFromProjectLibrary = useCallback(
     (assetIds: string[]) => {
@@ -714,9 +1273,11 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
         }
         const result = await api.directorTimelineSetLibraryAssets(project.id, sceneId, nextIds);
         setLibraryAssetIds(Array.isArray(result.libraryAssetIds) ? result.libraryAssetIds.map(String) : nextIds);
-        setLibraryOpen(false);
+        setLibraryOpen(null);
         const payload = await api.library(project.id, { scope: "project", limit: 48, offset: 0 });
-        setLibraryItems(((payload.items || []) as Asset[]).filter((item) => isTimelineMediaAsset(item)));
+        setLibraryItems((current) =>
+          mergeLibraryPage(current, ((payload.items || []) as Asset[]).filter((item) => isTimelineMediaAsset(item))),
+        );
       })().catch((error) => setMessage(error instanceof Error ? error.message : "Library update failed."));
     },
     [project.id, sceneId],
@@ -755,23 +1316,37 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
 
   const localModels = models.filter((item) => item.local);
   const apiModels = models.filter((item) => !item.local);
-  let videoCursor = 0;
-  const videoClips = [
-    ...(shot?.segments || [])
-      .filter((item) => item.assetId)
-      .map((item) => {
-        const clip = { id: item.id, label: `${item.durationSec}s`, assetId: item.assetId || "", startSec: videoCursor, durationSec: item.durationSec, kind: "segment" as const };
-        videoCursor += item.durationSec;
-        return clip;
-      }),
-    ...(film?.videoClips || []).map((clip) => ({ ...clip, kind: "clip" as const })),
-  ];
+  const batches = canonicalSceneBatches(shot?.segments);
+  const clips = visualWindows(batches);
+  const continuationMode = models.find((item) => item.id === modelId)?.continuationMode || "none";
+  const continuationLabel =
+    continuationMode === "hard" ? "Continuation: Hard start-frame" : continuationMode === "soft" ? "Continuation: Soft reference" : "";
+  const continuationHelper =
+    continuationMode === "soft" ? "Exact opening pose continuity is not guaranteed by this model." : "";
+  const retakeStart = retake.rangeStart == null || retake.rangeEnd == null ? null : Math.min(retake.rangeStart, retake.rangeEnd);
+  const retakeEnd = retake.rangeStart == null || retake.rangeEnd == null ? null : Math.max(retake.rangeStart, retake.rangeEnd);
+  const wholeShotRetake =
+    retake.open &&
+    retakeStart != null &&
+    retakeEnd != null &&
+    clips.some((clip) => Math.abs(clip.start - retakeStart) <= 0.05 && Math.abs(clip.end - retakeEnd) <= 0.05);
+  const upcomingShot = nextShotNumber(
+    film?.highestShotNumber || 0,
+    (film?.shots || []).flatMap((item) => (item.segments || []).map((segment) => segment.shotNumber)),
+  );
+  const pendingBatch = pendingSceneBatch(shot?.segments);
+  const trackEnabled = trackHasBatches(shot?.segments);
+  const showContinuation = Boolean(continuationLabel) && ((trackEnabled && addIntent !== "prepend") || wholeShotRetake);
+  const continuationStillId = (() => {
+    const done = (shot?.segments || []).filter((item) => item.status === "completed" && item.lastFrameAssetId);
+    return done.length ? String(done[done.length - 1].lastFrameAssetId) : "";
+  })();
   const previewUrl = preview.assetId ? api.assetUrl(preview.assetId, null, project.id) : "";
 
   const inspector = (
     <div className="film-timeline__inspector" data-testid="film-timeline-inspector">
-      <button type="button" className="film-timeline__new-scene" data-testid="film-timeline-new-scene" disabled={busy} onClick={() => void createScene()}>
-        + New Scene
+      <button type="button" className="film-timeline__new-scene" data-testid="film-timeline-new-scene" disabled={busy || creatingScene} onClick={() => void createScene()}>
+        {creatingScene ? "Creating scene…" : "+ New Scene"}
       </button>
       <label className="film-timeline__field">
         Scene
@@ -784,7 +1359,7 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
         </select>
       </label>
       <label className="film-timeline__field">
-        Model
+        Production
         <select value={modelId} onChange={(event) => { const value = event.target.value; setModelId(value); setStickyErrorHidden(true); if (shot) void run(() => api.filmTimelineSetShotModel(project.id, sceneId, shot.id, { generatorId: value })); }} data-testid="film-timeline-model">
           <option value="">Choose a model</option>
           <optgroup label="Local">
@@ -805,6 +1380,108 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
           </optgroup>
         </select>
       </label>
+      {frameModeModel ? (
+        <label className="film-timeline__field">
+          Mode
+          <select
+            data-testid="film-timeline-ltx-mode"
+            value={ltxMode}
+            onChange={(event) => {
+              const raw = event.target.value;
+              const next = raw === "start_end" ? "start_end" : raw === "one_frame" ? "one_frame" : "text";
+              setLtxMode(next);
+              setStickyErrorHidden(true);
+              if (shot && sceneId) {
+                void api.filmTimelineSetShotModel(project.id, sceneId, shot.id, {
+                  generatorId: modelId,
+                  providerOptions: { ltxMode: next, ltxStartAssetId, ltxEndAssetId },
+                });
+              }
+            }}
+          >
+            <option value="text">Text to Video</option>
+            {selectedModel?.supportsStartFrame ? <option value="one_frame">Start Frame</option> : null}
+            {selectedModel?.supportsEndFrame ? <option value="start_end">Start + End Frame</option> : null}
+          </select>
+        </label>
+      ) : null}
+      {frameModeModel && (ltxMode === "one_frame" || ltxMode === "start_end") && !(trackEnabled && addIntent !== "prepend") ? (
+        <div className="film-timeline__field" data-testid="film-timeline-ltx-frame">
+          Start frame
+          <div className="film-timeline__ltx-frame">
+            {ltxStartAssetId ? (
+              <img src={api.assetUrl(ltxStartAssetId, null, project.id)} alt="Start frame" />
+            ) : (
+              <span className="film-timeline__ltx-empty">Start frame</span>
+            )}
+            <button type="button" onClick={() => setLibraryOpen("ltx-frame")}>
+              {ltxStartAssetId ? "Change" : "Choose"}
+            </button>
+            {ltxStartAssetId ? (
+              <button
+                type="button"
+                aria-label="Clear start frame"
+                onClick={() => {
+                  setLtxStartAssetId("");
+                  if (shot && sceneId) {
+                    void api.filmTimelineSetShotModel(project.id, sceneId, shot.id, {
+                      generatorId: modelId,
+                      providerOptions: { ltxMode, ltxStartAssetId: "", ltxEndAssetId },
+                    });
+                  }
+                }}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {frameModeModel && ltxMode === "start_end" ? (
+        <div className="film-timeline__field" data-testid="film-timeline-ltx-end">
+          End frame
+          <div className="film-timeline__ltx-frame">
+            {ltxEndAssetId ? (
+              <img src={api.assetUrl(ltxEndAssetId, null, project.id)} alt="End frame" />
+            ) : (
+              <span className="film-timeline__ltx-empty">End frame</span>
+            )}
+            <button type="button" onClick={() => setLibraryOpen("ltx-end")}>
+              {ltxEndAssetId ? "Change" : "Choose"}
+            </button>
+            {ltxEndAssetId ? (
+              <button
+                type="button"
+                aria-label="Clear end frame"
+                onClick={() => {
+                  setLtxEndAssetId("");
+                  if (shot && sceneId) {
+                    void api.filmTimelineSetShotModel(project.id, sceneId, shot.id, {
+                      generatorId: modelId,
+                      providerOptions: { ltxMode, ltxStartAssetId, ltxEndAssetId: "" },
+                    });
+                  }
+                }}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {frameModeModel && showContinuation ? (
+        <div className="film-timeline__field" data-testid="film-timeline-ltx-continuation">
+          Continuation start
+          <div className="film-timeline__ltx-frame">
+            {continuationStillId ? (
+              <img src={api.assetUrl(continuationStillId, null, project.id)} alt="Previous shot final frame" />
+            ) : (
+              <span className="film-timeline__ltx-empty">Previous frame</span>
+            )}
+            <span>From previous shot</span>
+          </div>
+        </div>
+      ) : null}
 
       {(() => {
         // Picture shapes come from the backend production contract. H3 with no
@@ -861,7 +1538,7 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
         aspectRatio={scene?.aspect_ratio}
         h3Resolution={h3Resolution}
         ltxQuality={ltxQuality}
-        seedanceResolution={null}
+        seedanceResolution={seedanceResolution}
         draftMode={false}
         megapixelsTestId="film-timeline-megapixels"
         megapixelsSelectTestId="film-timeline-megapixels-select"
@@ -874,7 +1551,7 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
         qualityTip="The output size LTX 2.5 renders at. Higher settings are sharper but take longer."
         onH3Change={(next) => { setH3Resolution(next); setStickyErrorHidden(true); }}
         onLtxChange={(tier) => { setLtxQuality(tier); setStickyErrorHidden(true); }}
-        onSeedanceChange={() => {}}
+        onSeedanceChange={(next) => { setSeedanceResolution(next); setStickyErrorHidden(true); }}
       />
       <label className="film-timeline__field">
         Duration
@@ -885,9 +1562,72 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
             </option>
           ))}
         </select>
+        {ltxSelected ? (
+          <span className="scene-meta" data-testid="film-timeline-ltx-frames">
+            LTX renders {ltxTimelineFrameCount(duration)} frames so the count stays legal.
+          </span>
+        ) : null}
+        {selectedModel?.notes?.includes("480p") ? (
+          <span className="scene-meta" data-testid="film-timeline-output-class">
+            {selectedModel.notes}
+          </span>
+        ) : null}
       </label>
+      <label className="film-timeline__field">
+        Language
+        <select
+          value={spokenLanguage}
+          data-testid="film-timeline-language"
+          title="If anyone speaks in this shot, they use this language. A quiet shot stays quiet."
+          onChange={(event) => {
+            const code = event.target.value;
+            if (code === "custom") {
+              setSpokenLanguage("custom");
+              return;
+            }
+            void persistLanguage(code, "");
+          }}
+        >
+          {SPOKEN_LANGUAGES.map((item) => (
+            <option key={item.code} value={item.code}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {spokenLanguage === "custom" ? (
+        <label className="film-timeline__field">
+          Spoken language
+          <input
+            data-testid="film-timeline-language-custom"
+            value={spokenCustom}
+            placeholder="Name the language"
+            onChange={(event) => setSpokenCustom(event.target.value)}
+            onBlur={() => {
+              if (spokenCustom.trim()) void persistLanguage("custom", spokenCustom.trim());
+            }}
+          />
+        </label>
+      ) : null}
+      <label className="film-timeline__field">
+        Dialogue
+        <select
+          value={dialogueAuthority}
+          data-testid="film-timeline-dialogue"
+          title="Native Model lets the video generator speak. Character Voice uses this character's saved voice."
+          onChange={(event) => {
+            void persistDialogue(event.target.value);
+          }}
+        >
+          <option value="native_model">Native Model</option>
+          <option value="character_voice">Character Voice</option>
+        </select>
+      </label>
+      {dialogueNote ? (
+        <div className="film-timeline__note" data-testid="film-timeline-dialogue-warning">{dialogueNote}</div>
+      ) : null}
       {modelSwitchNote ? <div className="film-timeline__note" data-testid="film-timeline-duration-note">{modelSwitchNote}</div> : null}
-      <button type="button" data-testid="film-timeline-open-library" onClick={() => setLibraryOpen(true)}>
+      <button type="button" data-testid="film-timeline-open-library" onClick={() => setLibraryOpen("references")}>
         Open Library
       </button>
       <div className="film-timeline__assets">
@@ -895,16 +1635,13 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
           <div key={asset.id} className="film-timeline__asset" data-testid="film-timeline-asset">
             <img src={api.assetUrl(asset.id, null, project.id)} alt="" />
             <span>{assetLabel(asset)}</span>
-            <button
-              type="button"
-              className={referenced.has(asset.id) ? "is-referenced" : ""}
-              onClick={() => place(asset, "reference")}
-            >
-              {referenced.has(asset.id) ? "âœ“ Referenced" : "Reference"}
-            </button>
-            <button type="button" onClick={() => place(asset, "timeline")}>
-              Add to Timeline
-            </button>
+            <LibraryReferenceControl
+              asset={asset}
+              busy={classifyingId === asset.id}
+              error={classifyError?.assetId === asset.id ? classifyError.message : ""}
+              onClassify={(approvedAs) => void classifyReference(asset, approvedAs)}
+              onUse={() => place(asset)}
+            />
             <button
               type="button"
               className="film-timeline__asset-remove"
@@ -1006,7 +1743,8 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
       >
         <button
           type="button"
-          className={`live-preview-cancel-in-stage${cancellable ? "" : " is-idle"}`}
+          className={`live-preview-cancel-in-stage${cancellable ? "" : " is-idle"}${cancelUi.visible ? "" : " is-hidden"}`}
+          hidden={!cancelUi.visible}
           data-testid="live-preview-cancel-in-stage"
           data-film-timeline-cancel="1"
           data-cancel-armed={cancellable ? "true" : "false"}
@@ -1021,7 +1759,61 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
         >
           Cancel
         </button>
-        {preview.kind === "video" && previewUrl ? <video ref={videoRef} src={previewUrl} controls /> : null}
+        {preview.kind === "video" && previewUrl ? (
+          <video
+            ref={videoRef}
+            src={previewUrl}
+            data-preview-source={preview.source}
+            controls
+            onLoadedMetadata={(event) => {
+              const local = pendingSeek.current;
+              if (local != null) {
+                event.currentTarget.currentTime = local;
+                pendingSeek.current = null;
+              } else if (preview.source === "stitch") {
+                setPlayheadSec(sceneTimeFromPreview(preview.source, event.currentTarget.currentTime, clips, preview.assetId));
+              }
+              if (continueScene.current) void event.currentTarget.play();
+            }}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onEnded={() => {
+              if (preview.source === "stitch" || !continueScene.current) {
+                continueScene.current = false;
+                if (preview.source === "stitch") setPlayheadSec(sceneDuration(clips));
+                return;
+              }
+              const clip = clips.find((item) => item.id === segmentId) || clipAtTime(clips, playheadSec);
+              if (clip) advancePast(clip);
+            }}
+            onTimeUpdate={(event) => {
+              if (pendingSeek.current != null) return;
+              if (preview.source === "stitch") {
+                setPlayheadSec(sceneTimeFromPreview(preview.source, event.currentTarget.currentTime, clips, preview.assetId));
+                return;
+              }
+              const clip = clips.find((item) => item.id === segmentId);
+              if (!clip) return;
+              if (continueScene.current && windowReachedEnd(clip.trimInSec, clip.trimOutSec, clip.durationSec, event.currentTarget.currentTime)) {
+                advancePast(clip);
+                return;
+              }
+              const sceneTime = clip.start + sceneLocalFromFile(clip.trimInSec, event.currentTarget.currentTime);
+              setPlayheadSec(Math.max(clip.start, Math.min(clip.end, sceneTime)));
+            }}
+            onSeeked={(event) => {
+              if (pendingSeek.current != null) return;
+              if (preview.source === "stitch") {
+                setPlayheadSec(sceneTimeFromPreview(preview.source, event.currentTarget.currentTime, clips, preview.assetId));
+                return;
+              }
+              const clip = clips.find((item) => item.id === segmentId);
+              if (!clip) return;
+              const sceneTime = clip.start + sceneLocalFromFile(clip.trimInSec, event.currentTarget.currentTime);
+              setPlayheadSec(Math.max(clip.start, Math.min(clip.end, sceneTime)));
+            }}
+          />
+        ) : null}
         {preview.kind === "empty" ? <p>Generate a shot to see it here.</p> : null}
         <FilmPreviewClock videoRef={videoRef} active={preview.kind === "video"} />
         {renderNotice ? (
@@ -1032,18 +1824,16 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
             </button>
           </p>
         ) : null}
-        {generating ? (
+        {renderHud && (renderHud.kind === "active" || renderHud.kind === "complete") ? (
           <div className="film-timeline__progress" data-testid="film-timeline-progress">
-            <span>
-              {modelLabel} Â· {duration}s
-            </span>
-            <i />
+            <span>{filmTimelineRenderLine(renderHud)}</span>
+            {renderHud.bar !== "none" ? <RenderMeter model={renderHud} /> : null}
           </div>
         ) : null}
+        {renderHud ? <FilmTimelineRenderHud model={renderHud} onDismiss={() => renderNotice && setDismissedNoticeKey(renderNotice.key)} /> : null}
         <div
           className={[
             "live-preview-publish-bar",
-            magiOpen && publishBar ? "live-preview-publish-bar--chooser" : "",
             !publishBar ? "live-preview-publish-bar--collapsed" : "",
           ].filter(Boolean).join(" ")}
           data-testid="live-preview-publish-bar"
@@ -1059,10 +1849,11 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
                 data-testid="live-preview-publish"
                 title="Register Video Published Master in the Library from the full stitched scene"
                 aria-label="Publish"
-                disabled={!actionsOn || busy}
+                disabled={!actionsOn || busy || publishPhase !== null || magiGate.state !== "unpublished" || !magiGate.stitchReady}
+                aria-busy={publishPhase === "publish"}
                 onClick={() => void publish(false)}
               >
-                {busy ? "Publishingâ€¦" : "PUBLISH"}
+                {publishPhase === "publish" ? "Publishing..." : "PUBLISH"}
               </button>
               <button
                 type="button"
@@ -1070,58 +1861,51 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
                 data-testid="live-preview-update-published"
                 title="Update the Video Published Master from the current full stitch"
                 aria-label="Update Published"
-                disabled={!actionsOn || busy || !film?.publishedAssetId}
+                disabled={!actionsOn || busy || publishPhase !== null || magiGate.state !== "stale" || !magiGate.stitchReady}
+                aria-busy={publishPhase === "update"}
                 onClick={() => void publish(true)}
               >
-                {busy ? "Updatingâ€¦" : "UPDATE PUBLISHED"}
+                {publishPhase === "update" ? "Updating..." : "UPDATE PUBLISHED"}
               </button>
-              {!magiOpen ? (
-                <button
-                  type="button"
-                  className="live-preview-publish-bar__btn live-preview-publish-bar__btn--upscale"
-                  data-testid="live-preview-upscale-magi"
-                  title="Upscale the full stitched (or published) master with MAGI â€” does not auto-publish"
-                  aria-label="Upscale with MAGI"
-                  disabled={!actionsOn || busy}
-                  onClick={() => void openMagi()}
-                >
-                  UPSCALE WITH MAGI
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="live-preview-publish-bar__btn live-preview-publish-bar__btn--upscale"
+                data-testid="film-timeline-send-magi"
+                title="Send the assembled scene to MAGI for finishing"
+                aria-label="Send to MAGI"
+                disabled={!actionsOn || busy}
+                onClick={sendToMagi}
+              >
+                SEND TO MAGI
+              </button>
               <PreviewPublishBarVisibilityToggle visible attention={false} onToggle={toggleEye} />
             </div>
           ) : (
             <PreviewPublishBarVisibilityToggle visible={false} attention={false} onToggle={toggleEye} />
           )}
-          {publishBar && magiOpen ? (
-            <MagiUpscaleChooser
-              loading={magiLoading}
-              error={magiError}
-              honesty={magiOpts?.honesty}
-              sourceResolution={magiOpts?.sourceWidth && magiOpts?.sourceHeight ? `${magiOpts.sourceWidth}x${magiOpts.sourceHeight}` : ""}
-              realesrganReady={magiOpts?.realesrganReady}
-              engines={magiOpts?.engines || []}
-              targets={magiOpts?.targets || []}
-              engine={magiEngine}
-              model={magiModel}
-              targetId={magiTarget}
-              busy={busy}
-              onEngineChange={setMagiEngine}
-              onModelChange={setMagiModel}
-              onTargetChange={setMagiTarget}
-              onCancel={() => setMagiOpen(false)}
-              onConfirm={() => void confirmMagi()}
-            />
+          {magiNote.text ? (
+            <p
+              key={magiNote.key}
+              className="film-timeline__note film-timeline__note--top-action"
+              data-testid="film-timeline-magi-note"
+              role="status"
+            >
+              {magiNote.text}
+            </p>
           ) : null}
         </div>
         {retake.open ? (
           <TimelineRetakeOverlay
             session={retake}
             videoAvailable={actionsOn}
+            showRemoveBackground={false}
+            promptPlaceholder="Describe what should be different within the selected range."
+            submitEnabled={canSubmitVideoRetake(retake).ok && !shot?.segments.some((item) => item.generationMetadata?.segmentedRetake && item.status !== "failed" && item.status !== "cancelled")}
+            continuationLabel={wholeShotRetake ? continuationLabel : ""}
+            continuationHelper={wholeShotRetake ? continuationHelper : ""}
             onMarkIn={() => mark("in")}
             onMarkOut={() => mark("out")}
             onPrompt={(value) => setRetake((current) => ({ ...current, prompt: value }))}
-            onRemoveBackground={() => setRetake((current) => ({ ...current, removeBackgroundUsed: true }))}
             onCancel={() => setRetake(closedVideoRetakeSession())}
             onSubmit={() => void submitRetake()}
           />
@@ -1139,14 +1923,25 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
           isFullscreen={fullscreen.isFullscreen}
           isVideoMedia={actionsOn}
           onExitFullscreen={() => void fullscreen.exitFullscreen()}
-          onTogglePlay={() => {
-            const video = videoRef.current;
-            if (!video) return;
-            if (video.paused) void video.play();
-            else video.pause();
+          sceneTimeSec={playheadSec}
+          sceneDurationSec={sceneDuration(clips)}
+          onSceneSeek={seekScene}
+          onBatchStart={() => {
+            const piece = clipAtTime(clips, playheadSec);
+            if (piece) seekScene(piece.start);
           }}
+          onBatchEnd={() => {
+            const piece = clipAtTime(clips, playheadSec);
+            if (piece) seekScene(piece.end);
+          }}
+          onTogglePlay={togglePlay}
           onSeekLocalTime={(localSec) => {
-            if (videoRef.current) videoRef.current.currentTime = localSec;
+            if (preview.source === "stitch") {
+              seekScene(localSec);
+              return;
+            }
+            const clip = clips.find((item) => item.id === segmentId) || clips.find((item) => item.assetId === preview.assetId);
+            seekScene((clip?.start || 0) + localSec);
           }}
           onRetake={() => setRetake((current) => (current.open ? closedVideoRetakeSession() : { ...closedVideoRetakeSession(), open: true }))}
           retakeActive={retake.open}
@@ -1155,6 +1950,20 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
           timelinePlaying={Boolean(videoRef.current && !videoRef.current.paused)}
         />
       </div>
+      {fullscreen.isFullscreen || !previewShotLabel ? null : (
+        <p className="film-timeline__preview-shot" data-testid="film-timeline-preview-shot">
+          {previewShotLabel}
+        </p>
+      )}
+      {fullscreen.isFullscreen ? null : (
+        <PreviewTransport
+          clips={clips}
+          playheadSec={playheadSec}
+          playing={playing}
+          onTogglePlay={togglePlay}
+          onSeek={seekScene}
+        />
+      )}
       {fullscreen.isFullscreen ? null : (
         <div
           className="timeline-workspace-divider"
@@ -1167,106 +1976,129 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
           <span className="timeline-workspace-divider__grip" />
         </div>
       )}
-      {videoClips.length ? (
-        <div className="film-timeline__track">
-          <span>Video</span>
-          <div>
-            {videoClips.map((clip) => (
-              <span key={clip.id} className="film-timeline__clip-row">
-                <button type="button" className={segmentId === clip.id ? "is-selected" : ""} onClick={() => setSegmentId(clip.id)}>
-                  {clip.label}
-                </button>
-                <button type="button" className="film-timeline__remove" aria-label={`Remove ${clip.label}`} data-testid="film-timeline-delete-video" onClick={() => void removeVideoItem(clip)}>
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      {audioRows(film?.audio || []).map((row, index) => (
-        <div key={`audio-${index}`} className="film-timeline__track">
-          <span>Audio</span>
-          <div>
-            {row.map((clip) => (
-              <span key={clip.id} className="film-timeline__clip-row">
-                <button type="button">
-                  {clip.label}
-                  {clip.role ? ` · ${clip.role}` : ""}
-                </button>
-                <button type="button" className="film-timeline__remove" aria-label={`Remove ${clip.label}`} data-testid="film-timeline-delete-audio" onClick={() => void removeClip(clip.id)}>
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      ))}
-      {(film?.sfx || []).length ? (
-        <div className="film-timeline__track">
-          <span>SFX</span>
-          <div>
-            {(film?.sfx || []).map((clip) => (
-              <span key={clip.id} className="film-timeline__clip-row">
-                <button type="button">{clip.label}</button>
-                <button type="button" className="film-timeline__remove" aria-label={`Remove ${clip.label}`} data-testid="film-timeline-delete-sfx" onClick={() => void removeClip(clip.id)}>
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      <div className="film-timeline__tool-slot" data-testid="film-timeline-tool-slot">
-        <PromptToolbar
-          projectId={project.id}
-          sceneId={sceneId}
-          shotId={shot?.id || ""}
-          prompt={prompt}
-          onPrompt={setPrompt}
-          onReferences={() => setReferenceOpen({})}
-        />
-      </div>
-      {activeReferences.length ? (
-        <div className="film-reference-strip" data-testid="film-reference-strip">
-          {activeReferences.map((ref) => {
-            const label = filmReferenceChipLabel(ref);
-            return (
-              <span key={ref.id} className={`film-reference-chip is-${ref.type || "other"}`}>
-                <button type="button" onClick={() => setReferenceOpen({ assetId: ref.assetId, editId: ref.id })}>
-                  {label}
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Remove ${label}`}
-                  onClick={() => shot && void run(() => api.filmTimelineDetachReference(project.id, sceneId, shot.id, ref.assetId))}
-                >
-                  ×
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      ) : null}
-      <div className="film-timeline__prompt">
-        <span className="film-timeline__prompt-head">
-          Timed Prompt
-          <button type="button" className="film-timeline__remove" aria-label="Remove timed prompt" data-testid="film-timeline-delete-prompt" disabled={!prompt.trim()} onClick={() => void removeTimedPrompt()}>
-            ×
+      <div className="film-timeline__workspace" data-testid="film-timeline-workspace">
+        <div className="film-timeline__workspace-tabs" role="tablist" aria-label="Scene workspace">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspace === "prompt"}
+            className={workspace === "prompt" ? "is-selected" : ""}
+            data-testid="film-timeline-workspace-prompt"
+            onClick={() => setWorkspace("prompt")}
+          >
+            Prompt
           </button>
-        </span>
-        <textarea value={prompt} data-testid="film-timeline-prompt" onChange={(event) => setPrompt(event.target.value)} />
-      </div>
-      <div className="film-timeline__actions">
-        <button type="button" data-testid="film-timeline-generate" disabled={busy || !prompt.trim()} onClick={() => void generate()}>
-          Generate Shot
-        </button>
-        <button type="button" data-testid="film-timeline-continue" disabled={busy || !completed || !prompt.trim()} onClick={() => void continueShot()}>
-          Continue Shot
-        </button>
-        <button type="button" data-testid="film-timeline-review-extend" disabled={busy || !completed || !prompt.trim()} onClick={() => void reviewExtend()}>
-          Review & Extend
-        </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspace === "track"}
+            className={workspace === "track" ? "is-selected" : ""}
+            data-testid="film-timeline-workspace-track"
+            title="Visual track"
+            onClick={() => {
+              setAddIntent(null);
+              setWorkspace("track");
+            }}
+          >
+            Track
+          </button>
+        </div>
+        {workspace === "track" ? (
+          <VisualTrack
+            key={sceneId}
+            sceneId={sceneId}
+            initialScrollLeft={trackScrollByScene.current[sceneId] || 0}
+            onViewportScroll={(left) => {
+              trackScrollByScene.current[sceneId] = left;
+            }}
+            clips={clips}
+            pending={
+              pendingBatch
+                ? { id: pendingBatch.id, label: pendingBatch.label, durationSec: pendingBatch.durationSec, placement: pendingBatch.placement }
+                : null
+            }
+            selectedId={segmentId}
+            playheadSec={playheadSec}
+            rangeStart={retake.open ? retake.rangeStart : null}
+            rangeEnd={retake.open ? retake.rangeEnd : null}
+            projectId={project.id}
+            onSelect={selectClip}
+            onDelete={(clip) => void removeVideoItem({ id: clip.id, kind: "segment" })}
+            onSeek={seekScene}
+            onAdd={addNextBatch}
+            onAddPrevious={addPreviousBatch}
+            onAddFromLibrary={() => setLibraryOpen("visual")}
+            onMove={(clip, direction) => void moveClip(clip, direction)}
+            onStitch={() => void stitchScene()}
+            canStitch={clips.length >= 2 && !pendingBatch && !stitching}
+            stitching={stitching}
+            stitchNote={stitchNote}
+          />
+        ) : (
+          <>
+            <div className="film-timeline__tool-slot" data-testid="film-timeline-tool-slot">
+              <PromptToolbar
+                projectId={project.id}
+                sceneId={sceneId}
+                shotId={shot?.id || ""}
+                prompt={prompt}
+                onPrompt={setPrompt}
+                onReferences={showSemanticReferences ? () => setReferenceOpen({}) : undefined}
+                showReferences={showSemanticReferences}
+              />
+            </div>
+            <div className="film-reference-strip" data-testid="film-reference-strip">
+              <span className="film-timeline__shot-tag" data-testid="film-timeline-shot-tag">{shotTag(upcomingShot)}</span>
+              {showSemanticReferences ? activeReferences.map((ref) => {
+                  const label = filmReferenceChipLabel(ref);
+                  return (
+                    <span key={ref.id} className={`film-reference-chip is-${ref.type || "other"}`} data-asset-id={ref.assetId} data-source={ref.source || ""}>
+                      <button type="button" onClick={() => setReferenceOpen({ assetId: ref.assetId, editId: ref.id })}>
+                        {label}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${label}`}
+                        onClick={() => shot && void run(() => api.filmTimelineDetachReference(project.id, sceneId, shot.id, ref.assetId))}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+              }) : null}
+            </div>
+            <div className="film-timeline__prompt">
+              <span className="film-timeline__prompt-head">
+                Timed Prompt
+                <button type="button" className="film-timeline__remove" aria-label="Remove timed prompt" data-testid="film-timeline-delete-prompt" disabled={!prompt.trim()} onClick={() => void removeTimedPrompt()}>
+                  ×
+                </button>
+              </span>
+              <textarea
+                value={prompt}
+                data-testid="film-timeline-prompt"
+                placeholder={addIntent === "prepend" ? "What happens immediately before this?" : trackEnabled ? "What happens next?" : ""}
+                onChange={(event) => setPrompt(event.target.value)}
+              />
+            </div>
+            <div className="film-timeline__actions">
+              <button
+                type="button"
+                data-testid={addIntent === "prepend" ? "film-timeline-prepend" : trackEnabled ? "film-timeline-continue" : "film-timeline-generate"}
+                disabled={busy || !prompt.trim() || (frameModeModel && (ltxMode === "one_frame" || ltxMode === "start_end") && !ltxStartAssetId && !(trackEnabled && addIntent !== "prepend")) || (frameModeModel && ltxMode === "start_end" && !ltxEndAssetId)}
+                onClick={() => void (addIntent === "prepend" ? prependShot() : trackEnabled ? continueShot() : generate())}
+              >
+                {addIntent === "prepend" ? "Create Previous Shot" : trackEnabled ? "Continue Shot" : "Generate Shot"}
+              </button>
+              {showContinuation && trackEnabled && addIntent !== "prepend" ? (
+                <p className="film-timeline__continuation" data-testid="film-timeline-continuation">
+                  {continuationLabel}
+                  {continuationHelper ? <span>{continuationHelper}</span> : null}
+                </p>
+              ) : null}
+            </div>
+          </>
+        )}
       </div>
       {message || segmentError || seamWarning ? (
         <p className="film-timeline__error" data-testid="film-timeline-error">
@@ -1283,6 +2115,7 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
         <FilmReferenceModal
           assets={libraryItems}
           references={activeReferences}
+          projectId={project.id}
           initialAssetId={referenceOpen.assetId}
           editId={referenceOpen.editId}
           onClose={() => setReferenceOpen(null)}
@@ -1292,10 +2125,39 @@ export function FilmTimelineShell({ project, selectedScene, setSelectedScene, re
       {libraryOpen ? (
         <AddFromProjectLibraryModal
           project={project}
-          alreadyIds={libraryAssetIds}
-          onClose={() => setLibraryOpen(false)}
+          alreadyIds={libraryOpen === "visual" || libraryOpen === "ltx-frame" || libraryOpen === "ltx-end" ? [] : libraryAssetIds}
+          mediaKind={libraryOpen === "visual" ? "video" : "all"}
+          single={libraryOpen === "visual" || libraryOpen === "ltx-frame" || libraryOpen === "ltx-end"}
+          onClose={() => setLibraryOpen(null)}
           onAssetsChanged={() => void refresh()}
-          onAdd={handleAddFromProjectLibrary}
+          onAdd={
+            libraryOpen === "visual"
+              ? importVideo
+              : libraryOpen === "ltx-frame" || libraryOpen === "ltx-end"
+                ? (ids) => {
+                    const choosingEnd = libraryOpen === "ltx-end";
+                    const id = String(ids[0] || "");
+                    const asset = [...libraryItems, ...(project.assets || [])].find((item) => item.id === id);
+                    setLibraryOpen(null);
+                    if (!asset || asset.kind !== "image") {
+                      setMessage(`LTX_FRAME_INPUT_INVALID: Choose a still image for the ${choosingEnd ? "end" : "start"} frame.`);
+                      return;
+                    }
+                    const nextMode = choosingEnd ? "start_end" : ltxMode === "start_end" ? "start_end" : "one_frame";
+                    const nextStart = choosingEnd ? ltxStartAssetId : id;
+                    const nextEnd = choosingEnd ? id : ltxEndAssetId;
+                    if (choosingEnd) setLtxEndAssetId(id);
+                    else setLtxStartAssetId(id);
+                    setLtxMode(nextMode);
+                    if (shot && sceneId) {
+                      void api.filmTimelineSetShotModel(project.id, sceneId, shot.id, {
+                        generatorId: modelId,
+                        providerOptions: { ltxMode: nextMode, ltxStartAssetId: nextStart, ltxEndAssetId: nextEnd },
+                      });
+                    }
+                  }
+                : handleAddFromProjectLibrary
+          }
         />
       ) : null}
     </>

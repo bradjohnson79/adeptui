@@ -137,14 +137,14 @@ class DirectionModeBody(BaseModel):
 class GenerateTakesBody(BaseModel):
     count: int = 1
     labels: list[str] = Field(default_factory=list)
-    preferredProvider: Optional[str] = None  # ORDER15: local | elevenlabs
-    voiceId: Optional[str] = None  # ElevenLabs voice id when preferredProvider=elevenlabs
+    preferredProvider: Optional[str] = None  # local | elevenlabs
+    voiceId: Optional[str] = None  # ElevenLabs voice_id when preferredProvider is elevenlabs
     modelId: Optional[str] = None
 
     @field_validator("count")
     @classmethod
     def _validate_count(cls, value: int) -> int:
-        return max(1, min(8, int(value)))
+        return max(1, min(4, int(value)))
 
 
 class ApproveTakeBody(BaseModel):

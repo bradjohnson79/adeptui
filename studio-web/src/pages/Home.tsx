@@ -36,8 +36,8 @@ import {
   type StudioLaunchTarget,
 } from "../components/generationStudio/StudioLaunchCards";
 import {
-  BrowseTemplatesCard,
   CreateProjectCard,
+  previousEligibleProject,
 } from "../components/generationStudio/CreateProjectCard";
 import type { NewProductionOpts } from "../components/dashboard/NewProductionCard";
 import { Dialog, EmptyState, SectionHeader } from "../components/ui";
@@ -153,6 +153,10 @@ export default function Home() {
     () => projects.find((project) => project.id === preferredProjectId) || null,
     [preferredProjectId, projects],
   );
+  const previousProject = useMemo(
+    () => previousEligibleProject(projects, preferredProjectId),
+    [preferredProjectId, projects],
+  );
 
   useBindCoDirectorWorkspace({
     projectId: preferredProject?.id,
@@ -249,6 +253,8 @@ export default function Home() {
           projectId: id,
           componentId: setupEntry?.setupComponent,
           source: setupEntry?.setupSource || "workspace_launch",
+          setupSection: setupEntry?.setupSection,
+          missingComponentIds: setupEntry?.setupMissing?.split(",").filter(Boolean),
         }),
         { replace: true },
       );
@@ -417,18 +423,15 @@ export default function Home() {
         />
 
         <section id="projects" className="gs-projects" aria-labelledby="projects-heading">
-          <h2 id="projects-heading" className="section-heading">
-            Projects
-          </h2>
-          <div className="gs-projects-split">
-            <CreateProjectCard
-              busy={busy || createBusy}
-              onOpen={() => openCreateProject()}
-              activeProjectName={preferredProject?.name}
-              onOpenActive={preferredProject?.id ? () => void openProject(preferredProject.id) : undefined}
-            />
-            <BrowseTemplatesCard onSelectTemplate={useTemplateById} />
-          </div>
+          <CreateProjectCard
+            busy={busy || createBusy}
+            onOpen={() => openCreateProject()}
+            projects={projects}
+            activeProjectName={preferredProject?.name}
+            previousProjectName={previousProject?.name}
+            onOpenActive={preferredProject?.id ? () => void openProject(preferredProject.id) : undefined}
+            onOpenPrevious={previousProject?.id ? () => void openProject(previousProject.id) : undefined}
+          />
         </section>
 
         <section id="projects-library" className="gs-library glass-section" aria-labelledby="library-heading">

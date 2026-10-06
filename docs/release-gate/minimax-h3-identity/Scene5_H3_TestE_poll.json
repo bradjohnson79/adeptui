@@ -1,0 +1,308 @@
+{
+  "prompt_id": "fde23980-4782-4df9-ab4b-ba8ee929fe01",
+  "samples": [
+    {
+      "elapsed": 0.0,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 30.29,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 10.3,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 26.7,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 20.3,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 26.56,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 30.4,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 12.31,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 40.4,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 12.31,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 50.5,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 12.31,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 60.5,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 12.31,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 70.5,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 12.31,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 80.6,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 12.31,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 90.6,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 100.6,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 110.7,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 120.8,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 130.8,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 140.8,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 150.9,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 160.9,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 170.9,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 180.9,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 191.0,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 201.0,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 211.0,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 221.1,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 11.49,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 231.1,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 24.79,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 241.1,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 22.79,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 241.1,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 12.62,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 251.1,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 12.74,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 261.2,
+      "running": true,
+      "pending": false,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 12.77,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 271.2,
+      "running": false,
+      "pending": false,
+      "in_history": true,
+      "status_str": "success",
+      "vram_used_gb": 12.27,
+      "cached_nodes": []
+    }
+  ],
+  "final_status": {
+    "status_str": "success",
+    "completed": true,
+    "messages": [
+      [
+        "execution_start",
+        {
+          "prompt_id": "fde23980-4782-4df9-ab4b-ba8ee929fe01",
+          "timestamp": 1788932226777
+        }
+      ],
+      [
+        "execution_cached",
+        {
+          "nodes": [],
+          "prompt_id": "fde23980-4782-4df9-ab4b-ba8ee929fe01",
+          "timestamp": 1788932226787
+        }
+      ],
+      [
+        "execution_success",
+        {
+          "prompt_id": "fde23980-4782-4df9-ab4b-ba8ee929fe01",
+          "timestamp": 1788932577320
+        }
+      ]
+    ]
+  },
+  "final_outputs": {
+    "14": {
+      "images": [
+        {
+          "filename": "h3_single_subject_00002_.mp4",
+          "subfolder": "identity_test",
+          "type": "output"
+        }
+      ],
+      "animated": [
+        true
+      ]
+    }
+  }
+}

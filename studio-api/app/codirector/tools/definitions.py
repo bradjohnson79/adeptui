@@ -2921,6 +2921,7 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("brief", "string", required=True, max_length=8000),
             ToolParameter("role", "string", max_length=120),
             ToolParameter("description", "string", max_length=4000),
+            ToolParameter("requireNew", "boolean"),
         ),
     ),
     ToolDefinition(
@@ -2985,6 +2986,8 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         pinned_resources=("project",),
         parameters=(
             ToolParameter("characterId", "string", required=True, max_length=36),
+            ToolParameter("characterName", "string", required=False, max_length=200),
+            ToolParameter("profileSummary", "string", required=False, max_length=400),
             ToolParameter("heroAssetId", "string", required=False, max_length=36),
             ToolParameter("includeDetails", "boolean", required=False),
             ToolParameter("includePerformance", "boolean", required=False),
@@ -3228,6 +3231,14 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         parameters=(
             ToolParameter("propId", "string", required=False, max_length=36),
             ToolParameter("propName", "string", required=False, max_length=120),
+            ToolParameter("name", "string", required=False, max_length=200),
+            ToolParameter("description", "string", required=False, max_length=4000),
+            ToolParameter("generatorSources", "object", required=False),
+            ToolParameter("local_enabled", "boolean", required=False),
+            ToolParameter("api_enabled", "boolean", required=False),
+            ToolParameter("local_family", "string", required=False, max_length=64),
+            ToolParameter("api_model", "string", required=False, max_length=120),
+            ToolParameter("candidate_count", "integer", required=False, minimum=1, maximum=4),
             ToolParameter(
                 "view",
                 "string",
@@ -3277,10 +3288,50 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
     ),
     # ---- M42 W44 Voice Performance (mutating — approval gated) ----
     ToolDefinition(
+        tool_id="voice_performance.generate_takes",
+        kind="mutating",
+        title="Voice Performance: generate takes",
+        description="Generate one to four takes of dialogue using the character's saved voice. Resolve Local or ElevenLabs from that saved voice. Do not ask for a voice ID or switch providers.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("characterId", "string", required=True, max_length=36),
+            ToolParameter("dialogue", "string", required=True, max_length=2000),
+            ToolParameter("count", "integer", required=False),
+            ToolParameter("direction", "string", required=False, max_length=200),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="voice_performance.save_take_to_library",
+        kind="mutating",
+        title="Voice Performance: save take to Library",
+        description="Save a finished take into the project Library. The original take is kept.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("recordId", "string", required=True, max_length=36),
+            ToolParameter("takeId", "string", required=False, max_length=36),
+            ToolParameter("takeNumber", "integer", required=False),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="voice_performance.send_take_to_environment",
+        kind="mutating",
+        title="Voice Performance: send take to Voice Environment",
+        description="Register a finished take as a durable Library audio asset and return its asset id so the Voice Environment can load it as the dry source. The original take is kept. Use this when the creator asks to send or open a take in Voice Environment.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("recordId", "string", required=True, max_length=36),
+            ToolParameter("takeId", "string", required=False, max_length=36),
+            ToolParameter("takeNumber", "integer", required=False),
+        ),
+    ),
+    ToolDefinition(
         tool_id="voice_performance.generate_segments",
         kind="mutating",
         title="Voice Performance: generate segments",
-        description="Generate segmented dialogue using approved Character Voice (requires approval).",
+        description="Generate segmented dialogue using the character's saved voice. If that voice is ElevenLabs, speech uses the saved ElevenLabs voice ID. Do not invent a voice from the character name.",
         capability="project",
         pinned_resources=("project",),
         parameters=(
@@ -4211,6 +4262,59 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         result_char_budget=24000,
     ),
     ToolDefinition(
+        tool_id="timeline.publish_scene",
+        kind="mutating",
+        title="Publish scene",
+        description="Publish the finished Timeline scene. The ready stitch goes in and the published master comes out.",
+        capability="project",
+        pinned_resources=("scene",),
+        parameters=(
+            ToolParameter("sceneId", "string", max_length=36),
+            ToolParameter("shotId", "string", max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="timeline.prepend_shot",
+        kind="mutating",
+        title="Opening shot",
+        description="Create the picture that happens immediately before the first finished Timeline shot. It is inserted at the start only after the file exists.",
+        capability="project",
+        pinned_resources=("scene",),
+        parameters=(
+            ToolParameter("sceneId", "string", max_length=36),
+            ToolParameter("shotId", "string", max_length=64),
+            ToolParameter("prompt", "string", max_length=4000),
+            ToolParameter("durationSec", "number", minimum=0.5, maximum=20),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="timeline.continue_shot",
+        kind="mutating",
+        title="Continue shot",
+        description="Add the next part of the current Timeline shot after the finished picture. Does not start a new film.",
+        capability="project",
+        pinned_resources=("scene",),
+        parameters=(
+            ToolParameter("sceneId", "string", max_length=36),
+            ToolParameter("shotId", "string", max_length=64),
+            ToolParameter("prompt", "string", max_length=4000),
+            ToolParameter("durationSec", "number", minimum=0.5, maximum=20),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="timeline.generate_shot",
+        kind="mutating",
+        title="Generate shot",
+        description="Generate the prepared Timeline shot with the scene's generator. Does not create a second shot.",
+        capability="project",
+        pinned_resources=("scene",),
+        parameters=(
+            ToolParameter("sceneId", "string", max_length=36),
+            ToolParameter("shotId", "string", max_length=64),
+            ToolParameter("megapixels", "number", minimum=0.1, maximum=4),
+        ),
+    ),
+    ToolDefinition(
         tool_id="create_scene",
         kind="mutating",
         title="Create a scene",
@@ -4222,6 +4326,13 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("prompt", "string", max_length=4000),
             ToolParameter("engine", "string", choices=_ENGINE_CHOICES),
             ToolParameter("durationSec", "number", minimum=0.5, maximum=20.0),
+            ToolParameter("aspectRatio", "string", max_length=16),
+            ToolParameter("characterId", "string", max_length=36),
+            ToolParameter("characterName", "string", max_length=200),
+            ToolParameter("propName", "string", max_length=200),
+            ToolParameter("environmentName", "string", max_length=200),
+            ToolParameter("assetId", "string", max_length=64),
+            ToolParameter("identityId", "string", max_length=36),
         ),
     ),
     ToolDefinition(
@@ -4551,7 +4662,7 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         tool_id="audio.generate_music",
         kind="mutating",
         title="Audio Studio: generate music",
-        description="Generate a music candidate batch in Audio Studio (async, GPU-first, no silent provider/CPU switch). When a ready Media Intelligence packet exists for the scene (from analyze.video / Qwen 2.5 Omni), the prompt is enriched from that watch unless useMediaIntelligence=false.",
+        description="Generate a music candidate batch in Audio Studio (async, no silent provider/CPU switch). Pass preferredProvider=elevenlabs to use the ElevenLabs Music API directly. When a ready Media Intelligence packet exists for the scene, the prompt is enriched from that watch unless useMediaIntelligence=false.",
         capability="project",
         requires_approval=False,
         pinned_resources=("project", "scene"),
@@ -4573,7 +4684,7 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         tool_id="audio.generate_sfx",
         kind="mutating",
         title="Audio Studio: generate SFX",
-        description="Generate an SFX candidate batch in Audio Studio (async, GPU-first). When a ready Media Intelligence packet exists for the scene (from analyze.video / Qwen 2.5 Omni), the prompt is enriched from cue/contact opportunities unless useMediaIntelligence=false.",
+        description="Generate an SFX candidate batch in Audio Studio (async). Pass preferredProvider=elevenlabs to use the ElevenLabs Sound Effects API directly. When a ready Media Intelligence packet exists for the scene, the prompt is enriched from cue/contact opportunities unless useMediaIntelligence=false.",
         capability="project",
         requires_approval=False,
         pinned_resources=("project", "scene"),
@@ -4916,6 +5027,7 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("acceptedPrompt", "string", max_length=4000),
             ToolParameter("aspectRatio", "string", max_length=16),
             ToolParameter("qualityProfile", "string", choices=("draft", "standard", "high")),
+            ToolParameter("referenceAssetId", "string", max_length=64),
         ),
     ),
     ToolDefinition(
@@ -5134,6 +5246,9 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("identityVersionId", "string", max_length=36),
             ToolParameter("usageModes", "array"),
             ToolParameter("referenceRoles", "array"),
+            ToolParameter("characterName", "string", max_length=200),
+            ToolParameter("propName", "string", max_length=200),
+            ToolParameter("environmentName", "string", max_length=200),
         ),
     ),
     ToolDefinition(
@@ -5309,6 +5424,12 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("dialogue", "string", max_length=8000),
             ToolParameter("movementSegmentId", "string", max_length=36),
             ToolParameter("timelineRevision", "integer", minimum=1),
+            ToolParameter("sceneDurationSec", "number", minimum=0.5, maximum=20),
+            ToolParameter("aspectRatio", "string", max_length=16),
+            ToolParameter("characterId", "string", max_length=36),
+            ToolParameter("characterName", "string", max_length=200),
+            ToolParameter("propName", "string", max_length=200),
+            ToolParameter("environmentName", "string", max_length=200),
         ),
     ),
     ToolDefinition(
@@ -6340,6 +6461,24 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         ),
     ),
     ToolDefinition(
+        tool_id="ers.generate",
+        kind="mutating",
+        title="Environment Creator: generate",
+        description="Start the existing Environment Creator image. A prompt with no reference uses Qwen Image.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("name", "string", max_length=200),
+            ToolParameter("description", "string", max_length=6000),
+            ToolParameter("prompt", "string", max_length=6000),
+            ToolParameter("environmentPrompt", "string", max_length=6000),
+            ToolParameter("sourceAssetId", "string", max_length=64),
+            ToolParameter("model", "string", max_length=64),
+            ToolParameter("modelFamilyPreference", "string", max_length=64),
+            ToolParameter("forceWorkflowKey", "string", max_length=64),
+        ),
+    ),
+    ToolDefinition(
         tool_id="ers.create_sheet",
         kind="mutating",
         title="ERS: create sheet",
@@ -7050,6 +7189,20 @@ READ_TOOLS = READ_TOOLS + (
         capability="project",
     ),
     ToolDefinition(
+        tool_id="film_timeline.send_to_magi",
+        kind="read",
+        title="Send this scene to MAGI",
+        description=(
+            "Open MAGI for the current published scene. If the scene is unpublished "
+            "or the picture has changed since publish, explain that and do not open MAGI."
+        ),
+        capability="project",
+        parameters=(
+            ToolParameter("sceneId", "string", required=False, max_length=64),
+            ToolParameter("shotId", "string", required=False, max_length=64),
+        ),
+    ),
+    ToolDefinition(
         tool_id="magi.inspect_tracks",
         kind="read",
         title="MAGI: inspect tracks",
@@ -7223,13 +7376,22 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
         tool_id="magi.color.apply",
         kind="mutating",
         title="MAGI: apply color look",
-        description="Apply MAGI color look (propose→approve→apply→verify MagiActionReceipt). Source media preserved. NOT_SUPPORTED: LUT import, interactive curves, scopes.",
+        description="Apply a MAGI color or lighting look on the current edit. Lighting sliders and presets update the live finishing grade. Source media is preserved. NOT_SUPPORTED: LUT import, interactive curves, scopes, stabilization.",
         capability="project",
         pinned_resources=("project",),
         parameters=(
-            ToolParameter("assetId", "string", required=True, max_length=64),
+            ToolParameter("assetId", "string", required=False, max_length=64),
             ToolParameter("clipId", "string", required=False, max_length=64),
             ToolParameter("presetId", "string", required=False, max_length=64),
+            ToolParameter("lightingPresetId", "string", required=False, max_length=64),
+            ToolParameter("brightness", "number", required=False),
+            ToolParameter("highlights", "number", required=False),
+            ToolParameter("shadows", "number", required=False),
+            ToolParameter("temperature", "number", required=False),
+            ToolParameter("brightnessDelta", "number", required=False),
+            ToolParameter("highlightsDelta", "number", required=False),
+            ToolParameter("shadowsDelta", "number", required=False),
+            ToolParameter("temperatureDelta", "number", required=False),
         ),
     ),
     ToolDefinition(
@@ -7260,7 +7422,14 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
         tool_id="magi.upscale",
         kind="mutating",
         title="MAGI: upscale",
-        description="Queue MAGI asset-scoped upscale with MagiActionReceipt VERIFY. Does NOT persist Timeline scenePublish. GPU Real-ESRGAN when Ready; else honest fail.",
+        description=(
+            "Queue MAGI asset-scoped upscale with MagiActionReceipt VERIFY. "
+            "Does NOT persist Timeline scenePublish. GPU Real-ESRGAN when Ready; else honest fail. "
+            "Optional soundProfile on the same job: recommended, preserve_original, cinematic_stereo, "
+            "dialogue_enhance, wide_stereo, clean_restore, cinema_51, cinema_71, headphone_spatial. "
+            "Omit soundProfile to keep the original audio. "
+            "5.1 and 7.1 are cinema upmix profiles inside this upscale, not a separate workspace."
+        ),
         capability="project",
         pinned_resources=("project",),
         parameters=(
@@ -7268,6 +7437,8 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
             ToolParameter("engine", "string", required=False, max_length=64),
             ToolParameter("model", "string", required=False, max_length=64),
             ToolParameter("target", "string", required=False, max_length=32),
+            ToolParameter("soundProfile", "string", required=False, max_length=32),
+            ToolParameter("intent", "string", required=False, max_length=500),
         ),
     ),
     ToolDefinition(
@@ -7282,6 +7453,8 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
             ToolParameter("prompt", "string", required=True, max_length=2000),
             ToolParameter("range", "string", required=False, max_length=16, choices=("entire", "clip")),
             ToolParameter("clipId", "string", required=False, max_length=64),
+            ToolParameter("startSeconds", "number", required=False),
+            ToolParameter("duration", "number", required=False),
         ),
     ),
     ToolDefinition(
@@ -7304,7 +7477,8 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
             "Propose/apply MAGI finishing of the Timeline-published scene master "
             "(color → optional music/SFX → upscale → optional render). "
             "Never overwrites the published source. "
-            "NOT_SUPPORTED: EQ, 5.1/surround, frame interpolation."
+            "Sound enhancement is a profile on the upscale step. "
+            "NOT_SUPPORTED: EQ, frame interpolation."
         ),
         capability="project",
         pinned_resources=("project",),
@@ -7317,6 +7491,42 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
             ToolParameter("noMusic", "boolean", required=False),
             ToolParameter("keepOriginalAudio", "boolean", required=False),
             ToolParameter("finalRender", "boolean", required=False),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.recipe.apply",
+        kind="mutating",
+        title="MAGI: apply edit recipe",
+        description="Apply an existing MAGI recipe (track defaults, snap, finishing posture). Does not replace clips or timing.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("recipeId", "string", required=True, max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.transition.apply",
+        kind="mutating",
+        title="MAGI: set a clip-boundary transition",
+        description="Set None, Dissolve, Fade, or Wipe on the boundary between two adjacent picture clips. Duration is seconds from 0.1 to 3.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("kind", "string", required=True, max_length=32),
+            ToolParameter("clipId", "string", required=False, max_length=64),
+            ToolParameter("durationSeconds", "number", required=False),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.compare",
+        kind="mutating",
+        title="MAGI: compare the current edit",
+        description="Point MAGI Compare or Split View at the original published picture or another asset. Does not duplicate media.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("assetId", "string", required=False, max_length=64),
+            ToolParameter("mode", "string", required=False, max_length=16, choices=("compare", "split", "viewer")),
         ),
     ),
 )

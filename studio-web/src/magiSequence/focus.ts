@@ -33,7 +33,7 @@ export function canDeleteTimelineSelection(region: MagiFocusRegion): boolean {
 
 export function canControlPlayback(region: MagiFocusRegion): boolean {
   const effective = resolveEffectiveFocusRegion(region);
-  return effective === "timeline" || effective === "viewer";
+  return effective !== "text_input" && effective !== "modal";
 }
 
 export function canFrameStep(region: MagiFocusRegion): boolean {
@@ -46,5 +46,5 @@ export function canUseMagiClipboard(region: MagiFocusRegion, hasTimelineSelectio
 
 export function canUseMagiUndo(region: MagiFocusRegion): boolean {
   const effective = resolveEffectiveFocusRegion(region);
-  return effective === "timeline" || effective === "viewer" || effective === "media_bin";
+  return effective !== "text_input" && effective !== "modal";
 }

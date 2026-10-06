@@ -3,26 +3,17 @@ import { createPortal } from "react-dom";
 import { api } from "../api";
 import type { Project } from "../types";
 import type { EditorTab } from "../workspacePrefs";
+import { libraryThumbUrl } from "./library/libraryThumb";
+import { LibraryQuickPreviewModal, type LibraryQuickPreviewAsset } from "./library/LibraryQuickPreviewModal";
+import { isQuickPreviewKind } from "./library/libraryQuickPreview";
+import { sidebarFoldersForType, type LibraryTypeNav } from "./library/libraryNav";
 import { HelpTip } from "./HelpTip";
 
 const DIR_STATUS = ["draft", "generating", "variations", "approved", "used_in_editor"] as const;
 const ED_STATUS = ["animatic", "rough_cut", "scene_cut", "alternate", "approved", "master"] as const;
 const MODEL_FAMILIES = ["all", "zimage", "flux", "qwen", "imagen", "krea2"] as const;
 
-type TypeNav =
-  | "all"
-  | "images"
-  | "video"
-  | "audio"
-  | "characters"
-  | "props"
-  | "scenes"
-  | "environments"
-  | "storyboards"
-  | "scripts"
-  | "presets"
-  | "posecraft"
-  | "scene_image";
+type TypeNav = LibraryTypeNav | "posecraft";
 
 const TYPE_NAV: { id: TypeNav; label: string; testId?: string }[] = [
   { id: "all", label: "All" },
@@ -35,7 +26,6 @@ const TYPE_NAV: { id: TypeNav; label: string; testId?: string }[] = [
   { id: "environments", label: "Environments" },
   { id: "storyboards", label: "Storyboards" },
   { id: "scripts", label: "Scripts" },
-  { id: "presets", label: "Presets/Templates" },
   { id: "scene_image", label: "Scene Images" },
 ];
 
@@ -54,6 +44,24 @@ function loadFavorites(projectId: string): Set<string> {
 
 function saveFavorites(projectId: string, ids: Set<string>) {
   localStorage.setItem(favoritesKey(projectId), JSON.stringify([...ids]));
+}
+
+function LibraryUpscaleFinishing({ item }: { item: any }) {
+  const meta = parsePromptMeta(item);
+  const audio = String(meta.audioEnhancementLabel || "");
+  const target = String(meta.videoTarget || meta.upscaleTarget || "");
+  if (meta.operation !== "magi_upscale" && !audio && !target) return null;
+  const channels = Number(meta.audioChannels || 0);
+  const channelLabel = channels >= 8 ? "7.1" : channels >= 6 ? "5.1" : channels === 2 ? "Stereo" : channels === 1 ? "Mono" : "";
+  return (
+    <div data-testid="library-upscale-finishing">
+      <h3>Finishing</h3>
+      {target ? <p>Upscale: {target}</p> : null}
+      {meta.aspect ? <p>Aspect: {String(meta.aspect)}</p> : null}
+      {audio ? <p>Audio: {audio}</p> : null}
+      {channelLabel ? <p>Channels: {channelLabel}</p> : null}
+    </div>
+  );
 }
 
 function parsePromptMeta(item: any): Record<string, unknown> {
@@ -155,9 +163,6 @@ function matchesTypeNav(item: any, type: TypeNav): boolean {
   if (type === "scripts") {
     return kind === "script" || key.startsWith("scripts") || /\bscript/.test(hay);
   }
-  if (type === "presets") {
-    return key.startsWith("templates_presets") || key.includes("preset") || /preset|template/.test(hay);
-  }
   if (type === "posecraft") {
     return key.includes("posecraft") || /posecraft|pose\s*craft|\bpose\b/.test(hay);
   }
@@ -199,9 +204,47 @@ function collectionModified(col: any): string | null {
   );
 }
 
+function assetDurationLabel(item: any): string | null {
+  const meta = parsePromptMeta(item);
+  const raw = item?.duration ?? item?.duration_sec ?? item?.durationSec ?? meta.duration ?? meta.durationSec;
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+function LibraryCardPreview({ projectId, item }: { projectId: string; item: any }) {
+  const [failed, setFailed] = useState(false);
+  const kind = String(item?.kind || "").toLowerCase();
+  const duration = assetDurationLabel(item);
+  if (kind === "audio") {
+    return (
+      <div className="library-card-media library-card-media--audio">
+        <TypeGlyph kind="audio" />
+        <span className="library-card-media-kind">Audio{duration ? ` · ${duration}` : ""}</span>
+        <span className="library-card-media-name">{item.tag || item.filename || "Audio"}</span>
+      </div>
+    );
+  }
+  const owner = String(item?.projectId || item?.project_id || projectId);
+  const persisted = assetThumbUrl(item);
+  const generated = kind === "video" || kind === "image" ? libraryThumbUrl(owner, item.id, kind) : null;
+  const src = kind === "video" ? persisted || generated || "" : generated || persisted || "";
+  if (!failed && src) {
+    return <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} />;
+  }
+  return (
+    <div className={`library-card-media library-card-media--${kind || "file"}`}>
+      <TypeGlyph kind={kind} />
+      <span className="library-card-media-kind">{kindLabel(kind)}</span>
+      <span className="library-card-media-name">{item.filename || item.tag || "—"}</span>
+    </div>
+  );
+}
+
 function TypeGlyph({ kind }: { kind: string }) {
   const k = String(kind || "").toLowerCase();
-  const glyph = k === "video" ? "â–¶" : k === "audio" ? "â™ª" : k === "script" ? "â‰¡" : "â–£";
+  const glyph = k === "video" ? "\u25B6" : k === "audio" ? "\u266A" : k === "script" ? "\u2261" : "\u25A1";
   return (
     <span className={`library-type-glyph library-type-glyph--${k || "file"}`} aria-hidden>
       {glyph}
@@ -356,6 +399,7 @@ export function LibraryPanel({
   const [genHistory, setGenHistory] = useState<any[]>([]);
   const [packOpen, setPackOpen] = useState<Record<string, boolean>>({});
 
+  const [preview, setPreview] = useState<LibraryQuickPreviewAsset | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<"single" | "bulk" | null>(null);
@@ -458,6 +502,17 @@ export function LibraryPanel({
   }, [items, typeNav, showFavoritesOnly, favorites, modelFamilyFilter, refsFilter, collectionFilter, collections]);
 
   const selectedItem = useMemo(() => items.find((a) => a.id === selected) || null, [items, selected]);
+  const sidebarFolders = useMemo(() => sidebarFoldersForType(treeFolders, typeNav === "posecraft" ? "all" : typeNav), [treeFolders, typeNav]);
+
+  useEffect(() => {
+    if (!folderFilter?.systemKey) return;
+    const stillVisible = sidebarFolders.some(
+      (folder) =>
+        folder.systemKey === folderFilter.systemKey ||
+        (folder.children || []).some((child) => child.systemKey === folderFilter.systemKey),
+    );
+    if (!stillVisible) setFolderFilter(null);
+  }, [folderFilter, sidebarFolders]);
 
   const enterSelect = useCallback(() => {
     setSelectMode(true);
@@ -677,11 +732,11 @@ export function LibraryPanel({
             >
               All assets
             </button>
-            {!treeFolders.length ? (
+            {!sidebarFolders.length ? (
               <p className="library-empty-compact">No folders yet.</p>
             ) : (
-              <ul className="library-folder-list">
-                {treeFolders.map((f) => (
+              <ul className="library-folder-list" data-testid="library-folder-list">
+                {sidebarFolders.map((f) => (
                   <li key={f.folderId || f.systemKey}>
                     <button
                       type="button"
@@ -700,7 +755,7 @@ export function LibraryPanel({
                     >
                       {f.displayName}
                     </button>
-                    {(f.children || []).slice(0, 6).map((child: any) => (
+                    {(f.children || []).map((child) => (
                       <button
                         key={child.folderId || child.systemKey}
                         type="button"
@@ -750,6 +805,17 @@ export function LibraryPanel({
                         return;
                       }
                       setSelected(a.id);
+                      if (isQuickPreviewKind(a.kind)) {
+                        const family = assetModelFamily(a);
+                        setPreview({
+                          id: a.id,
+                          kind: a.kind,
+                          filename: a.filename,
+                          tag: a.tag,
+                          name: a.tag || a.filename,
+                          model: family ? modelFamilyLabel(family) : undefined,
+                        });
+                      }
                     }}
                   >
                     {showSelect && (
@@ -762,21 +828,13 @@ export function LibraryPanel({
                         <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(a.id)} />
                       </label>
                     )}
-                    {isImage ? (
-                      <img src={assetThumbUrl(a)} alt={title} loading="lazy" />
-                    ) : (
-                      <div className={`library-card-media library-card-media--${a.kind || "file"}`}>
-                        <TypeGlyph kind={a.kind} />
-                        <span className="library-card-media-kind">{kindLabel(a.kind)}</span>
-                        <span className="library-card-media-name">{a.filename || a.tag || "—"}</span>
-                      </div>
-                    )}
+                    <LibraryCardPreview projectId={project.id} item={a} />
                     <span className="library-card-kicker">
                       <TypeGlyph kind={a.kind} />
                       {kindLabel(a.kind)}
                     </span>
                     <span className="library-card-title">
-                      {favorites.has(a.id) ? "â˜… " : ""}
+                      {favorites.has(a.id) ? "\u2605 " : ""}
                       {title}
                     </span>
                     <span className="library-card-tags">
@@ -840,6 +898,7 @@ export function LibraryPanel({
                       Promote to Global
                     </button>
                   </div>
+                  {selectedItem ? <LibraryUpscaleFinishing item={selectedItem} /> : null}
                   <h3>Generation notes</h3>
                   {selectedItem ? <ImageProvenanceBlock item={selectedItem} /> : null}
                   <h3>Recent generations</h3>
@@ -1096,6 +1155,8 @@ export function LibraryPanel({
           </ul>
         )}
       </LibraryPack>
+
+      <LibraryQuickPreviewModal asset={preview} onClose={() => setPreview(null)} />
 
       {deleteConfirm &&
         createPortal(

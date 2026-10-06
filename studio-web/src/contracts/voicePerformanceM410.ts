@@ -1,3 +1,31 @@
+﻿export type VoicePerformanceMannerismCueId =
+  | "sigh"
+  | "chuckle"
+  | "laugh"
+  | "soft_laugh"
+  | "gasp"
+  | "breath_in"
+  | "breath_out"
+  | "whisper"
+  | "pause"
+  | "hesitate"
+  | "scoff"
+  | "nervous_breath";
+
+export type VoicePerformanceMannerismPosition = "before" | "during" | "after";
+export type VoicePerformanceMannerismIntensity = "light" | "medium" | "strong";
+
+export type VoicePerformanceMannerismCue = {
+  id: VoicePerformanceMannerismCueId | string;
+  label?: string;
+  position?: VoicePerformanceMannerismPosition | string;
+  intensity?: VoicePerformanceMannerismIntensity | string;
+  source?: string;
+  nativeSupport?: boolean;
+  approximationMode?: string;
+  approximationNote?: string;
+};
+
 export type VoicePerformanceDirectionMode = "codirector" | "manual";
 
 export type VoicePerformanceTakeStatus =
@@ -42,6 +70,8 @@ export type VoicePerformancePlan = {
   editable?: boolean;
   presetId?: string;
   emotionVector?: VoicePerformanceEmotionVector;
+  mannerismCues?: VoicePerformanceMannerismCue[];
+  mannerismNotices?: string[];
   [key: string]: unknown;
 };
 
@@ -112,9 +142,21 @@ export type VoicePerformanceRecordList = {
   mock?: boolean;
 };
 
+export type VoicePerformanceGenerationProgress = {
+  source?: string;
+  batchId?: string | null;
+  completed?: number;
+  total?: number;
+  percent?: number;
+  active?: boolean;
+  currentTakeNumber?: number | null;
+  label?: string;
+};
+
 export type VoicePerformanceTakeList = {
   recordId: string;
   approvedTakeId?: string | null;
+  generationProgress?: VoicePerformanceGenerationProgress | null;
   takes: VoicePerformanceTake[];
   mock?: boolean;
 };
@@ -149,6 +191,14 @@ export type VoicePerformanceCapabilities = {
   qwenReady?: boolean;
   indexTts2Ready?: boolean;
   sharedWarmWorker?: boolean;
+  mannerismVocabulary?: {
+    cues?: VoicePerformanceMannerismCue[];
+    positions?: string[];
+    intensities?: string[];
+    engine?: string;
+    policyUnknownTagShapedBrackets?: string;
+    mock?: boolean;
+  };
   mock?: boolean;
 };
 
@@ -201,3 +251,4 @@ export type VoicePerformanceLipsyncResult = {
   };
   mock?: boolean;
 };
+

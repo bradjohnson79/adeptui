@@ -1,0 +1,56 @@
+{
+  "hypothesis": "H3 failed Test B because Picture 1 / Picture 2 were multi-panel CRS documents",
+  "picture_1": {
+    "canonicalTag": "@Addex",
+    "socket": "ref_image_0",
+    "fixture": "studio/test_e_addex_front.png"
+  },
+  "picture_2": {
+    "canonicalTag": "@Korri40YearsOld",
+    "socket": "ref_image_1",
+    "fixture": "studio/test_e_korri_front.png"
+  },
+  "subject_1": "@Addex",
+  "subject_2": "@Korri40YearsOld",
+  "ref_image_0": "studio/test_e_addex_front.png",
+  "ref_image_1": "studio/test_e_korri_front.png",
+  "filename_prefix": "identity_test/h3_single_subject",
+  "ref_image_size": "max",
+  "easyCache": false,
+  "steps": 20,
+  "sampler": "res_multistep",
+  "scheduler": "simple",
+  "seed": 2248151181,
+  "length": 124,
+  "resolution": "1280x704",
+  "schedulerModel": [
+    "1",
+    0
+  ],
+  "guiderModel": [
+    "1",
+    0
+  ],
+  "prompt": "subject_definitions:\n<Subject 1> is @Addex, the person defined by <Picture 1>. Preserve their facial identity, hair, body proportions, clothing, and distinguishing appearance from <Picture 1>.\n<Subject 2> is @Korri40YearsOld, the person defined by <Picture 2>. Preserve their facial identity, hair, body proportions, clothing, and distinguishing appearance from <Picture 2>.\n\nCHARACTER IDENTITY\n<Picture 1> @Addex \u2014 Preserve the supplied visual identity. Do not invent a replacement person. Keep the face, hair, body, wardrobe, and distinguishing marks from the reference picture. The setting must not redesign their clothes or recast them as generic extras.\n<Picture 2> @Korri40YearsOld \u2014 Preserve the supplied visual identity. Do not invent a replacement person. Keep the face, hair, body, wardrobe, and distinguishing marks from the reference picture. The setting must not redesign their clothes or recast them as generic extras.\nThe people in this shot are <Subject 1> (<Picture 1> @Addex) and <Subject 2> (<Picture 2> @Korri40YearsOld).\nThese are the characters. Preserve them. The reference pictures are identity authority.\n\nVISUAL STYLE\nRealistic Anime\nHybrid realistic-anime illustration with refined line control, grounded shading, believable depth, and stylized clarity.\nApply this style to the entire scene while preserving reference identity. A style change is a rendering treatment of the same referenced characters, not a recast.\n\nACTION\nSci-fi living quarters.\n\n<Subject 1> is already seated on the couch, thinking.\n\n<Subject 2> stands beside him, then sits next to him. They hold hands. Keep both people looking exactly like their reference pictures, including face, hair, body, and clothes. The room may be sci-fi; do not put them in new uniforms.\n\n<Subject 2> (S2): Hey babe, are you ready for some fun?\n\n<Subject 1> smiles.\n\n<Subject 1> (S1): You know I am.\n\nCAMERA\nIllustrative cinematic coverage with grounded lenses, flattering perspective, and composition that protects facial recognition.",
+  "testBGraphSha256": "608c04dbab097335946fd59d50ffc63acd94bc7fd1eb0ec611c8ea2798ece317",
+  "testBGraphSha256Now": "608c04dbab097335946fd59d50ffc63acd94bc7fd1eb0ec611c8ea2798ece317",
+  "checks": {
+    "picture1_addex_front": true,
+    "picture2_korri_front": true,
+    "prompt_unchanged_from_test_b": true,
+    "seed_unchanged": true,
+    "canvas_unchanged": true,
+    "length_unchanged": true,
+    "steps_unchanged": true,
+    "sampler_unchanged": true,
+    "scheduler_unchanged": true,
+    "ref_image_size_max": true,
+    "easyCache_absent": true,
+    "scheduler_model_raw_unet": true,
+    "guider_model_raw_unet": true,
+    "save_prefix_test_e": true,
+    "test_b_graph_untouched": true,
+    "only_intended_edits": true
+  },
+  "ok": true
+}

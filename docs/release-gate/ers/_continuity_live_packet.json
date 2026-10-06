@@ -1,0 +1,37 @@
+{
+  "qwenOccupied": {
+    "fingerprint": "be26e417f574931499f5be4e",
+    "providerPromptHead": "参考图像是唯一权威的物理环境。\n\n保持同一物理环境。不要重新设计。\n\n以提供的参考图像作为唯一权威的物理环境（Schnick Coffee）。来源资产 4d3062e8-8c30-4230-8376-bc25d1d4f735。\n\n保持咖啡机工作区、材质以及房间朝向不变。\n\nKorri必须站在服务吧台后方、靠近咖啡机工作区、位于员工一侧。不要把Korri放在吧台前方或顾客座位区。\n\nKorri stays behind the service counter, staff side.\n\nKorri remains beside the espresso station.\n\nmove characters to customer seating\n\nplace characters in front of the service counter\n\nredesign the room\n\nmirror the architecture\n\nchange window count\n\nrelocate the main entrance\n\n仅在占用比例面板中显示已放置的人物。\n\n只改变摄像机视角。不要",
+    "englishHasBehind": true,
+    "chineseHasBehind": true,
+    "chineseFirst": "参考图像是唯一权威的物理环境。\n\n保持同",
+    "actor": {
+      "actor": "Korri",
+      "characterId": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+      "zone": "staff",
+      "landmark": "espresso_station",
+      "relativePosition": "behind_service_counter",
+      "barrierSide": "employee_side",
+      "facing": "customer_side",
+      "forbiddenZones": [
+        "front_of_counter",
+        "customer_seating"
+      ],
+      "gridCell": "L10",
+      "miniPrompt": "standing behind the barista bar beside the espresso station on the staff side",
+      "factStatus": "creator_confirmed",
+      "occludedFrom": []
+    },
+    "source": {
+      "assetId": "4d3062e8-8c30-4230-8376-bc25d1d4f735",
+      "type": "original_environment"
+    }
+  },
+  "gptWholeSheet": {
+    "fingerprint": "eaa2efe03bb1b45910ecfe3f",
+    "providerPromptHead": "Preserve this physical set. Do not redesign the room.\n\nUse the supplied reference image as the exact physical environment (Schnick Coffee). Source asset 4d3062e8-8c30-4230-8376-bc25d1d4f735.\n\nPreserve the espresso station, materials, and room orientation.\n\nKorri stands behind the service counter beside the espresso station on the staff side. Keep them there. Do not place them in front of the counter or in the customer seating.\n\nKorri stays behind the service counter, staff side.\n\nKorri remains b",
+    "englishPrimary": true,
+    "hasChineseBlock": true,
+    "englishHasBehind": true
+  }
+}

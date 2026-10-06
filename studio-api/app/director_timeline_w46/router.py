@@ -163,6 +163,8 @@ class PatchBatchBody(BaseModel):
     references: Optional[list[dict[str, Any]]] = None
     repairRanges: Optional[list[dict[str, Any]]] = None
     visualClips: Optional[list[dict[str, Any]]] = None
+    # Set when the creator removes a placed take from Visual. Not a config edit.
+    dismissedVisualAssetId: Optional[str] = None
     audioClips: Optional[list[dict[str, Any]]] = None
     sfxClips: Optional[list[dict[str, Any]]] = None
     cameraInstructions: Optional[list[dict[str, Any]]] = None
@@ -170,6 +172,7 @@ class PatchBatchBody(BaseModel):
     h3Resolution: Optional[dict[str, Any]] = None
     # LTX 2.5 Timeline QUALITY tier ("720p"|"1080p"|"2K"|"4K"); independent of H3.
     ltxQuality: Optional[str] = None
+    seedanceResolution: Optional[str] = None
 
 
 class AddClipBody(BaseModel):

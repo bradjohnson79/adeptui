@@ -326,6 +326,41 @@ def _apply_stats(payload: dict[str, Any], stats: dict[str, Any]) -> dict[str, An
     return payload
 
 
+def authoritative_comfy_health(*, timeout_sec: float = 3.0) -> dict[str, Any]:
+    """The one Comfy health read for Boot and Comfy Manager.
+
+    System stats come from ComfyClient. Process identity comes from the
+    existing runtime port owner. This does not start or restart Comfy.
+    """
+    from runtime_supervisor.ports import listening_pids
+
+    from .comfy_client import comfy
+
+    status, stats = comfy.read_system_stats(timeout_sec)
+    try:
+        pids = list(listening_pids(8188))
+    except Exception:
+        pids = []
+    devices = stats.get("devices") if isinstance(stats.get("devices"), list) else []
+    device = devices[0] if devices and isinstance(devices[0], dict) else {}
+    error = None
+    if status != 200:
+        error = str(stats.get("error") or (f"HTTP {status}" if status else "ComfyUI did not answer"))
+    return {
+        "healthy": status == 200,
+        "endpoint": str(getattr(comfy, "base_url", "http://127.0.0.1:8188")).rstrip("/"),
+        "httpStatus": status,
+        "pids": pids,
+        "pid": pids[0] if pids else None,
+        "gpu": device.get("name"),
+        "vramTotal": device.get("vram_total"),
+        "vramFree": device.get("vram_free"),
+        "checkedAt": _now(),
+        "error": error,
+        "stats": stats if isinstance(stats, dict) else {},
+    }
+
+
 async def _system_stats_once(timeout_sec: float) -> dict[str, Any]:
     from .comfy_client import comfy
 

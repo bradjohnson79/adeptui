@@ -126,7 +126,8 @@ test.describe("M42 W4B MAGI Editor @DETERMINISTIC", () => {
       await page.goto(`/project/${project.id}?workspace=magi`);
       const editor = page.getByTestId("magi-editor");
       await expect(editor).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByTestId("magi-strip")).toBeVisible();
+      await expect(page.getByTestId("magi-strip")).toHaveCount(0);
+      await expect(page.getByTestId("magi-workspace-status")).toBeVisible();
 
       // Graphics pane ships collapsed; open it and verify the creator-facing controls.
       await page.locator("#magi-acc-btn-graphics").click();

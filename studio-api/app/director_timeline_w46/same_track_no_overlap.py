@@ -119,5 +119,91 @@ def assert_track_array_no_overlap(clips: Iterable[Any] | None, track: str = "tra
     )
 
 
+
+# Creator / CD user-facing copy (Law #39 — no raw timing codes in chat).
+USER_FACING_TRACK_OCCUPIED = "That part of the track is already occupied."
+CD_LAYMAN_TRACK_OCCUPIED = (
+    "That section of the track is already in use. Choose another time range."
+)
+
+_CLIP_TRACK_FIELDS = ("visualClips", "audioClips", "sfxClips", "cameraInstructions")
+
+
+def flatten_master_prompts(master: Any) -> list[Any]:
+    """Scene-absolute Timed Prompt track across all execution windows."""
+    blocks = sorted(
+        list(getattr(master, "batchBlocks", None) or []),
+        key=lambda b: int(getattr(b, "order", 0) or 0),
+    )
+    out: list[Any] = []
+    for batch in blocks:
+        out.extend(list(getattr(batch, "promptSegments", None) or []))
+    return out
+
+
+def assert_prompt_segments_no_overlap(
+    segments: Iterable[Any] | None,
+    *,
+    other_segments: Iterable[Any] | None = None,
+    track: str = "prompt",
+) -> None:
+    """Reject any open intersection on the Timed Prompt track (edges may touch)."""
+    items = list(segments or [])
+    assert_track_array_no_overlap(items, track)
+    others = list(other_segments or [])
+    if not others:
+        return
+    for seg in items:
+        assert_no_same_track_overlap(others, seg, track)
+
+
+def assert_master_prompt_candidate_fits(master: Any, candidate: Any, track: str = "prompt") -> None:
+    """Refuse a Timed Prompt that would intersect any existing Master prompt."""
+    assert_no_same_track_overlap(flatten_master_prompts(master), candidate, track)
+
+
+def audit_master_same_track_overlaps(master: Any) -> list[dict[str, Any]]:
+    """Report existing same-track overlaps. Never deletes or mutates Master."""
+    findings: list[dict[str, Any]] = []
+    pair = find_same_track_overlap_pair(flatten_master_prompts(master))
+    if pair is not None:
+        left, right = pair
+        findings.append(
+            {
+                "track": "prompt",
+                "batchId": None,
+                "aId": _clip_id(left),
+                "bId": _clip_id(right),
+                "aStart": _clip_start(left),
+                "aLength": _clip_length(left),
+                "bStart": _clip_start(right),
+                "bLength": _clip_length(right),
+                "message": same_track_overlap_error([left], right, "prompt"),
+            }
+        )
+    for batch in getattr(master, "batchBlocks", None) or []:
+        batch_id = str(getattr(batch, "id", "") or "") or None
+        for field in _CLIP_TRACK_FIELDS:
+            clips = list(getattr(batch, field, None) or [])
+            hit = find_same_track_overlap_pair(clips)
+            if hit is None:
+                continue
+            left, right = hit
+            findings.append(
+                {
+                    "track": field,
+                    "batchId": batch_id,
+                    "aId": _clip_id(left),
+                    "bId": _clip_id(right),
+                    "aStart": _clip_start(left),
+                    "aLength": _clip_length(left),
+                    "bStart": _clip_start(right),
+                    "bLength": _clip_length(right),
+                    "message": same_track_overlap_error([left], right, field),
+                }
+            )
+    return findings
+
+
 def audio_lane_kind(kind: str | None) -> str:
     return "sfx" if kind == "sfx" else "audio"

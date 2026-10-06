@@ -143,6 +143,46 @@ def list_visible_sheets(db: Any, project_id: str) -> list[EnvironmentReferenceSh
     return sheets
 
 
+def sheet_is_project_reference(sheet: Any) -> bool:
+    """True only when the sheet already has a real Environment Reference Sheet visual.
+
+    A name, description, reference input, or generation attempt is not enough.
+    Direct approval and a successful generation both store the official visual.
+    """
+    composite = str(getattr(sheet, "ers_composite_asset_id", "") or "").strip()
+    if composite:
+        return True
+    rendered = getattr(getattr(sheet, "composition", None), "renderedAssetIds", None) or {}
+    if isinstance(rendered, dict):
+        for key in ("composite", "png", "sheet"):
+            if str(rendered.get(key) or "").strip():
+                return True
+    return False
+
+
+def find_reusable_environment_draft(
+    sheets: list[EnvironmentReferenceSheet],
+    *,
+    project_id: str,
+    name: str,
+) -> EnvironmentReferenceSheet | None:
+    """Reuse this project's unfinished sheet so a failed start does not occupy the name."""
+    token = str(name or "").strip().lower()
+    if not token:
+        return None
+    matches = [
+        sheet
+        for sheet in sheets
+        if str(getattr(sheet, "projectId", "") or "") == project_id
+        and str(getattr(sheet, "name", "") or "").strip().lower() == token
+        and not sheet_is_project_reference(sheet)
+    ]
+    if not matches:
+        return None
+    matches.sort(key=lambda sheet: str(getattr(sheet, "updatedAt", "") or ""), reverse=True)
+    return matches[0]
+
+
 def check_environment_tag_collision(
     db: Any,
     *,

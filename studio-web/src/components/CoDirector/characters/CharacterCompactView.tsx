@@ -7,9 +7,8 @@
  * selector, and the "Open Full Character Creator" deep-link are preserved.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, api } from "../../../api";
+import { api } from "../../../api";
 import {
-  PROFILE_NAME_ALREADY_EXISTS,
   characterOwnedByProject,
   groupScopeItems,
   pickOwnedCharacterId,
@@ -19,6 +18,8 @@ import { CharacterCore } from "../../character";
 import type { GoTab } from "../../character/characterSheetDestinations";
 import {
   CHARACTER_PROFILE_SAVED_EVENT,
+  DRAFT_CHARACTER_ID,
+  isUnsavedCharacterId,
   upsertCharacterSummary,
   type CharacterProfileSavedDetail,
 } from "../../character/useCharacterProfile";
@@ -58,6 +59,7 @@ function CharacterDetail({ projectId, characterId, onOpenFull, onCreated, onGoTa
         characterId={characterId}
         onDeleted={() => onOpenFull?.("__delete__")}
         onCreated={onCreated}
+        autoFocusName={characterId === DRAFT_CHARACTER_ID}
         mode="express"
         onGoTab={onGoTab}
       />
@@ -67,7 +69,11 @@ function CharacterDetail({ projectId, characterId, onOpenFull, onCreated, onGoTa
             type="button"
             className="character-compact__actions-button"
             data-testid="character-compact-open-full"
-            onClick={() => onOpenFull?.(characterId)}
+            disabled={isUnsavedCharacterId(characterId)}
+            onClick={() => {
+              if (isUnsavedCharacterId(characterId)) return;
+              onOpenFull?.(characterId);
+            }}
           >
             Open Full Character Creator
           </button>
@@ -101,7 +107,10 @@ export function CharacterCompactView({ projectId, onOpenFull, onGoTab }: Props) 
       ]));
       const list = Array.isArray(result?.items) ? result.items : [];
       setCharacters(list);
-      setSelectedId((prev) => pickOwnedCharacterId(list, projectId, prev));
+      setSelectedId((prev) => {
+        if (prev === DRAFT_CHARACTER_ID) return prev;
+        return pickOwnedCharacterId(list, projectId, prev);
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -123,7 +132,10 @@ export function CharacterCompactView({ projectId, onOpenFull, onGoTab }: Props) 
       if (!detail || detail.projectId !== projectId || !detail.profile?.id) return;
       const saved = detail.profile;
       setCharacters((prev) => upsertCharacterSummary(prev, saved));
-      setSelectedId((prev) => prev || (characterOwnedByProject(saved, projectId) ? saved.id : prev));
+      setSelectedId((prev) => {
+        if (prev) return prev;
+        return characterOwnedByProject(saved, projectId) ? saved.id : prev;
+      });
     };
     window.addEventListener(CHARACTER_PROFILE_SAVED_EVENT, onSaved);
     return () => window.removeEventListener(CHARACTER_PROFILE_SAVED_EVENT, onSaved);
@@ -132,7 +144,7 @@ export function CharacterCompactView({ projectId, onOpenFull, onGoTab }: Props) 
   const grouped = useMemo(() => groupScopeItems(characters, projectId), [characters, projectId]);
 
   const handleDeleteClick = useCallback(async () => {
-    if (!selectedId || busy || deleting) return;
+    if (!selectedId || selectedId === DRAFT_CHARACTER_ID || busy || deleting) return;
     const selected = characters.find((c) => c.id === selectedId);
     if (selected && !characterOwnedByProject(selected, projectId)) {
       setActionNotice("Global characters can only be deleted from the project that created them.");
@@ -168,26 +180,10 @@ export function CharacterCompactView({ projectId, onOpenFull, onGoTab }: Props) 
     }
   }, [deletePreview, projectId, refresh, selectedId]);
 
-  const handleCreate = useCallback(async () => {
+  const handleCreate = useCallback(() => {
     setActionNotice(null);
-    try {
-      const created = (await api.createCharacterProfile(projectId, { name: "New Character" })) as CharacterProfile;
-      await refresh();
-      setSelectedId(created.id);
-    } catch (e) {
-      if (e instanceof ApiError && (e.code === PROFILE_NAME_ALREADY_EXISTS || e.status === 409)) {
-        const existingId = String(e.details?.existingId || e.details?.existing_id || e.details?.entityId || "");
-        setActionNotice(e.message);
-        const listed = (await api.listCharacterProfiles(projectId)) as { items?: CharacterProfile[] };
-        const items = Array.isArray(listed?.items) ? listed.items : [];
-        setCharacters(items);
-        const byName = items.find((row) => (row.name || "").trim().toLowerCase() === "new character");
-        setSelectedId(existingId || byName?.id || "");
-        return;
-      }
-      setActionNotice(e instanceof Error ? e.message : String(e));
-    }
-  }, [projectId, refresh]);
+    setSelectedId(DRAFT_CHARACTER_ID);
+  }, []);
 
   return (
     <div className="character-compact" data-testid="character-compact">
@@ -223,6 +219,9 @@ export function CharacterCompactView({ projectId, onOpenFull, onGoTab }: Props) 
                   aria-label="Select saved character"
                 >
                   <option value="">— Select a saved character —</option>
+                  {selectedId === DRAFT_CHARACTER_ID ? (
+                    <option value={DRAFT_CHARACTER_ID}>Unsaved character</option>
+                  ) : null}
                   {grouped.project.length ? (
                     <optgroup label="Project">
                       {grouped.project.map((c) => (
@@ -255,7 +254,7 @@ export function CharacterCompactView({ projectId, onOpenFull, onGoTab }: Props) 
                 type="button"
                 className="character-compact__actions-button danger"
                 data-testid="character-compact-delete"
-                disabled={!selectedId || busy || deleting}
+                disabled={!selectedId || selectedId === DRAFT_CHARACTER_ID || busy || deleting}
                 onClick={() => void handleDeleteClick()}
               >
                 Delete Character

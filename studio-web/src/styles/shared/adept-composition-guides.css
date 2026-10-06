@@ -1,0 +1,75 @@
+/* One Adept guide overlay. All primitives are relative to the master composition rect. */
+
+.adept-composition-guides {
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+  box-sizing: border-box;
+  --adept-guide-frame: rgba(255, 255, 255, 0.82);
+  --adept-guide-action: rgba(255, 255, 255, 0.42);
+  --adept-guide-title: rgba(255, 255, 255, 0.32);
+  --adept-guide-center: rgba(255, 255, 255, 0.28);
+  --adept-guide-shadow: rgba(8, 12, 18, 0.5);
+}
+
+.adept-composition-guides--fill {
+  inset: 0;
+  z-index: 4;
+}
+
+.adept-composition-guides__frame,
+.adept-composition-guides__action-safe,
+.adept-composition-guides__title-safe,
+.adept-composition-guides__center-x,
+.adept-composition-guides__center-y,
+.adept-composition-guides__label {
+  position: absolute;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.adept-composition-guides__frame {
+  inset: 0;
+  border: 1.5px solid var(--adept-guide-frame);
+  box-shadow: inset 0 0 0 1px var(--adept-guide-shadow);
+}
+
+.adept-composition-guides__action-safe {
+  inset: 5%;
+  border: 1px dashed var(--adept-guide-action);
+}
+
+.adept-composition-guides__title-safe {
+  inset: 10%;
+  border: 1px dotted var(--adept-guide-title);
+}
+
+.adept-composition-guides__center-x {
+  left: 50%;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: var(--adept-guide-center);
+}
+
+.adept-composition-guides__center-y {
+  top: 50%;
+  left: 0;
+  height: 1px;
+  width: 100%;
+  background: var(--adept-guide-center);
+}
+
+.adept-composition-guides__label {
+  top: 5px;
+  left: 7px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(8, 12, 18, 0.45);
+}

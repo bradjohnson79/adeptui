@@ -349,6 +349,13 @@ async def lifespan(_: FastAPI):
     except Exception:
         logger.exception("Production Executive worker failed to start")
 
+    try:
+        from .codirector.durable.runtime import ensure_started
+
+        ensure_started()
+    except Exception:
+        logger.exception("Co-Director durable runtime failed to start")
+
     yield
 
     if exec_worker_started:
@@ -638,6 +645,15 @@ try:
     from .director_timeline_w46.router import router as director_timeline_w46_router
 
     app.include_router(director_timeline_w46_router, prefix="/api")
+    from .film_timeline.router import router as film_timeline_router
+
+    app.include_router(film_timeline_router, prefix="/api")
+    from .boot.router import router as boot_router
+
+    app.include_router(boot_router, prefix="/api")
+    from .comfy_manager.router import router as comfy_manager_router
+
+    app.include_router(comfy_manager_router, prefix="/api")
 except Exception:
     logger.exception("M42 W46 Director Timeline Master router failed to load")
 try:

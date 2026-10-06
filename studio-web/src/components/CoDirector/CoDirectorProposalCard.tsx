@@ -1,20 +1,7 @@
 import { useState } from "react";
 import type { CoDirectorProposal } from "../../api";
-
-function describeMutations(proposal: CoDirectorProposal): string[] {
-  const lines: string[] = [];
-  for (const m of proposal.payload.entityMutations) {
-    if (m.remove) {
-      lines.push(`Remove ${m.entityType}: ${m.displayName || m.entityKey}`);
-    } else {
-      lines.push(`${m.entityType}: ${m.displayName || m.entityKey}`);
-    }
-  }
-  for (const f of proposal.payload.factMutations) {
-    if (!f.remove) lines.push(`Fact: ${f.statement.slice(0, 120)}`);
-  }
-  return lines;
-}
+import { approvalSummary, handleApprovalChoice } from "./approvalSummary";
+import { STALE_APPROVAL_COPY, approvalCardIsActionable } from "./approvalLifetime";
 
 const TERMINAL_NO_APPROVE = new Set([
   "approved",
@@ -26,8 +13,8 @@ const TERMINAL_NO_APPROVE = new Set([
 ]);
 
 /**
- * Renders a durable Co-Director proposal as an approve/reject/request-revision card — never as
- * raw JSON, and never as something the model can apply itself.
+ * Creator-facing approval card. The stored proposal stays authoritative.
+ * Tool ids and internal ids stay behind Technical details.
  */
 export function CoDirectorProposalCard({
   proposal,
@@ -35,7 +22,7 @@ export function CoDirectorProposalCard({
   productionCapable = true,
   onApprove,
   onReject,
-  onRequestRevision,
+  onRevise,
   onCancel,
 }: {
   proposal: CoDirectorProposal;
@@ -43,125 +30,46 @@ export function CoDirectorProposalCard({
   productionCapable?: boolean;
   onApprove: () => void;
   onReject: (note?: string) => void;
-  onRequestRevision: (note?: string) => void;
+  onRevise: (correction: string) => void;
   onCancel: () => void;
 }) {
-  const [note, setNote] = useState("");
+  const [correction, setCorrection] = useState("");
+  const [revising, setRevising] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const toolCall = proposal.proposalType === "tool_call" ? proposal.toolCall : null;
-  const preview = toolCall?.preview;
-  const lines = toolCall ? preview?.lines ?? [] : describeMutations(proposal);
-  const warnings = preview?.warnings ?? [];
+  const summary = approvalSummary(toolCall?.toolId || "", (toolCall?.arguments as Record<string, unknown>) || {});
   const isStale = proposal.isStale || proposal.status === "stale";
   const isExecuting = proposal.status === "executing";
   const isFailed = proposal.status === "failed";
-  const isReviewable = proposal.status === "pending" || proposal.status === "revision_requested";
-  const canApprove = isReviewable && !isStale && productionCapable && !TERMINAL_NO_APPROVE.has(proposal.status);
-  const providerHint =
-    (toolCall?.capabilitySnapshot?.provider as string | undefined) ||
-    (toolCall?.capabilitySnapshot?.model as string | undefined) ||
-    null;
-  const cloudLocal =
-    typeof toolCall?.capabilitySnapshot?.execution === "string"
-      ? String(toolCall.capabilitySnapshot.execution)
-      : typeof toolCall?.capabilitySnapshot?.local === "boolean"
-        ? toolCall.capabilitySnapshot.local
-          ? "local"
-          : "cloud"
-        : null;
+  const isRejected = proposal.status === "rejected";
+  const isReviewable = approvalCardIsActionable(proposal);
+  const canApprove = approvalCardIsActionable(proposal) && productionCapable && !TERMINAL_NO_APPROVE.has(proposal.status);
 
   return (
     <div
       className={`codirector-cta-card codirector-proposal-card${toolCall ? " codirector-proposal-tool" : ""}`}
       role="group"
-      aria-label={`Proposal: ${proposal.title}`}
+      aria-label="Approval needed"
       data-testid={`codirector-proposal-card-${proposal.id}`}
       data-status={proposal.status}
     >
-      <p className="scene-meta">
-        {toolCall ? "Co-Director action · needs your approval" : "Production Bible proposal"}
-        {proposal.status === "revision_requested" && " · revision requested"}
-        {isFailed && " · failed"}
+      <p className="scene-meta">Approval needed</p>
+      <p className="codirector-proposal-title" data-testid="codirector-approval-wants">
+        <strong>Co-Director wants to: </strong>
+        {summary.wants}
       </p>
-      <p className="codirector-proposal-title">{proposal.title}</p>
-      {(preview?.summary || proposal.summary) && <p className="muted">{preview?.summary || proposal.summary}</p>}
+      {isReviewable ? <p className="muted">Prepared and waiting for approval.</p> : null}
 
-      {/* W6P-4: never bury approval inside generic chat — structured disclosure */}
-      <div className="codirector-approval-disclosure" data-testid="codirector-approval-disclosure">
-        <p className="scene-meta">Approval disclosure</p>
-        <ul className="assistant-setup-list">
-          <li>
-            <strong>Intended action:</strong> {toolCall?.toolId || proposal.proposalType}
-          </li>
-          <li>
-            <strong>Capability:</strong>{" "}
-            {String(
-              (toolCall?.capabilitySnapshot as Record<string, unknown> | undefined)?.capability ||
-                (toolCall?.capabilitySnapshot as Record<string, unknown> | undefined)?.workflowKey ||
-                toolCall?.toolId ||
-                "—",
-            )}
-          </li>
-          <li>
-            <strong>Provider:</strong> {cloudLocal || providerHint || "local (default)"}
-          </li>
-          <li>
-            <strong>Expected outputs:</strong>{" "}
-            {lines.length ? `${lines.length} change(s) listed below` : "See summary"}
-          </li>
-          <li>
-            <strong>May consume credits:</strong>{" "}
-            {cloudLocal === "cloud" ? "Yes — paid cloud" : "No (local path)"}
-          </li>
-        </ul>
-      </div>
-
-      <dl className="codirector-proposal-meta">
-        <div>
-          <dt>Project</dt>
-          <dd>{proposal.projectId || "—"}</dd>
-        </div>
-        <div>
-          <dt>Records</dt>
-          <dd>{lines.length || 0}</dd>
-        </div>
-        {toolCall?.toolId ? (
-          <div>
-            <dt>Tool</dt>
-            <dd>{toolCall.toolId}</dd>
-          </div>
-        ) : null}
-        {providerHint ? (
-          <div>
-            <dt>Provider / model</dt>
-            <dd>{providerHint}</dd>
-          </div>
-        ) : null}
-        {cloudLocal ? (
-          <div>
-            <dt>Execution</dt>
-            <dd>{cloudLocal}</dd>
-          </div>
-        ) : null}
-        <div>
-          <dt>Created</dt>
-          <dd>{proposal.createdAt ? new Date(proposal.createdAt).toLocaleString() : "—"}</dd>
-        </div>
-      </dl>
-
-      {lines.length > 0 && (
-        <ul className="assistant-setup-list">
-          {lines.map((line, i) => (
-            <li key={i}>{line}</li>
+      {summary.details.length > 0 && (
+        <ul className="assistant-setup-list" data-testid="codirector-approval-details">
+          {summary.details.map((detail) => (
+            <li key={detail.label}>
+              <strong>{detail.label}: </strong>
+              {detail.value}
+            </li>
           ))}
         </ul>
       )}
-
-      {warnings.map((warning) => (
-        <p key={warning} className="codirector-proposal-warning">
-          {warning}
-        </p>
-      ))}
 
       {!productionCapable && isReviewable && (
         <p className="codirector-proposal-warning" role="status">
@@ -171,29 +79,31 @@ export function CoDirectorProposalCard({
 
       {isStale && (
         <p className="codirector-proposal-stale" role="alert">
-          {toolCall
-            ? "The project changed since this action was proposed. It can no longer be approved as-is — cancel it and ask Co-Director again."
-            : "The Production Bible changed since this proposal was created. It can no longer be approved as-is — cancel it and ask Co-Director again."}
+          {STALE_APPROVAL_COPY}
         </p>
       )}
 
-      {isExecuting && <p className="muted">Applying…</p>}
-      {isFailed && <p className="codirector-proposal-warning" role="alert">Proposal failed. Partial work was not marked complete.</p>}
+      {isExecuting && <p className="muted">Working on it…</p>}
+      {isFailed && (
+        <p className="codirector-proposal-warning" role="alert">
+          That did not finish. Nothing was marked complete.
+        </p>
+      )}
+      {isRejected && <p role="status">Request rejected. Nothing was changed.</p>}
 
       <div className="row-actions">
-        <button type="button" className="ghost" onClick={() => setDetailsOpen((v) => !v)}>
-          {detailsOpen ? "Hide details" : "Details"}
+        <button type="button" className="ghost" onClick={() => setDetailsOpen((open) => !open)}>
+          {detailsOpen ? "Hide technical details" : "Technical details"}
         </button>
       </div>
       {detailsOpen && (
         <pre className="codirector-proposal-details" data-testid="codirector-proposal-details">
           {JSON.stringify(
             {
-              id: proposal.id,
-              status: proposal.status,
-              proposalType: proposal.proposalType,
               toolId: toolCall?.toolId,
-              warnings,
+              arguments: toolCall?.arguments,
+              proposalId: proposal.id,
+              projectId: proposal.projectId,
             },
             null,
             2,
@@ -201,44 +111,94 @@ export function CoDirectorProposalCard({
         </pre>
       )}
 
-      {isReviewable && !isStale && (
-        <>
+      {isReviewable && !isStale && revising && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const next = correction.trim();
+            if (!next || busy) return;
+            handleApprovalChoice("revise", {
+              onApprove,
+              onRevise: () => onRevise(next),
+              onReject: () => onReject(),
+            });
+          }}
+        >
+          <label className="muted" htmlFor={`revise-${proposal.id}`}>
+            What would you like changed?
+          </label>
           <textarea
+            id={`revise-${proposal.id}`}
             className="codirector-proposal-note"
-            placeholder="Optional note (used for reject / request revision)"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={2}
+            value={correction}
+            onChange={(event) => setCorrection(event.target.value)}
+            rows={3}
           />
           <div className="row-actions">
-            <button type="button" className="ghost" disabled={busy} onClick={() => onReject(note || undefined)}>
-              Reject
+            <button type="submit" className="primary" disabled={busy || !correction.trim()} data-testid="codirector-proposal-revise-send">
+              Send correction
             </button>
-            <button
-              type="button"
-              className="ghost"
-              disabled={busy}
-              onClick={() => onRequestRevision(note || undefined)}
-            >
-              Request Revision
-            </button>
-            <button
-              type="button"
-              className="primary"
-              disabled={busy || !canApprove}
-              onClick={onApprove}
-              data-testid="codirector-proposal-approve"
-            >
-              {busy ? "Approving…" : "Approve"}
+            <button type="button" className="ghost" disabled={busy} onClick={() => setRevising(false)}>
+              Back
             </button>
           </div>
-        </>
+        </form>
+      )}
+
+      {isReviewable && !isStale && !revising && (
+        <div className="row-actions">
+          <button
+            type="button"
+            className="primary"
+            disabled={busy || !canApprove}
+            onClick={() =>
+              handleApprovalChoice("approve", {
+                onApprove,
+                onRevise: () => setRevising(true),
+                onReject: () => onReject(),
+              })
+            }
+            data-testid="codirector-proposal-approve"
+          >
+            {busy ? "Approving…" : "Approve"}
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            disabled={busy}
+            onClick={() =>
+              handleApprovalChoice("revise", {
+                onApprove,
+                onRevise: () => setRevising(true),
+                onReject: () => onReject(),
+              })
+            }
+            data-testid="codirector-proposal-revise"
+          >
+            Revise
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            disabled={busy}
+            onClick={() =>
+              handleApprovalChoice("reject", {
+                onApprove,
+                onRevise: () => setRevising(true),
+                onReject: () => onReject(),
+              })
+            }
+            data-testid="codirector-proposal-reject"
+          >
+            Reject
+          </button>
+        </div>
       )}
 
       {isStale && (
         <div className="row-actions">
           <button type="button" className="ghost" disabled={busy} onClick={onCancel}>
-            Cancel proposal
+            Cancel
           </button>
         </div>
       )}

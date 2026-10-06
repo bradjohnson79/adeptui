@@ -727,7 +727,13 @@ def apply_project_type_change(project_id: str, body: dict, db: Session = Depends
 
 @router.get("/projects/{project_id}/execution-plan", response_model=ExecutionPlanOut)
 def get_execution_plan(
-    project_id: str, scene_id: str | None = None, db: Session = Depends(get_db)
+    project_id: str,
+    scene_id: str | None = None,
+    gen_width: int | None = None,
+    gen_height: int | None = None,
+    generator_id: str | None = None,
+    plan_source: str | None = None,
+    db: Session = Depends(get_db),
 ):
     from ..aspect_fps import resolve_scene_dims, resolve_scene_fps, validate_engine_aspect
     from ..preview_bus import preview_bus
@@ -739,6 +745,7 @@ def get_execution_plan(
         raise HTTPException(404, "Project not found")
     plan = resolve_render_plan(project)
     scene = db.get(Scene, scene_id) if scene_id else None
+    dims_source = "scene_canvas"
     if scene and scene.project_id == project_id:
         sw, sh = resolve_scene_dims(project, scene)
         sfps = resolve_scene_fps(project, scene)
@@ -755,6 +762,24 @@ def get_execution_plan(
         fps_mode = "auto"
         eng_warn = []
         caps = preview_bus.capabilities_for(project.engine_default)
+
+    # Film Timeline Live Plan: prefer stamped resolvedGeneration dims over Scene/project
+    # canvas. Never mutate Scene canvas — GPU panel is a consumer only.
+    gw = int(gen_width or 0)
+    gh = int(gen_height or 0)
+    gid = str(generator_id or "").strip()
+    if gw > 0 and gh > 0:
+        width, height = gw, gh
+        dims_source = str(plan_source or "resolved_generation")
+        if "minimax-h3" in gid.lower() or dims_source.startswith("h3"):
+            aspect = "16:9"
+    elif gid and "minimax-h3" in gid.lower():
+        from ..video_runtime.legal_canvas import resolve_generation_dimensions
+
+        dims = resolve_generation_dimensions(model=gid, draft_mode=False)
+        width, height = int(dims["width"]), int(dims["height"])
+        dims_source = "h3_auto_quality"
+        aspect = "16:9"
 
     safety_raw = getattr(project, "render_safety_json", "") or ""
     try:
@@ -775,6 +800,8 @@ def get_execution_plan(
     )
     if eng_warn:
         live += " " + " ".join(eng_warn)
+    if dims_source != "scene_canvas":
+        live += f" Generation canvas {width}x{height} ({dims_source}; Scene/project canvas unchanged)."
     if safety.unload_after_render:
         live += " Unload models after render (config)."
     if safety.vae_tiling:
@@ -1498,6 +1525,33 @@ def update_asset_tag(project_id: str, asset_id: str, tag: str = Form(...), db: S
     return AssetOut.model_validate(asset)
 
 
+class ReferenceClassificationIn(BaseModel):
+    approvedAs: str | None = None
+
+
+@router.put("/projects/{project_id}/assets/{asset_id}/reference-classification")
+def set_reference_classification(
+    project_id: str,
+    asset_id: str,
+    body: ReferenceClassificationIn,
+    db: Session = Depends(get_db),
+):
+    """Classify a library image for Timeline reference eligibility.
+
+    Writes only prompt_meta_json.approvedAs. Shot bindings, character profiles,
+    and Timeline Master are not touched.
+    """
+    from ..scene_references.reference_eligibility import (
+        ReferenceClassificationError,
+        set_explicit_reference_role,
+    )
+
+    try:
+        return set_explicit_reference_role(db, project_id, asset_id, body.approvedAs)
+    except ReferenceClassificationError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
 def _delete_asset_thumbnails(asset_dir: Path, stem: str) -> None:
     thumbs_dir = asset_dir / ".thumbs"
     if not thumbs_dir.is_dir():
@@ -1945,23 +1999,29 @@ async def assistant_health():
 @router.post("/assistant/chat", response_model=AssistantChatResponse)
 async def assistant_chat(body: AssistantChatRequest, db: Session = Depends(get_db)):
     """Thin alias over the Co-Director gateway (kept for existing FE call sites)."""
+    from ..codirector.durable.turn import begin_turn, wait_for_result
+
     try:
-        result, setup, suggested, _proposal, _manifest, _invocations = await codirector_service.chat_for_project(
+        request_id = getattr(body, "request_id", None) or codirector_service.new_request_id()
+        workflow_id = await begin_turn(
             db,
             messages=[{"role": m.role, "content": m.content} for m in body.messages],
             project_id=body.project_id,
             scene_id=body.scene_id,
-            mode=body.mode,
             model=body.model,
+            provider_id=None,
+            request_id=request_id,
+            surface=None,
         )
-    except CoDirectorError as err:
-        raise HTTPException(status_code=status_code_for_error(err.code), detail=err.to_dict()) from err
+        result = await wait_for_result(workflow_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc), "code": "DURABLE_TURN_FAILED"}) from exc
 
     return AssistantChatResponse(
-        reply=result.reply,
-        model=result.model_id,
-        suggested_prompt=suggested,
-        scene_setup=SceneSetupOut.model_validate(setup.model_dump()) if setup else None,
+        reply=result.get("reply") or "",
+        model=result.get("model") or "",
+        suggested_prompt=None,
+        scene_setup=None,
     )
 
 

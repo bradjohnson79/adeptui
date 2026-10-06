@@ -185,6 +185,49 @@ def _parse_entity_query(query: str) -> tuple[Optional[str], str]:
     return entity_type, term
 
 
+def _prop_name_matches(query: str, name: str, tag: str) -> bool:
+    """Match a creator's reference name to a prop name without a special case."""
+
+    term = " ".join((query or "").lower().split())
+    if not term:
+        return False
+    folded_name = " ".join((name or "").lower().replace("-", " ").split())
+    folded_tag = " ".join((tag or "").lower().replace("-", " ").split())
+    if term in {folded_name, folded_tag}:
+        return True
+    pattern = rf"(?<!\w){re.escape(term)}(?!\w)"
+    return bool(re.search(pattern, folded_name) or re.search(pattern, folded_tag))
+
+
+def visible_approved_prop_references(db: Session, project_id: str, query: str) -> list[Asset]:
+    """Approved identity images of props this project is allowed to see.
+
+    Global props stay in the project that created them. Their approved
+    identity asset is readable here by the same id. Local props from
+    another project are not included.
+    """
+
+    from ..creator_scope.contract import ENTITY_PROP
+    from ..creator_scope.service import list_visible_scope
+
+    if not (query or "").strip():
+        return []
+    rows = list_visible_scope(db, project_id, entity_type=ENTITY_PROP)
+    wanted: list[str] = []
+    for row in rows:
+        if row.owning_project_id != project_id and not row.is_global:
+            continue
+        if not _prop_name_matches(query, row.name or "", row.tag or ""):
+            continue
+        asset_id = str(row.identity_asset_id or "").strip()
+        if asset_id:
+            wanted.append(asset_id)
+    if not wanted:
+        return []
+    assets = db.query(Asset).filter(Asset.id.in_(wanted)).all()
+    return [asset for asset in assets if str(asset.production_approval or "").lower() == "approved"]
+
+
 def _asset_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
     approval = str(item.get("approvalState") or "draft")
     approved_rank = 0 if approval == "approved" else 1
@@ -235,6 +278,12 @@ def search_library_assets(
         for a in rows
         if a.project_id == project_id or getattr(a, "scope", "project") == "global"
     ]
+    seen = {item["id"] for item in items}
+    for asset in visible_approved_prop_references(db, project_id, search_q):
+        if asset.id in seen:
+            continue
+        items.append(enrich_library_item(asset))
+        seen.add(asset.id)
 
     if folder_id:
         items = [i for i in items if i.get("canonicalFolderId") == folder_id]

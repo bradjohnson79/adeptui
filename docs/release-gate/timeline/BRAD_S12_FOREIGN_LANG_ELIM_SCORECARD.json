@@ -1,0 +1,80 @@
+{
+  "title": "Brad \u00a712 \u2014 Scene 4 Take A Foreign-Language Elimination Proof",
+  "timestamp": "2026-09-18T19:12:54.173665",
+  "VERDICT": "SCENE 4 TAKE A RETAKE \u2014 NO-GO",
+  "verdict_reason": "API bounce mid-finalize wiped Scene 4 master to 1 Draft batch (structure loss). Raw H3 media is video-only (generate_audio=false honored) but Omni/VCM/stitch not completed on restored timeline; new asset not reattached to W2. Fail-closed.",
+  "preflight": {
+    "authorized_dialogue_lines": [],
+    "speakers": [],
+    "languages": [],
+    "silence_lock": true,
+    "generate_audio_false": true,
+    "result": "GO"
+  },
+  "gen_request": {
+    "generate_audio": false,
+    "audio_generation": false,
+    "audioAuthority": {
+      "authority": "silence_locked",
+      "dialogue": "manifest_locked_script",
+      "nativeAudio": "disabled",
+      "generateAudio": false,
+      "reason": "expectedSpeech_NONE_or_empty_silence_locked_manifest",
+      "allowAdLibs": false,
+      "allowLanguageSwitch": false,
+      "spokenLanguage": null,
+      "exactScriptEnforcedBy": "omni_post_gen_qc"
+    },
+    "dialogueAuthority_lines": [],
+    "authorized_languages": [],
+    "expectedSpeech": "NONE"
+  },
+  "comfy_graph": {
+    "has_VAEDecodeAudio": false,
+    "CreateVideo_has_audio": false,
+    "prompt_id": "b809ace3-1dc8-4e9e-9cea-6643a6dd7fc4"
+  },
+  "raw_media": {
+    "has_audio": false,
+    "streams": [
+      {
+        "codec_type": "video",
+        "codec_name": "h264"
+      }
+    ],
+    "path": "C:\\Users\\bradj\\AppData\\Local\\Temp\\wave6_live_cert\\foreign_lang_elim_freeze\\20260918_190653\\raw_w2.mp4",
+    "job_output_asset_id": "2c7c8003-d36b-4d9c-a82a-5c443dbc8ad9"
+  },
+  "omni": {
+    "status": "NOT_RUN_POST_BOUNCE",
+    "note": "Master wiped before QC attach; prior mute prove had OMNI_UNAVAILABLE \u2192 UNCERTAIN. Per hygiene: do not content-fail; do not regen H3."
+  },
+  "vcm": {
+    "status": "NOT_PROVEN_THIS_RUN",
+    "note": "No foreign text injected into Gen prompts this burn; prompt unchanged from bound BP1."
+  },
+  "same_take": true,
+  "w2_only": true,
+  "no_batch_ux": true,
+  "no_mute_wording_escalation": true,
+  "stitch_w1_w2": "NOT_DONE \u2014 master corruption",
+  "master_corruption": {
+    "detected": true,
+    "after_bounce": "single Draft bb_30c851e8c0a5",
+    "restored_from": "p6_v3_master_terminal.json",
+    "restored_state": "W1 Approved / W2 NeedsDialogueRetake / stk restored"
+  },
+  "section_12_fields": {
+    "12.1_preflight_silence_authority": "PASS",
+    "12.2_generate_audio_false": "PASS",
+    "12.3_comfy_no_audio_nodes": "PASS",
+    "12.4_raw_no_audio_stream": "PASS",
+    "12.5_no_foreign_in_prompt_authority": "PASS (lines=[], langs=[], expectedSpeech=NONE)",
+    "12.6_omni_affirmative_silence": "FAIL / BLOCKED (not run; bounce)",
+    "12.7_candidate_ready_not_pass_unauthorized": "N/A-BLOCKED (no CandidateReady claimed)",
+    "12.8_vcm_no_foreign_ingest": "PASS (no Gen inject); continuity QC not re-run",
+    "12.9_same_take_w2_only": "PASS request path; timeline state recovered after wipe",
+    "12.10_stitch_30s": "FAIL (not executed)",
+    "12.11_bounce_hygiene": "FAIL \u2014 master wiped to Draft; finalizer/reconcile P0"
+  }
+}

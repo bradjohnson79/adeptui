@@ -30,9 +30,6 @@ const RUN_ID = `EXPLORE-CORE-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 /** Canonical Explore roster — 4×3 creator/tool grid. Timeline/MAGI stay on Home feature cards. */
 const EXPECTED_IDS = [
   "imagegen",
-  "txt2vid",
-  "one",
-  "three",
   "characters",
   "propcreator",
   "environmentcreator",
@@ -40,14 +37,10 @@ const EXPECTED_IDS = [
   "scriptwriter",
   "voicestudio",
   "audiostudio",
-  "library",
 ] as const;
 
 const EXPECTED_TITLES = [
   "Image Generation",
-  "Text to Video",
-  "1 Frame",
-  "3 Frame",
   "Character Creator",
   "Prop Creator",
   "Environment Creator",
@@ -55,12 +48,9 @@ const EXPECTED_TITLES = [
   "Scriptwriter",
   "Voice Studio",
   "Audio Studio",
-  "Library",
 ] as const;
 
 const NEW_CORE_IDS = [
-  "one",
-  "three",
   "characters",
   "scriptwriter",
   "propcreator",
@@ -74,8 +64,6 @@ const NEW_CORE_ROUTES: ReadonlyArray<{
   shell: string;
   imagePattern: RegExp;
 }> = [
-  { id: "one", workspace: "one", shell: "one-frame-panel", imagePattern: /ws-one-frame\.jpg/ },
-  { id: "three", workspace: "three", shell: "three-frame-panel", imagePattern: /ws-three-frame\.jpg/ },
   {
     id: "characters",
     workspace: "characters",
@@ -110,7 +98,6 @@ const NEW_CORE_ROUTES: ReadonlyArray<{
 
 const LEGACY_SPOT_CHECKS = [
   { id: "imagegen", workspace: "imagegen", shell: "cinematic-image-studio" },
-  { id: "library", workspace: "library", shell: "library-filters" },
   { id: "script", workspace: "script", shell: "storyboard-studio" },
 ] as const;
 
@@ -282,7 +269,7 @@ test.describe.serial("Explore core creation workspaces @critical", () => {
       await test.step("Scenario 1: Explore roster is the canonical v1.1 workspaces in order", async () => {
         await gotoHome(page);
         const cards = page.getByTestId("explore-adept-ui").locator("[data-testid^='explore-workspace-']");
-        await expect(cards).toHaveCount(12);
+        await expect(cards).toHaveCount(8);
         for (const id of EXPECTED_IDS) {
           await expect(page.getByTestId(`explore-workspace-${id}`)).toBeVisible();
         }
@@ -332,17 +319,16 @@ test.describe.serial("Explore core creation workspaces @critical", () => {
         });
       }
 
-      await test.step("Scenario 3: 1 Frame Home card opens one-frame workspace", async () => {
-        await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-one").click();
-        await assertWorkspaceShell(page, "one", "one-frame-panel", active.id);
-        await page.screenshot({ path: path.join(artifactDir, "scenario-03-one-frame.png"), fullPage: true });
+      await test.step("Scenario 3: stale 1 Frame URL opens Timeline", async () => {
+        await page.goto(`/project/${active.id}?workspace=one`);
+        await assertWorkspaceShell(page, "timeline", "film-timeline", active.id);
       });
 
-      await test.step("Scenario 4: 3 Frame Home card opens three-frame workspace", async () => {
-        await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-three").click();
-        await assertWorkspaceShell(page, "three", "three-frame-panel", active.id);
+      await test.step("Scenario 4: stale Text to Video and 3 Frame URLs open Timeline", async () => {
+        await page.goto(`/project/${active.id}?workspace=txt2vid`);
+        await assertWorkspaceShell(page, "timeline", "film-timeline", active.id);
+        await page.goto(`/project/${active.id}?workspace=three`);
+        await assertWorkspaceShell(page, "timeline", "film-timeline", active.id);
         await page.screenshot({ path: path.join(artifactDir, "scenario-04-three-frame.png"), fullPage: true });
       });
 
@@ -373,7 +359,7 @@ test.describe.serial("Explore core creation workspaces @critical", () => {
         const baseline = monitors.createCount();
         await withZeroEligibleProjects(page, async () => {
           await gotoHome(page);
-          await page.getByTestId("explore-workspace-one").click();
+          await page.getByTestId("explore-workspace-imagegen").click();
           await expect(page.getByTestId("create-project-modal-panel")).toBeVisible({ timeout: 15_000 });
           expect(monitors.createCount()).toBe(baseline);
         });
@@ -429,7 +415,7 @@ test.describe.serial("Explore core creation workspaces @critical", () => {
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           await gotoHome(page);
           const grid = page.getByTestId("explore-adept-ui");
-          await expect(grid.locator("[data-testid^='explore-workspace-']")).toHaveCount(12);
+          await expect(grid.locator("[data-testid^='explore-workspace-']")).toHaveCount(8);
           const overflow = await grid.evaluate((el) => {
             const section = el.closest("section") || el;
             return {
@@ -452,15 +438,15 @@ test.describe.serial("Explore core creation workspaces @critical", () => {
 
       await test.step("Scenario 11: keyboard focus + Enter/Space opens workspace", async () => {
         await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-three").focus();
-        await expect(page.getByTestId("explore-workspace-three")).toBeFocused();
+        await page.getByTestId("explore-workspace-imagegen").focus();
+        await expect(page.getByTestId("explore-workspace-imagegen")).toBeFocused();
         await page.keyboard.press("Enter");
-        await assertWorkspaceShell(page, "three", "three-frame-panel", active.id);
+        await assertWorkspaceShell(page, "imagegen", "cinematic-image-studio", active.id);
 
         await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-one").focus();
+        await page.getByTestId("explore-workspace-characters").focus();
         await page.keyboard.press(" ");
-        await assertWorkspaceShell(page, "one", "one-frame-panel", active.id);
+        await assertWorkspaceShell(page, "characters", "character-profile-workspace", active.id);
       });
 
       await test.step("Scenario 12: existing Explore cards still route correctly", async () => {
@@ -473,8 +459,8 @@ test.describe.serial("Explore core creation workspaces @critical", () => {
 
       await test.step("Scenario 13: console and network clean; handoff project untouched", async () => {
         await waitForActiveProjectContext(active);
-        await page.getByTestId("explore-workspace-one").click();
-        await assertWorkspaceShell(page, "one", "one-frame-panel", active.id);
+        await page.getByTestId("explore-workspace-imagegen").click();
+        await assertWorkspaceShell(page, "imagegen", "cinematic-image-studio", active.id);
         monitors.assertClean("Explore core creation workspaces");
       });
     } finally {

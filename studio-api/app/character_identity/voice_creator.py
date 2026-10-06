@@ -243,6 +243,10 @@ def get_voice_workspace(db: Session, project_id: str, character_id: str) -> dict
             row = db.get(VoiceProfileRow, profile.active_voice_profile_id)
             if row is not None and row.character_profile_id == character_id:
                 active = service.voice_to_dict(row, character_name=profile.name)
+    if active is not None:
+        reference_id = str(active.get("approvedVoiceReferenceAssetId") or "")
+        if reference_id:
+            active["approvedVoiceReferenceAssetName"] = service.voice_reference_asset_name(db, reference_id)
     previous_approved = [
         v
         for v in voices
@@ -291,6 +295,7 @@ def get_voice_workspace(db: Session, project_id: str, character_id: str) -> dict
         "candidateBatches": batches,
         "voiceStudioDraft": draft,
         "testingSelection": testing,
+        "playableSamples": service.character_playable_samples(db, project_id, character_id),
         "prefillSource": "character_profile",
         "mock": False,
     }
@@ -1048,24 +1053,44 @@ def approve_voice_candidate(
     previous_id = str(getattr(profile_row, "active_voice_profile_id", "") or "") or None
     lineage = _loads(row.lineage_json, {})
     meta = list(lineage.get("candidatesMeta") or [])
+    switched_sample = False
     if candidate_id:
         cand = next((c for c in meta if c.get("id") == candidate_id), None)
         if not cand:
             raise _err("NOT_FOUND", "Candidate not found.", 404)
         if cand.get("status") == "rejected":
             raise _err("INVALID_STATUS", "Cannot approve a rejected candidate.")
-        if not already_approved:
+        same_sample = (
+            already_approved
+            and str(lineage.get("approvedCandidateId") or "") == candidate_id
+            and str(row.approved_preview_asset_id or "") == str(cand.get("assetId") or "")
+        )
+        if not same_sample:
+            switched_sample = True
             row.approved_preview_asset_id = cand.get("assetId")
-            for c in meta:
-                c["status"] = "approved" if c.get("id") == candidate_id else (
-                    "archived" if c.get("status") == "shortlisted" else c.get("status")
-                )
+            for item in meta:
+                if item.get("id") == candidate_id:
+                    item["status"] = "approved"
+                elif item.get("status") == "approved":
+                    item["status"] = "saved"
+            provider_voice = str(cand.get("providerVoiceId") or "")
+            if provider_voice:
+                binding = dict(lineage.get("providerBinding") or {})
+                binding["provider"] = "elevenlabs"
+                binding["providerVoiceId"] = provider_voice
+                binding["providerModelId"] = str(cand.get("modelId") or binding.get("providerModelId") or "")
+                binding["voiceName"] = str(cand.get("name") or binding.get("voiceName") or row.name or "")
+                lineage["providerBinding"] = binding
+                row.provider = "elevenlabs"
+                if cand.get("modelId"):
+                    row.model_id = str(cand.get("modelId"))
+            if cand.get("accent"):
+                row.accent = str(cand.get("accent"))
             lineage["candidatesMeta"] = meta
             lineage["approvedCandidateId"] = candidate_id
             lineage["approvedBy"] = approved_by
             lineage["approvedAt"] = _now()
             _save_lineage(row, lineage)
-            db.commit()
     approved = service.approve_voice_profile(db, project_id, character_id, voice_id)
     # Refresh Prompt Package with voice fields
     profile = service.get_profile(db, project_id, character_id)
@@ -1084,7 +1109,7 @@ def approve_voice_candidate(
         "voice": approved,
         "currentVoiceProfileId": approved.get("id"),
         "previousVoiceProfileId": previous_id if previous_id and previous_id != approved.get("id") else None,
-        "pointerOnly": already_approved,
+        "pointerOnly": already_approved and not switched_sample,
         "promptPackageUpdated": True,
         "approvedBy": approved_by,
         "mock": False,

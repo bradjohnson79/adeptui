@@ -41,13 +41,13 @@ def register_derived_asset(
     shutil.copy2(src, dest)
 
     meta = {
+        "localProvider": True,
+        "cloudPaid": False,
         **(prompt_meta or {}),
         "op": op,
         "model": model,
         "nonDestructive": True,
         "parentAssetId": parent_asset_id,
-        "localProvider": True,
-        "cloudPaid": False,
     }
     asset = Asset(
         id=str(uuid.uuid4()),
@@ -58,7 +58,14 @@ def register_derived_asset(
         path=str(dest),
         comfy_name="",
         scope="project",
-        labels_json=json.dumps([op]),
+        labels_json=json.dumps(
+            [op]
+            + (
+                [str(meta.get("libraryClass"))]
+                if meta.get("libraryClass") and str(meta.get("libraryClass")) != op
+                else []
+            )
+        ),
         prompt_meta_json=json.dumps(meta),
         parent_asset_id=parent_asset_id,
     )

@@ -1,0 +1,62 @@
+{
+  "capturedAt": "2026-09-16T20:50:00Z",
+  "method": "read-only sqlite inspect of data/studio.db",
+  "specimens": {
+    "korri": {
+      "authoritativeId": "4a2e9cbe-e1e0-4d87-a411-6a8851b2f0ed",
+      "owningProject": "Korri Anadriya",
+      "owningProjectId": "beffd3d8-791d-4adf-9c4d-681ec9d4efb0",
+      "fields": {
+        "entity": "EXISTS",
+        "name": "EXISTS — Korri",
+        "slug": "CORRUPTED — new-character (should be korri / @Korri)",
+        "is_global": "EXISTS — false",
+        "description": "EXISTS",
+        "canonicalHero": "EXISTS — asset 6be19649-e910-44dc-b1e4-efeb0d87e394 approved",
+        "scopeRow": "DISCONNECTED — no dedicated Korri scope row observed"
+      }
+    },
+    "cade": {
+      "authoritativeId": "85e37d4b-a32e-4374-888b-1389fc0b3720",
+      "owningProject": "Cade Scenes",
+      "owningProjectId": "fb24ff0f-8772-4d50-a602-ac69d14b5a6b",
+      "displayName": "Cade O'Connor",
+      "fields": {
+        "character_profiles": "MISSING — row deleted; id still stamped on assets/jobs",
+        "character_versions": "MISSING",
+        "character_reference_assets": "MISSING",
+        "creator_asset_scope": "MISSING",
+        "libraryAssets": "EXISTS — Cade CRS, Front, Side, 3/4, Back, voice, sheets",
+        "starfighterProp": "EXISTS — 6868078f-cda7-4427-8f85-fd318cf4a141 is a PROP, not the character"
+      },
+      "reconnect": "restore the same id; do not mint a second Cade"
+    },
+    "venture": {
+      "authoritativeId": "2601f525-a32e-401a-bc1a-b17b1fe92817",
+      "owningProject": "Korri Anadriya",
+      "owningProjectId": "beffd3d8-791d-4adf-9c4d-681ec9d4efb0",
+      "fields": {
+        "entity": "EXISTS",
+        "is_global": "EXISTS — true",
+        "display_label": "EXISTS — Venture Spaceship",
+        "tag": "CORRUPTED — venture-spaceship-4 / scope venturespaceship4",
+        "description": "CORRUPTED — prsAssetId=8593f29e-… adeptWorkingProp=1 universalAdeptProp=1",
+        "notes": "CORRUPTED — same machine markers",
+        "advanced_sheet_asset_id": "EXISTS — 8593f29e-c028-4278-9dcf-67b7ff238862",
+        "angles": "EXISTS — front/back/left/right/top/bottom/hero approved",
+        "reference_asset_id": "EXISTS — bfdf3045-ae82-422b-b83f-008e73f8e25b",
+        "approved_asset_id": "EXISTS — 24fa824d-87f2-49f3-a117-9a3a73e9028a"
+      }
+    }
+  },
+  "fixturesInOwnerProjects": [
+    {"kind": "character", "name": "New Character", "project": "Cade Scenes"},
+    {"kind": "character", "name": "WiringSmoke 424138 Character", "project": "Cade Scenes"},
+    {"kind": "character", "name": "WiringSmoke 499944 Character", "project": "Cade Scenes"},
+    {"kind": "environment", "name": "WiringSmoke Env *", "project": "Cade Scenes", "is_global": true},
+    {"kind": "character", "name": "CharacterGlobalTest9c1f3f", "project": "Global Scope Project A", "is_global": true},
+    {"kind": "character", "name": "TestGlobalCharacterf2dc3af3", "project": "Global Scope Project A", "is_global": true},
+    {"kind": "prop", "name": "TestGlobalPropf2dc3af3", "project": "Global Scope Project A"},
+    {"kind": "prop", "name": "PropGlobalTestLive", "project": "Global Scope Project A", "is_global": true}
+  ]
+}

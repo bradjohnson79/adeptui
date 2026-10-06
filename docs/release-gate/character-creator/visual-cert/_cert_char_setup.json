@@ -1,0 +1,407 @@
+{
+  "project_id": "2bc632b8-b329-4d3b-bc40-b68dc41b6bb1",
+  "existing_mira_references": {
+    "items": [
+      {
+        "id": "b22305eb-0295-467d-baa3-1559a3f80e36",
+        "asset_id": "063d1cfe-a998-4c18-a93f-b281cad62ea7",
+        "reference_role": "hero_identity",
+        "view_angle": "",
+        "framing": "",
+        "approval_status": "review",
+        "canonical": false,
+        "source_type": "generation",
+        "notes": "V2 approved front",
+        "character_version_id": "45a60829-e954-440b-8575-cb48d72beb59",
+        "created_at": "2026-08-24T00:25:31.073130Z"
+      },
+      {
+        "id": "acc42aa4-5adc-4ff8-b436-1d3141713c5c",
+        "asset_id": "b7ab0ef7-0be0-452b-b70e-86258a6be85b",
+        "reference_role": "reference_image",
+        "view_angle": "",
+        "framing": "",
+        "approval_status": "draft",
+        "canonical": false,
+        "source_type": "upload",
+        "notes": "",
+        "character_version_id": "45a60829-e954-440b-8575-cb48d72beb59",
+        "created_at": "2026-08-24T01:08:40.439536Z"
+      },
+      {
+        "id": "b6697755-4964-42b7-a7f5-88e93ace0350",
+        "asset_id": "7867b14e-7d56-4401-b443-29555151497d",
+        "reference_role": "hero_identity",
+        "view_angle": "",
+        "framing": "",
+        "approval_status": "approved",
+        "canonical": true,
+        "source_type": "generation",
+        "notes": "V2 approved front",
+        "character_version_id": "45a60829-e954-440b-8575-cb48d72beb59",
+        "created_at": "2026-08-24T02:31:00.019075Z"
+      }
+    ]
+  },
+  "source_reference_asset_id": "063d1cfe-a998-4c18-a93f-b281cad62ea7",
+  "reference_bytes_size": 2096567,
+  "reference_content_type": "image/png",
+  "new_character_id": "94eb7937-67ed-40ec-b482-439ec1e6dbdf",
+  "new_character_name": "Mira Vale Cert V2",
+  "new_reference_asset_id": "dedfb244-dca7-4093-ac6e-698feaaa6705",
+  "new_asset_filename": "mira-vale-cert-v2-ref.png",
+  "new_asset_comfy_name": "studio/MiraValeCertV2.png",
+  "attach_response": {
+    "id": "5ea2ac14-12ea-4fc5-b9a7-89d47a51395b",
+    "reference_role": "full_body_front",
+    "asset_id": "dedfb244-dca7-4093-ac6e-698feaaa6705",
+    "coverage": {
+      "status": "INCOMPLETE",
+      "score": 0.177,
+      "required_roles": [
+        "full_body_front",
+        "full_body_side_left",
+        "full_body_back",
+        "closeup_front",
+        "closeup_side_left",
+        "closeup_back"
+      ],
+      "present_roles": [
+        "full_body_front"
+      ],
+      "missing_roles": [
+        "full_body_side_left",
+        "full_body_back",
+        "closeup_front",
+        "closeup_side_left",
+        "closeup_back"
+      ],
+      "guidance": [
+        "Side identity is not yet defined. Generate or upload a full-body side view before profile-angle generations.",
+        "Rear body identity is not yet defined. Generate or upload a full-body back view before rear-angle shots.",
+        "Add a close-up front reference before portrait or dialogue close-ups.",
+        "Side facial identity is not yet defined. Generate or upload a close-up side view before side-profile shots.",
+        "Rear hair identity is not yet defined. Generate or upload a close-up back view before creating rear-angle portrait shots."
+      ],
+      "has_physical_details": true,
+      "has_personality": false,
+      "has_performance": false,
+      "has_wardrobe": false,
+      "voice_state": "UNASSIGNED",
+      "ready_for_generation": false,
+      "category_readiness": [
+        {
+          "category": "VisualIdentity",
+          "score": 0.286,
+          "ready": false,
+          "blockers": [
+            "full_body_side_left",
+            "full_body_back",
+            "closeup_front",
+            "closeup_side_left",
+            "closeup_back"
+          ],
+          "next_action": "Generate or attach required reference roles",
+          "critical": true
+        },
+        {
+          "category": "Personality",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "Core personality not defined"
+          ],
+          "next_action": "Define core personality and motivations",
+          "critical": false
+        },
+        {
+          "category": "Performance",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "Performance profile not defined"
+          ],
+          "next_action": "Define posture, gait, and mannerisms",
+          "critical": false
+        },
+        {
+          "category": "Wardrobe",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "No canonical wardrobe assigned"
+          ],
+          "next_action": "Create canonical wardrobe look",
+          "critical": false
+        },
+        {
+          "category": "Props",
+          "score": 0.5,
+          "ready": false,
+          "blockers": [
+            "No signature props defined (optional)"
+          ],
+          "next_action": "Add signature props if story-relevant",
+          "critical": false
+        },
+        {
+          "category": "Voice",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "Voice profile not assigned"
+          ],
+          "next_action": "Design or assign voice; obtain consent before cloning",
+          "critical": false
+        },
+        {
+          "category": "Continuity",
+          "score": 0.3,
+          "ready": false,
+          "blockers": [
+            "Continuity rules not documented"
+          ],
+          "next_action": "Document locked features and continuity restrictions",
+          "critical": false
+        },
+        {
+          "category": "ProductionReadiness",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "Generate or attach required reference roles",
+            "Define core personality and motivations",
+            "Define posture, gait, and mannerisms",
+            "Create canonical wardrobe look"
+          ],
+          "next_action": "Generate or attach required reference roles",
+          "critical": true
+        }
+      ],
+      "critical_blockers": [
+        "Missing visual references: full_body_side_left, full_body_back, closeup_front"
+      ],
+      "next_action": "Generate or attach required reference roles"
+    }
+  },
+  "cc_v2_state": {
+    "phase": "DRAFT",
+    "hasReference": false,
+    "referenceAssetId": null,
+    "views": {
+      "front": {
+        "status": "idle",
+        "jobId": null,
+        "promptId": null,
+        "assetId": null,
+        "assetUrl": null,
+        "workflowKey": null,
+        "generator": null,
+        "error": null,
+        "approved": false,
+        "approvedAt": null,
+        "progress": {
+          "percent": 0,
+          "stage": "idle",
+          "label": "",
+          "source": "stage",
+          "jobId": null,
+          "providerJobId": null
+        },
+        "provenance": null
+      },
+      "back": {
+        "status": "idle",
+        "jobId": null,
+        "promptId": null,
+        "assetId": null,
+        "assetUrl": null,
+        "workflowKey": null,
+        "generator": null,
+        "error": null,
+        "approved": false,
+        "approvedAt": null,
+        "progress": {
+          "percent": 0,
+          "stage": "idle",
+          "label": "",
+          "source": "stage",
+          "jobId": null,
+          "providerJobId": null
+        },
+        "provenance": null
+      },
+      "closeup": {
+        "status": "idle",
+        "jobId": null,
+        "promptId": null,
+        "assetId": null,
+        "assetUrl": null,
+        "workflowKey": null,
+        "generator": null,
+        "error": null,
+        "approved": false,
+        "approvedAt": null,
+        "progress": {
+          "percent": 0,
+          "stage": "idle",
+          "label": "",
+          "source": "stage",
+          "jobId": null,
+          "providerJobId": null
+        },
+        "provenance": null
+      }
+    }
+  },
+  "reference_image_attach": {
+    "attach_response": {
+      "id": "e9c372f5-8c76-47a5-b04a-04c5ae43e4b6",
+      "reference_role": "reference_image",
+      "asset_id": "dedfb244-dca7-4093-ac6e-698feaaa6705",
+      "coverage": {
+        "status": "INCOMPLETE",
+        "score": 0.177,
+        "required_roles": [
+          "full_body_front",
+          "full_body_side_left",
+          "full_body_back",
+          "closeup_front",
+          "closeup_side_left",
+          "closeup_back"
+        ],
+        "present_roles": [
+          "full_body_front",
+          "reference_image"
+        ],
+        "missing_roles": [
+          "full_body_side_left",
+          "full_body_back",
+          "closeup_front",
+          "closeup_side_left",
+          "closeup_back"
+        ],
+        "guidance": [
+          "Side identity is not yet defined. Generate or upload a full-body side view before profile-angle generations.",
+          "Rear body identity is not yet defined. Generate or upload a full-body back view before rear-angle shots.",
+          "Add a close-up front reference before portrait or dialogue close-ups.",
+          "Side facial identity is not yet defined. Generate or upload a close-up side view before side-profile shots.",
+          "Rear hair identity is not yet defined. Generate or upload a close-up back view before creating rear-angle portrait shots."
+        ],
+        "has_physical_details": true,
+        "has_personality": false,
+        "has_performance": false,
+        "has_wardrobe": false,
+        "voice_state": "UNASSIGNED",
+        "ready_for_generation": false,
+        "category_readiness": [
+          {
+            "category": "VisualIdentity",
+            "score": 0.286,
+            "ready": false,
+            "blockers": [
+              "full_body_side_left",
+              "full_body_back",
+              "closeup_front",
+              "closeup_side_left",
+              "closeup_back"
+            ],
+            "next_action": "Generate or attach required reference roles",
+            "critical": true
+          },
+          {
+            "category": "Personality",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "Core personality not defined"
+            ],
+            "next_action": "Define core personality and motivations",
+            "critical": false
+          },
+          {
+            "category": "Performance",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "Performance profile not defined"
+            ],
+            "next_action": "Define posture, gait, and mannerisms",
+            "critical": false
+          },
+          {
+            "category": "Wardrobe",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "No canonical wardrobe assigned"
+            ],
+            "next_action": "Create canonical wardrobe look",
+            "critical": false
+          },
+          {
+            "category": "Props",
+            "score": 0.5,
+            "ready": false,
+            "blockers": [
+              "No signature props defined (optional)"
+            ],
+            "next_action": "Add signature props if story-relevant",
+            "critical": false
+          },
+          {
+            "category": "Voice",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "Voice profile not assigned"
+            ],
+            "next_action": "Design or assign voice; obtain consent before cloning",
+            "critical": false
+          },
+          {
+            "category": "Continuity",
+            "score": 0.3,
+            "ready": false,
+            "blockers": [
+              "Continuity rules not documented"
+            ],
+            "next_action": "Document locked features and continuity restrictions",
+            "critical": false
+          },
+          {
+            "category": "ProductionReadiness",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "Generate or attach required reference roles",
+              "Define core personality and motivations",
+              "Define posture, gait, and mannerisms",
+              "Create canonical wardrobe look"
+            ],
+            "next_action": "Generate or attach required reference roles",
+            "critical": true
+          }
+        ],
+        "critical_blockers": [
+          "Missing visual references: full_body_side_left, full_body_back, closeup_front"
+        ],
+        "next_action": "Generate or attach required reference roles"
+      }
+    },
+    "cc_v2_state": {
+      "phase": "DRAFT",
+      "hasReference": true,
+      "referenceAssetId": "dedfb244-dca7-4093-ac6e-698feaaa6705"
+    }
+  },
+  "clean_reference_attach": {
+    "patched_profile_description": "A young woman stands centered, facing forward. She has fair complexion, dark brown wavy hair falling just past her shoul",
+    "attach_response_id": "542cfd1d-a86d-4e6d-bf84-fe5af568bd86",
+    "cc_v2_phase": "FRONT_READY",
+    "cc_v2_hasReference": true,
+    "cc_v2_referenceAssetId": "b2263863-97c6-4aea-a969-fa69310ab785",
+    "clean_reference_asset_id": "b2263863-97c6-4aea-a969-fa69310ab785",
+    "reference_matches_clean": true
+  }
+}

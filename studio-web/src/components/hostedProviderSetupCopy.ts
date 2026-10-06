@@ -24,7 +24,7 @@ export const SETUP_PROVIDERS = [
   {
     id: "elevenlabs" as const,
     title: "ElevenLabs",
-    blurb: "BYOK for Voice Studio TTS + Audio Studio SFX (Browser → Adept API → ElevenLabs; key never leaves Adept secrets_store).",
+    blurb: "Direct ElevenLabs API for Voice Studio and Audio Studio. One key covers speech, sound effects, and music.",
   },
 ];
 

@@ -45,6 +45,7 @@ REFERENCE_TYPES = frozenset(
         "other",
         "image",
         "video",
+        "audio",
     }
 )
 

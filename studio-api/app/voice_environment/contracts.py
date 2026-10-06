@@ -135,8 +135,9 @@ class ProfileUpdateRequest(BaseModel):
 class PreviewRenderRequest(BaseModel):
     projectId: str
     characterId: str
-    performanceRecordId: str
-    performanceTakeId: str
+    performanceRecordId: str = ""
+    performanceTakeId: str = ""
+    libraryAssetId: str = ""
     environmentProfileId: str
     preview: bool = True
 

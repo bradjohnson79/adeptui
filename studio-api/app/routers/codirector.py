@@ -105,6 +105,7 @@ class CoDirectorChatBody(BaseModel):
     scriptwriter_scene_id: Optional[str] = Field(default=None, alias="scriptwriterSceneId")
     environment_creator_planning: Optional[dict] = Field(default=None, alias="environmentCreatorPlanning")
     image_generator_planning: Optional[dict] = Field(default=None, alias="imageGeneratorPlanning")
+    character_id: Optional[str] = Field(default=None, alias="characterId")
 
 
 class CoDirectorCancelBody(BaseModel):
@@ -326,54 +327,46 @@ async def provider_models(provider_id: str) -> dict[str, Any]:
 
 @router.post("/chat")
 async def chat(body: CoDirectorChatBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from ..codirector.durable.turn import begin_turn, wait_for_result
+
+    request_id = body.request_id or codirector_service.new_request_id()
     try:
-        (
-            result,
-            scene_setup,
-            suggested,
-            proposal,
-            manifest,
-            invocations,
-        ) = await codirector_service.chat_for_project(
+        workflow_id = await begin_turn(
             db,
             messages=[m.model_dump() for m in body.messages],
             project_id=body.project_id,
             scene_id=body.scene_id,
-            mode=body.mode,
             model=body.model,
             provider_id=body.provider_id,
-            request_id=body.request_id,
-            conversation_locale=body.conversation_locale or body.conversationLocale,
-            attachment_ids=body.attachment_ids or body.attachmentIds,
-            active_content_tab=body.active_content_tab or body.activeContentTab,
-            active_workspace=body.workspace_tab or body.workspaceTab or body.active_content_tab or body.activeContentTab,
-            active_document_id=body.active_document_id,
-            scriptwriter_scene_id=body.scriptwriter_scene_id,
-            environment_creator_planning=body.environment_creator_planning,
-            image_generator_planning=body.image_generator_planning,
+            request_id=request_id,
+            surface=body.workspace_tab or body.workspaceTab or body.active_content_tab or body.activeContentTab,
+            selected_character_id=body.character_id,
         )
-    except CoDirectorError as err:
-        raise _http_error(err) from err
+        result = await wait_for_result(workflow_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc), "code": "DURABLE_TURN_FAILED"}) from exc
     return {
-        "requestId": result.request_id,
-        "reply": result.reply,
-        "model": result.model_id,
-        "providerId": result.provider_id,
-        "suggestedPrompt": suggested,
-        "sceneSetup": scene_setup.model_dump() if scene_setup else None,
-        "proposal": proposal.model_dump(mode="json") if proposal else None,
-        "contextManifest": manifest.model_dump(mode="json") if manifest.bibleVersionId else None,
-        "toolInvocations": [i.model_dump(mode="json") for i in invocations],
-        # Truthful degradation: when the foundation LLM turn failed and a
-        # deterministic fallback replied, the client can see it (and why).
-        "fallbackUsed": bool((result.raw or {}).get("fallbackUsed", False)),
-        "fallbackReason": (result.raw or {}).get("fallbackReason"),
-        "providerError": (result.raw or {}).get("providerError"),
+        "requestId": result.get("requestId") or request_id,
+        "reply": result.get("reply") or "",
+        "model": result.get("model") or "",
+        "providerId": result.get("providerId") or "",
+        "suggestedPrompt": None,
+        "sceneSetup": None,
+        "proposal": None,
+        "contextManifest": None,
+        "toolInvocations": [],
+        "fallbackUsed": False,
+        "fallbackReason": None,
+        "providerError": None,
+        "workflowId": result.get("workflowId") or request_id,
+        "traceId": result.get("traceId"),
     }
 
 
 @router.post("/chat/stream")
 async def chat_stream(body: CoDirectorChatBody) -> StreamingResponse:
+    from ..codirector.durable.turn import begin_turn, iter_projection
+
     request_id = body.request_id or codirector_service.new_request_id()
     messages = [m.model_dump() for m in body.messages]
 
@@ -381,35 +374,25 @@ async def chat_stream(body: CoDirectorChatBody) -> StreamingResponse:
         # A `Depends(get_db)` session would be torn down by FastAPI's exit stack as soon as
         # this endpoint returns the StreamingResponse — before the body generator below is
         # ever iterated. Own the session's lifecycle for the duration of the stream instead.
+        # Closing this generator does not cancel the workflow.
         db = SessionLocal()
         try:
-            async for event in codirector_service.stream_for_project(
+            workflow_id = await begin_turn(
                 db,
                 messages=messages,
                 project_id=body.project_id,
                 scene_id=body.scene_id,
-                mode=body.mode,
                 model=body.model,
                 provider_id=body.provider_id,
                 request_id=request_id,
-                conversation_locale=body.conversation_locale or body.conversationLocale,
-                origin_session_id=body.origin_session_id,
-                attachment_ids=body.attachment_ids or body.attachmentIds,
-                active_content_tab=body.active_content_tab or body.activeContentTab,
-                active_workspace=body.workspace_tab or body.workspaceTab or body.active_content_tab or body.activeContentTab,
-                active_document_id=body.active_document_id,
-                scriptwriter_scene_id=body.scriptwriter_scene_id,
-                environment_creator_planning=body.environment_creator_planning,
-                image_generator_planning=body.image_generator_planning,
-            ):
+                surface=body.workspace_tab or body.workspaceTab or body.active_content_tab or body.activeContentTab,
+                selected_character_id=body.character_id,
+            )
+            async for event in iter_projection(workflow_id):
                 yield f"data: {json.dumps(event)}\n\n"
-                if codirector_service.is_cancelled(request_id):
-                    yield f"data: {json.dumps({'type': 'cancelled', 'requestId': request_id})}\n\n"
-                    break
-        except CoDirectorError as err:
-            yield f"data: {json.dumps({'type': 'error', 'requestId': request_id, 'error': err.to_dict()})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'requestId': request_id, 'error': {'message': str(exc), 'code': 'DURABLE_TURN_FAILED'}})}\n\n"
         finally:
-            codirector_service.clear_cancelled(request_id)
             db.close()
 
     return StreamingResponse(
@@ -421,7 +404,9 @@ async def chat_stream(body: CoDirectorChatBody) -> StreamingResponse:
 
 @router.post("/cancel")
 async def cancel(body: CoDirectorCancelBody) -> dict[str, Any]:
-    return codirector_service.request_cancel(body.request_id)
+    from ..codirector.durable.turn import cancel_turn
+
+    return cancel_turn(body.request_id)
 
 
 class NextStepDeferBody(BaseModel):
@@ -1992,13 +1977,45 @@ async def preview_proposal(project_id: str, proposal_id: str, db: Session = Depe
 
 @router.post("/projects/{project_id}/proposals/{proposal_id}/approve")
 async def approve_proposal(
-    project_id: str, proposal_id: str, body: ApprovalDecisionRequest = ApprovalDecisionRequest(), db: Session = Depends(get_db)
+    project_id: str,
+    proposal_id: str,
+    request: Request,
+    body: ApprovalDecisionRequest = ApprovalDecisionRequest(),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    from ..codirector.durable.approval import begin_approval, wait_approval
+
+    crash_at = None
+    requested = (request.headers.get("x-adept-cd-crash-at") or "").strip()
+    if requested:
+        crash_at = requested
     try:
-        receipt = ProposalService.approve(db, project_id, proposal_id, note=body.note, decided_by=body.decidedBy)
+        approval_id = await begin_approval(
+            db,
+            project_id=project_id,
+            proposal_id=proposal_id,
+            note=body.note,
+            decided_by=body.decidedBy,
+            crash_at=crash_at,
+        )
+        result = await wait_approval(approval_id)
+        if result.get("toolId") == "prop_creator.generate_view" and not result.get("verified"):
+            from ..codirector.durable.approval import observe_prop_image
+
+            result = await observe_prop_image(project_id, result)
     except CoDirectorError as err:
         raise _http_error(err) from err
-    return receipt.model_dump(mode="json")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"message": str(exc), "code": "DURABLE_APPROVAL_FAILED"}) from exc
+    if not result.get("verified"):
+        raise HTTPException(
+            status_code=409,
+            detail={"message": result.get("reply") or "The change could not be verified.", "code": "VERIFICATION_FAILED", "approvalId": approval_id},
+        )
+    receipt = dict(result.get("receipt") or {})
+    receipt["approvalId"] = approval_id
+    receipt["verified"] = True
+    return receipt
 
 
 @router.post("/projects/{project_id}/proposals/{proposal_id}/reject")

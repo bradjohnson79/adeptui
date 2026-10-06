@@ -7,12 +7,14 @@ import re
 import logging
 from typing import Any
 
-from ...aspect_fps import normalize_production_aspect, production_pixels
+from ...aspect_fps import production_pixels
+from ...video_runtime.h3_resolved_generation import stamp_resolved_generation
 from ...video_runtime.legal_canvas import (
     SpecFidelityError,
     infer_tier_from_pixels,
     is_minimax_h3_generator,
     require_h3_timeline_aspect,
+    require_timeline_aspect,
     resolve_h3_timeline_canvas,
     resolve_legal_canvas,
     snap_h3_timeline_duration,
@@ -23,6 +25,21 @@ from .contracts import GenerationMode, TimelineGenerationRequest, VideoGenerator
 from .registry import get_registry
 
 logger = logging.getLogger("adept.director_timeline_w46.request_builder")
+
+
+def _ltx_accepts_end(caps: VideoGeneratorCapabilities, batch: BatchBlock, end_image: str) -> bool:
+    """Seedance may use an end picture. LTX only when the anchor kind is end_frame.
+
+    A label that merely contains "end" is not an LTX end frame. Film Timeline
+    sets the end image on its own request and does not use this promotion.
+    """
+
+    if not (is_ltx_25_generator(getattr(caps, "id", "")) or is_ltx_25_generator(getattr(batch, "generatorId", ""))):
+        return True
+    return any(
+        getattr(anchor, "kind", "") == "end_frame" and str(getattr(anchor, "assetId", "") or "") == end_image
+        for anchor in (getattr(batch, "sourceAnchors", None) or [])
+    )
 
 
 
@@ -120,60 +137,13 @@ def _scope_root_batch_prompt(
     window_end: float,
     total_batches: int,
 ) -> str:
-    """Scope the scene-level Timed Prompt for a ROOT batch (0-15s of an N-batch scene).
+    """Timed Prompt text is not rewritten for a window.
 
-    12B reference lesson: the known-good 2-batch scene gives each batch its own
-    window-scoped prompt. When a single scene-level Timed Prompt covers the full
-    scene, delivering it verbatim to Batch 1 with duration=15 makes H3 compress
-    the ENTIRE story arc into 15 seconds -- the first half of the
-    "15-second scene twice" symptom.
-
-    This keeps the creator's prose intact and only adds an explicit WINDOW
-    scoping note: which part of the scene this batch renders and that the
-    remaining story belongs to later batches.
+    Duration and batch count stay on the window itself. This does not add a
+    continuation line or a window-scope note.
     """
-    if not scene_prompt or not scene_prompt.strip():
-        return scene_prompt
-    import re
-
-    text = scene_prompt
-    duration_pattern = re.compile(
-        r"(Duration:\s*\n?\s*Seconds:\s*)0\s*-\s*\d+(?:\.\d+)?\.?\s*"
-        r"This segment is a \d+(?:\.\d+)? second scene\.?",
-        re.IGNORECASE,
-    )
-    replacement = (
-        f"{window_start:.0f}-{window_end:.0f}. "
-        f"This segment renders only the scene window from {window_start:.0f}s to {window_end:.0f}s."
-    )
-    if duration_pattern.search(text):
-        text = duration_pattern.sub(lambda m: m.group(1) + replacement, text, count=1)
-    else:
-        seconds_pattern = re.compile(
-            r"(Seconds:\s*)0\s*-\s*\d+(?:\.\d+)?\.?",
-            re.IGNORECASE,
-        )
-        if seconds_pattern.search(text):
-            text = seconds_pattern.sub(
-                lambda m: m.group(1) + f"{window_start:.0f}-{window_end:.0f}.", text, count=1
-            )
-    # Explicit window discipline for the root batch.
-    scoping = (
-        "\n\nWINDOW SCOPE\n"
-        f"This batch renders ONLY the segment from {window_start:.0f}s to {window_end:.0f}s "
-        f"of the scene. Do not compress, summarize, or complete the whole scene in this "
-        f"segment. The story continues after {window_end:.0f}s in the next batch -- end this "
-        "segment mid-motion at a natural continuation point that the next batch can "
-        "advance from. Preserve identity, wardrobe, environment, and lighting."
-    )
-    if "WINDOW SCOPE" not in text:
-        text = text.rstrip() + scoping
-    if total_batches > 1:
-        text += (
-            f"\n(This scene continues across {total_batches} sequential batches; "
-            f"this is batch 1.)"
-        )
-    return text
+    _ = (window_start, window_end, total_batches)
+    return scene_prompt or ""
 
 
 def _batch_windows_for_prompt(project_id: str, scene_id: str) -> list[tuple[float, float]]:
@@ -407,6 +377,19 @@ def _resolution_for_request(
         )
         return f"{canvas['width']}x{canvas['height']}"
 
+    # Seedance quality is the creator's fal resolution token. Unset stays 720p,
+    # or 480p when Generate Draft is on and they have not picked a tier.
+    from app.fal_catalog import normalize_seedance_resolution, seedance_product_id
+
+    if seedance_product_id(caps.id) or seedance_product_id(getattr(batch, "generatorId", None)):
+        chosen = str(getattr(batch, "seedanceResolution", None) or "").strip()
+        product = seedance_product_id(caps.id) or seedance_product_id(getattr(batch, "generatorId", None))
+        if chosen:
+            return normalize_seedance_resolution(product, chosen)
+        if draft_mode:
+            return str(caps.draftResolution or "480p")
+        return str(caps.finalResolution or "720p")
+
     # Hosted cheap-preview uses provider-native labels (480p/720p), never forced pixels.
     # Seedance keeps aspect_ratio on the request; labels stay honest.
     if caps.draftPathway == "cheap_preview" and (caps.draftResolution or caps.finalResolution):
@@ -449,7 +432,12 @@ def _resolution_for_request(
             caps.id, tier=_tier_for_caps(caps, draft_mode=tier_draft), aspect=aspect
         )
         return f"{legal.width}x{legal.height}"
-    except SpecFidelityError:
+    except SpecFidelityError as exc:
+        # H3 / LTX must never fall through to production_pixels (illegal non-/32 sizes).
+        if is_minimax_h3_generator(batch.generatorId) or is_minimax_h3_generator(caps.id):
+            raise ValueError(str(exc)) from exc
+        if is_ltx_25_generator(caps.id) or is_ltx_25_generator(batch.generatorId):
+            raise ValueError(str(exc)) from exc
         pass
 
     # Landscape WxH capability label is only honest for 16:9.
@@ -467,9 +455,95 @@ def _resolution_for_request(
             f"Supported: {', '.join(str(a) for a in (caps.supportedAspectRatios or [])) or 'none listed'}."
         )
 
+    # Ban production_pixels for H3 / LTX Timeline generate (owner stamp / Spec Fidelity).
+    if is_minimax_h3_generator(batch.generatorId) or is_minimax_h3_generator(caps.id):
+        raise ValueError(
+            f"{caps.label} could not compile a legal MiniMax H3 canvas for aspect {aspect}."
+        )
+    if is_ltx_25_generator(caps.id) or is_ltx_25_generator(batch.generatorId):
+        raise ValueError(
+            f"{caps.label} could not compile a legal LTX canvas for aspect {aspect}."
+        )
+
     quality = "draft" if draft_mode and caps.draftPathway != "none" else "final"
     width, height = production_pixels(aspect, quality)
     return f"{width}x{height}"
+
+
+_CONTINUITY_HEADER = "Co-Director visual continuity"
+_MACHINE_WINDOW_NOTE = re.compile(
+    r"(?im)^\[CONTINUATION window[^\]]*\][^\n]*\n?"
+    r"|^\(This scene continues across \d+ sequential batches;[^\n]*\)\n?"
+    r"|\n*WINDOW SCOPE\b[\s\S]*\Z"
+)
+
+
+def strip_machine_window_notes(text: str) -> str:
+    """Drop continuation headers and window-scope notes. Keep the creator's words."""
+    cleaned = _MACHINE_WINDOW_NOTE.sub("", text or "")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
+
+def strip_codirector_continuity_from_script(text: str) -> str:
+    """Drop machine notes that are not the creator's Timed Prompt.
+
+    Continuation headers, window-scope notes, and a Co-Director continuity
+    block are removed. Creator text around them is kept.
+    """
+    raw = strip_machine_window_notes(text or "")
+    idx = raw.find(_CONTINUITY_HEADER)
+    if idx < 0:
+        return raw
+    return raw[:idx].rstrip()
+
+
+def strip_machine_window_notes_from_master(master: object) -> bool:
+    """Remove continuation and window-scope notes from every stored Timed Prompt."""
+    changed = False
+    for batch in getattr(master, "batchBlocks", None) or []:
+        for seg in getattr(batch, "promptSegments", None) or []:
+            for attr in ("text", "productionPrompt", "userDirection"):
+                current = str(getattr(seg, attr, "") or "")
+                cleaned = strip_machine_window_notes(current)
+                if cleaned != current:
+                    setattr(seg, attr, cleaned)
+                    changed = True
+    return changed
+
+
+def strip_codirector_continuity_from_master(master: object) -> bool:
+    """Remove stored Co-Director continuity text from every window script."""
+    changed = strip_machine_window_notes_from_master(master)
+    for batch in getattr(master, "batchBlocks", None) or []:
+        for seg in getattr(batch, "promptSegments", None) or []:
+            current = str(getattr(seg, "text", "") or "")
+            cleaned = strip_codirector_continuity_from_script(current)
+            if cleaned != current:
+                seg.text = cleaned
+                changed = True
+    return changed
+
+
+def persist_ready_continuity_observation(
+    batch: BatchBlock,
+    temporal_packet: object | None,
+    incoming_bridge: object | None,
+) -> bool:
+    """Keep a continuity observation off the Timed Prompt.
+
+    The review stays on the continuity packet. It is not written into the
+    creator's script, and a block already stored there is removed.
+    """
+    _ = (temporal_packet, incoming_bridge)
+    changed = False
+    for seg in list(batch.promptSegments or []):
+        current = str(getattr(seg, "text", "") or "")
+        cleaned = strip_codirector_continuity_from_script(current)
+        if cleaned != current:
+            seg.text = cleaned
+            changed = True
+    return changed
 
 
 def build_timeline_generation_request(
@@ -500,17 +574,9 @@ def build_timeline_generation_request(
     # second silent authority for Comfy Input Text -- use Timed Prompt text only.
     from ...video_runtime.legal_canvas import is_minimax_h3_generator as _is_h3_gen
     _h3_delivery = _is_h3_gen(str(batch.generatorId or ""))
-    # LTX 2.5 uses the same scene-length window rule. Its clip is 20s, not 15s.
-    _window_split = _h3_delivery or is_ltx_25_generator(str(batch.generatorId or ""))
     # Whether a ready Qwen packet was woven into this request's prompt (set in
     # the extension-adaptation branch below; initialized for all other paths).
     _qwen_weave_packet = None
-    # Batch time windows for root-batch scoping (resolved once, reused below).
-    windows_for_scope: list[tuple[float, float]] = []
-    try:
-        windows_for_scope = _batch_windows_for_prompt(project_id, scene_id)
-    except Exception:
-        windows_for_scope = []
     source_segments = _authoritative_timed_segments(batch.promptSegments or []) if _h3_delivery else list(batch.promptSegments or [])
     prompt_parts = []
     for p in source_segments:
@@ -523,137 +589,16 @@ def build_timeline_generation_request(
         part = timed or str(p.productionPrompt or "").strip()
         if part:
             prompt_parts.append(part)
-    prompt = "\n".join(prompt_parts)
-    if _window_split and windows_for_scope:
-        # Dual-stack removal left later windows empty, or with only a
-        # [CONTINUATION] stub and no story. That stub is not a prompt.
-        # Reconnect the root Timed Prompt as this window's slice.
-        try:
-            order_empty = int(getattr(batch, "order", 0) or 0)
-        except (TypeError, ValueError):
-            order_empty = 0
-        if 0 < order_empty < len(windows_for_scope):
-            from .window_script import story_blocks as _story_blocks
+    prompt = strip_codirector_continuity_from_script("\n".join(prompt_parts))
+    # Authorship is Master. This builder reads the stored window text.
+    # It does not reslice the root story, replace a stub, or add window scope.
+    from .window_script import story_blocks as _story_blocks
 
-            if not prompt.strip() or not _story_blocks(prompt):
-                from ..execution_window_materialize import _continuation_text
-                from .window_script import is_structured_scene_prompt, slice_story_for_window
-
-                ws_empty, we_empty = windows_for_scope[order_empty]
-                root_script = _root_scene_prompt(project_id, scene_id)
-                sliced = ""
-                if root_script and not is_structured_scene_prompt(root_script):
-                    sliced = slice_story_for_window(
-                        root_script, order_empty, len(windows_for_scope)
-                    )
-                continuation = _continuation_text(order_empty, ws_empty, we_empty)
-                scope = (
-                    "\n\nWINDOW SCOPE\n"
-                    f"This batch renders ONLY the segment from {ws_empty:g}s to {we_empty:g}s of the scene. "
-                    "Do not restart the scene from 0s. Do not retell the opening. "
-                    "Continue identity, wardrobe, environment, and lighting."
-                )
-                prompt = continuation + (("\n\n" + sliced) if sliced else "") + scope
-    if not prompt.strip():
-        # WAVE2 dual-authority purge: refuse empty batch prompts. Do NOT inherit
-        # scene-level Timed Prompt / legacy director_json / scene.prompt.
-        # Co-Director + timeline_builder must supply per-batch window segments.
+    if not _story_blocks(prompt):
         raise ValueError(
             "BATCH_PROMPT_REQUIRED: batch has no promptSegments text; "
             "scene-level prompt inheritance is removed (WAVE2)."
         )
-    # Root-batch window scoping: if an H3 root batch's own segment still frames
-    # the full scene (Seconds: 0-N) while the batch window is a strict sub-window,
-    # append WINDOW SCOPE. WAVE2: empty batches refuse above -- no scene-level inherit.
-    if _window_split and windows_for_scope:
-        try:
-            order_now = int(getattr(batch, "order", 0) or 0)
-        except (TypeError, ValueError):
-            order_now = 0
-        # A11: every window that still carries identical full-scene framing must be
-        # rewritten to its own [ws, we] -- not only the root batch.
-        if len(windows_for_scope) > 1 and 0 <= order_now < len(windows_for_scope):
-            ws, we = windows_for_scope[order_now]
-            scene_total = windows_for_scope[-1][1]
-            full_scene = _frames_full_scene(prompt, scene_total, source_segments)
-            if order_now > 0 and full_scene:
-                from ..execution_window_materialize import _continuation_text
-                from .window_script import is_structured_scene_prompt, slice_story_for_window
-
-                if is_structured_scene_prompt(prompt):
-                    # Structured compiler recipes must not replay Seconds: 0-N.
-                    prompt = (
-                        _continuation_text(order_now, ws, we)
-                        + "\n\nWINDOW SCOPE\n"
-                        f"This batch renders ONLY the segment from {ws:g}s to {we:g}s of the scene. "
-                        "Do not restart the scene from 0s. Do not retell the opening. "
-                        "Continue identity, wardrobe, environment, and lighting."
-                    )
-                else:
-                    sliced = slice_story_for_window(
-                        prompt, order_now, len(windows_for_scope)
-                    )
-                    prompt = (
-                        _continuation_text(order_now, ws, we)
-                        + ("\n\n" + sliced if sliced else "")
-                        + "\n\nWINDOW SCOPE\n"
-                        f"This batch renders ONLY the segment from {ws:g}s to {we:g}s of the scene. "
-                        "Do not restart the scene from 0s. Do not retell the opening. "
-                        "Continue identity, wardrobe, environment, and lighting."
-                    )
-            elif full_scene and (we < scene_total or ws > 0):
-                from .window_script import is_structured_scene_prompt, slice_story_for_window
-
-                if is_structured_scene_prompt(prompt):
-                    if "WINDOW SCOPE" not in prompt:
-                        prompt = _scope_root_batch_prompt(
-                            prompt,
-                            window_start=ws,
-                            window_end=we,
-                            total_batches=len(windows_for_scope),
-                        )
-                else:
-                    # A 45s Timed Prompt on a 15s window must not carry the
-                    # rest of the scene, including the ending, into batch 1.
-                    sliced = slice_story_for_window(
-                        prompt, order_now, len(windows_for_scope)
-                    )
-                    if order_now == 0:
-                        prompt = _scope_root_batch_prompt(
-                            sliced or prompt,
-                            window_start=ws,
-                            window_end=we,
-                            total_batches=len(windows_for_scope),
-                        )
-                    else:
-                        from ..execution_window_materialize import _continuation_text
-
-                        prompt = (
-                            _continuation_text(order_now, ws, we)
-                            + ("\n\n" + sliced if sliced else "")
-                            + "\n\nWINDOW SCOPE\n"
-                            f"This batch renders ONLY the segment from {ws:g}s to {we:g}s of the scene. "
-                            "Do not restart the scene from 0s. Do not retell the opening. "
-                            "Continue identity, wardrobe, environment, and lighting."
-                        )
-            # A one-sentence Timed Prompt cannot be split into story beats, so
-            # later windows keep that sentence. They still must be told their
-            # own interval. Without this fence MiniMax treats every window as
-            # the whole scene.
-            if order_now > 0 and "WINDOW SCOPE" not in prompt:
-                from ..execution_window_materialize import _continuation_text
-
-                header = ""
-                if "CONTINUATION window" not in prompt:
-                    header = _continuation_text(order_now, ws, we) + "\n\n"
-                prompt = (
-                    header
-                    + prompt.rstrip()
-                    + "\n\nWINDOW SCOPE\n"
-                    f"This batch renders ONLY the segment from {ws:g}s to {we:g}s of the scene. "
-                    "Do not restart the scene from 0s. Do not retell the opening. "
-                    "Continue identity, wardrobe, environment, and lighting."
-                )
     negative = next((p.negativePrompt for p in (batch.promptSegments or []) if p.negativePrompt), None)
     range_rep = _range_replacement(snapshot)
     range_prompt = str(range_rep.get("prompt") or "").strip()
@@ -737,26 +682,12 @@ def build_timeline_generation_request(
             and _h3_order_ok
             and not range_prompt
         ):
-            from ...codirector.video_intelligence.compile import compile_temporal_continuation
-
-            _compiled = compile_temporal_continuation(
-                temporal_packet,
-                supports_prompt_continuation=True,
-                creator_rejected=False,
-            )
-            _qwen_block = str(_compiled.get("promptPrefix") or "").strip()
-            if _qwen_block and _qwen_block not in prompt:
-                prompt = prompt.rstrip() + "\n\n" + _qwen_block
-            semantic = ""
-            if incoming_bridge is not None:
-                state = getattr(incoming_bridge, "continuityState", None) or {}
-                if isinstance(state, dict):
-                    semantic = str(state.get("semanticContinuity") or "").strip()
-            if semantic and semantic not in prompt:
-                prompt = prompt.rstrip() + "\n\n" + semantic
+            # The watched clip is evidence for Co-Director. It is not the next
+            # window's script, and it must not be appended to Timed Prompt.
+            _ = incoming_bridge
             temporal_compile = {
-                "applied": True,
-                "reason": "H3_CONTINUATION_WEAVE",
+                "applied": False,
+                "reason": "H3_OBSERVATION_KEPT_OFF_SCRIPT",
                 "promptPrefix": "",
             }
         else:
@@ -860,7 +791,7 @@ def build_timeline_generation_request(
     # Single-cond I2V engines (LTX 2.5 maximumReferenceImages=0) still need one
     # start frame for LTXVImgToVideo. Promote first image reference when
     # supportsImageToVideo and no start was resolved.
-    if not start_image and caps.supportsImageToVideo:
+    if not start_image and caps.supportsImageToVideo and not caps.supportsTextToVideo:
         max_imgs = int(getattr(caps, "maximumReferenceImages", 0) or 0)
         multi = bool(getattr(caps, "supportsMultipleImageReferences", False))
         if max_imgs <= 0 or not multi:
@@ -915,10 +846,10 @@ def build_timeline_generation_request(
         else:
             mode = "image_to_video"
             gen_start = start_image
-            if caps.supportsEndFrame and end_image:
+            if caps.supportsEndFrame and end_image and _ltx_accepts_end(caps, batch, end_image):
                 mode = "start_end_frame"
                 gen_end = end_image
-    elif caps.supportsImageToVideo and (ref_ids or video_ref_id or video_ids):
+    elif caps.supportsImageToVideo and not caps.supportsTextToVideo and (ref_ids or video_ref_id or video_ids):
         # Image/video refs present but no dedicated start role -- R2V/I2V, never
         # unsupported T2V for force-R2V products (Seedance Mini).
         multi = bool(getattr(caps, "supportsMultipleImageReferences", False))
@@ -964,7 +895,7 @@ def build_timeline_generation_request(
         mode = "image_to_video"
         gen_start = last_frame
         strategy = "last_frame_i2v"
-        if caps.supportsEndFrame and end_image:
+        if caps.supportsEndFrame and end_image and _ltx_accepts_end(caps, batch, end_image):
             mode = "start_end_frame"
             gen_end = end_image
     elif last_frame:
@@ -1001,13 +932,16 @@ def build_timeline_generation_request(
         if pose_compile.get("applied") and pose_prefix:
             prompt = "\n".join(part for part in (pose_prefix, prompt) if part)
 
-    if caps.executionType == "local":
-        # Mapped start/end stay for single-cond engines. Product mode is R2V.
+    if caps.executionType == "local" and not (
+        is_ltx_25_generator(generator_id) and mode in {"text_to_video", "image_to_video"}
+    ):
+        # Mapped start/end stay for single-cond engines. MiniMax H3 stays Reference-to-Video.
+        # LTX 2.5 keeps text-to-video or the one start image it already resolved.
         mode = "reference"
 
     # Never silently drop image references. Adapter validation refuses
     # unsupported / over-limit counts. Bindings stay on the Prompt clip.
-    aspect = normalize_production_aspect(aspect_ratio)
+    aspect = require_timeline_aspect(aspect_ratio)
     use_draft = bool(draft_mode) if draft_mode is not None else caps.draftPathway != "none"
     if caps.draftPathway == "none":
         use_draft = False
@@ -1064,26 +998,13 @@ def build_timeline_generation_request(
         batch=batch,
         duration=job_duration,
     )
-    # Phase A Direct Line (H3): knowledge compiledPrompt must not overwrite
-    # Timed Prompt. Non-H3 generators keep the existing compile overwrite.
-    if (
-        knowledge.get("compiledPrompt")
-        and not range_prompt
-        and not is_minimax_h3_generator(generator_id)
-    ):
-        prompt = str(knowledge["compiledPrompt"])
+    # Timed Prompt is the creator's text. Knowledge compile must not replace it.
     if knowledge.get("compiledNegative") and caps.supportsNegativePrompt:
         negative = str(knowledge["compiledNegative"])
 
-    # H3 Comfy Input Text = creator Timed Prompt (authoredPrompt), not temporal
-    # / pose / movement prefixes or knowledge rewrites -- EXCEPT:
-    #   - range retake, where delivery is ESTABLISHED + TARGET BEAT + USER DELTA
-    #     + HARD CONSTRAINTS (authoredPrompt stays established), and
-    #   - the H3 continuation weave, where the Qwen observed end-state is
-    #     appended after the creator text (temporal_compile reason
-    #     H3_CONTINUATION_WEAVE). The weave is additive observation bound to a
-    #     ready packet -- it must ship on H3 Comfy Input Text or the review is
-    #     silently dropped (recursive Batch N ? N+1 continuity contract).
+    # H3 Comfy Input Text = creator Timed Prompt. A Qwen watch of the previous
+    # clip is not appended. Range retake still delivers ESTABLISHED + TARGET
+    # BEAT + USER DELTA + HARD CONSTRAINTS.
     _h3_weave_applied = (
         is_minimax_h3_generator(generator_id)
         and str(temporal_compile.get("reason") or "") == "H3_CONTINUATION_WEAVE"
@@ -1093,13 +1014,58 @@ def build_timeline_generation_request(
     elif _h3_weave_applied:
         delivery_prompt = prompt
     else:
-        delivery_prompt = authored_prompt if is_minimax_h3_generator(generator_id) else prompt
+        # Take and Generate send the stored Timed Prompt. Machine prefixes,
+        # window-scope notes, and compiled rewrites stay off that text.
+        delivery_prompt = authored_prompt
 
     # Keep @ImageN order: startImage = Image1, referenceAssetIds = Image2..N
     # so Seedance fal image_urls does not upload the first ref twice.
     ref_ids_for_request = list(ref_ids)
     if gen_start and ref_ids_for_request and str(ref_ids_for_request[0]).strip() == str(gen_start).strip():
         ref_ids_for_request = ref_ids_for_request[1:]
+
+    # Always stamp resolvedGeneration (primary size authority). Aliases kept below.
+    resolved_generation = None
+    try:
+        res_s = str(resolution or "")
+        if "x" in res_s.lower():
+            w_s, h_s = res_s.lower().split("x", 1)
+            rg_width, rg_height = int(w_s), int(h_s)
+            rg_dims = {
+                "productId": canonical or caps.id,
+                "width": rg_width,
+                "height": rg_height,
+                "aspect": aspect,
+                "label": None,
+                "megapixels": None,
+                "source": "timeline_compile",
+                "tier": None,
+                "projectCanvasIgnored": None,
+            }
+            if isinstance(h3_resolved_canvas, dict):
+                rg_dims["megapixels"] = h3_resolved_canvas.get("megapixels")
+                rg_dims["label"] = h3_resolved_canvas.get("label")
+                rg_dims["source"] = "h3_timeline_canvas"
+                rg_dims["productId"] = "minimax-h3"
+            elif isinstance(ltx_resolved_quality, dict):
+                rg_dims["tier"] = ltx_resolved_quality.get("tier")
+                rg_dims["label"] = f"Native {ltx_resolved_quality.get('tier')}"
+                rg_dims["source"] = "ltx_quality"
+            resolved_generation = stamp_resolved_generation({}, rg_dims)
+        elif res_s:
+            resolved_generation = {
+                "productId": canonical or caps.id,
+                "width": 0,
+                "height": 0,
+                "aspect": aspect,
+                "label": res_s,
+                "megapixels": None,
+                "source": "provider_token",
+                "tier": res_s,
+                "projectCanvasIgnored": None,
+            }
+    except Exception:
+        resolved_generation = None
 
     request = TimelineGenerationRequest(
         projectId=project_id,
@@ -1133,6 +1099,7 @@ def build_timeline_generation_request(
             "draftPathway": caps.draftPathway,
             "finalRequiresNewGeneration": caps.finalRequiresNewGeneration,
             "fast_generation": bool(use_draft and (caps.draftPathway == "local_live" or speed_quality)),
+            "resolvedGeneration": resolved_generation,
             "h3ResolvedCanvas": h3_resolved_canvas,
             "ltxResolvedQuality": ltx_resolved_quality,
             "aspectWarning": aspect_warning,
@@ -1275,7 +1242,9 @@ def build_timeline_generation_request(
                         or spoken.get("projectLanguage")
                     )
             # Re-assert silence lock after Dialogue Manifest apply.
-            if _batch_silence_locked(batch, request.prompt):
+            # Seedance native audio is the model's own soundtrack. A silence
+            # lock written for MiniMax must not turn that off.
+            if _batch_silence_locked(batch, request.prompt) and not _seedance_keeps_native_audio(caps):
                 aa = dict(request.providerOptions.get("audioAuthority") or {})
                 aa["authority"] = "silence_locked"
                 aa["nativeAudio"] = "disabled"
@@ -1323,7 +1292,8 @@ def build_timeline_generation_request(
             request.prompt = (request.prompt or "").rstrip() + "\n\n" + lock
     # Always re-assert silence lock (covers empty-manifest / try skip paths).
     # The delivered prompt counts: a slice with spoken lines is not silence.
-    if _batch_silence_locked(batch, request.prompt):
+    # Seedance keeps generate_audio; fal's native track is not the H3 silence lock.
+    if _batch_silence_locked(batch, request.prompt) and not _seedance_keeps_native_audio(caps):
         aa = dict(request.providerOptions.get("audioAuthority") or {})
         aa["authority"] = "silence_locked"
         aa["nativeAudio"] = "disabled"
@@ -1511,6 +1481,14 @@ def _batch_allow_non_speech_audio(batch: BatchBlock) -> bool:
     return False
 
 
+def _seedance_keeps_native_audio(caps: VideoGeneratorCapabilities) -> bool:
+    """Seedance generate_audio is the model's soundtrack, including speech in the prompt."""
+    from app.fal_catalog import seedance_product_id
+
+    product = seedance_product_id(getattr(caps, "id", None))
+    return bool(product) and bool(getattr(caps, "audio_generation", False))
+
+
 def _resolve_audio_authority(
     project_id: str,
     scene_id: str,
@@ -1575,7 +1553,15 @@ def _resolve_audio_authority(
         }
 
     # Silence-locked Dialogue Authority: never ask H3 for native audio.
+    # Seedance still sends generate_audio. Turning it off drops the soundtrack.
     if _batch_silence_locked(batch):
+        if _seedance_keeps_native_audio(caps):
+            return {
+                "authority": "generator",
+                "nativeAudio": "enabled",
+                "generateAudio": True,
+                "reason": "seedance_native_audio",
+            }
         return {
             "authority": "silence_locked",
             "dialogue": "manifest_locked_script",

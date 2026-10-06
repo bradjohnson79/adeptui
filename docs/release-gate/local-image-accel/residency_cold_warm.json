@@ -1,0 +1,39 @@
+{
+  "comfy": "http://127.0.0.1:8188",
+  "project": "0ffe56e2-0d58-4926-91bf-0f947898d02e",
+  "quality": "knobs unchanged",
+  "vram_before": {
+    "system_stats_ok": true,
+    "vram_free_mib": 30841.875,
+    "device": "cuda:0 NVIDIA GeForce RTX 5090 : cudaMallocAsync"
+  },
+  "free_status": 200,
+  "cold_unload_sec": 0.001,
+  "cold_qwen_t2i": {
+    "ok": true,
+    "job_id": "3f2228ba-a6d6-46a6-be63-9f57953a7645",
+    "status": "done",
+    "workflow": "qwen2512.txt2img",
+    "elapsed_sec": 36.38,
+    "message": "ImageGen (edit) complete"
+  },
+  "vram_after_cold": {
+    "system_stats_ok": true,
+    "vram_free_mib": 2655.335744857788,
+    "device": "cuda:0 NVIDIA GeForce RTX 5090 : cudaMallocAsync"
+  },
+  "warm_qwen_t2i": {
+    "ok": true,
+    "job_id": "f16dc4cb-d5c0-43b6-a4bf-ec4780d1dc89",
+    "status": "done",
+    "workflow": "qwen2512.txt2img",
+    "elapsed_sec": 6.199,
+    "message": "ImageGen (edit) complete"
+  },
+  "vram_after_warm": {
+    "system_stats_ok": true,
+    "vram_free_mib": 2608.460744857788,
+    "device": "cuda:0 NVIDIA GeForce RTX 5090 : cudaMallocAsync"
+  },
+  "gain_sec": 30.181
+}

@@ -11,6 +11,7 @@ export type LibraryQuickPreviewAsset = {
   filename?: string;
   tag?: string;
   name?: string;
+  model?: string;
 };
 
 function kindLabel(kind: QuickPreviewKind, t: (key: string) => string) {
@@ -28,6 +29,7 @@ export function LibraryQuickPreviewModal({
 }) {
   const { t } = useTranslation("library");
   const [meta, setMeta] = useState({ width: 0, height: 0, duration: 0 });
+  const [failed, setFailed] = useState(false);
   const kind = asset && isQuickPreviewKind(asset.kind) ? asset.kind : null;
 
   useEffect(() => {
@@ -41,6 +43,7 @@ export function LibraryQuickPreviewModal({
 
   useEffect(() => {
     setMeta({ width: 0, height: 0, duration: 0 });
+    setFailed(false);
   }, [asset?.id]);
 
   if (!asset || !kind) return null;
@@ -58,31 +61,44 @@ export function LibraryQuickPreviewModal({
         onClick={onClose}
       />
       <div className="library-quick-preview__panel" data-testid={`library-quick-preview-${kind}`} onClick={(event) => event.stopPropagation()}>
-        <button
-          type="button"
-          className="library-quick-preview__close"
-          aria-label={t("closePreview")}
-          data-testid="library-quick-preview-close"
-          onClick={onClose}
-        >
-          ×
-        </button>
+        <header className="library-quick-preview__header">
+          <h3 className="library-quick-preview__title">{title}</h3>
+          <button
+            type="button"
+            className="library-quick-preview__close"
+            aria-label={t("closePreview")}
+            data-testid="library-quick-preview-close"
+            onClick={onClose}
+          >
+            X
+          </button>
+        </header>
         <div className="library-quick-preview__media">
-          {kind === "image" ? (
+          {failed ? (
+            <p className="library-quick-preview__unavailable" data-testid="library-quick-preview-error">
+              Unable to preview this asset.
+            </p>
+          ) : null}
+          {!failed && kind === "image" ? (
             <img
+              key={asset.id}
               src={src}
               alt={title}
               onLoad={(event) => {
                 const el = event.currentTarget;
                 setMeta((current) => ({ ...current, width: el.naturalWidth, height: el.naturalHeight }));
               }}
+              onError={() => setFailed(true)}
             />
           ) : null}
-          {kind === "video" ? (
+          {!failed && kind === "video" ? (
             <video
+              key={asset.id}
               src={src}
               controls
               playsInline
+              preload="metadata"
+              data-testid="library-quick-preview-player"
               onLoadedMetadata={(event) => {
                 const el = event.currentTarget;
                 setMeta({
@@ -91,12 +107,16 @@ export function LibraryQuickPreviewModal({
                   duration: Number.isFinite(el.duration) ? el.duration : 0,
                 });
               }}
+              onError={() => setFailed(true)}
             />
           ) : null}
-          {kind === "audio" ? (
+          {!failed && kind === "audio" ? (
             <audio
+              key={asset.id}
               src={src}
               controls
+              preload="metadata"
+              data-testid="library-quick-preview-player"
               onLoadedMetadata={(event) => {
                 const el = event.currentTarget;
                 setMeta((current) => ({
@@ -104,17 +124,18 @@ export function LibraryQuickPreviewModal({
                   duration: Number.isFinite(el.duration) ? el.duration : 0,
                 }));
               }}
+              onError={() => setFailed(true)}
             />
           ) : null}
         </div>
         <div className="library-quick-preview__meta">
-          <h3 className="library-quick-preview__title">{title}</h3>
           <span>{t("previewKind")}: {kindLabel(kind, t)}</span>
           {asset.filename ? <span>{t("previewFilename")}: {asset.filename}</span> : null}
           {meta.width > 0 && meta.height > 0 ? (
             <span>{t("previewDimensions")}: {meta.width}×{meta.height}</span>
           ) : null}
           {meta.duration > 0 ? <span>{t("previewDuration")}: {meta.duration.toFixed(1)}s</span> : null}
+          {asset.model ? <span>Model: {asset.model}</span> : null}
         </div>
       </div>
     </div>,

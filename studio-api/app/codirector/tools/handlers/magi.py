@@ -299,15 +299,54 @@ def preview_color_apply(ctx: ToolContext, args: dict[str, Any]):
     )
 
 
+def _lighting_requested(args: dict[str, Any]) -> bool:
+    if str(args.get("lightingPresetId") or "").strip():
+        return True
+    return any(args.get(key) is not None for key in ("brightness", "highlights", "shadows", "temperature", "temperatureDelta", "brightnessDelta"))
+
+
 def apply_color_apply(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     from ....magi.color_grading import apply_color_grade_to_asset
     from ....magi.finishing import set_clip_grade
+    from ....magi.lighting import merge_lighting
 
     requested_at = utc_now()
     action_id = new_action_id()
     asset_id = str(args.get("assetId") or "")
     preset_id = str(args.get("presetId") or "")
     clip_id = str(args.get("clipId") or "") or None
+    if _lighting_requested(args):
+        try:
+            deltas = {}
+            params = {}
+            for key in ("brightness", "highlights", "shadows", "temperature"):
+                if args.get(key) is not None:
+                    params[key] = float(args[key])
+                delta_key = f"{key}Delta"
+                if args.get(delta_key) is not None:
+                    deltas[key] = float(args[delta_key])
+            result = merge_lighting(
+                ctx.project_id,
+                clip_id=clip_id,
+                preset_id=str(args.get("lightingPresetId") or "") or None,
+                params=params or None,
+                deltas=deltas or None,
+            )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:800]}
+        return wrap_apply_result(
+            tool_id="magi.color.apply",
+            domain="color",
+            apply_result=result,
+            asset_ids_in=[asset_id] if asset_id else [],
+            db=ctx.db,
+            project_id=ctx.project_id,
+            clip_id=str(result.get("clipId") or clip_id or "") or None,
+            preset_id=None,
+            action_id=action_id,
+            requested_at=requested_at,
+            verify_plan={"checks": ["clip_grade_persisted", "source_asset_preserved"]},
+        )
     try:
         result = apply_color_grade_to_asset(ctx.db, ctx.project_id, asset_id, preset_id, {})
         if clip_id:
@@ -400,6 +439,14 @@ def _frames_from_seconds(args: dict[str, Any], fps: int) -> tuple[int | None, in
 def _make_text_element(args: dict[str, Any], index: int, start: int | None, end: int | None) -> dict[str, Any]:
     now_ts = utc_now()
     text = str(args.get("text") or "")
+    # Co-Director does not pick a new typeface unless the owner authorized it.
+    font_family = "dejavu-sans"
+    font_size = 48
+    if args.get("ownerAuthority") is True:
+        if args.get("fontFamily"):
+            font_family = str(args["fontFamily"])
+        if args.get("fontSize") is not None:
+            font_size = int(args["fontSize"])
     return {
         "id": f"txt-{uuid.uuid4().hex[:8]}",
         "type": "text",
@@ -421,8 +468,8 @@ def _make_text_element(args: dict[str, Any], index: int, start: int | None, end:
         "updatedAt": now_ts,
         "text": text,
         "textStyle": {
-            "fontFamily": "dejavu-sans",
-            "fontSize": int(args.get("fontSize", 48)),
+            "fontFamily": font_family,
+            "fontSize": font_size,
             "fontWeight": 700,
             "fontStyle": "normal",
             "textDecoration": "none",
@@ -825,11 +872,22 @@ def apply_graphics_apply(ctx: ToolContext, args: dict[str, Any]) -> dict[str, An
     )
 
 
+def _upscale_sound_profile(args: dict[str, Any]) -> str:
+    from ....magi.sound_enhancement import sound_profile_from_intent
+
+    explicit = str(args.get("soundProfile") or args.get("sound_profile") or "").strip()
+    if explicit:
+        return explicit
+    heard = sound_profile_from_intent(str(args.get("intent") or args.get("prompt") or ""))
+    return heard or "preserve_original"
+
+
 def preview_upscale(ctx: ToolContext, args: dict[str, Any]):
     return _preview(
         "Queue MAGI upscale",
         f"engine={args.get('engine') or 'ffmpeg-scale'}",
         f"asset={args.get('assetId')}",
+        f"sound={_upscale_sound_profile(args)}",
         "Does NOT persist Timeline scenePublish (Timeline Publish path is separate).",
     )
 
@@ -840,6 +898,7 @@ def apply_upscale(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     requested_at = utc_now()
     action_id = new_action_id()
     asset_id = str(args.get("assetId") or "")
+    sound_profile = _upscale_sound_profile(args)
     try:
         result = enqueue_upscale(
             ctx.db,
@@ -849,6 +908,7 @@ def apply_upscale(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
             model=str(args.get("model") or "lanczos"),
             target_resolution=str(args.get("target") or "1920x1080"),
             preview=False,
+            sound_profile=sound_profile,
         )
     except Exception as exc:
         return {
@@ -926,11 +986,6 @@ _FINISH_NOT_SUPPORTED = (
     },
     {
         "code": "NOT_SUPPORTED",
-        "capability": "surround_5_1",
-        "message": "5.1 / spatial surround is not available.",
-    },
-    {
-        "code": "NOT_SUPPORTED",
         "capability": "frame_interpolation",
         "message": "Frame interpolation and fps conversion are not available. Source fps is reported only.",
     },
@@ -957,12 +1012,25 @@ def _finish_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         re.search(r"keep original audio|audio untouched|do not (change|touch) (the )?audio", intent)
     )
     want_4k = bool(re.search(r"\b4k\b|3840\s*[x×]\s*2160|2160p", intent))
-    want_2k = bool(args.get("upscaleTarget")) or bool(
-        re.search(r"\b2k\b|2560\s*[x×]\s*1440|1440p", intent)
-    )
+    want_2k = bool(re.search(r"\b2k\b", intent))
+    want_1440 = bool(re.search(r"\b1440p\b|2560\s*[x×]\s*1440", intent))
+    want_1080 = bool(re.search(r"\b1080p\b|1920\s*[x×]\s*1080", intent))
     wants_unsupported = bool(
         re.search(
-            r"\beq\b|equalizer|de-?ess|compressor|limiter|5\.1|surround|spatial audio|interpolat|60\s*fps|change (the )?frame rate",
+            r"\beq\b|equalizer|de-?ess|compressor|limiter|interpolat|60\s*fps|change (the )?frame rate",
+            intent,
+        )
+    )
+    from ....magi.sound_enhancement import sound_profile_from_intent
+
+    sound_profile = sound_profile_from_intent(_finish_intent_text(args))
+    if keep_audio and sound_profile in {None, "recommended"}:
+        sound_profile = "preserve_original"
+    if sound_profile is None:
+        sound_profile = "preserve_original"
+    mentions_sound_upscale = bool(
+        re.search(
+            r"upscale|5\.1|7\.1|sound enhancement|cinematic stereo|dialogue enhance|wide stereo|headphone",
             intent,
         )
     )
@@ -983,10 +1051,12 @@ def _finish_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     if master_clip and not asset_id:
         asset_id = str(master_clip.get("assetId") or "")
     fps = seq.get("frameRate") or 24
-    target = str(
-        args.get("upscaleTarget")
-        or ("3840x2160" if want_4k else "2560x1440" if want_2k else "")
+    explicit_target = str(args.get("upscaleTarget") or "").strip()
+    target = explicit_target or (
+        "4K" if want_4k else "2K" if want_2k else "1440p" if want_1440 else "1080p" if want_1080 else ""
     )
+    if not target and sound_profile not in {"", "preserve_original"} and mentions_sound_upscale:
+        target = "1440p"
     preset_id = str(args.get("presetId") or "cinematic_neutral")
     generate_music = (not no_music) and bool(re.search(r"\bmusic\b|\bscore\b|\bsoundtrack\b", intent))
     generate_sfx = (not keep_audio) and bool(re.search(r"\bsfx\b|\bsound effects?\b", intent))
@@ -1003,7 +1073,12 @@ def _finish_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
             "generateSfx": bool(generate_sfx),
             "music": None if (no_music or keep_audio or not generate_music) else "generate",
         },
-        "upscale": {"enabled": bool(target), "target": target or None, "engine": str(args.get("engine") or "ffmpeg-scale")},
+        "upscale": {
+            "enabled": bool(target),
+            "target": target or None,
+            "engine": str(args.get("engine") or "ffmpeg-scale"),
+            "soundProfile": sound_profile if target else "preserve_original",
+        },
         "render": {"enabled": bool(args.get("finalRender", False))},
         "notSupported": list(_FINISH_NOT_SUPPORTED),
         "requestedUnsupported": wants_unsupported,
@@ -1021,14 +1096,15 @@ def preview_propose_finish(ctx: ToolContext, args: dict[str, Any]):
         f"music={plan['audio']['music']}",
         f"keepOriginalAudio={plan['audio']['keepOriginal']}",
         f"upscale={plan['upscale']['target'] or 'none'}",
+        f"sound={plan['upscale'].get('soundProfile') or 'preserve_original'}",
         f"sourceFps={plan['sourceFps']} (reported only; not changed)",
-        "NOT_SUPPORTED: EQ, 5.1/surround, frame interpolation",
+        "NOT_SUPPORTED: EQ, frame interpolation",
     ]
     warnings = ["This writes MAGI finishing state or queues a job."]
     if plan.get("publishedRequired"):
         warnings.append("This scene has no published master. Publish on Timeline first.")
     if plan.get("requestedUnsupported"):
-        warnings.append("Requested EQ / 5.1 / fps interpolation will be refused. Supported finishing can still run.")
+        warnings.append("Requested EQ or frame interpolation will be refused. Supported finishing can still run.")
     from ..definitions import ToolPreview
 
     return ToolPreview(
@@ -1061,7 +1137,7 @@ def apply_propose_finish(ctx: ToolContext, args: dict[str, Any]) -> dict[str, An
         return {
             "ok": False,
             "error": "NOT_SUPPORTED",
-            "message": "EQ, 5.1, and frame interpolation are not MAGI engines.",
+            "message": "EQ and frame interpolation are not MAGI engines.",
             "plan": plan,
             "notSupported": plan["notSupported"],
             "magiActionReceipt": build_receipt(
@@ -1127,6 +1203,7 @@ def apply_propose_finish(ctx: ToolContext, args: dict[str, Any]) -> dict[str, An
                 "engine": plan["upscale"]["engine"],
                 "model": str(args.get("model") or "lanczos"),
                 "target": plan["upscale"]["target"],
+                "soundProfile": plan["upscale"].get("soundProfile") or "preserve_original",
             },
         )
         steps.append({"toolId": "magi.upscale", "result": up_result})
@@ -1192,3 +1269,138 @@ def apply_render(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         action_id=action_id,
         requested_at=requested_at,
     )
+
+
+def preview_recipe_apply(ctx: ToolContext, args: dict[str, Any]):
+    return _preview("Apply MAGI recipe", f"recipe={args.get('recipeId') or 'unknown'}")
+
+
+def apply_recipe_apply(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....magi.recipes import apply_recipe
+    from ....magi.sequence.store import get_sequence, save_sequence
+
+    recipe_id = str(args.get("recipeId") or "").strip()
+    try:
+        current = get_sequence(ctx.project_id)
+        before = [
+            (clip.get("id"), clip.get("assetId"), clip.get("startFrame"), clip.get("durationFrames"))
+            for clip in (current.get("clips") or [])
+        ]
+        updated = apply_recipe(current, recipe_id)
+        after = [
+            (clip.get("id"), clip.get("assetId"), clip.get("startFrame"), clip.get("durationFrames"))
+            for clip in (updated.get("clips") or [])
+        ]
+        if before != after:
+            return {"ok": False, "error": "Recipe refused because it would change clip timing."}
+        saved = save_sequence(ctx.project_id, updated)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:800]}
+    sfx_muted = any(
+        str(track.get("kind") or "") == "sfx" and bool(track.get("muted"))
+        for track in (saved.get("tracks") or [])
+    )
+    return {
+        "ok": True,
+        "recipeId": saved.get("recipeId"),
+        "snapEnabled": saved.get("snapEnabled"),
+        "sfxMuted": sfx_muted,
+        "clipCount": len(saved.get("clips") or []),
+    }
+
+
+def preview_transition_apply(ctx: ToolContext, args: dict[str, Any]):
+    return _preview(
+        "Set MAGI transition",
+        f"kind={args.get('kind') or 'dissolve'}",
+        f"duration={args.get('durationSeconds') if args.get('durationSeconds') is not None else 1}s",
+    )
+
+
+def apply_transition_apply(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....magi.transitions import apply_transition
+
+    try:
+        return apply_transition(
+            ctx.project_id,
+            kind=str(args.get("kind") or ""),
+            clip_id=str(args.get("clipId") or "") or None,
+            duration_seconds=None if args.get("durationSeconds") is None else float(args.get("durationSeconds")),
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:800]}
+
+
+def preview_compare(ctx: ToolContext, args: dict[str, Any]):
+    return _preview(
+        "Compare this MAGI edit",
+        f"with={args.get('assetId') or 'original'}",
+        f"mode={args.get('mode') or 'compare'}",
+    )
+
+
+def apply_compare(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....magi.finishing import merge_finishing
+    from ....magi.sequence.store import get_sequence
+
+    mode = str(args.get("mode") or "compare").strip().lower()
+    if mode not in {"compare", "split", "viewer"}:
+        mode = "compare"
+    asset_id = str(args.get("assetId") or "original").strip()
+    sequence = get_sequence(ctx.project_id)
+    if asset_id.lower() in {"", "original"}:
+        asset_id = ""
+        for clip in sequence.get("clips") or []:
+            if str(clip.get("ingestRole") or "") == "published_master" and clip.get("assetId"):
+                asset_id = str(clip["assetId"])
+                break
+        if not asset_id:
+            return {"ok": False, "error": "This edit has no original picture to compare."}
+    saved = merge_finishing(
+        ctx.project_id,
+        {"compareAssetId": asset_id, "viewerMode": mode},
+    )
+    finishing = saved.get("finishing") or {}
+    return {
+        "ok": True,
+        "compareAssetId": finishing.get("compareAssetId"),
+        "viewerMode": finishing.get("viewerMode"),
+    }
+
+
+async def send_scene_to_magi(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Open MAGI only when this scene's published picture matches the ready stitch."""
+
+    from ....film_timeline.magi_handoff import UNPUBLISHED_MESSAGE, film_magi_handoff
+
+    from .scenes import latest_ready_published_scene
+
+    scene_id = str(args.get("sceneId") or "").strip()
+    shot_id = str(args.get("shotId") or "").strip() or None
+    if not scene_id:
+        found = latest_ready_published_scene(ctx.db, ctx.project_id)
+        if found:
+            scene_id = found[0]
+            shot_id = shot_id or found[1] or None
+    if not scene_id:
+        return {
+            "ok": False,
+            "state": "unpublished",
+            "message": UNPUBLISHED_MESSAGE,
+            "canSend": False,
+            "_evidence": {"source": "film_timeline.magi_handoff"},
+        }
+    try:
+        result = film_magi_handoff(ctx.db, ctx.project_id, scene_id, shot_id=shot_id)
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "state": "unpublished",
+            "message": UNPUBLISHED_MESSAGE,
+            "canSend": False,
+            "error": str(exc)[:200],
+            "_evidence": {"source": "film_timeline.magi_handoff"},
+        }
+    result["_summary"] = str(result.get("message") or "")
+    result["_evidence"] = {"source": "film_timeline.magi_handoff"}
+    return result

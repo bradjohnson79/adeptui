@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-09-18 19:15 PT",
+  "status": "AUDIT_DONE",
+  "smoking_guns": [
+    "watcher.py daemon thread dies on API bounce",
+    "BatchStatus missing QC_Pending/QC_RetryRequired",
+    "queue_worker recover does not timeline-finalize",
+    "live master wipe to single Draft during foreign-elim bounce"
+  ],
+  "existing_helpers": [
+    "dialogue_authority.apply_qc_to_batch_status \u2192 QC_RetryRequired on Omni unavailable",
+    "freeze_language_authority_packet for QC retry"
+  ],
+  "blockers_for_implement": [
+    "BatchStatus enum gap",
+    "no bounce reconciler"
+  ],
+  "do_not_touch": [
+    "mute",
+    "windows rematerialize",
+    "Batch UX"
+  ]
+}

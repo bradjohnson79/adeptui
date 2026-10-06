@@ -1,0 +1,69 @@
+{
+  "prompt_id": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+  "graph_node_count": 11,
+  "class_types": [
+    "CLIPLoader",
+    "EmptyLatentImage",
+    "KSampler",
+    "LoadImage",
+    "ModelSamplingAuraFlow",
+    "SaveImage",
+    "TextEncodeQwenImageEdit",
+    "UNETLoader",
+    "VAEDecode",
+    "VAELoader"
+  ],
+  "load_image_nodes": [
+    {
+      "node_id": "5",
+      "inputs": {
+        "image": "studio/MiraValeCertV2.png"
+      }
+    }
+  ],
+  "qwen_encode_nodes": [
+    {
+      "node_id": "6",
+      "inputs": {
+        "clip": [
+          "2",
+          0
+        ],
+        "prompt": "1. Reference Reproduction: REFERENCE-FIRST AUTHORITY: Reproduce the attached character reference as faithfully as possible. Preserve the same face, hairstyle, eye color, ears, skin tone, body proportions, wardrobe, accessories, tattoos/circuitry, and silhouette. Do not redesign or reinterpret the character. Only vary pose, expression, and background subtly. The attached reference image is the visual identity lock; the written profile is supplemental guidance only and must not override clearly visible reference details.\n2. Request Intent: Create one person, full body, front-facing, neutral standing pose, centered, simple background, no collage, no text, no second person. FRONT: one camera only, this view only, front-facing, full-body neutral stance. one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image for Mira Vale Cert V2.\n3. Subject Identity: Mira Vale Cert V2; man; human; middle-aged; broad, solid, rectangular silhouette. personality/bio: A man stands centered, facing forward. He has short, dark hair with graying temples and a salt-and-pepper goatee and mustache. Medium skin tone. He wears a black suit jacket with peaked lapels, a white dress shirt, and a dark red tie with a white pocket square. Black creased trousers and black dress shoes. Broad, solid rectangular build. The style is formal and traditional..\n4. Identity Lock: locked traits: eyes, skin, broad, solid, rectangular silhouette; preserve every locked identity trait exactly with no substitutions or character drift\n5. Face Features: \n6. Wardrobe Materials: \n7. Pose Expression: \n8. Composition Camera: Single-subject composition with the character clearly readable.\n9. Environment Lighting: soft studio lighting with readable facial clarity\n10. Style Profile: medium: cinematic character reference; palette: grounded natural color separation with identity-safe materials; lighting: soft studio lighting with readable facial clarity; finish: clean production-ready render\n11. Continuity References: locked continuity traits: eyes, skin, broad, solid, rectangular silhouette. reference roles: full_body_front, reference_image\n12. Single Camera: Single approved image output. One camera pose only. one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image.\n13. Negative Constraints: multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality, identity drift, wrong character, No close-up, No headshot, No bust portrait, No waist-up framing, Do not crop head, arms, hands, legs, or feet, one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image\n14. Output Guardrails: Use direct production language for Qwen-Image-2512. Do not write conversational fluff, do not merge character identity with style, and keep the final render faithful to the structured blocks above.",
+        "vae": [
+          "3",
+          0
+        ],
+        "image": [
+          "5",
+          0
+        ]
+      }
+    },
+    {
+      "node_id": "7",
+      "inputs": {
+        "clip": [
+          "2",
+          0
+        ],
+        "prompt": "blurry, low quality, watermark, text, letters, watermark, logo, caption, overlay, typography, writing",
+        "vae": [
+          "3",
+          0
+        ],
+        "image": [
+          "5",
+          0
+        ]
+      }
+    }
+  ],
+  "reference_conditioning_verified": true,
+  "positive_prompts": [],
+  "negative_prompts": [
+    "1. Reference Reproduction: REFERENCE-FIRST AUTHORITY: Reproduce the attached character reference as faithfully as possible. Preserve the same face, hairstyle, eye color, ears, skin tone, body proportions, wardrobe, accessories, tattoos/circuitry, and silhouette. Do not redesign or reinterpret the character. Only vary pose, expression, and background subtly. The attached reference image is the visual identity lock; the written profile is supplemental guidance only and must not override clearly visible reference details.\n2. Request Intent: Create one person, full body, front-facing, neutral standing pose, centered, simple background, no collage, no text, no second person. FRONT: one camera only, this view only, front-facing, full-body neutral stance. one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image for Mira Vale Cert V2.\n3. Subject Identity: Mira Vale Cert V2; man; human; middle-aged; broad, solid, rectangular silhouette. personality/bio: A man stands centered, facing forward. He has short, dark hair with graying temples and a salt-and-pepper goatee and mustache. Medium skin tone. He wears a black suit jacket with peaked lapels, a white dress shirt, and a dark red tie with a white pocket square. Black creased trousers and black dress shoes. Broad, solid rectangular build. The style is formal and traditional..\n4. Identity Lock: locked traits: eyes, skin, broad, solid, rectangular silhouette; preserve every locked identity trait exactly with no substitutions or character drift\n5. Face Features: \n6. Wardrobe Materials: \n7. Pose Expression: \n8. Composition Camera: Single-subject composition with the character clearly readable.\n9. Environment Lighting: soft studio lighting with readable facial clarity\n10. Style Profile: medium: cinematic character reference; palette: grounded natural color separation with identity-safe materials; lighting: soft studio lighting with readable facial clarity; finish: clean production-ready render\n11. Continuity References: locked continuity traits: eyes, skin, broad, solid, rectangular silhouette. reference roles: full_body_front, reference_image\n12. Single Camera: Single approved image output. One camera pose only. one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image.\n13. Negative Constraints: multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality, identity drift, wrong character, No close-up, No headshot, No bust portrait, No waist-up framing, Do not crop head, arms, hands, legs, or feet, one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image\n14. Output Guardrails: Use direct production language for Qwen-Image-2512. Do not write conversational fluff, do not merge character identity with style, and keep the final render faithful to the structured blocks above.",
+    "blurry, low quality, watermark, text, letters, watermark, logo, caption, overlay, typography, writing"
+  ],
+  "negative_has_blonde_aqua": false
+}

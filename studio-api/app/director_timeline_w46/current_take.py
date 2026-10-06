@@ -302,8 +302,9 @@ def compute_generation_progress(master: Any) -> dict[str, Any]:
 
     derived = derive_scene_render_progress(master)
     # completedBatches from derive = QC-eligible complete (excludes NeedsDialogueRetake).
-    # overallBatchesLabel counts RENDER completion (includes NeedsDialogueRetake):
-    # "N/N batches complete" means rendering finished ΓÇö NOT Scene Finished.
+    # overallBatchesLabel counts RENDER completion, including a deposited window
+    # still in dialogue retake or QC. "N/N batches complete" means rendering
+    # finished — NOT Scene Finished.
     completed = int(derived.get("completedBatches") or 0)
     total = int(derived.get("totalBatches") or len(batches))
     queue_active = bool(derived.get("queueActive"))
@@ -313,6 +314,8 @@ def compute_generation_progress(master: Any) -> dict[str, Any]:
         "ApprovedConfigurationChanged",
         "RegenerationRecommended",
         "NeedsDialogueRetake",
+        "QC_Pending",
+        "QC_RetryRequired",
     }
     render_completed = sum(
         1 for b in batches if str(getattr(b, "status", "") or "") in render_complete_statuses

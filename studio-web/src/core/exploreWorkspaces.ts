@@ -3,16 +3,15 @@ import { dashboardImages } from "../dashboardImages";
 import { WORKSPACES, type EditorTab } from "./workspaces";
 
 /**
- * Canonical Home "Explore Adept UI" roster — 4 columns × 3 rows = 12 cards.
+ * Canonical Home "Explore Adept UI" roster.
  * Timeline and MAGI stay on Home feature cards / nav / Production, not here.
+ * Library stays in Production and the project workspace, not on this grid.
+ * Text to Video, 1 Frame, and 3 Frame are LTX modes on Timeline, not Explore cards.
  * Ordered list of workspace ids from the WORKSPACES registry — do not hardcode
  * parallel route maps in Home or Production menu.
  */
 export const EXPLORE_WORKSPACE_IDS = [
   "imagegen",
-  "txt2vid",
-  "one",
-  "three",
   "characters",
   "propcreator",
   "environmentcreator",
@@ -20,7 +19,6 @@ export const EXPLORE_WORKSPACE_IDS = [
   "scriptwriter",
   "voicestudio",
   "audiostudio",
-  "library",
 ] as const satisfies readonly EditorTab[];
 
 export type ExploreWorkspaceId = (typeof EXPLORE_WORKSPACE_IDS)[number];
@@ -33,7 +31,7 @@ export type ExploreWorkspaceCard = {
   image: DashboardImage;
   requiresProject: boolean;
   enabled: boolean;
-  category: "production" | "studio" | "library";
+  category: "production" | "studio";
 };
 
 /**
@@ -50,24 +48,6 @@ const EXPLORE_CARD_COPY: Record<
     description: "Create stills, keyframes, and references.",
     category: "studio",
     image: dashboardImages.imagegen,
-  },
-  txt2vid: {
-    label: "Text to Video",
-    description: "Generate motion clips from prompts.",
-    category: "studio",
-    image: dashboardImages.video,
-  },
-  one: {
-    label: "1 Frame",
-    description: "Animate a single keyframe into a cinematic shot.",
-    category: "studio",
-    image: dashboardImages.oneFrame,
-  },
-  three: {
-    label: "3 Frame",
-    description: "Build motion from start, middle, and end frames.",
-    category: "studio",
-    image: dashboardImages.threeFrame,
   },
   characters: {
     label: "Character Creator",
@@ -110,12 +90,6 @@ const EXPLORE_CARD_COPY: Record<
     description: "Create music, ambience, Foley, and production-ready audio.",
     category: "studio",
     image: dashboardImages.audio,
-  },
-  library: {
-    label: "Library",
-    description: "Browse assets, tags, and approved frames.",
-    category: "library",
-    image: dashboardImages.library,
   },
 };
 

@@ -308,6 +308,9 @@ class BatchBlock(BaseModel):
     promptSegments: list[TimelinePromptSegment] = Field(default_factory=list)
     # Per-batch owned clips (BATCH_OWNED_CLIPS). Stable IDs; order is by `order`.
     visualClips: list[BatchClip] = Field(default_factory=list)
+    # Creator removed this exact video from the Visual lane. The Library asset
+    # and the take stay. Placement skips this asset until a new one is deposited.
+    dismissedVisualAssetId: Optional[str] = None
     audioClips: list[BatchClip] = Field(default_factory=list)
     sfxClips: list[BatchClip] = Field(default_factory=list)
     cameraInstructions: list[BatchClip] = Field(default_factory=list)
@@ -348,6 +351,9 @@ class BatchBlock(BaseModel):
     # Canonical values: "720p" | "1080p" | "2K" | "4K". Independent of h3Resolution.
     # Native 4K is UNAVAILABLE - request_builder must fail honestly, never fake.
     ltxQuality: Optional[str] = None
+    # Seedance fal resolution. None = 720p. Values: 480p, 720p, 1080p, 4k.
+    # A product that does not offer a tier refuses it instead of substituting.
+    seedanceResolution: Optional[str] = None
     downstreamStale: bool = False
     staleFromTakeId: Optional[str] = None
 
@@ -578,6 +584,7 @@ class SceneTakeQuality(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     ltxQuality: Optional[str] = None
+    seedanceResolution: Optional[str] = None
     durationSec: Optional[float] = None
     batchCount: int = 0
 

@@ -41,15 +41,22 @@ def handle(
     if user_instructions:
         prompt = f"{user_instructions}. {prompt}"
 
+    from ....storyboard_studio.aspect import board_aspect_of, generation_dimensions
+
+    board_aspect = board_aspect_of(project_id)
+    if board_aspect == "9:16":
+        frame_w, frame_h = generation_dimensions("9:16")
+    else:
+        frame_w, frame_h = 1280, 720
     body: dict[str, Any] = {
         "prompt": prompt,
         "negative_prompt": "",
-        "width": 1280,
-        "height": 720,
+        "width": frame_w,
+        "height": frame_h,
         "tag": f"codirector_storyboard_regen_{execution_id[:8]}_frame{frame_index + 1}",
         "modelFamilyPreference": "zimage",
         "purpose": "codirector_storyboard_regen",
-        "aspectRatio": "16:9",
+        "aspectRatio": board_aspect,
         "batchCount": 1,
         "creativeContext": {
             "objective": "storyboard_regen",

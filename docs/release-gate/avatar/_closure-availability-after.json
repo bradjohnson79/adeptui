@@ -1,0 +1,30 @@
+{
+  "count": 516,
+  "needed": {
+    "avatar.open_studio": true,
+    "avatar.detect_speakers": true,
+    "avatar.create_plan": true,
+    "avatar.inspect": true,
+    "avatar.create_job": true
+  },
+  "avatar_ids": [
+    "avatar.adjust_section",
+    "avatar.assemble",
+    "avatar.check_continuity",
+    "avatar.compare_sections",
+    "avatar.create_job",
+    "avatar.create_plan",
+    "avatar.detect_speakers",
+    "avatar.get_job",
+    "avatar.get_provider_status",
+    "avatar.get_script_context",
+    "avatar.get_section",
+    "avatar.get_voice_context",
+    "avatar.inspect",
+    "avatar.open_studio",
+    "avatar.prepare_timeline",
+    "avatar.repair_lipsync",
+    "avatar.replace_voice",
+    "avatar.request_retake"
+  ]
+}

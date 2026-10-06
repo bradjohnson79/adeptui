@@ -8,8 +8,12 @@ from .adapters.kling_api import ALIASES as KLING_ALIASES
 from .adapters.kling_api import KlingApiAdapter
 from .adapters.ltx_25_local import ALIASES as LTX25_ALIASES
 from .adapters.ltx_25_local import Ltx25LocalAdapter
+from .adapters.minimax_h3_base_optimized import ALIASES as MINIMAX_BO_ALIASES
+from .adapters.minimax_h3_base_optimized import MiniMaxH3BaseOptimizedAdapter
 from .adapters.minimax_h3_i2v_local import ALIASES as MINIMAX_I2V_ALIASES
 from .adapters.minimax_h3_i2v_local import MiniMaxH3I2VLocalAdapter
+from .adapters.hunyuan15_distilled import ALIASES as HUNYUAN_DISTILLED_ALIASES
+from .adapters.hunyuan15_distilled import Hunyuan15DistilledAdapter
 from .adapters.minimax_h3_local import ALIASES as MINIMAX_T2V_ALIASES
 from .adapters.minimax_h3_local import MiniMaxH3LocalAdapter
 from .adapters.seedance_api import ALIASES as SEEDANCE_ALIASES
@@ -40,7 +44,9 @@ class VideoGeneratorRegistry:
         self._adapters = {
             MiniMaxH3LocalAdapter.id: MiniMaxH3LocalAdapter(),
             MiniMaxH3I2VLocalAdapter.id: MiniMaxH3I2VLocalAdapter(),
+            MiniMaxH3BaseOptimizedAdapter.id: MiniMaxH3BaseOptimizedAdapter(),
             Ltx25LocalAdapter.id: Ltx25LocalAdapter(),
+            Hunyuan15DistilledAdapter.id: Hunyuan15DistilledAdapter(),
             SeedanceApiAdapter.id: SeedanceApiAdapter(),
             Seedance25ApiAdapter.id: Seedance25ApiAdapter(),
             SeedanceMiniApiAdapter.id: SeedanceMiniApiAdapter(),
@@ -53,6 +59,10 @@ class VideoGeneratorRegistry:
             self._aliases[alias] = MiniMaxH3LocalAdapter.id
         for alias in MINIMAX_I2V_ALIASES:
             self._aliases[alias] = MiniMaxH3I2VLocalAdapter.id
+        for alias in MINIMAX_BO_ALIASES:
+            self._aliases[alias] = MiniMaxH3BaseOptimizedAdapter.id
+        for alias in HUNYUAN_DISTILLED_ALIASES:
+            self._aliases[alias] = Hunyuan15DistilledAdapter.id
         for alias in SEEDANCE_ALIASES:
             self._aliases[alias] = SeedanceApiAdapter.id
         for alias in SEEDANCE_25_ALIASES:
@@ -82,7 +92,7 @@ class VideoGeneratorRegistry:
 
         if is_retired_local_video(generator_id):
             raise GeneratorNotFoundError(
-                f"Retired generatorId={generator_id} — Adept UI uses MiniMax H3 and LTX 2.5 only. "
+                f"Retired generatorId={generator_id} — Adept UI local video is MiniMax H3, MiniMax H3 Base Optimized, LTX 2.5, and HunyuanVideo 1.5 Distilled. "
                 "WAN is NOT_PRODUCT_READY (retired; no Timeline adapter)."
             )
         if generator_id in self._adapters:

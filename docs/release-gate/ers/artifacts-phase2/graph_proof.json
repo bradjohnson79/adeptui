@@ -1,0 +1,37 @@
+{
+  "jobId": "588fc5ac-252e-4b12-89d2-0d7a35dd183d",
+  "comfyPromptId": "496c9b44-d7f6-4259-91b8-cb6c09d17224",
+  "status": "success",
+  "outputAssetId": "c1b26209-0480-432e-8328-b1cb8e10bc85",
+  "outputPath": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\projects\\2347bf46-3762-4763-86c5-4a6032522278\\assets\\imagegen_edit_4d64768e.png",
+  "resolution": [2560, 1440],
+  "stepsObserved": 20,
+  "cfgObserved": 3.5,
+  "loadImage": "studio/atlas_shot.png",
+  "loadImageIsOriginalCafePhoto": true,
+  "loadImageAssetId": "4d3062e8-8c30-4230-8376-bc25d1d4f735",
+  "promptTextClaimsAtlasId": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+  "parentImages": ["4d3062e8-8c30-4230-8376-bc25d1d4f735"],
+  "nodes": {
+    "5": "LoadImage",
+    "6": "TextEncodeQwenImageEdit",
+    "7": "TextEncodeQwenImageEdit",
+    "8": "EmptyLatentImage",
+    "9": "KSampler",
+    "10": "VAEDecode",
+    "11": "SaveImage"
+  },
+  "textEncodeImageLink": ["5", 0],
+  "ksampler": {
+    "model": ["4", 0],
+    "positive": ["6", 0],
+    "negative": ["7", 0],
+    "latent": ["8", 0]
+  },
+  "graphHash": "sha256:cd87c8625857c081fb88eed40bb9c9535f8337ffbf5acf853d4972e82d19677d",
+  "registryGraphHashMatch": true,
+  "currentDiskBuilderHashMatch": true,
+  "pixelsReachedEncoder": true,
+  "hardGate": "PASS — not text-only",
+  "visualCanonOnJob": null
+}

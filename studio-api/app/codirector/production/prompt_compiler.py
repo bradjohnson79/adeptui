@@ -457,27 +457,11 @@ class MiniMaxH3PromptCompiler:
         framing = plan.framing or spec.camera.framing or "wide"
         target = plan.target
 
-        if batch_count > 1:
-            start, end = _batch_window(spec, batch_index, batch_count)
-            beat_ids = _beats_in_window(intent, spec, batch_index, batch_count)
-            action = _scoped_action(intent, spec, batch_count, batch_index)
-        window_note = (
-            f"Duration:\n"
-            f"Seconds: {start:g}-{end:g}. This segment covers story seconds "
-            f"{start:g}–{end:g} of the scene."
-            + (
-                "\nThis is the first part of the scene — the story continues after it. "
-                "End mid-motion at a natural continuation point; do not compress the "
-                "whole scene into this segment."
-                if batch_index == 0
-                else (
-                    f"\nCONTINUATION\nThis segment continues directly from the final state of "
-                    f"the previous segment (story seconds {start:g}–{end:g}). Do not restart the "
-                    f"camera move, walk, or action from the beginning; advance the remaining "
-                    f"scene beats only."
-                )
-            )
+        action = _scoped_action(intent, spec, batch_count, batch_index)
+        beat_ids = (
+            _beats_in_window(intent, spec, batch_index, batch_count) if batch_count > 1 else None
         )
+        window_note = ""
 
         scoped_beats = (
             [b for b in intent.scene_beats if beat_ids is None or b.index in beat_ids]
@@ -693,23 +677,11 @@ class GenericTimelinePromptCompiler:
         batch_count: int,
     ) -> str:
         intent = _ensure_intent(spec, references)
-        beat_ids = _beats_in_window(intent, spec, batch_index, batch_count)
         action = _scoped_action(intent, spec, batch_count, batch_index)
-        start, end = _batch_window(spec, batch_index, batch_count)
-        window_note = (
-            f"Duration:\nSeconds: {start:g}-{end:g}. "
-            f"This segment covers story seconds {start:g}–{end:g} of the scene."
-        )
-        if batch_index > 0:
-            window_note += (
-                f"\nCONTINUATION\nThis segment continues directly from the final state of "
-                f"the previous segment (story seconds {start:g}–{end:g}). Do not restart the camera "
-                f"move, walk, or action from the beginning; advance the remaining scene beats only."
-            )
         names = ", ".join(
             (item.canonical_tag or item.display_name) for item in references if item.status == "found"
         )
-        return f"{window_note}\n{action}\n\nBound references: {names}".strip()
+        return f"{action}\n\nBound references: {names}".strip()
 
 
 _COMPILERS: dict[str, GeneratorPromptCompiler] = {

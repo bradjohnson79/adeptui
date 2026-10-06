@@ -588,6 +588,12 @@ def ensure_character_identity_tables() -> None:
         if profile_rows and not any(r[1] == "is_global" for r in profile_rows):
             conn.execute(text("ALTER TABLE character_profiles ADD COLUMN is_global BOOLEAN NOT NULL DEFAULT 0"))
             conn.commit()
+        voice_rows = conn.execute(text("PRAGMA table_info(voice_profiles)")).fetchall()
+        if voice_rows and not any(r[1] == "approved_voice_reference_asset_id" for r in voice_rows):
+            conn.execute(
+                text("ALTER TABLE voice_profiles ADD COLUMN approved_voice_reference_asset_id VARCHAR(36)")
+            )
+            conn.commit()
 
 
 def _coverage_for(db: Session, profile: CharacterProfileRow):
@@ -1238,6 +1244,12 @@ def approve_character_candidate(
     from .crs_service import persist_crs_in_session
 
     try:
+        if reference_role in {"hero_identity", "hero_portrait"}:
+            from ..scene_references.reference_eligibility import stamp_aligned_role
+
+            hero_asset = db.get(Asset, asset_id)
+            if hero_asset is not None:
+                stamp_aligned_role(hero_asset, "character")
         crs_payload = persist_crs_in_session(db, profile, asset_id=asset_id)
         _set_pack_hero_no_commit(db, project_id, character_id, asset_id, crs_payload)
         db.commit()
@@ -2134,6 +2146,592 @@ def fork_draft_voice_profile(
     return row, True
 
 
+def _provider_binding(lineage: Any) -> dict[str, Any]:
+    if not isinstance(lineage, dict):
+        return {}
+    binding = lineage.get("providerBinding")
+    return binding if isinstance(binding, dict) else {}
+
+
+def provider_voice_binding(voice: Any) -> dict[str, str] | None:
+    """Saved ElevenLabs identity. Display name is never used as the voice id."""
+    if isinstance(voice, dict):
+        lineage = voice.get("lineage") if isinstance(voice.get("lineage"), dict) else {}
+        provider = str(voice.get("provider") or "")
+        name = str(voice.get("voiceName") or voice.get("name") or "")
+        model = str(voice.get("providerModelId") or voice.get("model_id") or "")
+        explicit = str(voice.get("providerVoiceId") or "")
+    else:
+        lineage = _loads(getattr(voice, "lineage_json", None), {})
+        provider = str(getattr(voice, "provider", "") or "")
+        name = str(getattr(voice, "name", "") or "")
+        model = str(getattr(voice, "model_id", "") or "")
+        explicit = ""
+    binding = _provider_binding(lineage)
+    provider_id = str(binding.get("provider") or provider or "").strip().lower()
+    voice_id = str(binding.get("providerVoiceId") or explicit or "").strip()
+    if provider_id != "elevenlabs" or not voice_id:
+        return None
+    return {
+        "provider": "elevenlabs",
+        "providerVoiceId": voice_id,
+        "voiceName": str(binding.get("voiceName") or name or ""),
+        "providerModelId": str(binding.get("providerModelId") or model or ""),
+    }
+
+
+def _character_voice_rows(db: Session, character_id: str) -> list[VoiceProfileRow]:
+    return (
+        db.query(VoiceProfileRow)
+        .filter(VoiceProfileRow.character_profile_id == character_id)
+        .order_by(VoiceProfileRow.version_number.desc())
+        .all()
+    )
+
+
+def _row_is_elevenlabs(row: VoiceProfileRow) -> bool:
+    if str(getattr(row, "provider", "") or "").strip().lower() == "elevenlabs":
+        return True
+    return provider_voice_binding(row) is not None
+
+
+def unassign_active_voice(db: Session, project_id: str, character_id: str) -> dict[str, Any]:
+    """Clear the character's current voice. Saved profiles and audio stay."""
+
+    profile = _require_visible_profile(db, project_id, character_id)
+    profile.active_voice_profile_id = None
+    profile.updated_at = _now()
+    db.commit()
+    return active_voice_authority(db, project_id, character_id)
+
+
+def active_voice_authority(db: Session, project_id: str, character_id: str) -> dict[str, Any]:
+    """The character's one active voice. No pointer means no Character Voice."""
+    profile = _require_visible_profile(db, project_id, character_id)
+    active: dict[str, Any] | None = None
+    if profile.active_voice_profile_id:
+        row = db.get(VoiceProfileRow, profile.active_voice_profile_id)
+        if row and row.character_profile_id == character_id:
+            active = voice_to_dict(row, character_name=profile.name)
+    binding = provider_voice_binding(active) if active else None
+    reference_id = str((active or {}).get("approvedVoiceReferenceAssetId") or "")
+    if active is None:
+        provider = ""
+    elif binding:
+        provider = "elevenlabs"
+    else:
+        provider = "local"
+    return {
+        "provider": provider,
+        "activeVoiceProfileId": profile.active_voice_profile_id or "",
+        "voiceName": (binding or {}).get("voiceName") or (active or {}).get("name") or "",
+        "providerVoiceId": (binding or {}).get("providerVoiceId") or "",
+        "providerModelId": (binding or {}).get("providerModelId") or (active or {}).get("model_id") or "",
+        "approvedVoiceReferenceAssetId": reference_id,
+        "approvedVoiceReferenceAssetName": voice_reference_asset_name(db, reference_id),
+        "approved": bool(
+            active
+            and (
+                binding
+                or str(active.get("approval_status") or "").lower() == "approved"
+            )
+        ),
+        "activeVoice": active,
+    }
+
+
+def voice_reference_asset_name(db: Session, asset_id: str) -> str:
+    """Creator-facing name for a voice-reference Library asset (tag or filename)."""
+    if not asset_id:
+        return ""
+    asset = db.get(Asset, str(asset_id))
+    if asset is None:
+        return ""
+    return str(getattr(asset, "tag", "") or getattr(asset, "filename", "") or "")
+
+
+def set_approved_voice_reference(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    *,
+    asset_id: str,
+) -> dict[str, Any]:
+    """Point the active voice profile at an approved Library audio asset.
+
+    The file stays in the Library. Only its asset id is stored on the voice.
+    When the character has no saved voice yet, a minimal approved LIBRARY
+    VoiceProfileRow is created to carry the reference — still the canonical
+    voice store, never a parallel database. An existing active voice keeps
+    its provider binding untouched; only the reference pointer is attached.
+    """
+    profile = _require_visible_profile(db, project_id, character_id)
+    asset = db.get(Asset, str(asset_id))
+    if asset is None:
+        raise _err("ASSET_NOT_FOUND", "That audio is not in the Library.", 404)
+    if str(asset.project_id) not in {str(profile.project_id), str(project_id)}:
+        raise _err("ASSET_NOT_IN_PROJECT", "That audio belongs to another project.", 400)
+    if str(getattr(asset, "kind", "") or "") != "audio":
+        raise _err("ASSET_NOT_AUDIO", "Choose an audio asset for the voice reference.", 400)
+    row: VoiceProfileRow | None = None
+    if profile.active_voice_profile_id:
+        candidate = db.get(VoiceProfileRow, profile.active_voice_profile_id)
+        if candidate is not None and candidate.character_profile_id == character_id:
+            row = candidate
+    now = _now()
+    if row is None:
+        row = VoiceProfileRow(
+            id=str(uuid.uuid4()),
+            project_id=str(profile.project_id),
+            character_profile_id=character_id,
+            version_number=_next_voice_version_number(db, character_id),
+            name=str(asset.tag or asset.filename or "Library voice"),
+            source_mode="LIBRARY",
+            provider="",
+            model_id="",
+            status="APPROVED",
+            approval_status="approved",
+            approved_preview_asset_id=asset.id,
+            created_at=now,
+            updated_at=now,
+            approved_at=now,
+        )
+        db.add(row)
+        profile.active_voice_profile_id = row.id
+        profile.updated_at = now
+    row.approved_voice_reference_asset_id = asset.id
+    row.updated_at = now
+    db.commit()
+    return {
+        "ok": True,
+        "characterId": character_id,
+        "voiceProfileId": row.id,
+        "approvedVoiceReferenceAssetId": asset.id,
+        "approvedVoiceReferenceAssetName": voice_reference_asset_name(db, asset.id),
+        "mock": False,
+    }
+
+
+def assign_provider_voice(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    *,
+    provider_voice_id: str,
+    voice_name: str = "",
+    model_id: str = "",
+    voice_profile_id: str | None = None,
+) -> dict[str, Any]:
+    """Approve an ElevenLabs voice profile and make it the character's active voice.
+
+    A Local profile is never rewritten. Switching back to Local reactivates that row.
+    """
+    profile = _require_visible_profile(db, project_id, character_id)
+    vid = (provider_voice_id or "").strip()
+    if not vid:
+        raise _err("ELEVENLABS_VALIDATION", "Choose an ElevenLabs voice before saving.", 400)
+    rows = _character_voice_rows(db, character_id)
+    row = None
+    if voice_profile_id:
+        candidate = get_voice_or_none(db, project_id, character_id, voice_profile_id)
+        if candidate and _row_is_elevenlabs(candidate):
+            row = candidate
+    if row is None:
+        row = next((item for item in rows if _row_is_elevenlabs(item)), None)
+    now = _now()
+    if row is None:
+        row = VoiceProfileRow(
+            id=str(uuid.uuid4()),
+            project_id=str(profile.project_id),
+            character_profile_id=character_id,
+            version_number=_next_voice_version_number(db, character_id),
+            name=voice_name or "ElevenLabs voice",
+            source_mode="PROVIDER",
+            provider="elevenlabs",
+            model_id=model_id or "",
+            status="APPROVED",
+            approval_status="approved",
+            created_at=now,
+            updated_at=now,
+            approved_at=now,
+        )
+        db.add(row)
+    lineage = _loads(row.lineage_json, {})
+    lineage["providerBinding"] = {
+        "provider": "elevenlabs",
+        "providerVoiceId": vid,
+        "voiceName": voice_name or row.name or "",
+        "providerModelId": model_id or row.model_id or "",
+    }
+    row.provider = "elevenlabs"
+    row.source_mode = row.source_mode or "PROVIDER"
+    row.status = "APPROVED"
+    row.approval_status = "approved"
+    row.approved_at = row.approved_at or now
+    if model_id:
+        row.model_id = model_id
+    if voice_name:
+        row.name = voice_name
+    row.lineage_json = json.dumps(lineage, ensure_ascii=False)
+    row.updated_at = now
+    profile.active_voice_profile_id = row.id
+    profile.updated_at = now
+    db.commit()
+    db.refresh(row)
+    return voice_to_dict(row, character_name=profile.name)
+
+
+def activate_voice_provider(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    provider: str,
+) -> dict[str, Any]:
+    """Point the character at one saved provider without deleting the other."""
+    chosen = (provider or "").strip().lower()
+    if chosen not in {"local", "elevenlabs"}:
+        raise _err("VOICE_PROVIDER_INVALID", "Choose Local or ElevenLabs.", 400)
+    profile = _require_visible_profile(db, project_id, character_id)
+    rows = _character_voice_rows(db, character_id)
+    now = _now()
+    if chosen == "elevenlabs":
+        row = next((item for item in rows if _row_is_elevenlabs(item) and provider_voice_binding(item)), None)
+        if row is None:
+            raise _err(
+                "CHARACTER_VOICE_NOT_ASSIGNED",
+                "Choose an ElevenLabs voice and save it to this character.",
+                400,
+            )
+        if str(row.approval_status or "").lower() != "approved":
+            row.status = "APPROVED"
+            row.approval_status = "approved"
+            row.approved_at = now
+            row.updated_at = now
+        profile.active_voice_profile_id = row.id
+    else:
+        local = next(
+            (
+                item
+                for item in rows
+                if not _row_is_elevenlabs(item) and str(item.approval_status or "").lower() == "approved"
+            ),
+            None,
+        )
+        profile.active_voice_profile_id = local.id if local else None
+    profile.updated_at = now
+    db.commit()
+    return active_voice_authority(db, project_id, character_id)
+
+
+def generate_elevenlabs_sample(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    *,
+    text: str,
+    provider_voice_id: str,
+    model_id: str = "",
+    voice_name: str = "",
+) -> dict[str, Any]:
+    """Playable sample through the direct ElevenLabs adapter. Does not change the saved voice."""
+    _require_visible_profile(db, project_id, character_id)
+    spoken = (text or "").strip()
+    voice_id = (provider_voice_id or "").strip()
+    if not spoken:
+        raise _err("ELEVENLABS_VALIDATION", "Enter a line to hear this voice.", 400)
+    if not voice_id:
+        raise _err("CHARACTER_VOICE_NOT_ASSIGNED", "Choose an ElevenLabs voice first.", 400)
+    from ..generation_tools.lineage import register_derived_asset
+    from ..hosted_providers.adapters.elevenlabs_routed import generate_tts_routed
+
+    try:
+        generated = generate_tts_routed(
+            text=spoken,
+            voice_id=voice_id,
+            model_id=(model_id or "").strip() or None,
+            surface="voice-studio.sample",
+        )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        message = str(detail.get("message") or "ElevenLabs is currently unavailable. Check your API configuration in Setup.")
+        raise _err(str(detail.get("code") or "ELEVENLABS_UNAVAILABLE"), message, int(exc.status_code or 400)) from exc
+    proven = dict(generated.get("provenance") or {})
+    proven.pop("apiKey", None)
+    asset = register_derived_asset(
+        db,
+        project_id=project_id,
+        source_path=generated["path"],
+        kind="audio",
+        tag="voice",
+        parent_asset_id=None,
+        op="voice_sample_elevenlabs",
+        model=str(generated.get("model") or ""),
+        prompt_meta={
+            "prompt": spoken,
+            "localProvider": False,
+            "cloudPaid": True,
+            "libraryClass": "audio",
+            "audioRole": "voice-sample",
+            "voiceName": voice_name,
+            "characterId": character_id,
+            **proven,
+        },
+        library_key="audio.voice",
+    )
+    remembered = remember_voice_sample(
+        db,
+        project_id,
+        character_id,
+        asset_id=asset.id,
+        provider="elevenlabs",
+        provider_voice_id=voice_id,
+        model_id=(model_id or "").strip(),
+        voice_name=voice_name,
+        sample_name=voice_name or "ElevenLabs sample",
+    )
+    db.commit()
+    return {
+        "assetId": asset.id,
+        "provider": "elevenlabs",
+        "voiceName": voice_name,
+        "voiceProfileId": remembered["voiceProfileId"],
+        "candidateId": remembered["candidateId"],
+        "directApi": True,
+        "mock": False,
+    }
+
+
+def remember_voice_sample(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    *,
+    asset_id: str,
+    provider: str,
+    provider_voice_id: str = "",
+    model_id: str = "",
+    voice_name: str = "",
+    sample_name: str = "",
+    accent: str = "",
+) -> dict[str, Any]:
+    """Keep a playable sample on the character without making it the current voice."""
+
+    profile = _require_visible_profile(db, project_id, character_id)
+    chosen = (provider or "").strip().lower()
+    rows = _character_voice_rows(db, character_id)
+    if chosen == "elevenlabs":
+        row = next((item for item in rows if _row_is_elevenlabs(item)), None)
+    else:
+        row = next((item for item in rows if not _row_is_elevenlabs(item)), None)
+    now = _now()
+    if row is None:
+        row = VoiceProfileRow(
+            id=str(uuid.uuid4()),
+            project_id=str(profile.project_id),
+            character_profile_id=character_id,
+            version_number=_next_voice_version_number(db, character_id),
+            name=voice_name or ("ElevenLabs voice" if chosen == "elevenlabs" else "Voice"),
+            source_mode="PROVIDER" if chosen == "elevenlabs" else "DESIGN",
+            provider="elevenlabs" if chosen == "elevenlabs" else (provider or "local"),
+            model_id=model_id or "",
+            accent=accent or "",
+            status="DRAFT",
+            approval_status="draft",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+        db.flush()
+    lineage = _loads(row.lineage_json, {})
+    if (
+        chosen == "elevenlabs"
+        and provider_voice_id
+        and str(row.approval_status or "").lower() != "approved"
+    ):
+        lineage["providerBinding"] = {
+            "provider": "elevenlabs",
+            "providerVoiceId": provider_voice_id,
+            "voiceName": voice_name or row.name or "",
+            "providerModelId": model_id or row.model_id or "",
+        }
+        row.provider = "elevenlabs"
+        if model_id:
+            row.model_id = model_id
+        if voice_name and str(row.approval_status or "").lower() != "approved":
+            row.name = voice_name
+    if accent and not row.accent:
+        row.accent = accent
+    meta = list(lineage.get("candidatesMeta") or [])
+    candidate_id = str(uuid.uuid4())
+    meta.append(
+        {
+            "id": candidate_id,
+            "name": sample_name or f"Sample {len(meta) + 1}",
+            "assetId": asset_id,
+            "status": "ready",
+            "provider": "elevenlabs" if chosen == "elevenlabs" else "local",
+            "providerVoiceId": provider_voice_id,
+            "modelId": model_id,
+            "accent": accent,
+            "createdAt": now,
+        }
+    )
+    lineage["candidatesMeta"] = meta
+    row.lineage_json = json.dumps(lineage, ensure_ascii=False)
+    row.updated_at = now
+    db.flush()
+    return {"voiceProfileId": row.id, "candidateId": candidate_id}
+
+
+def _sample_from_candidate(row: VoiceProfileRow, candidate: dict[str, Any]) -> dict[str, Any] | None:
+    asset_id = str(candidate.get("assetId") or candidate.get("asset_id") or "")
+    candidate_id = str(candidate.get("id") or "")
+    if not asset_id or not candidate_id:
+        return None
+    if str(candidate.get("status") or "").lower() == "rejected":
+        return None
+    return {
+        "id": candidate_id,
+        "assetId": asset_id,
+        "status": str(candidate.get("status") or "ready"),
+        "provider": str(candidate.get("provider") or row.provider or ""),
+        "providerVoiceId": str(candidate.get("providerVoiceId") or ""),
+        "modelId": str(candidate.get("modelId") or ""),
+        "name": str(candidate.get("name") or ""),
+        "voiceProfileId": row.id,
+        "createdAt": str(candidate.get("createdAt") or ""),
+        "orphan": False,
+    }
+
+
+def character_playable_samples(db: Session, project_id: str, character_id: str) -> list[dict[str, Any]]:
+    """Saved candidates plus generated ElevenLabs audio that was not linked yet."""
+
+    _require_visible_profile(db, project_id, character_id)
+    rows = _character_voice_rows(db, character_id)
+    bound_voice_ids: set[str] = set()
+    samples: list[dict[str, Any]] = []
+    seen_assets: set[str] = set()
+    for row in rows:
+        lineage = _loads(row.lineage_json, {})
+        binding = _provider_binding(lineage)
+        voice_id = str(binding.get("providerVoiceId") or "")
+        if voice_id:
+            bound_voice_ids.add(voice_id)
+        for candidate in list(lineage.get("candidatesMeta") or []):
+            if not isinstance(candidate, dict):
+                continue
+            sample = _sample_from_candidate(row, candidate)
+            if not sample or sample["assetId"] in seen_assets:
+                continue
+            seen_assets.add(sample["assetId"])
+            samples.append(sample)
+    assets = (
+        db.query(Asset)
+        .filter(Asset.project_id == project_id, Asset.kind == "audio", Asset.tag == "voice")
+        .all()
+    )
+    for asset in assets:
+        if asset.id in seen_assets:
+            continue
+        meta = _loads(asset.prompt_meta_json, {})
+        if str(meta.get("op") or "") != "voice_sample_elevenlabs":
+            continue
+        owner = str(meta.get("characterId") or "")
+        voice_id = str(meta.get("providerVoiceId") or "")
+        if owner and owner != character_id:
+            continue
+        if not owner and voice_id not in bound_voice_ids:
+            continue
+        seen_assets.add(asset.id)
+        created = asset.created_at.isoformat() if asset.created_at else ""
+        samples.append(
+            {
+                "id": "",
+                "assetId": asset.id,
+                "status": "ready",
+                "provider": "elevenlabs",
+                "providerVoiceId": voice_id,
+                "modelId": str(meta.get("model") or meta.get("providerModelId") or ""),
+                "name": str(meta.get("voiceName") or "ElevenLabs sample"),
+                "voiceProfileId": "",
+                "createdAt": created,
+                "orphan": True,
+            }
+        )
+    samples.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
+    return samples
+
+
+def approve_generated_voice_asset(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    asset_id: str,
+    *,
+    approved_by: str = "owner",
+) -> dict[str, Any]:
+    """Approve one generated sample. Link it first when generation stored only the audio."""
+
+    from .voice_creator import approve_voice_candidate
+
+    wanted = (asset_id or "").strip()
+    if not wanted:
+        raise _err("NOT_FOUND", "That sample could not be found.", 404)
+    _require_visible_profile(db, project_id, character_id)
+    rows = _character_voice_rows(db, character_id)
+    for row in rows:
+        lineage = _loads(row.lineage_json, {})
+        for candidate in list(lineage.get("candidatesMeta") or []):
+            if str(candidate.get("assetId") or "") != wanted:
+                continue
+            return approve_voice_candidate(
+                db,
+                project_id,
+                character_id,
+                row.id,
+                candidate_id=str(candidate.get("id") or ""),
+                approved_by=approved_by,
+            )
+    asset = db.get(Asset, wanted)
+    if asset is None or str(asset.project_id) != str(project_id):
+        raise _err("NOT_FOUND", "That sample could not be found.", 404)
+    meta = _loads(asset.prompt_meta_json, {})
+    if str(meta.get("op") or "") != "voice_sample_elevenlabs":
+        raise _err("INVALID_STATUS", "Only a generated voice sample can be approved this way.", 400)
+    owner = str(meta.get("characterId") or "")
+    voice_id = str(meta.get("providerVoiceId") or "")
+    bound_voice_ids = {
+        str(_provider_binding(_loads(row.lineage_json, {})).get("providerVoiceId") or "")
+        for row in rows
+    }
+    bound_voice_ids.discard("")
+    if owner and owner != character_id:
+        raise _err("NOT_FOUND", "That sample belongs to another character.", 404)
+    if not owner and voice_id not in bound_voice_ids:
+        raise _err("NOT_FOUND", "That sample is not one of this character's generated voices.", 404)
+    remembered = remember_voice_sample(
+        db,
+        project_id,
+        character_id,
+        asset_id=wanted,
+        provider="elevenlabs",
+        provider_voice_id=voice_id,
+        model_id=str(meta.get("model") or meta.get("providerModelId") or ""),
+        voice_name=str(meta.get("voiceName") or ""),
+        sample_name=str(meta.get("voiceName") or "ElevenLabs sample"),
+    )
+    db.commit()
+    return approve_voice_candidate(
+        db,
+        project_id,
+        character_id,
+        remembered["voiceProfileId"],
+        candidate_id=remembered["candidateId"],
+        approved_by=approved_by,
+    )
+
+
 def voice_to_dict(row: VoiceProfileRow, *, character_name: str = "") -> dict[str, Any]:
     lineage = _loads(row.lineage_json, {})
     return {
@@ -2150,6 +2748,9 @@ def voice_to_dict(row: VoiceProfileRow, *, character_name: str = "") -> dict[str
         "source_mode": row.source_mode,
         "provider": row.provider,
         "model_id": row.model_id,
+        "providerVoiceId": _provider_binding(lineage).get("providerVoiceId") or "",
+        "voiceName": _provider_binding(lineage).get("voiceName") or row.name,
+        "providerModelId": _provider_binding(lineage).get("providerModelId") or row.model_id,
         "status": row.status,
         "approval_status": row.approval_status,
         "language": row.language,
@@ -2168,6 +2769,7 @@ def voice_to_dict(row: VoiceProfileRow, *, character_name: str = "") -> dict[str
         "reference_asset_id": row.reference_asset_id,
         "reference_transcript": row.reference_transcript,
         "approved_preview_asset_id": row.approved_preview_asset_id,
+        "approvedVoiceReferenceAssetId": row.approved_voice_reference_asset_id,
         "consent_record_id": row.consent_record_id,
         "candidate_asset_ids": _loads(row.candidate_asset_ids_json, []),
         "candidates": lineage.get("candidatesMeta") or [],

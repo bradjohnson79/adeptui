@@ -280,6 +280,49 @@ def _register_audio_asset(
     return asset
 
 
+def _resolve_environment_source(
+    db: Session,
+    *,
+    project_id: str,
+    character_id: str,
+    performance_record_id: str,
+    performance_take_id: str,
+    library_asset_id: str,
+) -> tuple[str, str, Asset]:
+    """Dry audio from a Library asset, or from an existing performance take."""
+    library_id = (library_asset_id or "").strip()
+    if library_id:
+        asset = db.get(Asset, library_id)
+        if (
+            not asset
+            or asset.project_id != project_id
+            or not asset.path
+            or not Path(asset.path).is_file()
+        ):
+            raise VoiceEnvironmentError(
+                "VOICE_PERFORMANCE_REQUIRED",
+                "Choose a voice recording from the Library.",
+                status_code=404,
+            )
+        take = (
+            db.query(VoicePerformanceTakeRow)
+            .filter(VoicePerformanceTakeRow.audio_asset_id == asset.id)
+            .first()
+        )
+        if take:
+            record = db.get(VoicePerformanceRecordRow, take.record_id)
+            if record and record.character_id == character_id:
+                return record.id, take.id, asset
+        return "library", asset.id, asset
+    record, take, asset = _require_take(
+        db,
+        character_id=character_id,
+        record_id=performance_record_id,
+        take_id=performance_take_id,
+    )
+    return record.id, take.id, asset
+
+
 def create_render(
     db: Session,
     *,
@@ -289,6 +332,7 @@ def create_render(
     performance_take_id: str,
     environment_profile_id: str,
     preview: bool = False,
+    library_asset_id: str = "",
 ) -> VoiceEnvironmentRender:
     status = runtime_status()
     if not status["ok"]:
@@ -303,8 +347,13 @@ def create_render(
     if not profile_row or profile_row.project_id != project_id:
         raise VoiceEnvironmentError("VOICE_ENVIRONMENT_PROFILE_INVALID", "Environment profile not found.", status_code=404)
 
-    record, take, dry_asset = _require_take(
-        db, character_id=character_id, record_id=performance_record_id, take_id=performance_take_id
+    record_id, take_id, dry_asset = _resolve_environment_source(
+        db,
+        project_id=project_id,
+        character_id=character_id,
+        performance_record_id=performance_record_id,
+        performance_take_id=performance_take_id,
+        library_asset_id=library_asset_id,
     )
     profile = _profile_to_contract(profile_row)
     dsp_plan = compile_dsp_plan(profile.model_dump())
@@ -321,8 +370,8 @@ def create_render(
         id=render_id,
         project_id=project_id,
         character_id=character_id,
-        performance_record_id=record.id,
-        performance_take_id=take.id,
+        performance_record_id=record_id,
+        performance_take_id=take_id,
         environment_profile_id=profile_row.id,
         dry_audio_asset_id=dry_asset.id,
         status="processing",
@@ -386,19 +435,20 @@ def create_render(
         row.processed_duration_ms = timing.processedDurationMs
         row.status = "preview_ready" if preview else "completed"
         row.updated_at = _now()
-        # Link on M410 record without mutating dry take.
-        linkage = dict(record.timeline_linkage_json or {})
-        env_link = {
-            "environmentProfileId": profile_row.id,
-            "environmentRenderId": render_id,
-            "dryAudioAssetId": dry_asset.id,
-            "processedAudioAssetId": processed_asset.id,
-            "timing": timing.model_dump(),
-            "preview": preview,
-        }
-        linkage["voiceEnvironment"] = env_link
-        record.timeline_linkage_json = linkage
-        record.updated_at = _now()
+        # Link a real performance record. A Library-only source has no record to update.
+        record = db.get(VoicePerformanceRecordRow, record_id) if record_id and record_id != "library" else None
+        if record is not None and record.character_id == character_id:
+            linkage = dict(record.timeline_linkage_json or {})
+            linkage["voiceEnvironment"] = {
+                "environmentProfileId": profile_row.id,
+                "environmentRenderId": render_id,
+                "dryAudioAssetId": dry_asset.id,
+                "processedAudioAssetId": processed_asset.id,
+                "timing": timing.model_dump(),
+                "preview": preview,
+            }
+            record.timeline_linkage_json = linkage
+            record.updated_at = _now()
         db.commit()
         db.refresh(row)
         return _render_to_contract(row)
@@ -638,7 +688,45 @@ def place_timeline(db: Session, render_id: str, *, scene_id: Optional[str] = Non
     ]
     audio_track["clips"].append(dict(proposal["clip"]))
 
-    project.settings_json = json.dumps(settings, ensure_ascii=False)
+    from ..film_timeline.insertion import add_to_timeline
+    from ..scene_service import list_scenes
+
+    target_scene = scene_id
+    record_row = db.get(VoicePerformanceRecordRow, row.performance_record_id)
+    if not target_scene and record_row:
+        target_scene = record_row.scene_id
+    if not target_scene:
+        scenes = list_scenes(db, row.project_id)
+        target_scene = scenes[0].id if scenes else None
+    if not target_scene:
+        raise VoiceEnvironmentError("VOICE_ENVIRONMENT_TIMELINE_HANDOFF_FAILED", "Open a scene on Timeline first.", status_code=409)
+    dialogue_asset = proposal["clip"].get("assetId")
+    if dialogue_asset:
+        add_to_timeline(
+            db,
+            row.project_id,
+            target_scene,
+            media_type="voice",
+            asset_id=str(dialogue_asset),
+            target_track_type="voice",
+            start_time=float(proposal["clip"].get("startMs") or 0) / 1000.0,
+            duration_sec=float(proposal["clip"].get("durationMs") or 0) / 1000.0,
+            label="Dialogue",
+            metadata={"environmentRenderId": row.id, "source": "voice-environment"},
+        )
+    for stem_asset, stem_label in ((row.room_tone_asset_id, "Room tone"), (row.walla_asset_id, "Walla")):
+        if not stem_asset:
+            continue
+        add_to_timeline(
+            db,
+            row.project_id,
+            target_scene,
+            media_type="ambience",
+            asset_id=str(stem_asset),
+            target_track_type="ambience",
+            label=stem_label,
+            metadata={"environmentRenderId": row.id, "source": "voice-environment"},
+        )
     project.updated_at = _now()
     record = db.get(VoicePerformanceRecordRow, row.performance_record_id)
     if record:

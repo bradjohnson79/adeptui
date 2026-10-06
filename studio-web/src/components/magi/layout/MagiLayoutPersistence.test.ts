@@ -4,6 +4,7 @@ import {
   validateMagiLayout,
   loadMagiLayout,
   applyPreset,
+  nextDualDrawerCollapsed,
 } from "./MagiLayoutPersistence";
 
 describe("MagiLayoutPersistence", () => {
@@ -79,6 +80,21 @@ describe("MagiLayoutPersistence", () => {
     });
     expect(layout).not.toBeNull();
     expect(layout!.leftPaneOrder).toEqual(["project", "library"]);
+  });
+
+  it("expand hides both drawers and retract restores both", () => {
+    expect(nextDualDrawerCollapsed(false, false)).toBe(true);
+    expect(nextDualDrawerCollapsed(true, false)).toBe(true);
+    expect(nextDualDrawerCollapsed(false, true)).toBe(true);
+    expect(nextDualDrawerCollapsed(true, true)).toBe(false);
+    const reset = applyPreset("default", {
+      ...DEFAULT_LAYOUT,
+      leftDockCollapsed: true,
+      rightDockCollapsed: true,
+      accordionState: { ...DEFAULT_LAYOUT.accordionState },
+    });
+    expect(reset.leftDockCollapsed).toBe(false);
+    expect(reset.rightDockCollapsed).toBe(false);
   });
 
   it("compare-review preset keeps Clip Properties expanded", () => {

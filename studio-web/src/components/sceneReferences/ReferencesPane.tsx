@@ -295,18 +295,29 @@ export function ReferencesPane({
       return false;
     }
     const localAsset = (project.assets || []).find((item) => item.id === candidate.assetId);
-    if (localAsset?.kind === "audio") {
-      setError("Audio stays on Lip Sync, SFX, or Music. It cannot be a typed reference.");
-      return false;
-    }
     // Prefer live asset kind when present; otherwise trust candidate.mediaKind from resolver.
     const assetMediaKind =
       (localAsset ? mediaKindForAssetKind(localAsset.kind) : null) ||
-      (candidate.mediaKind === "video" || candidate.mediaKind === "image" ? candidate.mediaKind : null) ||
+      (candidate.mediaKind === "video" || candidate.mediaKind === "audio" || candidate.mediaKind === "image"
+        ? candidate.mediaKind
+        : null) ||
       "image";
-    if (assetMediaKind !== "image" && assetMediaKind !== "video") {
-      setError("Only images and videos can be named as references.");
+    if (assetMediaKind !== "image" && assetMediaKind !== "video" && assetMediaKind !== "audio") {
+      setError("Only images, videos, and audio can be named as references.");
       return false;
+    }
+    // H3 (and any generator) caps: refuse 4th video/audio — never silently discard.
+    if (assetMediaKind === "video" || assetMediaKind === "audio") {
+      const maxRefs = 3;
+      const sameKind = items.filter((b) => String(b.media_kind || "").toLowerCase() === assetMediaKind);
+      if (sameKind.length >= maxRefs) {
+        setError(
+          assetMediaKind === "video"
+            ? `This generator supports up to ${maxRefs} video references.`
+            : `This generator supports up to ${maxRefs} audio references.`,
+        );
+        return false;
+      }
     }
     // One @/%/# tag per identity. @Cade is the same character as @CadeCRS.
     const dup = isAlreadyBound(
@@ -330,7 +341,7 @@ export function ReferencesPane({
         reference_type: candidate.referenceType,
         media_kind: assetMediaKind,
         alias: candidate.alias,
-        usage_modes: assetMediaKind === "video" ? ["motion"] : ["appearance"],
+        usage_modes: assetMediaKind === "video" ? ["motion"] : assetMediaKind === "audio" ? ["informational"] : ["appearance"],
         reference_roles: [candidate.referenceType],
       });
       await load();
@@ -392,14 +403,22 @@ export function ReferencesPane({
   };
 
   const attachAsset = async (asset: Pick<Asset, "id" | "kind" | "tag" | "filename">) => {
-    if (asset.kind === "audio") {
-      setError("Audio stays on Lip Sync, SFX, or Music. It cannot be a typed reference.");
-      return;
-    }
     const assetMediaKind = mediaKindForAssetKind(asset.kind);
     if (!assetMediaKind) {
-      setError("Only images and videos can be named as references.");
+      setError("Only images, videos, and audio can be named as references.");
       return;
+    }
+    if (assetMediaKind === "video" || assetMediaKind === "audio") {
+      const maxRefs = 3;
+      const sameKind = items.filter((b) => String(b.media_kind || "").toLowerCase() === assetMediaKind);
+      if (sameKind.length >= maxRefs) {
+        setError(
+          assetMediaKind === "video"
+            ? `This generator supports up to ${maxRefs} video references.`
+            : `This generator supports up to ${maxRefs} audio references.`,
+        );
+        return;
+      }
     }
     const identity = timelineLibraryIdentity(asset, { relatedAssets: project.assets });
     const referenceType = inferSemanticReferenceType({
@@ -408,7 +427,7 @@ export function ReferencesPane({
       alias: identity.title,
       mediaKind: assetMediaKind,
     });
-    // Keep media_kind as image/video from the asset; semantic type is separate.
+    // Keep media_kind as image/video/audio from the asset; semantic type is separate.
     const mediaKind = assetMediaKind;
     const alias =
       sanitizeAlias(identity.title) ||
@@ -435,7 +454,7 @@ export function ReferencesPane({
       reference_type: referenceType,
       media_kind: mediaKind,
       alias,
-      usage_modes: mediaKind === "video" ? ["motion"] : ["appearance"],
+      usage_modes: mediaKind === "video" ? ["motion"] : mediaKind === "audio" ? ["informational"] : ["appearance"],
       reference_roles: [referenceType],
     });
     await load();

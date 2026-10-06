@@ -20,6 +20,12 @@ type Props = {
   references: CharacterReference[];
   disabled?: boolean;
   onChanged: () => void | Promise<void>;
+  /**
+   * Unsaved character: remember the picture locally. The profile save attaches it
+   * after the character row exists, so a reload cannot replace the form with defaults.
+   */
+  onHoldReference?: (assetId: string, sourceType: "upload" | "library") => void | Promise<void>;
+  onClearHeldReference?: () => void | Promise<void>;
   /** Called when user chooses to use the reference as the identity candidate. */
   onUseAsIdentity?: (assetId: string, sourceType: "upload" | "library") => void | Promise<void>;
   onAskCoDirector?: (prompt: string, opts?: { autoSend?: boolean }) => void;
@@ -32,6 +38,8 @@ export function CharacterReferenceControl({
   references,
   disabled,
   onChanged,
+  onHoldReference,
+  onClearHeldReference,
   onUseAsIdentity,
   onAskCoDirector,
 }: Props) {
@@ -53,6 +61,10 @@ export function CharacterReferenceControl({
     setBusy(true);
     setError(null);
     try {
+      if (onHoldReference) {
+        await onHoldReference(assetId, sourceType);
+        return;
+      }
       await api.attachCharacterReference(projectId, characterId, {
         asset_id: assetId,
         reference_role: "reference_image",
@@ -87,6 +99,10 @@ export function CharacterReferenceControl({
     setBusy(true);
     setError(null);
     try {
+      if (onHoldReference) {
+        await onClearHeldReference?.();
+        return;
+      }
       await api.detachCharacterReference(projectId, characterId, refAssetId);
       await onChanged();
     } catch (e) {

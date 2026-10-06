@@ -17,6 +17,7 @@ from .authority import finishing_audio_labels
 from .finishing import clip_grade, finishing_of
 from .media import cleanup_dir, disk_preflight, new_temp_dir, probe_media, run_ffmpeg
 from .sequence.store import get_sequence
+from .upscale_targets import UpscaleTargetError, aspect_label, resolve_apply_target
 from .upscaling import ENGINE_FFMPEG, ENGINE_GPU, upscale_frame
 
 DEFAULT_MUSIC_GAIN = 0.28
@@ -35,6 +36,8 @@ def picture_clips(sequence: dict[str, Any]) -> list[dict[str, Any]]:
         kind = str(track.get("kind") or "")
         if tracks and kind and kind not in PICTURE_TRACK_KINDS:
             continue
+        if track.get("hidden"):
+            continue
         selected.append(clip)
     return selected
 
@@ -44,7 +47,14 @@ def enqueue_final_render(
     project_id: str,
     body: dict[str, Any],
 ) -> dict[str, Any]:
+    from .final_video_name import FINAL_VIDEO_NAME_CONFLICT, final_video_name_taken, parse_final_video_name
+
     profile = str(body.get("profile") or "final")
+    named = None
+    if profile != "preview":
+        named = parse_final_video_name(body.get("outputName"))
+        if final_video_name_taken(db, project_id, named):
+            raise ValueError(FINAL_VIDEO_NAME_CONFLICT)
     fingerprint = json.dumps(
         {
             "profile": profile,
@@ -53,16 +63,22 @@ def enqueue_final_render(
             "upscale": body.get("upscale"),
             "includeColor": body.get("includeColor", True),
             "includeAudio": body.get("includeAudio", True),
+            "outputName": named.title if named else "",
         },
         sort_keys=True,
     )
     params = {
         **body,
         "profile": profile,
+        "outputName": named.title if named else "",
+        "outputTitle": named.title if named else "",
+        "outputFile": named.filename if named else "",
         "fingerprint": f"render|{fingerprint}",
     }
     existing = magi_jobs.find_active_duplicate(db, project_id, "magi_final_render", params["fingerprint"])
     if existing is not None:
+        if existing.status == "queued":
+            magi_jobs.start_background(existing.id, lambda jid: magi_jobs.run_with_session(jid, run_final_render_job))
         return {
             "ok": True,
             "queued": existing.status in magi_jobs.ACTIVE,
@@ -78,7 +94,7 @@ def enqueue_final_render(
         project_id=project_id,
         kind="magi_final_render",
         params=params,
-        message="Queued MAGI final render",
+        message=named.title if named else "Queued MAGI final render",
     )
     if job.status == "queued":
         magi_jobs.start_background(job.id, lambda jid: magi_jobs.run_with_session(jid, run_final_render_job))
@@ -91,6 +107,35 @@ def enqueue_final_render(
         "profile": profile,
         "duplicate": False,
     }
+
+
+def upscale_requested(spec: Any) -> bool:
+    """True only when the request asks for an upscale. An engine alone still counts,
+    so an Off payload must be ``{"enabled": false}`` with no engine."""
+    return isinstance(spec, dict) and bool(spec.get("enabled") or spec.get("engine"))
+
+
+def note_stage(db: Session, job: Job, stage: str, message: str, progress: float) -> None:
+    """Commit a checkpoint the render actually reached. Progress never moves backward."""
+    job.stage = stage
+    job.message = message
+    job.progress = max(float(job.progress or 0), float(progress))
+    history: dict[str, Any] = {}
+    try:
+        parsed = json.loads(job.history_json or "{}")
+        if isinstance(parsed, dict):
+            history = parsed
+    except json.JSONDecodeError:
+        history = {}
+    stages = history.get("stages")
+    if not isinstance(stages, list):
+        stages = []
+    note = {"stage": stage, "message": message, "progress": job.progress}
+    if not stages or stages[-1].get("stage") != stage or stages[-1].get("message") != message:
+        stages.append(note)
+    history["stages"] = stages
+    job.history_json = json.dumps(history)
+    db.commit()
 
 
 def run_final_render_job(db: Session, job: Job) -> dict[str, Any]:
@@ -108,26 +153,36 @@ def run_final_render_job(db: Session, job: Job) -> dict[str, Any]:
     if range_mode in {"clip", "selected"} and selected_clip_id:
         clips = [c for c in clips if c.get("id") == selected_clip_id] or clips[:1]
     elif preview:
-        clips = clips[:1]
+        from .transitions import preview_clips
 
-    job.stage = "Dispatching"
-    job.message = "Preparing finishing render"
-    db.commit()
+        clips = preview_clips(clips)
+
+    note_stage(db, job, "Preparing scene", "Validating current MAGI settings…", 0.08)
     if magi_jobs.job_cancelled(db, job.id):
         return {"ok": False, "message": "Cancelled"}
 
     work = new_temp_dir("render")
     try:
         disk_preflight(need_bytes=2_000_000_000, label="MAGI final render")
-        job.stage = "Rendering"
-        job.progress = 0.15
-        db.commit()
+        note_stage(db, job, "Rendering final frames", "Rendering final frames…", 0.18)
         edit_path = _build_edit(db, job.project_id, clips, sequence, work / "edit.mp4", preview=preview)
 
         current = edit_path
         if params.get("includeOverlays", True):
             fps = max(int(sequence.get("frameRate") or 24), 1)
-            overlaid = _maybe_overlay(db, job.project_id, current, work / "overlay.mp4", fps=fps)
+
+            def _burn_notice() -> None:
+                note_stage(db, job, "Applying titles", "Applying titles and objects…", 0.4)
+
+            overlaid = _maybe_overlay(
+                db,
+                job.project_id,
+                current,
+                work / "overlay.mp4",
+                fps=fps,
+                sequence=sequence,
+                on_burn=_burn_notice,
+            )
             if overlaid:
                 current = overlaid
 
@@ -138,28 +193,32 @@ def run_final_render_job(db: Session, job: Job) -> dict[str, Any]:
             grade_params = dict(COLOR_PRESETS.get(preset_id, {}).get("params") or {})
             grade_params.update(grade.get("params") or {})
             if grade_params:
+                note_stage(db, job, "Applying color", "Applying MAGI color…", 0.52)
                 graded = work / "graded.mp4"
                 apply_color_grade(str(current), str(graded), grade_params)
                 current = graded
                 grade_meta = {"preset": preset_id or "custom", "parameters": grade_params}
 
-        job.progress = 0.45
-        db.commit()
         audio_meta: dict[str, Any] = {}
         if params.get("includeAudio", True):
+            audio_state = finishing.get("audio") if isinstance(finishing.get("audio"), dict) else {}
+            will_mix = bool(audio_state.get("musicAssetId") and not _track_kind_muted(sequence, "music")) or bool(
+                audio_state.get("sfxAssetId") and not _track_kind_muted(sequence, "sfx")
+            )
+            if will_mix:
+                note_stage(db, job, "Mixing sound", "Mixing sound…", 0.64)
+            else:
+                note_stage(db, job, "Preparing audio", "Keeping source audio…", 0.64)
             mixed = _mix_audio(db, job.project_id, sequence, finishing, current, work / "mixed.mp4")
             current = mixed[0]
             audio_meta = mixed[1]
-
-        job.progress = 0.6
-        job.stage = "Encoding"
-        db.commit()
 
         upscale_spec = params.get("upscale")
         if upscale_spec is None:
             upscale_spec = finishing.get("upscale") or {}
         upscale_meta: dict[str, Any] = {}
-        if isinstance(upscale_spec, dict) and (upscale_spec.get("enabled") or upscale_spec.get("engine")):
+        if upscale_requested(upscale_spec):
+            note_stage(db, job, "Applying video upscale", "Applying video upscale…", 0.78)
             engine = str(upscale_spec.get("engine") or (ENGINE_FFMPEG if preview else ENGINE_GPU))
             if preview and engine == ENGINE_GPU:
                 engine = ENGINE_FFMPEG
@@ -168,38 +227,74 @@ def run_final_render_job(db: Session, job: Job) -> dict[str, Any]:
                 params.get("resolution")
                 or params.get("targetResolution")
                 or upscale_spec.get("target")
-                or "1920x1080"
+                or ""
             )
-            tw, th = (1920, 1080)
-            if "x" in target.lower():
-                parts = target.lower().split("x")
-                tw, th = int(parts[0]), int(parts[1])
-            elif target.upper() == "4K":
-                tw, th = 3840, 2160
-            elif target.upper() == "1080P":
-                tw, th = 1920, 1080
-            upscaled = work / "upscaled.mp4"
-            upscale_frame(str(current), str(upscaled), engine, model, tw, th)
-            current = upscaled
-            upscale_meta = {"engine": engine, "model": model, "target": f"{tw}x{th}"}
+            picture = probe_media(current)
+            try:
+                tw, th, label = resolve_apply_target(
+                    int(picture.get("width") or 0),
+                    int(picture.get("height") or 0),
+                    target,
+                )
+            except UpscaleTargetError as exc:
+                note_stage(db, job, "Applying video upscale", str(exc), 0.78)
+                upscale_meta = {
+                    "applied": False,
+                    "reason": exc.code,
+                    "message": str(exc),
+                    "requested": target,
+                }
+            else:
+                upscaled = work / "upscaled.mp4"
+                upscale_frame(str(current), str(upscaled), engine, model, tw, th)
+                current = upscaled
+                upscale_meta = {
+                    "applied": True,
+                    "engine": engine,
+                    "model": model,
+                    "target": f"{tw}x{th}",
+                    "upscaleTarget": label,
+                    "width": tw,
+                    "height": th,
+                    "aspect": aspect_label(tw, th),
+                }
 
         if magi_jobs.job_cancelled(db, job.id):
             return {"ok": False, "message": "Cancelled"}
 
+        note_stage(db, job, "Finalizing output", "Finalizing output…", 0.92)
         probe = probe_media(current)
+        output_title = ""
+        output_file = ""
+        output_filename: str | None = None
+        if preview:
+            asset_tag = "magi_preview"
+        else:
+            from .final_video_name import FINAL_VIDEO_NAME_CONFLICT, final_video_name_taken, parse_final_video_name
+
+            named_output = parse_final_video_name(params.get("outputName") or params.get("outputTitle"))
+            if final_video_name_taken(db, job.project_id, named_output):
+                raise ValueError(FINAL_VIDEO_NAME_CONFLICT)
+            asset_tag = named_output.title
+            output_title = named_output.title
+            output_file = named_output.filename
+            output_filename = named_output.filename
         asset = register_derived_asset(
             db,
             project_id=job.project_id,
             source_path=current,
             kind="video",
-            tag="magi_final" if not preview else "magi_preview",
+            tag=asset_tag,
             parent_asset_id=clips[0].get("assetId"),
             op="magi_final_render",
             model=profile,
+            filename=output_filename,
             prompt_meta={
                 "operation": "final_render",
                 "sequenceId": sequence.get("id"),
                 "renderProfile": profile,
+                "outputName": output_title,
+                "outputFile": output_file,
                 "sourceAssets": [c.get("assetId") for c in clips],
                 "grade": grade_meta,
                 "audio": audio_meta,
@@ -229,7 +324,10 @@ def run_final_render_job(db: Session, job: Job) -> dict[str, Any]:
             "grade": grade_meta,
             "audio": audio_meta,
             "upscale": upscale_meta,
-            "message": "Final render ready" if not preview else "Preview render ready",
+            "message": output_file or ("Final render ready" if not preview else "Preview render ready"),
+            "outputName": output_title,
+            "outputFile": output_file,
+            "outputPath": asset.path,
             "sourcePreserved": True,
         }
     finally:
@@ -255,17 +353,36 @@ def _build_edit(
     *,
     preview: bool,
 ) -> Path:
+    from .transitions import (
+        apply_edge_fades,
+        canonical_transition,
+        join_picture_parts,
+        transition_in_seconds,
+        transition_seconds,
+    )
+
     fps = max(int(sequence.get("frameRate") or 24), 1)
-    parts: list[Path] = []
+    parts: list[dict[str, Any]] = []
     work = dest.parent
     for index, clip in enumerate(clips):
         src = _asset_path(db, project_id, clip.get("assetId"))
         if src is None:
             continue
+        full = max(int(clip.get("durationFrames") or clip.get("outPoint") or fps), 1) / fps
         start = max(int(clip.get("inPoint") or 0), 0) / fps
-        duration = max(int(clip.get("durationFrames") or clip.get("outPoint") or fps), 1) / fps
+        duration = full
+        kind = canonical_transition(str(clip.get("transitionOutId") or ""))
+        opening = canonical_transition(str(clip.get("transitionInId") or ""))
+        blend = transition_seconds(clip, fps) if kind and kind != "none" else 0.0
+        fade_in = transition_in_seconds(clip, fps) if index == 0 and opening == "fade" else 0.0
+        fade_out = transition_seconds(clip, fps) if index == len(clips) - 1 and kind == "fade" else 0.0
+        if fade_out:
+            kind = ""
+            blend = 0.0
         if preview:
-            duration = min(duration, 3.0)
+            duration = min(duration, max(3.0, blend + 0.5))
+            if blend:
+                start += max(0.0, full - duration)
         part = work / f"clip_{index:02d}.mp4"
         audio_args = ["-c:a", "aac"] if probe_has_audio(src) else ["-an"]
         run_ffmpeg(
@@ -286,18 +403,21 @@ def _build_edit(
                 str(part),
             ]
         )
-        parts.append(part)
+        if fade_in or fade_out:
+            apply_edge_fades(part, duration, fade_in, fade_out)
+        parts.append({"path": part, "duration": duration, "kind": kind if blend else "", "xfade": blend})
     if not parts:
         raise RuntimeError("No playable MAGI clips were found for render.")
+    if any(item.get("kind") for item in parts[:-1]):
+        join_picture_parts(parts, dest)
+        return dest
     if len(parts) == 1:
-        dest.write_bytes(parts[0].read_bytes()) if parts[0] != dest else None
-        if parts[0] != dest:
-            import shutil
+        import shutil
 
-            shutil.copy2(parts[0], dest)
+        shutil.copy2(parts[0]["path"], dest)
         return dest
     listing = work / "concat.txt"
-    listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8")
+    listing.write_text("".join(f"file '{item['path'].as_posix()}'\n" for item in parts), encoding="utf-8")
     run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(dest)])
     return dest
 
@@ -347,7 +467,16 @@ def _overlay_paint_key(el: dict[str, Any]) -> tuple[int, int]:
     return (slot_i, z)
 
 
-def _maybe_overlay(db: Session, project_id: str, video: Path, dest: Path, *, fps: int = 24) -> Path | None:
+def _maybe_overlay(
+    db: Session,
+    project_id: str,
+    video: Path,
+    dest: Path,
+    *,
+    fps: int = 24,
+    sequence: dict[str, Any] | None = None,
+    on_burn: Any = None,
+) -> Path | None:
     """Burn project overlay compositions into the edit video, or honest no-op/refuse.
 
     - No compositions / empty overlays ? return None (nothing to burn).
@@ -376,15 +505,22 @@ def _maybe_overlay(db: Session, project_id: str, video: Path, dest: Path, *, fps
         return None
 
     # Collect top-level overlays across all project compositions, sorted by zIndex.
+    hidden_slots = _hidden_objects_slots(sequence or {})
     top_overlays: list[tuple[int, int, dict[str, Any]]] = []
     for comp in comps:
         cw = int(comp.get("canvasWidth") or 1920)
         ch = int(comp.get("canvasHeight") or 1080)
         for el in comp.get("overlays") or []:
-            if isinstance(el, dict) and el.get("visible") is not False:
-                top_overlays.append((cw, ch, el))
+            if not isinstance(el, dict) or el.get("visible") is False:
+                continue
+            slot = 2 if el.get("objectsTrack") == 2 else 1
+            if slot in hidden_slots:
+                continue
+            top_overlays.append((cw, ch, el))
     if not top_overlays:
         return None
+    if on_burn is not None:
+        on_burn()
     top_overlays.sort(key=lambda item: _overlay_paint_key(item[2]))
 
     probe = probe_media(video)
@@ -524,6 +660,41 @@ def _maybe_overlay(db: Session, project_id: str, video: Path, dest: Path, *, fps
         ) from exc
 
 
+def _track_kind_muted(sequence: dict[str, Any], kind: str) -> bool:
+    return any(
+        str(track.get("kind") or "") == kind and bool(track.get("muted"))
+        for track in sequence.get("tracks") or []
+    )
+
+
+def _hidden_objects_slots(sequence: dict[str, Any]) -> set[int]:
+    slots: set[int] = set()
+    for track in sequence.get("tracks") or []:
+        if not track.get("hidden"):
+            continue
+        if str(track.get("kind") or "") not in {"objects", "graphics"}:
+            continue
+        slots.add(2 if track.get("objectsSlot") == 2 else 1)
+    return slots
+
+
+def _clip_start_ms(sequence: dict[str, Any], asset_id: Any) -> int:
+    """Sequence start of the finishing stem, in milliseconds. Missing clip stays at 0."""
+
+    wanted = str(asset_id or "").strip()
+    if not wanted:
+        return 0
+    fps = max(int(sequence.get("frameRate") or 24), 1)
+    starts = [
+        int(clip.get("startFrame") or 0)
+        for clip in sequence.get("clips") or []
+        if str(clip.get("assetId") or "") == wanted
+    ]
+    if not starts:
+        return 0
+    return max(0, int(round(min(starts) * 1000 / fps)))
+
+
 def _mix_audio(
     db: Session,
     project_id: str,
@@ -542,9 +713,9 @@ def _mix_audio(
     owner = project_id or sequence.get("projectId") or ""
     music = _asset_path(db, owner, audio_state.get("musicAssetId"))
     sfx = _asset_path(db, owner, audio_state.get("sfxAssetId"))
-    if music:
+    if music and not _track_kind_muted(sequence, "music"):
         stems.append(("music", music, DEFAULT_MUSIC_GAIN))
-    if sfx:
+    if sfx and not _track_kind_muted(sequence, "sfx"):
         stems.append(("sfx", sfx, DEFAULT_SFX_GAIN))
     # Dialogue stays on the picture (source video audio). Extra A2/A3 clips are
     # already represented by finishing.music/sfx and must not be stacked at 1.0.
@@ -557,14 +728,18 @@ def _mix_audio(
         inputs.extend(["-i", str(path)])
     filters = []
     mix_labels = []
-    if probe_has_audio(video):
+    if probe_has_audio(video) and not _track_kind_muted(sequence, "audio"):
         filters.append("[0:a]volume=1.0[a0]")
         mix_labels.append("[a0]")
-    for index, (_role, _path, gain) in enumerate(stems, start=1):
+    for index, (role, _path, gain) in enumerate(stems, start=1):
         label = f"a{index}"
-        filters.append(f"[{index}:a]volume={gain:.2f}[{label}]")
+        asset_id = audio_state.get("musicAssetId") if role == "music" else audio_state.get("sfxAssetId")
+        delay_ms = _clip_start_ms(sequence, asset_id)
+        filters.append(f"[{index}:a]volume={gain:.2f},adelay={delay_ms}:all=1[{label}]")
         mix_labels.append(f"[{label}]")
-    filters.append(f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:normalize=0:dropout_transition=0[aout]")
+    filters.append(
+        f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:duration=longest:normalize=0:dropout_transition=0[aout]"
+    )
     run_ffmpeg(
         [
             *inputs,

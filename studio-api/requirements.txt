@@ -2,9 +2,9 @@ cryptography>=43.0.0
 argon2-cffi>=23.1.0
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
-sqlalchemy==2.0.41
+sqlalchemy==2.0.54
 aiosqlite==0.21.0
-pydantic==2.11.7
+pydantic==2.13.5
 pydantic-settings==2.10.1
 httpx==0.28.1
 python-multipart==0.0.20
@@ -12,3 +12,7 @@ aiofiles==24.1.0
 Pillow==11.3.0
 opencv-python-headless>=4.8
 mediapipe>=0.10.14
+# Co-Director durable runtime. pydantic-ai 2.49 requires pydantic>=2.12.
+# DBOS 3 requires sqlalchemy>=2.0.43. Starlette and uvicorn stay on the FastAPI 0.116 pins.
+pydantic-ai[dbos]==2.49.0
+langfuse==4.15.6

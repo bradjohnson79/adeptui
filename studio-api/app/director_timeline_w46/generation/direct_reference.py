@@ -118,7 +118,12 @@ def _canonical_tag(alias: str | None, reference_type: str | None, media_kind: st
         token = canonical_token_only(raw) or "Reference"
         return f"{PREFIX_VIDEO}{token}"
     if kind == "audio":
-        return raw or canonical_token_only(raw)
+        from ...scene_references.sheet_tags import PREFIX_AUDIO, ALL_PREFIXES
+
+        token = canonical_token_only(raw) or "Audio"
+        if raw[:1] in ALL_PREFIXES:
+            return raw if raw[:1] == PREFIX_AUDIO else f"{PREFIX_AUDIO}{token}"
+        return f"{PREFIX_AUDIO}{token}"
     return sanitize_generator_tag(kind, raw)
 
 
@@ -369,14 +374,38 @@ def _ltx25_like(generator_id: str) -> bool:
     return token in LTX25_GENERATOR_IDS or token.startswith("ltx-2.5") or token.startswith("ltx_2_5")
 
 
-def _map_sockets(payload: DirectReferencePayload) -> None:
-    payload.sockets = []
-    generator_id = payload.generatorId
-    if _h3_like(generator_id):
-        visuals = payload.visual_items()
-        extras = visuals[9:]
-        visuals = visuals[:9]
-        for item in extras:
+def _seedance_like(generator_id: str) -> bool:
+    """fal Seedance products. Kie stays on the unsupported path."""
+    from .r2v import SEEDANCE_GENERATOR_IDS
+
+    token = str(generator_id or "").strip().lower()
+    return (
+        token in SEEDANCE_GENERATOR_IDS
+        or token.startswith("seedance-2")
+        or token.startswith("fal_seedance")
+    )
+
+
+def _single_start_image(generator_id: str) -> bool:
+    """Kling and Veo take one opening picture. Extra pictures are not dropped."""
+    token = str(generator_id or "").strip().lower()
+    return token.startswith("kling") or token.startswith("veo") or token in {"fal_kling", "fal_veo"}
+
+
+def _map_single_start_image(payload: DirectReferencePayload) -> None:
+    visuals = payload.visual_items()
+    if visuals:
+        first, *rest = visuals
+        payload.sockets.append(
+            DirectSocketBinding(
+                socket="start_image",
+                canonicalTag=first.canonicalTag,
+                assetId=first.assetId,
+                sourcePath=first.sourcePath,
+                kind=first.kind,
+            )
+        )
+        for item in rest:
             payload.blocked.append(
                 DirectReferenceBlock(
                     canonicalTag=item.canonicalTag,
@@ -385,7 +414,124 @@ def _map_sockets(payload: DirectReferencePayload) -> None:
                     message=f"{item.canonicalTag} could not be delivered to the selected generator reference input.",
                 )
             )
-        for index, item in enumerate(visuals):
+    for item in payload.motion:
+        payload.blocked.append(
+            DirectReferenceBlock(
+                canonicalTag=item.canonicalTag,
+                bindingId=item.bindingId,
+                reason="unsupported_motion_socket",
+                message=f"{item.canonicalTag} could not be delivered to the selected generator reference input.",
+            )
+        )
+    for item in payload.audio:
+        payload.blocked.append(
+            DirectReferenceBlock(
+                canonicalTag=item.canonicalTag,
+                bindingId=item.bindingId,
+                reason="unsupported_audio_socket",
+                message=f"{item.canonicalTag} could not be delivered to the selected generator reference input.",
+            )
+        )
+
+
+def _map_seedance_sockets(payload: DirectReferencePayload) -> None:
+    """Deliver checked pictures to fal Seedance image slots.
+
+    Seedance 2.0, Mini, Fast, and 2.5 accept the scene's character, place, and
+    prop images. A voice clip is refused here so it is not dropped silently.
+    """
+    image_limit = 4
+    video_limit = 1
+    try:
+        from .registry import get_registry
+
+        caps = get_registry().capabilities(payload.generatorId)
+        image_limit = max(0, int(getattr(caps, "maximumReferenceImages", 4) or 0))
+        video_limit = max(0, int(getattr(caps, "maximumReferenceVideos", 1) or 0))
+    except Exception:
+        pass
+    visuals = payload.visual_items()
+    for item in visuals[image_limit:]:
+        payload.blocked.append(
+            DirectReferenceBlock(
+                canonicalTag=item.canonicalTag,
+                bindingId=item.bindingId,
+                reason="over_limit",
+                message=f"{item.canonicalTag} could not be delivered to the selected generator reference input.",
+            )
+        )
+    for index, item in enumerate(visuals[:image_limit]):
+        payload.sockets.append(
+            DirectSocketBinding(
+                socket=f"ref_image_{index}",
+                canonicalTag=item.canonicalTag,
+                assetId=item.assetId,
+                sourcePath=item.sourcePath,
+                kind=item.kind,
+            )
+        )
+    motions = list(payload.motion)
+    for item in motions[video_limit:]:
+        payload.blocked.append(
+            DirectReferenceBlock(
+                canonicalTag=item.canonicalTag,
+                bindingId=item.bindingId,
+                reason="over_limit",
+                message=f"{item.canonicalTag} could not be delivered to the selected generator reference input.",
+            )
+        )
+    for index, item in enumerate(motions[:video_limit]):
+        payload.sockets.append(
+            DirectSocketBinding(
+                socket=f"ref_video_{index}",
+                canonicalTag=item.canonicalTag,
+                assetId=item.assetId,
+                sourcePath=item.sourcePath,
+                kind="motion",
+            )
+        )
+    for item in payload.audio:
+        payload.blocked.append(
+            DirectReferenceBlock(
+                canonicalTag=item.canonicalTag,
+                bindingId=item.bindingId,
+                reason="unsupported_audio_socket",
+                message=f"{item.canonicalTag} could not be delivered to the selected generator reference input.",
+            )
+        )
+
+
+def _map_sockets(payload: DirectReferencePayload) -> None:
+    payload.sockets = []
+    generator_id = payload.generatorId
+    if _h3_like(generator_id):
+        image_limit = 9
+        video_limit = 3
+        audio_limit = 3
+        try:
+            from .registry import get_registry
+
+            caps = get_registry().capabilities(payload.generatorId)
+            image_limit = max(0, int(getattr(caps, "maximumReferenceImages", 9) or 0))
+            video_limit = max(0, int(getattr(caps, "maximumReferenceVideos", 3) or 0))
+            audio_limit = max(0, int(getattr(caps, "maximumReferenceAudio", 3) or 0))
+            if not bool(getattr(caps, "supportsVideoReferences", False)):
+                video_limit = 0
+            if not bool(getattr(caps, "supportsAudioReferences", False)):
+                audio_limit = 0
+        except Exception:
+            pass
+        visuals = payload.visual_items()
+        for item in visuals[image_limit:]:
+            payload.blocked.append(
+                DirectReferenceBlock(
+                    canonicalTag=item.canonicalTag,
+                    bindingId=item.bindingId,
+                    reason="over_limit",
+                    message=f"{item.canonicalTag} could not be delivered to the selected generator reference input.",
+                )
+            )
+        for index, item in enumerate(visuals[:image_limit]):
             payload.sockets.append(
                 DirectSocketBinding(
                     socket=f"ref_image_{index}",
@@ -395,16 +541,37 @@ def _map_sockets(payload: DirectReferencePayload) -> None:
                     kind=item.kind,
                 )
             )
-        for item in payload.motion:
+        motions = list(payload.motion)
+        for item in motions[video_limit:]:
             payload.blocked.append(
                 DirectReferenceBlock(
                     canonicalTag=item.canonicalTag,
                     bindingId=item.bindingId,
-                    reason="unsupported_motion_socket",
+                    reason="over_limit" if video_limit > 0 else "unsupported_motion_socket",
                     message=f"{item.canonicalTag} could not be delivered to the selected generator reference input.",
                 )
             )
-        for index, item in enumerate(payload.audio):
+        for index, item in enumerate(motions[:video_limit]):
+            payload.sockets.append(
+                DirectSocketBinding(
+                    socket=f"ref_video_{index}",
+                    canonicalTag=item.canonicalTag,
+                    assetId=item.assetId,
+                    sourcePath=item.sourcePath,
+                    kind="motion",
+                )
+            )
+        audios = list(payload.audio)
+        for item in audios[audio_limit:]:
+            payload.blocked.append(
+                DirectReferenceBlock(
+                    canonicalTag=item.canonicalTag,
+                    bindingId=item.bindingId,
+                    reason="over_limit" if audio_limit > 0 else "unsupported_audio_socket",
+                    message=f"{item.canonicalTag} could not be delivered to the selected generator reference input.",
+                )
+            )
+        for index, item in enumerate(audios[:audio_limit]):
             payload.sockets.append(
                 DirectSocketBinding(
                     socket=f"ref_audio_{index}",
@@ -459,6 +626,14 @@ def _map_sockets(payload: DirectReferencePayload) -> None:
             )
         return
 
+    if _seedance_like(generator_id):
+        _map_seedance_sockets(payload)
+        return
+
+    if _single_start_image(generator_id):
+        _map_single_start_image(payload)
+        return
+
     for item in payload.all_items():
         payload.blocked.append(
             DirectReferenceBlock(
@@ -474,6 +649,7 @@ def payload_to_r2v_slots(payload: DirectReferencePayload) -> list[R2VSlot]:
     slots: list[R2VSlot] = []
     picture = 0
     audio = 0
+    video = 0
     role_map = {
         "character": "character",
         "environment": "place",
@@ -488,12 +664,16 @@ def payload_to_r2v_slots(payload: DirectReferencePayload) -> list[R2VSlot]:
         role = role_map[item.kind]
         picture_index = None
         audio_index = None
+        video_index = None
         if item.kind in {"character", "environment", "prop"}:
             picture += 1
             picture_index = picture
         elif item.kind == "audio":
             audio += 1
             audio_index = audio
+        elif item.kind == "motion":
+            video += 1
+            video_index = video
         slots.append(
             R2VSlot(
                 role=role,  # type: ignore[arg-type]
@@ -502,7 +682,8 @@ def payload_to_r2v_slots(payload: DirectReferencePayload) -> list[R2VSlot]:
                 identityId=item.identityId,
                 pictureIndex=picture_index,
                 audioIndex=audio_index,
-                aliases=[item.canonicalTag.lstrip("@#%*"), item.canonicalTag],
+                videoIndex=video_index,
+                aliases=[item.canonicalTag.lstrip("@#%*&"), item.canonicalTag],
             )
         )
     return slots

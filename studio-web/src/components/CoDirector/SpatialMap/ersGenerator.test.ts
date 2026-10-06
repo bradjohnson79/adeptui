@@ -75,6 +75,7 @@ describe("ERS generator selector", () => {
     expect(formatErsProvenance({ model: "qwen2512.txt2img", sourceKind: "Local" })).toBe(
       "Generating with Qwen Image · Reference",
     );
+    expect(formatErsProvenance({ model: "env:FLUX", sourceKind: "API" })).toBe("Generating with FLUX");
     expect(formatErsProvenance({ model: "gpt-image-2-image-to-image", sourceKind: "API" })).toBe(
       "Generating with GPT Image 2 · Image Edit",
     );

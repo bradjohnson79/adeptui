@@ -24,7 +24,7 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     await ensureShotDir();
   });
 
-  test("GENSTUDIO-UI-01 Hero renders with local artwork and SVG overlay", async ({
+  test("GENSTUDIO-UI-01 Compact hero renders the local emblem", async ({
     page,
     request,
   }) => {
@@ -32,13 +32,12 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     await gotoHome(page);
     const hero = page.getByTestId("generation-studio-hero");
     await expect(hero).toBeVisible();
-    const img = page.getByTestId("generation-studio-hero-image");
-    await expect(img).toBeVisible();
-    const src = await img.getAttribute("src");
-    expect(src || "").toMatch(/\/images\/hero\/Adept_UI_Hero_header\.(png|webp)/);
+    await expect(page.getByRole("heading", { name: "ADEPT UI", exact: true })).toBeVisible();
+    await expect(page.getByText("AI-Powered Film Production")).toBeVisible();
+    await expect(page.getByTestId("generation-studio-hero-image")).toHaveCount(0);
     const logo = page.getByTestId("generation-studio-hero-logo");
     await expect(logo).toBeVisible();
-    await expect(logo).toHaveAttribute("src", /\/brand\/adept-ui-logo\.svg/);
+    await expect(logo).toHaveAttribute("src", /\/brand\/adept-ui-emblem\.webp/);
     await page.screenshot({ path: path.join(SHOT_DIR, "01-hero.png"), fullPage: false });
   });
 
@@ -50,22 +49,23 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     await expect(page.getByText("NEW PRODUCTION", { exact: false })).toHaveCount(0);
   });
 
-  test("GENSTUDIO-UI-03 Co-Director feature card is visible above templates", async ({
+  test("GENSTUDIO-UI-03 Co-Director feature card is visible above projects", async ({
     page,
     request,
   }) => {
     await waitForAppReady(request);
     await gotoHome(page);
     const card = page.getByTestId("codirector-launch-card");
-    const templates = page.getByTestId("browse-templates-card");
+    const projects = page.getByTestId("projects-hero");
     await expect(card).toBeVisible();
     await expect(page.getByTestId("codirector-launch-image")).toBeVisible();
     await expect(page.getByTestId("enter-codirector")).toBeVisible();
     await expect(page.getByTestId("codirector-launch-composer")).toHaveCount(0);
+    await expect(page.getByTestId("browse-templates-card")).toHaveCount(0);
     const cardBox = await card.boundingBox();
-    const templatesBox = await templates.boundingBox();
-    expect(cardBox && templatesBox).toBeTruthy();
-    expect(cardBox!.y).toBeLessThan(templatesBox!.y);
+    const projectsBox = await projects.boundingBox();
+    expect(cardBox && projectsBox).toBeTruthy();
+    expect(cardBox!.y).toBeLessThan(projectsBox!.y);
   });
 
   test("GENSTUDIO-UI-04 Home composer and prompt starters are absent", async ({ page, request }) => {
@@ -117,38 +117,26 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     await expect(context).toHaveText(/Active project:|Open Co-Director to choose or continue a project\./);
   });
 
-  test("GENSTUDIO-UI-08 Project Templates use real inventory", async ({ page, request }) => {
+  test("GENSTUDIO-UI-08 Projects header replaces Browse Templates", async ({ page, request }) => {
     await waitForAppReady(request);
     await gotoHome(page);
-    await expect(page.getByTestId("browse-templates-card")).toBeVisible();
-    const slides = page.locator("[data-testid^='carousel-slide-']");
-    const count = await slides.count();
-    expect(count).toBeGreaterThanOrEqual(10);
-    for (const id of [
-      "narrative",
-      "explainer",
-      "documentary",
-      "social",
-      "trailer",
-      "talking-avatar",
-      "web-series",
-      "brand-ad",
-    ]) {
-      await expect(page.getByTestId(`carousel-slide-${id}`)).toBeAttached();
-    }
-    await expect(page.getByTestId("carousel-page-indicator")).toHaveText(`1 / ${count}`);
+    await expect(page.getByTestId("projects-hero")).toBeVisible();
+    await expect(page.getByTestId("projects-hero-summary")).toBeVisible();
+    await expect(page.getByTestId("home-active-project-banner")).toBeVisible();
+    await expect(page.getByTestId("home-previous-project")).toBeVisible();
+    await expect(page.getByTestId("browse-templates-card")).toHaveCount(0);
+    await expect(page.getByTestId("template-carousel")).toHaveCount(0);
     await expect(page.getByText("Fake Template XYZ")).toHaveCount(0);
-    await expect(page.getByTestId("project-templates-grid")).toHaveCount(0);
   });
 
-  test("GENSTUDIO-UI-09 Template selection reaches real template flow", async ({
+  test("GENSTUDIO-UI-09 Create Project stays on the projects header", async ({
     page,
     request,
   }) => {
     await waitForAppReady(request);
     await gotoHome(page);
-    await page.getByTestId("carousel-slide-narrative").click();
-    await expect(page).toHaveURL(/\/project\//, { timeout: 30_000 });
+    await page.getByTestId("create-project-open").click();
+    await expect(page.getByTestId("create-project-modal")).toBeVisible();
   });
 
   test("GENSTUDIO-UI-10 Create Project opens real blank-project flow", async ({
@@ -163,46 +151,19 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     await page.screenshot({ path: path.join(SHOT_DIR, "10-create-project-modal.png") });
   });
 
-  test("GENSTUDIO-UI-11 Browse Templates carousel is keyboard operable", async ({
+  test("GENSTUDIO-UI-11 Projects header keeps create and project actions", async ({
     page,
     request,
   }) => {
     await waitForAppReady(request);
     await gotoHome(page);
-    const track = page.getByTestId("carousel-track");
-    const viewport = page.locator(".gs-carousel__viewport");
-    await expect(page.getByTestId("carousel-prev")).toBeVisible();
-    await expect(page.getByTestId("carousel-next")).toBeVisible();
-    const slideCount = await page.locator("[data-testid^='carousel-slide-']").count();
-    expect(slideCount).toBeGreaterThanOrEqual(10);
-    await expect(page.getByTestId("carousel-page-indicator")).toHaveText(`1 / ${slideCount}`);
+    await expect(page.getByTestId("create-project-open")).toBeVisible();
+    await expect(page.getByTestId("home-active-project-name")).toBeVisible();
+    await expect(page.getByTestId("home-previous-project-name")).toBeVisible();
+    await expect(page.getByTestId("carousel-next")).toHaveCount(0);
 
-    // Controlled transform carousel — never a native horizontal scroll surface.
-    const overflowX = await track.evaluate((el) => getComputedStyle(el).overflowX);
-    expect(["visible", "clip", "hidden"]).toContain(overflowX);
-    const viewportOverflow = await viewport.evaluate((el) => getComputedStyle(el).overflowX);
-    expect(["hidden", "clip"]).toContain(viewportOverflow);
-    // No classic horizontal scrollbar gutter on the viewport.
-    const scrollbarDx = await viewport.evaluate((el) => el.offsetWidth - el.clientWidth);
-    expect(scrollbarDx).toBeLessThanOrEqual(1);
-
-    await track.focus();
-    await page.keyboard.press("ArrowRight");
-    await expect(page.getByTestId("carousel-page-indicator")).toHaveText(`2 / ${slideCount}`);
-    await page.keyboard.press("ArrowLeft");
-    await expect(page.getByTestId("carousel-page-indicator")).toHaveText(`1 / ${slideCount}`);
-
-    await page.getByTestId("carousel-next").click();
-    await expect(page.getByTestId("carousel-page-indicator")).toHaveText(`2 / ${slideCount}`);
-    await expect(page.getByTestId("carousel-slide-dialogue")).toHaveAttribute("aria-selected", "true");
-
-    // Wrap at end
-    for (let i = 0; i < slideCount - 1; i += 1) {
-      await page.getByTestId("carousel-next").click();
-    }
-    await expect(page.getByTestId("carousel-page-indicator")).toHaveText(`1 / ${slideCount}`);
-
-    await page.screenshot({ path: path.join(SHOT_DIR, "11-template-carousel.png") });
+    await page.getByTestId("create-project-open").focus();
+    await expect(page.getByTestId("create-project-open")).toBeFocused();
   });
 
   test("GENSTUDIO-UI-12 Existing Explore Adept UI routes remain live", async ({
@@ -248,7 +209,6 @@ test.describe("M3.2d Generation Studio Aurora @DETERMINISTIC", () => {
     await gotoHome(page);
     await expect(page.getByTestId("create-project-open")).toHaveClass(/ui-btn/);
     await expect(page.getByTestId("enter-codirector")).toHaveClass(/ui-btn/);
-    await expect(page.getByTestId("carousel-next")).toHaveClass(/ui-btn/);
   });
 
   test("GENSTUDIO-UI-16 Narrow desktop has no unexpected horizontal scroll", async ({

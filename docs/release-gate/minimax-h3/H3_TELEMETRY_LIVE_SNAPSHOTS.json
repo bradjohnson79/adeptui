@@ -1,0 +1,93 @@
+{
+  "jobId": "fd0c9c58-184d-4846-a789-91629cf4559f",
+  "generationJobId": "job_3f4d760ff6ea",
+  "comfyPromptId": "d6727573-3f5e-43fb-a1d0-ad5504c3ef6e",
+  "projectId": "beffd3d8-791d-4adf-9c4d-681ec9d4efb0",
+  "sceneId": "6a7a8a8b-71a1-41e2-8900-871c1b3d71db",
+  "batchId": "bb_a2da11efffe7",
+  "path": "MiniMax H3 Local R2V Quality — PathchSageAttentionKJ, no EasyCache, 1920x1088, length 362",
+  "comfyPid": 34484,
+  "snapshots": [
+    {
+      "mark": "T+0",
+      "local": "2026-09-16T20:05:40-07:00",
+      "status": "running",
+      "progress": 0.05,
+      "progressGrounded": false,
+      "phase": "sampling",
+      "phaseLabel": "Generating",
+      "node": "125",
+      "stalled": false,
+      "lastRuntimeEventAt": "2026-09-17T03:05:39Z",
+      "comfyRunning": 1,
+      "gpu": "100% / ~32120 MiB"
+    },
+    {
+      "mark": "T+30s",
+      "local": "2026-09-16T20:06:27-07:00",
+      "status": "running",
+      "progressGrounded": false,
+      "phaseLabel": "Generating",
+      "node": "125",
+      "stalled": false,
+      "lastRuntimeEventAt": "2026-09-17T03:06:27Z",
+      "elapsedActiveTime": 64,
+      "gpu": "100%"
+    },
+    {
+      "mark": "T+2m",
+      "local": "2026-09-16T20:08:19-07:00",
+      "status": "running",
+      "progressGrounded": false,
+      "phaseLabel": "Generating",
+      "node": "125",
+      "stalled": false,
+      "lastRuntimeEventAt": "2026-09-17T03:08:17Z",
+      "lastProgressAt": "2026-09-17T03:05:36Z",
+      "elapsedActiveTime": 175,
+      "gpu": "100% / 32071 MiB"
+    },
+    {
+      "mark": "T+5m",
+      "local": "2026-09-16T20:11:17-07:00",
+      "status": "running",
+      "progress": 0.05,
+      "progressGrounded": false,
+      "phase": "sampling",
+      "phaseLabel": "Generating",
+      "node": "125",
+      "stalled": false,
+      "lastRuntimeEventAt": "2026-09-17T03:11:17Z",
+      "lastProgressAt": "2026-09-17T03:05:36Z",
+      "elapsedActiveTime": 353,
+      "comfyRunning": 1,
+      "gpu": "0% snapshot / 32076 MiB (next samples 100%)"
+    },
+    {
+      "mark": "T+8.5m",
+      "local": "2026-09-16T20:14:00-07:00",
+      "status": "running",
+      "progressGrounded": false,
+      "phaseLabel": "Generating",
+      "node": "125",
+      "stalled": false,
+      "lastRuntimeEventAt": "2026-09-17T03:13:58Z",
+      "elapsedActiveTime": 515,
+      "comfyRunning": 1,
+      "gpu": "100% / 32001 MiB"
+    },
+    {
+      "mark": "T+10m",
+      "local": "2026-09-16T20:15:30-07:00",
+      "status": "running",
+      "progressGrounded": false,
+      "phaseLabel": "Generating",
+      "node": "125",
+      "stalled": false,
+      "lastRuntimeEventAt": "2026-09-17T03:15:29Z",
+      "elapsedActiveTime": 605,
+      "comfyRunning": 1,
+      "gpu": "100% / 31917 MiB"
+    }
+  ]
+}

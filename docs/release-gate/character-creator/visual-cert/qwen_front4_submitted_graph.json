@@ -1,0 +1,15 @@
+{
+  "prompt_id": "65308372-370d-48bf-893e-65e8396d3490",
+  "graph_node_count": 0,
+  "history_present": false,
+  "qwen_encode_nodes": [],
+  "reference_conditioning_verified": false,
+  "positive_prompt": null,
+  "negative_prompt": null,
+  "leak1_old_reproduce_present": false,
+  "leak1_new_identity_only_present": false,
+  "leak2_negative_has_collage_concepts": false,
+  "leak2_negative_is_only_blurry_default": false,
+  "continuity_has_role_enumeration": false,
+  "negative_has_blonde_aqua": false
+}

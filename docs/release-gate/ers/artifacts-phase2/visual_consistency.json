@@ -1,0 +1,37 @@
+{
+  "acceptanceQuestion": "Could these views plausibly be photographs/technical representations of the exact same physical set?",
+  "verdict": "FAIL — ERS CONSISTENCY NOT CERTIFIED",
+  "source": {
+    "assetId": "4d3062e8-8c30-4230-8376-bc25d1d4f735",
+    "filename": "Korri Coffee House.png",
+    "size": [1536, 1024],
+    "bytes": 2652664,
+    "description": "Korri's Coffee House photo: leather sofa left, long dark bar center, tables right, EXIT/windows left, brick and COFFEE FOCUS CREATE right."
+  },
+  "atlas": {
+    "assetId": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+    "filename": "imagegen_edit_ac9ac1e1.png",
+    "size": [1280, 1280],
+    "bytes": 2296867,
+    "description": "Top-down multi-room light-wood floor plan. Not the same physical café as the source photo."
+  },
+  "productErs": {
+    "jobId": "588fc5ac-252e-4b12-89d2-0d7a35dd183d",
+    "assetId": "c1b26209-0480-432e-8328-b1cb8e10bc85",
+    "size": [2560, 1440],
+    "description": "Abstract dark void with neon yellow scribbles. Not a café. Not an ERS sheet."
+  },
+  "graphRecertClipTextEncodeNegative": {
+    "promptId": "e38c7ad9-7285-432c-b928-a9f99ba54b31",
+    "steps": 50,
+    "cfg": 4.0,
+    "result": "pure black 2560x1440; negative CLIPTextEncode reverted"
+  },
+  "nativeSmoke": {
+    "promptId": "6c88b866-399d-43d8-a42d-33beb61d17f4",
+    "size": [1328, 1328],
+    "meanRgb": [1, 1, 0],
+    "result": "near-black; short preserve-cafe prompt did not recover the set"
+  },
+  "rootCause": "Whole-sheet 9-panel ERS prompt at 2560x1440 with EmptyLatentImage denoise 1.0 does not preserve Schnick geometry. Atlas is a different building than the source photo. Visual Canon was unavailable so canon injection could not constrain architecture. Bounded graph tweaks (steps/cfg, CLIPTextEncode negative) did not produce the café; CLIPTextEncode negative made output black and was reverted. Per-panel ERS v2 was not created."
+}

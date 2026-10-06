@@ -32,6 +32,12 @@
   gap: var(--space-3);
 }
 
+.route-fallback {
+  min-height: 40vh;
+  margin: var(--space-5);
+  justify-content: center;
+}
+
 .ds-empty-state__art {
   width: min(220px, 70%);
   aspect-ratio: 16 / 10;

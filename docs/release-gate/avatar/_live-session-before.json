@@ -1,0 +1,146 @@
+﻿{
+    "id":  "avs-a10ef709c2",
+    "project_id":  "2347bf46-3762-4763-86c5-4a6032522278",
+    "name":  "Anadriya Presenter Session",
+    "mode":  "talking_portrait",
+    "character_profile_id":  "b7086f85-3ee3-44db-a395-ae1a94e37fe1",
+    "character_name":  "Anadriya",
+    "continuity_lock":  true,
+    "active_job_id":  null,
+    "look":  {
+                 "id":  "look-1787073381754",
+                 "name":  "Default Look",
+                 "framing":  "medium close-up",
+                 "wardrobe":  "",
+                 "expression":  "neutral",
+                 "pose":  "upright",
+                 "camera_angle":  "three-quarter",
+                 "lens":  "50mm",
+                 "background":  "neutral gray",
+                 "lighting":  "soft key, gentle fill",
+                 "style":  "cinematic live-action",
+                 "aspect":  "16:9",
+                 "portrait_asset_id":  null
+             },
+    "voice":  {
+                  "provider":  "upload",
+                  "model":  "",
+                  "speaker_id":  "",
+                  "language":  "en",
+                  "accent":  "",
+                  "tone":  "natural",
+                  "pitch":  "medium",
+                  "pace":  "moderate",
+                  "emotional_range":  "restrained",
+                  "pronunciation_notes":  "",
+                  "stability":  "high",
+                  "usage_rights":  "project",
+                  "audio_asset_id":  null,
+                  "fallback_audio_asset_id":  null,
+                  "profile_id":  null,
+                  "approved_record_id":  null,
+                  "approved_take_id":  null
+              },
+    "dialogue_original":  "",
+    "dialogue_spoken":  "",
+    "dialogue_adaptation_accepted":  null,
+    "performance":  {
+                        "tone":  "restrained",
+                        "eye_contact":  "slightly off-camera",
+                        "head_movement":  "minimal",
+                        "blink_frequency":  "natural",
+                        "shoulder_movement":  "low",
+                        "gesture_intensity":  "low",
+                        "breathing":  "subtle",
+                        "facial_expressiveness":  "controlled",
+                        "energy":  "moderate",
+                        "stillness":  "high"
+                    },
+    "camera":  {
+                   "shot_size":  "medium close-up",
+                   "lens":  "50mm",
+                   "height":  "eye level",
+                   "angle":  "direct-to-camera",
+                   "movement":  "static",
+                   "aspect":  "16:9"
+               },
+    "background_mode":  "solid",
+    "background_notes":  "Neutral studio background",
+    "input_mode":  "script",
+    "presentation_style":  "direct_presenter",
+    "framing_choice":  "medium_presenter",
+    "background_choice":  "studio_gradient",
+    "background_asset_id":  null,
+    "duration_class":  "story_section",
+    "provider_mode":  "best_match",
+    "provider_choice":  null,
+    "model_id":  "infinitetalk-local",
+    "prompt":  "",
+    "negative_prompt":  "identity drift, teeth distortion, frozen face, overactive facial motion, mouth drift, cropped chin, background warping, duplicate characters, blurry, low quality",
+    "source_video_asset_id":  null,
+    "source_still_asset_id":  null,
+    "mouth_mask":  {
+                       "placed":  false
+                   },
+    "lip_sync_method":  "external",
+    "takes":  [
+
+              ],
+    "links":  {
+                  "script_document_id":  null,
+                  "script_scene_heading_id":  null,
+                  "script_scene_id":  null,
+                  "script_source_label":  "",
+                  "script_revision_version":  null,
+                  "voice_record_id":  null,
+                  "voice_take_id":  null,
+                  "master_sheet_id":  null
+              },
+    "created_at":  "2026-08-18T17:16:21.783448Z",
+    "updated_at":  "2026-08-18T17:16:21.783448Z",
+    "presentation_plan":  {
+                              "version":  "m4.12",
+                              "source":  "manual",
+                              "summary":  "Plan this presenter section as clean, reviewable beats with clear continuity.",
+                              "sectioningStrategy":  "Break the script into creator-reviewable presenter beats.",
+                              "sectionTargetSeconds":  6.0,
+                              "deliveryStyle":  "Clear, confident presenter delivery.",
+                              "gazeStyle":  "Hold steady eye contact on key lines.",
+                              "gestureStyle":  "Keep gestures compact and purposeful.",
+                              "pacingStyle":  "Measured pacing with short emphasis pauses.",
+                              "chapterTransitionStyle":  "Use a small breath and reset between sections.",
+                              "emphasisNotes":  "Save the strongest emphasis for pivots and the close.",
+                              "postureNotes":  "Stay upright with relaxed shoulders.",
+                              "pronunciationNotes":  "",
+                              "backgroundRecommendation":  "Soft studio gradient with clean separation.",
+                              "framingRecommendation":  "medium close-up",
+                              "continuityChecklist":  "Keep eye line, camera height, and background continuity consistent.",
+                              "retakeGuidance":  "Retake only the drifting section and preserve the handoff into the next beat.",
+                              "sections":  [
+
+                                           ],
+                              "updatedAt":  "2026-08-18T22:07:31.747697Z"
+                          },
+    "source_kind":  "character",
+    "mode_kind":  "single",
+    "speakers":  [
+                     {
+                         "id":  "speaker-a",
+                         "label":  "Anadriya",
+                         "character_id":  "b7086f85-3ee3-44db-a395-ae1a94e37fe1",
+                         "bbox":  null,
+                         "mask_asset_id":  null
+                     }
+                 ],
+    "conversation":  {
+                         "order":  "a_then_b",
+                         "turns":  [
+                                       {
+                                           "speakerId":  "speaker-a",
+                                           "dialogue":  ""
+                                       }
+                                   ]
+                     },
+    "lora":  null,
+    "direction_prompt":  ""
+}

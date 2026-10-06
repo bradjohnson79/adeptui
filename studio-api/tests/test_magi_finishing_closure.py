@@ -65,6 +65,62 @@ def test_audio_duration_uses_clip_span_not_empty_timeline():
     save_sequence(project_id, seq)
     assert _duration_for_range(project_id, {"range": "entire"}) == 3.0
     assert _duration_for_range(project_id, {"range": "clip", "clipId": "clip_a"}) == 3.0
+    long_id = f"audio-dur-long-{uuid.uuid4().hex[:8]}"
+    long_seq = empty_sequence(long_id)
+    long_seq["clips"] = [
+        {
+            "id": "clip_long",
+            "trackId": long_seq["tracks"][0]["id"],
+            "assetId": "asset-long",
+            "name": "Scene",
+            "startFrame": 0,
+            "durationFrames": 1082,
+            "inPoint": 0,
+            "outPoint": 1082,
+        }
+    ]
+    save_sequence(long_id, long_seq)
+    assert _duration_for_range(long_id, {"range": "entire"}, kind="music") == 30.0
+    assert _duration_for_range(long_id, {"range": "entire"}, kind="sfx") == 20.0
+
+
+def test_timed_sfx_starts_at_the_requested_second():
+    from app.magi.audio_generate import _place_on_sequence
+    from app.magi.sequence.store import empty_sequence, get_sequence, save_sequence
+
+    project_id = f"sfx-start-{uuid.uuid4().hex[:8]}"
+    seq = empty_sequence(project_id)
+    seq["frameRate"] = 24
+    save_sequence(project_id, seq)
+    _place_on_sequence(
+        project_id,
+        "sfx",
+        "asset-sfx",
+        {"duration": 2, "startSeconds": 40, "range": "entire"},
+    )
+    placed = get_sequence(project_id)
+    clip = next(item for item in placed["clips"] if item.get("assetId") == "asset-sfx")
+    track = next(item for item in placed["tracks"] if item.get("id") == clip["trackId"])
+    assert track["kind"] == "sfx"
+    assert clip["startFrame"] == 960
+    assert clip["durationFrames"] == 48
+    assert clip["inPoint"] == 0
+    assert clip["outPoint"] == 48
+
+
+def test_final_render_delays_sfx_to_the_clip_start():
+    from app.magi.final_render import _clip_start_ms
+
+    sequence = {
+        "frameRate": 24,
+        "clips": [
+            {"assetId": "music-bed", "startFrame": 0},
+            {"assetId": "vanish", "startFrame": 960},
+        ],
+    }
+    assert _clip_start_ms(sequence, "music-bed") == 0
+    assert _clip_start_ms(sequence, "vanish") == 40000
+    assert _clip_start_ms(sequence, "missing") == 0
 
 
 def test_catalog_has_magi_gpu_upscale():
@@ -168,6 +224,10 @@ def test_duplicate_job_guard(client):
         assert second is not None
         assert second.id == first.id
         assert first.status in ACTIVE
+        from app.runtime_session import job_in_current_session
+
+        stored = json.loads(first.params_json or "{}")
+        assert job_in_current_session(stored)
     finally:
         db.close()
 
@@ -357,3 +417,20 @@ def test_picture_clips_exclude_audio_tracks():
     ]
     selected = picture_clips(seq)
     assert [c["id"] for c in selected] == ["v1"]
+    video = next(t for t in seq["tracks"] if t["kind"] == "video")
+    video["hidden"] = True
+    assert picture_clips(seq) == []
+
+
+def test_muted_audio_tracks_and_hidden_objects_slots():
+    from app.magi.final_render import _hidden_objects_slots, _track_kind_muted
+
+    seq = empty_sequence("track-flags")
+    for track in seq["tracks"]:
+        if track["kind"] == "music":
+            track["muted"] = True
+        if track["kind"] == "objects":
+            track["hidden"] = True
+    assert _track_kind_muted(seq, "music") is True
+    assert _track_kind_muted(seq, "sfx") is False
+    assert _hidden_objects_slots(seq) == {1}

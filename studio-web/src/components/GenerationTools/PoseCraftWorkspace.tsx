@@ -82,7 +82,6 @@ import {
   executeAutoPreviz,
   flushSceneDocument,
   getReconstruction,
-  handoffPoseToTimeline,
   importReconstruction,
   listCustomPoses,
   loadPoseIntelligence,
@@ -204,7 +203,6 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
   const [previewSnapshotId, setPreviewSnapshotId] = useState<string | null>(null);
   const [sendingImageGen, setSendingImageGen] = useState(false);
   const [sendingStoryboard, setSendingStoryboard] = useState(false);
-  const [sendingTimeline, setSendingTimeline] = useState(false);
   const [poseIntelStatus, setPoseIntelStatus] = useState<"idle" | "analyzing" | "ready" | "warning" | "unavailable" | "degraded">("idle");
   const [poseIntel, setPoseIntel] = useState<PoseIntelligencePacket | null>(null);
   const [poseIntelDetail, setPoseIntelDetail] = useState("");
@@ -1311,32 +1309,6 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
     }
   }, [handoffDisabledTip, onGo, project.id, sendingStoryboard]);
 
-  const sendToTimeline = useCallback(async () => {
-    const snap = getSelectedSnapshot(documentRef.current);
-    if (!snap) {
-      setStatusMessage(handoffDisabledTip);
-      return;
-    }
-    setSendingTimeline(true);
-    try {
-      await flushSceneDocument(project.id, { ...documentRef.current, currentScene: sceneRef.current });
-      await handoffPoseToTimeline(project.id, snap.snapshotId);
-      try {
-        window.sessionStorage.setItem(
-          `adept.posecraft.timeline.${project.id}`,
-          JSON.stringify({ snapshotId: snap.snapshotId, imageAssetId: snap.imageAssetId, name: snap.name, at: Date.now() }),
-        );
-      } catch { /* ignore */ }
-      onGo?.("timeline");
-      setStatusMessage(`Sent Snapshot "${snap.name}" and motion notes to Timeline.`);
-    } catch (error) {
-      console.error(error);
-      setStatusMessage("Could not send motion notes to Timeline. Your pose is unchanged.");
-    } finally {
-      setSendingTimeline(false);
-    }
-  }, [handoffDisabledTip, onGo, project.id]);
-
   // selectedFigure from useMemo above (do not redeclare)
   const sceneObjects = scene.objects ?? [];
 
@@ -2188,15 +2160,6 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
                   title={hasSelectedSnapshot ? "Send the selected Snapshot to Storyboard" : handoffDisabledTip}
                 >
                   {sendingStoryboard ? "Sending…" : "Send to Storyboard"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void sendToTimeline()}
-                  disabled={sendingTimeline || !hasSelectedSnapshot}
-                  data-testid="posecraft-send-timeline"
-                  title={hasSelectedSnapshot ? "Send the selected Snapshot and motion notes to Timeline" : handoffDisabledTip}
-                >
-                  {sendingTimeline ? "Sending…" : "Send to Timeline"}
                 </button>
                 {!hasSelectedSnapshot && (
                   <p className="scene-meta posecraft-handoff-gate" data-testid="posecraft-handoff-gate">{handoffDisabledTip}</p>

@@ -14,6 +14,78 @@ from sqlalchemy.orm import Session
 from .store import require_film, save_film
 
 
+def ready_stitch_id(film, shot_id: str | None = None) -> str:
+    """The finished scene picture. A preview clip is not a publish source."""
+
+    shots = list(getattr(film, "shots", None) or [])
+    shot = None
+    wanted = str(shot_id or "").strip()
+    if wanted:
+        shot = next((item for item in shots if str(getattr(item, "id", "") or "") == wanted), None)
+    elif len(shots) == 1:
+        shot = shots[0]
+    if shot is None:
+        return ""
+    state = getattr(shot, "state", None)
+    status = str(getattr(state, "stitchStatus", "") or "").strip().lower()
+    asset_id = str(getattr(state, "stitchAssetId", "") or "").strip()
+    if status == "ready" and asset_id:
+        return asset_id
+    completed = [
+        segment
+        for segment in (getattr(shot, "segments", None) or [])
+        if str(getattr(segment, "status", "") or "") == "completed" and str(getattr(segment, "assetId", "") or "").strip()
+    ]
+    if len(completed) == 1:
+        segment = completed[0]
+        trimmed = float(getattr(segment, "trimInSec", 0) or 0) > 0.02 or getattr(segment, "trimOutSec", None) is not None
+        if not trimmed:
+            return str(segment.assetId)
+    return ""
+
+
+def _stamp_scene_publish(db: Session, project_id: str, scene_id: str, published_asset_id: str, stitch_id: str, version: int) -> None:
+    """Record the published picture on an existing director master.
+
+    Film scenes are owned by the film document, so this only patches scenePublish.
+    MAGI ingest also reads film.publishedAssetId when that field is set.
+    """
+
+    import json
+    import logging
+
+    from ..scene_service import get_scene
+
+    log = logging.getLogger(__name__)
+    scene = get_scene(db, project_id, scene_id)
+    if scene is None:
+        return
+    raw = getattr(scene, "director_json", None)
+    try:
+        data = json.loads(raw) if isinstance(raw, str) and raw.strip() else (raw if isinstance(raw, dict) else {})
+    except json.JSONDecodeError:
+        return
+    if not isinstance(data, dict):
+        return
+    existing = data.get("timelineMaster")
+    if not isinstance(existing, dict):
+        return
+    publish = dict(existing.get("scenePublish") or {})
+    publish["publishedAssetId"] = published_asset_id
+    publish["sourceSceneStitchAssetId"] = stitch_id
+    publish["version"] = version
+    publish["publishSource"] = "stitch"
+    existing["scenePublish"] = publish
+    data["timelineMaster"] = existing
+    try:
+        scene.director_json = json.dumps(data, ensure_ascii=False)
+        db.add(scene)
+        db.commit()
+    except Exception:
+        log.exception("film-timeline scenePublish stamp skipped scene=%s", scene_id)
+        db.rollback()
+
+
 def publish_film_media(
     db: Session,
     project_id: str,
@@ -21,15 +93,25 @@ def publish_film_media(
     *,
     asset_id: str,
     update: bool = False,
+    shot_id: str | None = None,
 ) -> dict[str, Any]:
     from ..director_timeline_w46.scene_publish import OP_VIDEO_PUBLISH, TAG_VIDEO_PUBLISHED_MASTER
     from ..director_timeline_w46.scene_stitch import resolve_asset_file
     from ..generation_tools.lineage import register_derived_asset
 
     film = require_film(db, project_id, scene_id)
-    source_id = str(asset_id or "").strip()
-    if not source_id:
-        return {"ok": False, "error": "VIDEO_REQUIRED", "message": "Publish needs a finished video.", "mock": False}
+    stitch_id = ready_stitch_id(film, shot_id)
+    if not stitch_id:
+        return {"ok": False, "error": "STITCH_REQUIRED", "message": "Publish needs the finished scene.", "mock": False}
+    requested = str(asset_id or "").strip()
+    if requested and requested != stitch_id:
+        return {
+            "ok": False,
+            "error": "STITCH_REQUIRED",
+            "message": "Publish uses the finished scene, not a single preview.",
+            "mock": False,
+        }
+    source_id = stitch_id
     if update and not film.publishedAssetId:
         return {"ok": False, "error": "NOTHING_PUBLISHED", "message": "Nothing is published yet.", "mock": False}
     src_path = resolve_asset_file(db, project_id, source_id)
@@ -59,8 +141,10 @@ def publish_film_media(
         return {"ok": False, "error": "PUBLISH_FAILED", "message": str(exc)[:400], "mock": False}
     film = require_film(db, project_id, scene_id)
     film.publishedAssetId = asset.id
+    film.publishedSourceAssetId = stitch_id
     film.publishVersion = next_version
     save_film(db, project_id, scene_id, film)
+    _stamp_scene_publish(db, project_id, scene_id, asset.id, stitch_id, next_version)
     return {
         "ok": True,
         "updated": bool(update),

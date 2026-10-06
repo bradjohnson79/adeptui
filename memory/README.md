@@ -1,4 +1,4 @@
-﻿# Co-Director 2.0 â€” Session Memory
+# Co-Director 2.0 â€” Session Memory
 
 ## Project Overview
 
@@ -21,6 +21,10 @@ Creator message
 ```
 
 ## Current State
+
+- **Timeline V2 / H3 Director (2026-09-27 evening through 2026-09-28 ~8:30 PM PT):** Render Shot + H3 legal canvas GO; Preview Cancel always visible; H3 Director cutover live; Continuity 15+5 GO; R2V eradication GO (LIVE_GPU_PARTIAL); Aspect Ratio thin slice GO then H3 non-16:9 hard-refuse **superseded** by Director Aspect Unify (D1 ResolutionSelector — IN FLIGHT); Library Remove X COMPLETE; Director R2V workflow verify DERIVED / KEEP AS-IS. Detail: `memory/session-2026-09-27-28-timeline-v2-h3.md`. Prior day note: `memory/session-2026-09-26-27-timeline-v2.md`.
+
+- **Co-Director and ERS (2026-09-24 through 2026-09-25):** Eleven completed tasks are recorded in `memory/session-2026-09-24-25-codirector-ers.md`. Durable single-owner architecture, 6-test command acceptance, Character Creator and reference sheets, creator tool completeness, ERS legend navigation, ERS zoom and environment scope, Environment Creator provider binding, character auto-resolution, semantic intent, entity resolution and receipt projection, and a 60-minute approval lifetime. The movable ERS legend insert is not certified. Working tree is uncommitted on `feat/character-creator-final-closure` at `ca8f3c0c`.
 
 - **Timeline Master Single-Stack (2026-09-20):** Dual-stack retirement Primary GO — Timed Prompt SoT = SceneTimelineMaster; Take-P rematerialize fence; put_director Master shim; FE Master-FIRST; speech Master-only; CD01 Env/Image nav live CERT on disposable project. Detail: `memory/session-2026-09-20-timeline-master-single-stack.md`. Law 65: post-task FE parse check mandatory.
 
@@ -73,7 +77,9 @@ Creator message
 1. `/memory/README.md` â€” this file
 2. `/memory/FULL_STACK_E2E_COMPLETION_LAW.md` â€” full-stack E2E completion law (binding)
 3. `/memory/phases/phase-spatial-map-ers-scene-creator.md` â€” Spatial Map + Atlas + ERS + Scene Creator (latest, 2026-08-11)
-4. `/memory/session-2026-09-13-avatar.md` â€” Avatar Studio character propagation + UI style convergence (latest, 2026-09-13)
+4. `/memory/session-2026-09-26-27-timeline-v2.md` — Timeline V2 tasks, 2026-09-26 through 2026-09-27
+4-prev. `/memory/session-2026-09-24-25-codirector-ers.md` — completed Co-Director and ERS tasks, 2026-09-24 through 2026-09-25
+4a. `/memory/session-2026-09-13-avatar.md` â€” Avatar Studio character propagation + UI style convergence (latest, 2026-09-13)
 4b. `/memory/session-2026-09-13-timeline.md` â€” Timeline H3 R2V law + Track Integrity + Correct Area + Re-Take R2V mission (2026-09-13)
 4c. `/memory/session-2026-09-18-timeline-batch-architecture.md` â€” Take N regression fix, batch-architecture Protection Charter, long-scene audit (2026-09-18)
 5. `/memory/session-2026-08-11.md` â€” session memory for Spatial Map implementation day

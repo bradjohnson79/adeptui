@@ -226,6 +226,17 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         surface_type="storyboard_generation",
     ),
     CapabilityDefinition(
+        id="film.send_to_magi",
+        title="Send this scene to MAGI",
+        description="Open MAGI only when the published scene picture is still current.",
+        handler_kind=HandlerKind.TOOL,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("scene",),
+        tool_ids=("film_timeline.send_to_magi",),
+        surface_type="",
+    ),
+    CapabilityDefinition(
         id="voice.creator",
         title="Open Voice Creator",
         description="Open Voice Creator to create or assign a character's default voice.",
@@ -550,6 +561,24 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         approval_policy=ApprovalPolicy.DIRECT,
         required_context=("project", "scene"),
         surface_type="timeline_extend",
+    ),
+    CapabilityDefinition(
+        id="timeline.reorder",
+        title="Reorder Timeline Clips",
+        description="Move a Visual Track clip earlier, later, or beside another shot. Uses the Timeline composition order.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project", "scene"),
+        surface_type="timeline_reorder",
+    ),
+    CapabilityDefinition(
+        id="timeline.stitch",
+        title="Stitch Timeline Scene",
+        description="Assemble the current Visual Track with the Timeline stitch service.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project", "scene"),
+        surface_type="timeline_stitch",
     ),
 )
 

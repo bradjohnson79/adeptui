@@ -24,7 +24,8 @@ JobLifecycleStatus = Literal[
     "blocked",
 ]
 DraftPathway = Literal["none", "local_live", "cheap_preview", "native_api_draft"]
-QualityControlKind = Literal["h3_megapixels", "ltx_quality"]
+ContinuationMode = Literal["hard", "soft", "none"]
+QualityControlKind = Literal["h3_megapixels", "ltx_quality", "seedance_resolution"]
 
 
 class VideoGeneratorCapabilities(BaseModel):
@@ -72,6 +73,9 @@ class VideoGeneratorCapabilities(BaseModel):
     supportsImageAndVideoTogether: bool = False
     supportsPromptContinuation: bool = True
     supportsTemporalConditioning: bool = False
+    continuationMode: ContinuationMode = "none"
+    # True only when the live workflow conditions an ordered start/middle/end image batch.
+    supportsThreeFrame: bool = False
 
     @model_validator(mode="after")
     def _local_live_implies_preview(self):

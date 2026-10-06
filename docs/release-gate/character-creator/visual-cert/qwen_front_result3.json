@@ -1,0 +1,672 @@
+{
+  "character_id": "94eb7937-67ed-40ec-b482-439ec1e6dbdf",
+  "generator": "qwen2512",
+  "view": "front",
+  "clean_reference_asset_id": "b2263863-97c6-4aea-a969-fa69310ab785",
+  "note": "after continuity_rules repair (no role enumeration)",
+  "generate_response_status": "queued",
+  "runtime_seconds": 384.2,
+  "final_front_view": {
+    "status": "ready",
+    "jobId": "ed9b3dc7-7810-49bf-9a8b-67333739971e",
+    "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+    "assetId": "cd924706-73c0-4576-a6ab-c0c3e33bb034",
+    "assetUrl": "/api/assets/cd924706-73c0-4576-a6ab-c0c3e33bb034/file",
+    "workflowKey": "qwen2512.ref",
+    "generator": "qwen2512",
+    "error": null,
+    "approved": false,
+    "approvedAt": null,
+    "progress": {
+      "percent": 100,
+      "stage": "ready",
+      "label": "Front Ready",
+      "source": "job",
+      "jobId": "ed9b3dc7-7810-49bf-9a8b-67333739971e",
+      "providerJobId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8"
+    },
+    "provenance": {
+      "generator_family": "qwen2512",
+      "provider": "comfyui",
+      "local_or_api": "local",
+      "workflow_key": "qwen2512.ref",
+      "provider_model": "qwen2512.ref",
+      "source_reference_asset_id": "b2263863-97c6-4aea-a969-fa69310ab785",
+      "approved_front_asset_id": null,
+      "prompt_id": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "provider_job_id": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "view_role": "front",
+      "created_at": "2026-08-24T05:49:28Z",
+      "label": "Qwen Image \u00b7 Local",
+      "selected_as": "qwen2512"
+    }
+  },
+  "progress_log": [
+    {
+      "t": 4.3,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 10.4,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 16.4,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 22.4,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 28.4,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 34.5,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 40.5,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 46.5,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 52.6,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 58.6,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 64.6,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 70.6,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 76.7,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 82.7,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 88.7,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 94.7,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 100.8,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 106.8,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 112.9,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 118.9,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 124.9,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 130.9,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 137.0,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 143.0,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 149.0,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 155.1,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 161.1,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 167.1,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 173.2,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 179.2,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 185.2,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 191.3,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 197.3,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 203.3,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 209.4,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 215.4,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 221.4,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 227.4,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 233.5,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 239.5,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 245.5,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 251.5,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 257.6,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 263.6,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 269.6,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 275.7,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 281.7,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 287.7,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 293.7,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 299.8,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 305.8,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 311.8,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 317.9,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 323.9,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 329.9,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 335.9,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 342.0,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 348.0,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 354.0,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 360.1,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 366.1,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 372.1,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 378.2,
+      "status": "generating",
+      "pct": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": null
+    },
+    {
+      "t": 384.2,
+      "status": "ready",
+      "pct": 100,
+      "stage": "ready",
+      "label": "Front Ready",
+      "promptId": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+      "assetId": "cd924706-73c0-4576-a6ab-c0c3e33bb034"
+    }
+  ],
+  "workflow_key": "qwen2512.ref",
+  "prompt_id": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+  "output_asset_id": "cd924706-73c0-4576-a6ab-c0c3e33bb034",
+  "provenance": {
+    "generator_family": "qwen2512",
+    "provider": "comfyui",
+    "local_or_api": "local",
+    "workflow_key": "qwen2512.ref",
+    "provider_model": "qwen2512.ref",
+    "source_reference_asset_id": "b2263863-97c6-4aea-a969-fa69310ab785",
+    "approved_front_asset_id": null,
+    "prompt_id": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+    "provider_job_id": "13e89b67-938f-4ff2-9a15-ba6bf10ac5d8",
+    "view_role": "front",
+    "created_at": "2026-08-24T05:49:28Z",
+    "label": "Qwen Image \u00b7 Local",
+    "selected_as": "qwen2512"
+  },
+  "graph_node_count": 11,
+  "qwen_encode_nodes": [
+    {
+      "node_id": "6",
+      "image": [
+        "5",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    {
+      "node_id": "7",
+      "image": [
+        "5",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  ],
+  "reference_conditioning_verified": true,
+  "positive_prompt": "1. Reference Reproduction: REFERENCE-FIRST AUTHORITY: Reproduce the attached character reference as faithfully as possible. Preserve the same face, hairstyle, eye color, ears, skin tone, body proportions, wardrobe, accessories, tattoos/circuitry, and silhouette. Do not redesign or reinterpret the character. Only vary pose, expression, and background subtly. The attached reference image is the visual identity lock; the written profile is supplemental guidance only and must not override clearly visible reference details.\n2. Request Intent: Create one person, full body, front-facing, neutral standing pose, centered, simple background, no collage, no text, no second person. FRONT: one camera only, this view only, front-facing, full-body neutral stance. one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image for Mira Vale Cert V2.\n3. Subject Identity: Mira Vale Cert V2; woman; human; young adult; slender. personality/bio: A young woman stands centered, facing forward. She has fair complexion, dark brown wavy hair falling just past her shoulders, brown eyes, and a symmetrical face. She wears a muted olive-green long-sleeved crew-neck sweater with ribbed cuffs and dark charcoal-green denim pants. Neutral standing pose, arms at her sides. The style is a clean studio portrait..\n4. Identity Lock: locked traits: eyes, skin, slender; preserve every locked identity trait exactly with no substitutions or character drift\n5. Face Features: \n6. Wardrobe Materials: \n7. Pose Expression: \n8. Composition Camera: Single-subject composition with the character clearly readable.\n9. Environment Lighting: soft studio lighting with readable facial clarity\n10. Style Profile: medium: cinematic character reference; palette: grounded natural color separation with identity-safe materials; lighting: soft studio lighting with readable facial clarity; finish: clean production-ready render\n11. Continuity References: locked continuity traits: eyes, skin, slender. identity reference attached for identity preservation\n12. Single Camera: Single approved image output. One camera pose only. one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image.\n13. Negative Constraints: multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality, identity drift, wrong character, No close-up, No headshot, No bust portrait, No waist-up framing, Do not crop head, arms, hands, legs, or feet, one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image\n14. Output Guardrails: Use direct production language for Qwen-Image-2512. Do not write conversational fluff, do not merge character identity with style, and keep the final render faithful to the structured blocks above.",
+  "negative_prompt": "blurry, low quality, watermark, text, letters, watermark, logo, caption, overlay, typography, writing",
+  "negative_has_blonde_aqua": false,
+  "continuity_has_role_enumeration": false,
+  "png_bytes": 4937104,
+  "png_path": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\visual-cert\\qwen_front3.png"
+}

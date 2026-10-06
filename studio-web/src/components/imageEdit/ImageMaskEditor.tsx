@@ -37,6 +37,11 @@ type Props = {
   onReady?: (info: { naturalWidth: number; naturalHeight: number; displayWidth: number; displayHeight: number }) => void;
   frameChildren?: ReactNode;
   frameInteractive?: boolean;
+  /**
+   * Scroll pad grows with the zoomed frame so both axes can reach every edge.
+   * Flex centering on the scroller itself clips the far side of a zoomed sheet.
+   */
+  fullSheetScroll?: boolean;
 };
 
 export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function ImageMaskEditor(
@@ -56,6 +61,7 @@ export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function
     onReady,
     frameChildren,
     frameInteractive = true,
+    fullSheetScroll = false,
   },
   ref,
 ) {
@@ -129,17 +135,22 @@ export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function
     [zoom],
   );
 
+  const lastFitRef = useRef({ w: 0, h: 0, nw: 0, nh: 0 });
   const applyCssSize = useCallback(
     (nw: number, nh: number) => {
       const fit = computeFitCss(nw, nh);
-      setCssDims({ w: fit.w, h: fit.h });
+      const prev = lastFitRef.current;
+      const changed = prev.w !== fit.w || prev.h !== fit.h || prev.nw !== nw || prev.nh !== nh;
+      if (!changed) return { ...fit, changed: false };
+      lastFitRef.current = { w: fit.w, h: fit.h, nw, nh };
+      setCssDims((current) => (current.w === fit.w && current.h === fit.h ? current : { w: fit.w, h: fit.h }));
       onReadyRef.current?.({
         naturalWidth: nw,
         naturalHeight: nh,
         displayWidth: fit.w,
         displayHeight: fit.h,
       });
-      return fit;
+      return { ...fit, changed: true };
     },
     [computeFitCss],
   );
@@ -215,8 +226,8 @@ export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function
     const nw = naturalRef.current.w;
     const nh = naturalRef.current.h;
     if (!nw || !nh) return;
-    applyCssSize(nw, nh);
-    syncDisplayRef.current();
+    const fit = applyCssSize(nw, nh);
+    if (fit.changed) syncDisplayRef.current();
   }, [zoom, applyCssSize]);
 
   useEffect(() => {
@@ -226,8 +237,8 @@ export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function
       const nw = naturalRef.current.w;
       const nh = naturalRef.current.h;
       if (!nw || !nh) return;
-      applyCssSize(nw, nh);
-      syncDisplayRef.current();
+      const fit = applyCssSize(nw, nh);
+      if (fit.changed) syncDisplayRef.current();
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -563,18 +574,36 @@ export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function
         ref={stageRef}
         className="image-mask-editor__stage"
         data-testid="image-mask-editor-stage"
+        data-full-sheet-scroll={fullSheetScroll ? "true" : "false"}
         style={{
           flex: fill ? 1 : undefined,
           minHeight: fill ? 0 : undefined,
           width: "100%",
           height: fill ? "100%" : undefined,
           overflow: "auto",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          display: fullSheetScroll ? "block" : "flex",
+          alignItems: fullSheetScroll ? undefined : "center",
+          justifyContent: fullSheetScroll ? undefined : "center",
           background: "#07090e",
         }}
       >
+        <div
+          data-testid={fullSheetScroll ? "image-mask-editor-scroll-pad" : undefined}
+          style={
+            fullSheetScroll
+              ? {
+                  minWidth: "100%",
+                  minHeight: "100%",
+                  width: "max-content",
+                  height: "max-content",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxSizing: "border-box",
+                }
+              : undefined
+          }
+        >
         <div
           data-testid="image-mask-editor-frame"
           style={{
@@ -618,6 +647,7 @@ export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function
               {frameChildren}
             </div>
           ) : null}
+        </div>
         </div>
         <canvas ref={maskCanvasRef} style={{ display: "none" }} />
       </div>

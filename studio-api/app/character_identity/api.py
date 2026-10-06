@@ -351,6 +351,118 @@ def voice_profiles(project_id: str, character_id: str, db: Session = Depends(get
     return {"items": service.list_voice_profiles(db, project_id, character_id)}
 
 
+class AssignProviderVoiceBody(BaseModel):
+    providerVoiceId: str = Field(min_length=1, max_length=128)
+    voiceName: str = ""
+    modelId: str = ""
+    voiceProfileId: Optional[str] = None
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/voice/elevenlabs")
+def assign_elevenlabs_voice(
+    project_id: str,
+    character_id: str,
+    body: AssignProviderVoiceBody,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    return service.assign_provider_voice(
+        db,
+        project_id,
+        character_id,
+        provider_voice_id=body.providerVoiceId,
+        voice_name=body.voiceName,
+        model_id=body.modelId,
+        voice_profile_id=body.voiceProfileId,
+    )
+
+
+class ActivateVoiceProviderBody(BaseModel):
+    provider: str = Field(min_length=1, max_length=32)
+
+
+class ElevenLabsSampleBody(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    providerVoiceId: str = Field(min_length=1, max_length=128)
+    modelId: str = ""
+    voiceName: str = ""
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/voice/unassign")
+def unassign_character_voice(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    authority = service.unassign_active_voice(db, project_id, character_id)
+    authority.pop("activeVoice", None)
+    return authority
+
+
+@router.get("/projects/{project_id}/characters/{character_id}/voice/authority")
+def voice_authority(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    authority = service.active_voice_authority(db, project_id, character_id)
+    authority.pop("activeVoice", None)
+    return authority
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/voice/provider")
+def activate_character_voice_provider(
+    project_id: str,
+    character_id: str,
+    body: ActivateVoiceProviderBody,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    authority = service.activate_voice_provider(db, project_id, character_id, body.provider)
+    authority.pop("activeVoice", None)
+    return authority
+
+
+class VoiceReferenceBody(BaseModel):
+    assetId: str
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/voice/reference")
+def set_voice_reference(
+    project_id: str,
+    character_id: str,
+    body: VoiceReferenceBody,
+    db: Session = Depends(get_db),
+):
+    """Attach an approved Library audio asset as the character's voice reference."""
+    _require_flag()
+    _project(db, project_id)
+    return service.set_approved_voice_reference(
+        db,
+        project_id,
+        character_id,
+        asset_id=body.assetId,
+    )
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/voice/elevenlabs/sample")
+def elevenlabs_voice_sample(
+    project_id: str,
+    character_id: str,
+    body: ElevenLabsSampleBody,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    return service.generate_elevenlabs_sample(
+        db,
+        project_id,
+        character_id,
+        text=body.text,
+        provider_voice_id=body.providerVoiceId,
+        model_id=body.modelId,
+        voice_name=body.voiceName,
+    )
+
+
 @router.post("/projects/{project_id}/characters/{character_id}/voice-profiles")
 def create_voice(project_id: str, character_id: str, body: VoiceProfileCreate, db: Session = Depends(get_db)):
     _require_flag()
@@ -699,13 +811,22 @@ def voice_candidate_action(
 class VoiceApproveBody(BaseModel):
     candidateId: Optional[str] = None
     approvedBy: str = "owner"
-    voiceId: str
+    voiceId: str = ""
+    assetId: str = ""
 
 
 @router.post("/projects/{project_id}/characters/{character_id}/voice/approve")
 def voice_approve(project_id: str, character_id: str, body: VoiceApproveBody, db: Session = Depends(get_db)):
     _require_flag()
     _project(db, project_id)
+    if body.assetId and not body.candidateId:
+        return service.approve_generated_voice_asset(
+            db,
+            project_id,
+            character_id,
+            body.assetId,
+            approved_by=body.approvedBy,
+        )
     from .voice_creator import approve_voice_candidate
 
     return approve_voice_candidate(

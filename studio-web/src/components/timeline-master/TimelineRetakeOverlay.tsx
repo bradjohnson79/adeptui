@@ -38,15 +38,25 @@ export function TimelineRetakeOverlay({
   onRemoveBackground,
   onCancel,
   onSubmit,
+  showRemoveBackground = true,
+  promptPlaceholder = "Describe what you want to change\u2026",
+  submitEnabled,
+  continuationLabel = "",
+  continuationHelper = "",
 }: {
   session: VideoRetakeSession;
   videoAvailable: boolean;
   onMarkIn: () => void;
   onMarkOut: () => void;
   onPrompt: (value: string) => void;
-  onRemoveBackground: () => void;
+  onRemoveBackground?: () => void;
   onCancel: () => void;
   onSubmit: () => void;
+  showRemoveBackground?: boolean;
+  promptPlaceholder?: string;
+  submitEnabled?: boolean;
+  continuationLabel?: string;
+  continuationHelper?: string;
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragKind | null>(null);
@@ -272,26 +282,34 @@ export function TimelineRetakeOverlay({
           <button type="button" data-testid="timeline-retake-mark-out" title="Mark Out" aria-label="Mark Out" onClick={onMarkOut}>
             Out
           </button>
-          <button
-            type="button"
-            className={session.removeBackgroundUsed ? "is-active" : ""}
-            data-testid="timeline-retake-remove-background"
-            title="Remove Background"
-            aria-label="Remove Background"
-            aria-pressed={session.removeBackgroundUsed}
-            disabled={session.busy || !videoAvailable}
-            onClick={onRemoveBackground}
-          >
-            No BG
-          </button>
+          {showRemoveBackground ? (
+            <button
+              type="button"
+              className={session.removeBackgroundUsed ? "is-active" : ""}
+              data-testid="timeline-retake-remove-background"
+              title="Remove Background"
+              aria-label="Remove Background"
+              aria-pressed={session.removeBackgroundUsed}
+              disabled={session.busy || !videoAvailable}
+              onClick={onRemoveBackground}
+            >
+              No BG
+            </button>
+          ) : null}
         </div>
+        {continuationLabel ? (
+          <p className="timeline-retake-overlay__continuation" data-testid="timeline-retake-continuation">
+            {continuationLabel}
+            {continuationHelper ? <span>{continuationHelper}</span> : null}
+          </p>
+        ) : null}
         <div className="timeline-retake-overlay__prompt">
           <label>
             <span className="sr-only">Describe what you want to change</span>
             <textarea
               data-testid="timeline-retake-prompt"
               value={session.prompt}
-              placeholder={"Describe what you want to change\u2026"}
+              placeholder={promptPlaceholder}
               autoComplete="off"
               rows={2}
               disabled={session.busy}
@@ -306,7 +324,7 @@ export function TimelineRetakeOverlay({
             aria-label="Re-Take"
             title="Re-Take"
             onClick={onSubmit}
-            disabled={session.busy}
+            disabled={session.busy || submitEnabled === false}
           >
             <IconSend width={13} height={13} />
           </button>

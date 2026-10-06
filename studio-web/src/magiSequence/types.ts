@@ -31,6 +31,8 @@ export type MagiTrack = {
   order: number;
   locked?: boolean;
   muted?: boolean;
+  /** Picture and Objects tracks. Hidden tracks stay in the timeline and drop out of the preview. */
+  hidden?: boolean;
   solo?: boolean;
   /** 1 = OBJECTS 1, 2 = OBJECTS 2. Required when kind is objects; graphics aliases slot 1. */
   objectsSlot?: MagiObjectsSlot;
@@ -50,6 +52,10 @@ export type MagiClip = {
   freeze?: boolean;
   transitionInId?: string | null;
   transitionOutId?: string | null;
+  /** Boundary blend length. Used when transitionOutId is dissolve, fade, or wipe. */
+  transitionDurationFrames?: number | null;
+  /** Fade-in length for the first picture clip. Independent of the outgoing cut. */
+  transitionInDurationFrames?: number | null;
   /** m2 lineage: provenance of how this clip entered MAGI (W46 Timeline handoff). */
   batchBlockId?: string;
   generationId?: string;
@@ -95,6 +101,7 @@ export type MagiSequenceDocument = {
 
 export type MagiClipGrade = {
   presetId?: string;
+  lightingPresetId?: string;
   params?: Record<string, number>;
 };
 
@@ -106,6 +113,8 @@ export type MagiFinishingState = {
     model?: string;
     target?: string;
     preview?: boolean;
+    soundProfile?: string;
+    soundSourceAssetId?: string;
   };
   audio?: {
     range?: "entire" | "clip";
@@ -117,9 +126,13 @@ export type MagiFinishingState = {
   render?: {
     lastJobId?: string;
     profile?: "preview" | "final";
+    assetId?: string;
   };
   /** Latest applied MAGI visual derivative (color / upscale / final render). */
   visualResultAssetId?: string | null;
+  /** Viewer Compare / Split View source. Original is the published picture, not a copy. */
+  compareAssetId?: string | null;
+  viewerMode?: "viewer" | "compare" | "split";
 };
 
 export type MagiTimelineExportClip = {

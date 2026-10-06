@@ -668,47 +668,72 @@ def execute_generate_batch(db: Session, project_id: str, batch_id: str) -> dict[
             varied_prompt = f"{prompt} {hint}."
             pref = str(batch.get("preferred_provider") or batch.get("provider_source") or "").strip().lower()
             if pref in ("elevenlabs", "eleven_labs", "el"):
-                from ..hosted_providers.adapters.elevenlabs_routed import generate_sfx_routed
+                # ElevenLabs sound and music text has a 450 character limit.
+                # The local compiler prompt is for the local engine. Send the creator line.
+                raw_line = str(batch.get("raw_prompt") or "").strip()
+                el_text = raw_line or prompt
+                if hint and len(el_text) + len(hint) + 2 <= 450:
+                    el_text = f"{el_text} {hint}."
+                elif len(el_text) > 450:
+                    el_text = el_text[:450].rsplit(" ", 1)[0].strip() or el_text[:450]
+                from ..hosted_providers.adapters.elevenlabs_routed import generate_music_routed, generate_sfx_routed
                 from ..generation_tools.lineage import register_derived_asset
                 from pathlib import Path as _Path
                 import tempfile as _tempfile
-                if kind == "music":
-                    from fastapi import HTTPException as _HTTPException
-                    raise _HTTPException(
+                if kind == "ambience":
+                    raise HTTPException(
                         status_code=400,
                         detail={
                             "code": "ELEVENLABS_VALIDATION",
                             "error": "ELEVENLABS_VALIDATION",
-                            "message": "ElevenLabs music/ambience is HOLD for ORDER 15.",
+                            "message": "Choose Sound Effects or Music for ElevenLabs. Ambience stays on Local.",
                             "silentFallback": False,
                             "mock": False,
                         },
                     )
-                dest = _Path(_tempfile.mkstemp(prefix="el_sfx_", suffix=".mp3")[1])
-                el = generate_sfx_routed(
-                    text=varied_prompt,
-                    duration_seconds=float(duration) if duration else None,
-                    dest=dest,
-                    surface="audio-studio.generate",
-                )
+                if kind == "music":
+                    dest = _Path(_tempfile.mkstemp(prefix="el_music_", suffix=".mp3")[1])
+                    el = generate_music_routed(
+                        prompt=el_text,
+                        duration_seconds=float(duration) if duration else None,
+                        dest=dest,
+                        surface="audio-studio.music",
+                    )
+                    library_class = "music"
+                    op_name = "music_generate_elevenlabs"
+                    tag_name = "music"
+                else:
+                    dest = _Path(_tempfile.mkstemp(prefix="el_sfx_", suffix=".mp3")[1])
+                    el = generate_sfx_routed(
+                        text=el_text,
+                        duration_seconds=float(duration) if duration else None,
+                        loop=bool((batch.get("brief_snapshot") or {}).get("loop_required")),
+                        dest=dest,
+                        surface="audio-studio.sfx",
+                    )
+                    library_class = "sfx"
+                    op_name = "sfx_generate_elevenlabs"
+                    tag_name = "sfx"
+                proven_el = dict(el.get("provenance") or {})
                 asset = register_derived_asset(
                     db,
                     project_id=project_id,
                     source_path=el["path"],
                     kind="audio",
-                    tag="sfx_el",
+                    tag=tag_name,
                     parent_asset_id=None,
-                    op="sfx_generate_elevenlabs",
-                    model=str(el.get("model") or "eleven_text_to_sound_v2"),
+                    op=op_name,
+                    model=str(el.get("model") or proven_el.get("providerModelId") or ""),
                     prompt_meta={
-                        "prompt": varied_prompt,
-                        "provider": "elevenlabs",
-                        "model": el.get("model"),
-                        "order15": True,
+                        "prompt": el_text,
+                        "localProvider": False,
+                        "cloudPaid": True,
                         "audioStudioProductionPath": True,
-                        "audioRole": kind,
+                        "audioRole": library_class,
+                        "libraryClass": library_class,
+                        **proven_el,
                     },
-                    library_key="audio.sfx",
+                    library_key=f"audio.{library_class}",
                 )
                 out = {
                     "assetId": asset.id,
@@ -718,6 +743,7 @@ def execute_generate_batch(db: Session, project_id: str, batch_id: str) -> dict[
                             "model": el.get("model"),
                             "negativeUsed": False,
                             "runtime": "ElevenLabs",
+                            **proven_el,
                         },
                         "sha256": None,
                     },
@@ -748,7 +774,7 @@ def execute_generate_batch(db: Session, project_id: str, batch_id: str) -> dict[
             proven = ((out.get("m29") or {}).get("provenance") or {})
             if proven.get("gpuProven") or str(proven.get("device") or "").startswith("cuda"):
                 badge = _runtime_badge(kind, resolution, proven_device=str(proven.get("device") or "cuda"))
-            if asset_id and kind in ("sfx", "ambience"):
+            if asset_id and kind in ("sfx", "ambience") and pref not in ("elevenlabs", "eleven_labs", "el"):
                 from .sfx_wav_validate import validate_sfx_wav
                 from ..db import Asset
 
@@ -797,6 +823,14 @@ def execute_generate_batch(db: Session, project_id: str, batch_id: str) -> dict[
                 ),
                 "stage": "saving",
             }
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            cand["asset_id"] = None
+            cand["status"] = "failed"
+            cand["error"] = detail.get("message") or "ElevenLabs could not complete that request."
+            cand["errorCode"] = detail.get("code")
+            if detail.get("upstreamStatus"):
+                cand["upstreamStatus"] = detail.get("upstreamStatus")
         except Exception as exc:
             msg = str(exc)
             cancelled = "cancel" in msg.lower() or preg.is_batch_cancel_requested(batch_id)
@@ -1115,6 +1149,27 @@ def place_on_timeline(
     }
     mix["clips"] = clips
     store.save_mix(project_id, mix)
+    from ..film_timeline.insertion import add_to_timeline
+    from ..scene_service import list_scenes
+
+    target_scene = scene_id
+    if not target_scene:
+        scenes = list_scenes(db, project_id)
+        target_scene = scenes[0].id if scenes else None
+    film_place = None
+    if target_scene:
+        lane = category if category in {"music", "sfx", "ambience", "voice"} else None
+        film_place = add_to_timeline(
+            db,
+            project_id,
+            target_scene,
+            media_type=lane or "audio",
+            asset_id=asset_id,
+            target_track_type=lane,
+            start_time=float(start_ms or 0) / 1000.0,
+            label=category,
+            metadata={"source": "audio-studio", "loop": loop},
+        )
     return {
         "ok": True,
         "clipId": clip_id,
@@ -1122,6 +1177,7 @@ def place_on_timeline(
         "category": category,
         "placement": placement,
         "mix": mix,
+        "filmTimeline": film_place,
         "mock": False,
     }
 

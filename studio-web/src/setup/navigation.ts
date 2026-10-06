@@ -14,17 +14,23 @@ type BuildAiGuidedSetupPathArgs = {
   projectId?: string | null;
   componentId?: string | null;
   source?: SetupEntrySource | string | null;
+  setupSection?: string | null;
+  missingComponentIds?: string[] | null;
 };
 
 export function buildAiGuidedSetupPath({
   projectId,
   componentId,
   source,
+  setupSection,
+  missingComponentIds,
 }: BuildAiGuidedSetupPathArgs): string {
   const params = new URLSearchParams();
   params.set("setupMode", "ai_guided");
   if (componentId) params.set("setupComponent", componentId);
   if (source) params.set("setupSource", source);
+  if (setupSection) params.set("setupSection", setupSection);
+  if (missingComponentIds?.length) params.set("setupMissing", missingComponentIds.join(","));
   const hash = "#ai-guided-setup-heading";
   if (projectId) {
     params.set("workspace", "setup");

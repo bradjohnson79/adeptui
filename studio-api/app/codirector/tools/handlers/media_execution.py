@@ -33,6 +33,9 @@ def _assets(args: dict[str, Any]) -> list[str]:
 
 
 def _build_intent(ctx: ToolContext, args: dict[str, Any], *, operation: str, tool_id: str):
+    args = dict(args)
+    if args.get("referenceAssetId") and not args.get("startAssetId"):
+        args["startAssetId"] = str(args["referenceAssetId"])
     refs = []
     for role, key in (("start", "startAssetId"), ("middle", "middleAssetId"), ("end", "endAssetId")):
         if args.get(key):

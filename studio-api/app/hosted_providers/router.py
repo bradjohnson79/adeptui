@@ -199,13 +199,30 @@ def review_catalog_endpoint(row_id: str, body: CatalogReviewBody):
 
 @router.get("/elevenlabs/availability")
 def elevenlabs_availability():
-    """ORDER 15 UX LAW: API — ElevenLabs available when any fal/kie/wavespeed route is eligible.
-
-    FE polls this — do NOT gate on elevenlabs_api_key.
-    """
+    """Direct ElevenLabs capability. The response never includes the API key."""
     from .elevenlabs_capability import elevenlabs_availability as _avail
 
     return _avail()
+
+
+@router.get("/elevenlabs/voices")
+def elevenlabs_voices():
+    """Usable ElevenLabs voices. Identity is voice_id, not the display name."""
+    from .elevenlabs_capability import require_route_or_raise
+    from .adapters.elevenlabs_adapter import list_voices
+
+    route = require_route_or_raise(capability="elevenlabs.voice", surface="voice-studio.voices")
+    return list_voices(api_key=route["apiKey"])
+
+
+@router.get("/elevenlabs/models")
+def elevenlabs_models():
+    """Models reported by ElevenLabs for this key."""
+    from .elevenlabs_capability import require_route_or_raise
+    from .adapters.elevenlabs_adapter import list_models
+
+    route = require_route_or_raise(capability="elevenlabs.voice", surface="voice-studio.models")
+    return list_models(api_key=route["apiKey"])
 
 @router.get("/{provider_id}")
 def get_provider(provider_id: str):

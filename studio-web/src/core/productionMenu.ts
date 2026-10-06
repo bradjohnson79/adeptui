@@ -113,16 +113,6 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
     label: PRODUCTION_CATEGORY_LABELS.create,
     entries: [
       {
-        id: "txt2vid",
-        label: "Text to Video",
-        description: "Create video directly from a written scene",
-        helpLabel: "What is Text to Video?",
-        helpContent: "Create video directly from a written scene description.",
-        action: "workspace",
-        workspace: "txt2vid",
-        availabilityKey: "textToVideo",
-      },
-      {
         id: "imagegen",
         label: "Image Generation",
         description: "Create images, concepts, and production frames",
@@ -131,26 +121,6 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
         action: "workspace",
         workspace: "imagegen",
         availabilityKey: "imageGeneration",
-      },
-      {
-        id: "one",
-        label: "1 Frame",
-        description: "Animate a single keyframe",
-        helpLabel: "What is 1 Frame?",
-        helpContent: "Animate a single keyframe into a short motion clip.",
-        action: "workspace",
-        workspace: "one",
-        availabilityKey: "oneFrame",
-      },
-      {
-        id: "three",
-        label: "3 Frame",
-        description: "Build motion from start, middle, and end frames",
-        helpLabel: "What is 3 Frame?",
-        helpContent: "Build motion from start, middle, and end frames for continuity.",
-        action: "workspace",
-        workspace: "three",
-        availabilityKey: "threeFrame",
       },
       {
         id: "script",

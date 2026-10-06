@@ -35,8 +35,11 @@ PAGE_GRIDS: dict[int, tuple[int, int]] = {
 }
 
 
-def grid_for_page_size(page_size: int) -> tuple[int, int]:
-    return PAGE_GRIDS.get(int(page_size), (3, 3))
+def grid_for_page_size(page_size: int, aspect: str = "16:9") -> tuple[int, int]:
+    cols, rows = PAGE_GRIDS.get(int(page_size), (3, 3))
+    if str(aspect or "16:9") == "9:16":
+        return rows, cols
+    return cols, rows
 
 
 def _now() -> str:
@@ -97,6 +100,19 @@ def _fit_tile(src: Image.Image, width: int, height: int) -> Image.Image:
     return canvas
 
 
+def _cover_tile(src: Image.Image, width: int, height: int) -> Image.Image:
+    """Fill a frame without stretching. Extra pixels are cropped from the center."""
+    image = src.convert("RGB")
+    scale = max(width / max(image.width, 1), height / max(image.height, 1))
+    resized = image.resize(
+        (max(1, int(round(image.width * scale))), max(1, int(round(image.height * scale)))),
+        Image.Resampling.LANCZOS,
+    )
+    left = max(0, (resized.width - width) // 2)
+    top = max(0, (resized.height - height) // 2)
+    return resized.crop((left, top, left + width, top + height))
+
+
 def compose_page_image(
     *,
     title: str,
@@ -106,43 +122,60 @@ def compose_page_image(
     page_size: int,
     slots: list[dict[str, Any]],
     asset_paths: dict[str, Path],
+    aspect: str = "16:9",
 ) -> Image.Image:
-    cols, rows = grid_for_page_size(page_size)
-    canvas = Image.new("RGB", (CANVAS_W, CANVAS_H), BG)
+    from .aspect import normalize_storyboard_aspect, sheet_canvas
+
+    board_aspect = normalize_storyboard_aspect(aspect)
+    canvas_w, canvas_h = sheet_canvas(board_aspect) if board_aspect == "9:16" else (CANVAS_W, CANVAS_H)
+    cols, rows = grid_for_page_size(page_size, board_aspect)
+    canvas = Image.new("RGB", (canvas_w, canvas_h), BG)
     draw = ImageDraw.Draw(canvas)
     title_font = _font(28)
     meta_font = _font(16)
     caption_font = _font(15)
     header = f"{project_name}  ·  {title}  ·  Page {page_index + 1} of {page_count}"
     draw.text((MARGIN, 22), header, font=title_font, fill=HEADER_FG)
-    draw.text((MARGIN, 58), f"{page_size}-panel storyboard  ·  {CANVAS_W}×{CANVAS_H}", font=meta_font, fill=(170, 174, 180))
+    draw.text((MARGIN, 58), f"{page_size}-panel storyboard  ·  {board_aspect}  ·  {canvas_w}×{canvas_h}", font=meta_font, fill=(170, 174, 180))
 
-    usable_w = CANVAS_W - 2 * MARGIN - GAP * (cols - 1)
-    usable_h = CANVAS_H - HEADER_H - MARGIN - GAP * (rows - 1)
+    usable_w = canvas_w - 2 * MARGIN - GAP * (cols - 1)
+    usable_h = canvas_h - HEADER_H - MARGIN - GAP * (rows - 1)
     tile_w = usable_w // cols
     tile_h = usable_h // rows
     image_h = max(40, tile_h - CAPTION_H)
+    frame_w = tile_w
+    frame_h = image_h
+    if board_aspect == "9:16":
+        frame_h = image_h
+        frame_w = max(1, int(frame_h * 9 / 16))
+        if frame_w > tile_w:
+            frame_w = tile_w
+            frame_h = max(1, int(frame_w * 16 / 9))
 
     for idx in range(page_size):
         col = idx % cols
         row = idx // cols
         x = MARGIN + col * (tile_w + GAP)
         y = HEADER_H + row * (tile_h + GAP)
+        frame_x = x + max(0, (tile_w - frame_w) // 2)
         slot = slots[idx] if idx < len(slots) else {}
         aid = slot.get("assetId")
         src_path = asset_paths.get(str(aid)) if aid else None
         if src_path and src_path.is_file():
             try:
                 im = Image.open(src_path)
-                tile = _fit_tile(im, tile_w, image_h)
-                canvas.paste(tile, (x, y))
+                if board_aspect == "9:16":
+                    tile = _cover_tile(im, frame_w, frame_h)
+                else:
+                    tile = _fit_tile(im, frame_w, frame_h)
+                canvas.paste(tile, (frame_x, y))
             except Exception:
-                draw.rectangle([x, y, x + tile_w, y + image_h], fill=TILE_BG)
+                draw.rectangle([frame_x, y, frame_x + frame_w, y + frame_h], fill=TILE_BG)
         else:
-            draw.rectangle([x, y, x + tile_w, y + image_h], fill=TILE_BG)
-            draw.text((x + 12, y + image_h // 2), "Empty", font=caption_font, fill=(120, 120, 120))
+            draw.rectangle([frame_x, y, frame_x + frame_w, y + frame_h], fill=TILE_BG)
+            draw.text((frame_x + 12, y + frame_h // 2), "Empty", font=caption_font, fill=(120, 120, 120))
         caption = str(slot.get("label") or "")
-        cy = y + image_h + 6
+        cy = y + frame_h + 6
         for line in _wrap(draw, caption, caption_font, tile_w - 8):
             draw.text((x + 4, cy), line, font=caption_font, fill=CAPTION_FG)
             cy += 18
@@ -185,6 +218,9 @@ def compose_storyboard_2k(
             resolved = _resolve_asset_path(db, str(aid) if aid else None)
             if resolved:
                 paths[str(aid)] = resolved
+        from .aspect import normalize_storyboard_aspect
+
+        board_aspect = normalize_storyboard_aspect(doc.get("aspectRatio"))
         image = compose_page_image(
             title=str(doc.get("title") or "Storyboard"),
             project_name=project_name,
@@ -193,6 +229,7 @@ def compose_storyboard_2k(
             page_size=page_size,
             slots=page_panels[:page_size],
             asset_paths=paths,
+            aspect=board_aspect,
         )
         image.save(out_path, format="PNG")
         panel_ids = [str(p.get("panelId") or "") for p in page_panels[:page_size]]
@@ -203,10 +240,11 @@ def compose_storyboard_2k(
             "storyboardId": doc.get("id"),
             "pageIndex": page_index,
             "pageSize": page_size,
+            "aspectRatio": board_aspect,
             "panelAssetIds": source_ids,
             "panelIds": panel_ids,
             "captions": captions,
-            "resolution": {"width": CANVAS_W, "height": CANVAS_H},
+            "resolution": {"width": image.width, "height": image.height},
             "composedAt": _now(),
         }
         asset = Asset(
@@ -225,8 +263,9 @@ def compose_storyboard_2k(
             "ok": True,
             "assetId": asset.id,
             "path": str(out_path),
-            "width": CANVAS_W,
-            "height": CANVAS_H,
+            "width": image.width,
+            "height": image.height,
+            "aspectRatio": board_aspect,
             "pageIndex": page_index,
             "panelAssetIds": source_ids,
             "captions": captions,

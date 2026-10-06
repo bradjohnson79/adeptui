@@ -1119,41 +1119,6 @@ export function AvatarStudioWorkspace({
     }
   };
 
-  const sendTakeToDirector = async (takeId: string) => {
-    if (!session) return;
-    const take = session.takes.find((item) => item.id === takeId);
-    if (!take?.asset_id) {
-      setMsg("This take does not have a video asset yet.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await api.promote(project.id, {
-        asset_id: take.asset_id,
-        target: "scene_new",
-        name: `${session.character_name || "Avatar"} — ${take.label}`,
-      });
-      await api.addAvatarTake(project.id, session.id, {
-        asset_id: take.asset_id || undefined,
-        scene_id: take.scene_id || undefined,
-        approved: true,
-        status: "final",
-        label: take.label,
-        performance_note: take.performance_note,
-        favorite: take.favorite,
-      });
-      const refreshed = normalizeSession(await api.getAvatarSession(project.id, session.id));
-      setSession(refreshed);
-      setSessions((prev) => prev.map((item) => (item.id === refreshed.id ? refreshed : item)));
-      setMsg("Video sent to Timeline as a new scene.");
-      setReviewTab("completed");
-    } catch (error) {
-      setMsg(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const approvedVoices = useMemo(
     () => approvedVoiceOptions(voiceRecords, session?.character_profile_id),
     [voiceRecords, session?.character_profile_id],
@@ -1743,14 +1708,6 @@ export function AvatarStudioWorkspace({
                         >
                           Retake
                         </button>
-                        <button
-                          type="button"
-                          className="primary"
-                          disabled={!item.asset_id || busy}
-                          onClick={() => void sendTakeToDirector(item.id)}
-                        >
-                          Send to Timeline
-                        </button>
                       </div>
                     </article>
                   ))}
@@ -1931,16 +1888,6 @@ export function AvatarStudioWorkspace({
                           {item.status === "final" || item.approved ? "Ready for Timeline" : item.status}
                         </p>
                         <span className="scene-meta">{displayTime(item.created_at)}</span>
-                      </div>
-                      <div className="avatar-inline-actions">
-                        <button
-                          type="button"
-                          className="primary"
-                          disabled={!item.asset_id || busy}
-                          onClick={() => void sendTakeToDirector(item.id)}
-                        >
-                          Open in Timeline
-                        </button>
                       </div>
                     </article>
                   ))}

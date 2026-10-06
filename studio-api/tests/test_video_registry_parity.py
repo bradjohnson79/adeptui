@@ -26,12 +26,16 @@ EXPECTED_PRODUCT_ALIASES = {
     "minimax-h3-local": "minimax-h3",
     "minimax-h3-t2v-local": "minimax-h3",
     "minimax-h3-i2v": "minimax-h3-i2v-local",
+    "h3-base-optimized": "minimax-h3-base-optimized",
+    "hunyuan-video-1.5-distilled": "hunyuan-video-1.5-distilled",
     "seedance-api": "seedance-2.0",
     "seedance-fal": "seedance-2.0",
     "fal_seedance": "seedance-2.0",
     "fal_seedance_mini": "seedance-2.0-mini",
     "seedance-mini": "seedance-2.0-mini",
     "fal_seedance_25": "seedance-2.5",
+    "fal_seedance_fast": "seedance-2.0-fast",
+    "seedance-fast": "seedance-2.0-fast",
 }
 
 EXPECTED_PRODUCT_ADAPTER = {
@@ -40,6 +44,8 @@ EXPECTED_PRODUCT_ADAPTER = {
     "ltx-2.5-comfy": "ltx-2.5-distilled",
     "minimax-h3": "minimax-h3-t2v-local",
     "minimax-h3-i2v-local": "minimax-h3-i2v-local",
+    "minimax-h3-base-optimized": "minimax-h3-base-optimized",
+    "hunyuan-video-1.5-distilled": "hunyuan-video-1.5-distilled",
     "kling-kie": "kling-api",
     "kling-fal": "kling-api",
     "veo-kie": "veo-api",
@@ -47,6 +53,7 @@ EXPECTED_PRODUCT_ADAPTER = {
     "seedance-2.0": "seedance-2.0",
     "seedance-2.0-mini": "seedance-2.0-mini",
     "seedance-2.5": "seedance-2.5",
+    "seedance-2.0-fast": "seedance-2.0-fast",
 }
 
 EXPECTED_LIVE_SUBMIT_ADAPTERS = frozenset(
@@ -54,9 +61,14 @@ EXPECTED_LIVE_SUBMIT_ADAPTERS = frozenset(
         "ltx-2.5-distilled",
         "minimax-h3-t2v-local",
         "minimax-h3-i2v-local",
+        "minimax-h3-base-optimized",
+        "hunyuan-video-1.5-distilled",
         "seedance-2.0",
         "seedance-2.0-mini",
+        "seedance-2.0-fast",
         "seedance-2.5",
+        "kling-api",
+        "veo-api",
     }
 )
 
@@ -64,6 +76,7 @@ EXPECTED_HOSTED_LIVE_ONLY = {
     "seedance-2.0": "fal_api_key",
     "seedance-2.0-mini": "fal_api_key",
     "seedance-2.5": "fal_api_key",
+    "seedance-2.0-fast": "fal_api_key",
     "kling-fal": "fal_api_key",
     "kling-kie": "kie_api_key",
     "seedance-kie": "kie_api_key",
@@ -75,6 +88,8 @@ EXPECTED_SETUP_COMPONENTS = {
     "ltx-2.5-full": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae", "ltx_2_5_audio_vae"),
     "ltx-2.5-distilled": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae", "ltx_2_5_audio_vae"),
     "ltx-2.5-comfy": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),
+    "minimax-h3-base-optimized": ("minimax_h3_base_optimized",),
+    "hunyuan-video-1.5-distilled": ("hunyuan_video_1_5_distilled",),
 }
 
 EXPECTED_REQUIRED_NODES = {
@@ -83,6 +98,17 @@ EXPECTED_REQUIRED_NODES = {
     "ltx-2.5-comfy": ("UNETLoader", "LTXVBaseSampler", "LTXVScheduler", "LTXVImgToVideo", "LoadImage"),
     "minimax-h3": ("MiniMaxH3ReferenceToVideo", "UNETLoader", "CLIPLoader", "VAELoader", "LoadImage"),
     "minimax-h3-i2v-local": ("MiniMaxH3ReferenceToVideo", "UNETLoader", "CLIPLoader", "VAELoader", "LoadImage"),
+    "minimax-h3-base-optimized": ("MiniMaxH3ReferenceToVideo", "UNETLoader", "CLIPLoader", "VAELoader", "LoadImage", "LoraLoaderModelOnly"),
+    "hunyuan-video-1.5-distilled": (
+        "DualCLIPLoader",
+        "UNETLoader",
+        "VAELoader",
+        "EmptyHunyuanVideo15Latent",
+        "HunyuanVideo15ImageToVideo",
+        "CLIPVisionLoader",
+        "ModelSamplingSD3",
+        "CFGGuider",
+    ),
 }
 
 EXPECTED_ADAPTER_ONLY_IDS = frozenset(
@@ -103,6 +129,7 @@ EXPECTED_CREATE_ENGINE_ROWS = (
     ("ltx-2.5", "LTX 2.5", "local"),
     ("seedance-2.0", "Seedance 2.0", "hosted"),
     ("seedance-2.0-mini", "Seedance 2.0 Mini", "hosted"),
+    ("seedance-2.0-fast", "Seedance 2.0 Fast", "hosted"),
     ("seedance-2.5", "Seedance 2.5", "hosted"),
     ("fal_kling", "Kling", "hosted"),
     ("fal_veo", "Veo", "hosted"),
@@ -116,9 +143,12 @@ EXPECTED_SURFACE_WORKFLOWS_EXISTING = {
     "ltx-2.5-comfy": {"t2v": "ltx_25.t2v", "i2v": "ltx_25.i2v", "r2v": "ltx_25.i2v"},
     "minimax-h3": {"t2v": "route_a.t2va", "i2v": "route_a.i2va", "multiFrame": "route_a.flf2va", "r2v": "h3.ref2v"},
     "minimax-h3-i2v-local": {"i2v": "route_a.i2va"},
+    "minimax-h3-base-optimized": {"r2v": "h3.ref2v"},
+    "hunyuan-video-1.5-distilled": {"t2v": "hunyuan15.distilled.t2v", "i2v": "hunyuan15.distilled.i2v"},
     "seedance-2.0": {"t2v": "fal.seedance-2.0.t2v", "i2v": "fal.seedance-2.0.i2v", "r2v": "fal.seedance-2.0.r2v"},
     "seedance-2.0-mini": {"r2v": "fal.seedance-2.0-mini.r2v"},
     "seedance-2.5": {"t2v": "fal.seedance-2.5.t2v", "i2v": "fal.seedance-2.5.i2v", "r2v": "fal.seedance-2.5.r2v"},
+    "seedance-2.0-fast": {"t2v": "fal.seedance-2.0-fast.t2v", "i2v": "fal.seedance-2.0-fast.i2v", "r2v": "fal.seedance-2.0-fast.r2v"},
 }
 
 # Intended new honesty: hosted entries added by the registry.
@@ -163,6 +193,20 @@ EXPECTED_VIDEO_DESCRIPTORS = [
         vram=None, gpu=True, executable=False,
     ),
     dict(
+        id="minimax-h3-base-optimized", modality="video", label="MiniMax H3 Base Optimized", locality="local",
+        provider_id=None, capability="Available", lifecycle=None,
+        supports=["reference_to_video", "native_audio"],
+        does_not_support=["text_to_video", "start_frame", "start_end_frame"],
+        vram=None, gpu=True, executable=True,
+    ),
+    dict(
+        id="hunyuan-video-1.5-distilled", modality="video", label="HunyuanVideo 1.5 Distilled", locality="local",
+        provider_id=None, capability="Available", lifecycle=None,
+        supports=["text_to_video", "start_frame", "continuation_start_image"],
+        does_not_support=["start_end_frame", "semantic_references"],
+        vram=None, gpu=True, executable=True,
+    ),
+    dict(
         id="kling-kie", modality="video", label="Kling (Kie)", locality="hosted",
         provider_id="kie", capability="Testing", lifecycle=None,
         supports=["text_to_video", "image_to_video"], does_not_support=[],
@@ -184,6 +228,12 @@ EXPECTED_VIDEO_DESCRIPTORS = [
         id="seedance-2.0-mini", modality="video", label="Seedance 2.0 Mini", locality="hosted",
         provider_id="fal", capability="Available", lifecycle=None,
         supports=["image_to_video"], does_not_support=[],
+        vram=None, gpu=False, executable=False,
+    ),
+    dict(
+        id="seedance-2.0-fast", modality="video", label="Seedance 2.0 Fast", locality="hosted",
+        provider_id="fal", capability="Available", lifecycle=None,
+        supports=["text_to_video", "image_to_video"], does_not_support=[],
         vram=None, gpu=False, executable=False,
     ),
     dict(

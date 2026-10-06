@@ -50,3 +50,21 @@
 | `test_m42_w47_docker_runtime.py` | 8 | PASS |
 | **Total (core, legacy suites)** | **262** | **ALL PASS** |
 | Full backend collection | ~2173 | 1 collection error (non-blocking) |
+
+## 2026-09-24 through 2026-09-25
+
+Detail: `memory/session-2026-09-24-25-codirector-ers.md`
+
+| Task | Verdict | Date |
+|---|---|---|
+| Co-Director durable single-owner architecture | GO | 2026-09-24 |
+| Co-Director 6-test command acceptance | GO | 2026-09-24 |
+| Character Creator and reference sheet | GO | 2026-09-25 |
+| Creator tool completeness | GO | 2026-09-25 |
+| ERS legend layout and navigation | GO | 2026-09-25 |
+| ERS zoom, legend colors, and environment scope | GO | 2026-09-25 |
+| Environment Creator provider binding | GO | 2026-09-25 |
+| Character name auto-resolution and approval copy | GO | 2026-09-25 |
+| Semantic intent authority | GO | 2026-09-25 |
+| Entity resolution and receipt projection | GO | 2026-09-25 |
+| Approval lifetime | GO | 2026-09-25 |

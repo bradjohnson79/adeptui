@@ -1,14 +1,18 @@
-"""Execution dispatcher — resolves capabilities and submits real jobs.
+﻿"""Execution dispatcher for image and scene execution packs.
 
-Spec §7: "If sufficient: EXECUTE."
-Spec §14: "The execution plan should be machine-readable and traceable."
-Spec §15: "Each long-running execution needs: execution_id, job_id, project_id,
+Chat, stream, and assistant chat do not call this module. Those turns enter
+`codirector_turn` and `ToolExecutionService`. Approval of a Co-Director
+proposal enters the separate durable approval transaction, not `dispatch`.
+
+Spec section 7: "If sufficient: EXECUTE."
+Spec section 14: "The execution plan should be machine-readable and traceable."
+Spec section 15: "Each long-running execution needs: execution_id, job_id, project_id,
 capability, provider, model, status, progress, created_at, updated_at,
 result_asset_ids, error."
 
 The dispatcher:
 1. Resolves the CapabilityDefinition from the registry.
-2. Checks approval policy (spec §50).
+2. Checks approval policy (spec section 50).
 3. For CAPABILITY_HANDLER kinds: imports the handler module by convention
    and calls its `handle()` function.
 4. For TOOL kinds: delegates to the existing ToolExecutionService.
@@ -69,7 +73,7 @@ def _publish_event(event: ExecutionEvent) -> None:
 
         _publish(event.to_sse_data())
     except Exception as exc:
-        # Non-fatal — SSE bus may not be available.
+        # Non-fatal â€” SSE bus may not be available.
         logger.debug("Failed to publish execution event: %s", exc)
 
 
@@ -165,6 +169,29 @@ async def dispatch(
         updated_at=_now(),
     )
 
+    # Generation ready notices — persist conversation ↔ execution linkage.
+    try:
+        from .generation_ready_notice import stamp_generation_link
+
+        stamp_generation_link(
+            plan,
+            request_id=str(ctx.get("user_turn_id") or ctx.get("request_id") or "") or None,
+        )
+        # Carry character/speaker name for voice copy when present.
+        _name = str(
+            ctx.get("character_name")
+            or ctx.get("characterName")
+            or ctx.get("speaker_name")
+            or ctx.get("speakerName")
+            or ""
+        ).strip()
+        if _name:
+            _pd = dict(plan.plan_data or {})
+            _pd.setdefault("characterName", _name)
+            plan.plan_data = _pd
+    except Exception:
+        logger.debug("generation ready link stamp failed", exc_info=True)
+
     # ORDER19: expose sourceAssetId/assetId on pack for FE leftover-card hints
     try:
         _atts = list(ctx.get("attachment_asset_ids") or [])
@@ -196,7 +223,7 @@ async def dispatch(
     except Exception:
         logger.warning("production planner pack bridge failed (non-fatal)", exc_info=True)
 
-    # Check approval policy (spec §50).
+    # Check approval policy (spec Â§50).
     if cap.approval_policy != ApprovalPolicy.DIRECT and not pre_approved:
         if cap.handler_kind == HandlerKind.TOOL:
             # CDX-084: TOOL-kind capabilities never complete through the
@@ -261,7 +288,7 @@ def _apply_handler_result(
     ZERO-JOBS LAW enforced.
 
     A handler result with no child jobs is TERMINAL (failed with a clear
-    error) — never QUEUED/RUNNING. This makes an infinite 0/0 work surface
+    error) â€” never QUEUED/RUNNING. This makes an infinite 0/0 work surface
     impossible at the source: no EXECUTION_STARTED event is published for
     a zero-job result, and no poller can ever hang on an empty pack.
     """
@@ -502,7 +529,7 @@ def _dispatch_capability_handler(
         result = handle(**handler_kwargs)
 
         # Populate the plan from the handler result (zero-job results are
-        # terminal — never QUEUED with an empty work surface).
+        # terminal â€” never QUEUED with an empty work surface).
         plan = _apply_handler_result(plan, result, context=ctx)
         production_caps = {
             "image.generate",
@@ -659,7 +686,7 @@ async def approve_and_execute(
 
     if cap.handler_kind == HandlerKind.TOOL:
         # CDX-084: TOOL-kind capabilities execute through the ProposalService
-        # approved path — the proposal was created at dispatch time.
+        # approved path â€” the proposal was created at dispatch time.
         return await _approve_tool_execution(db, project_id, plan, cap)
     if cap.handler_kind != HandlerKind.CAPABILITY_HANDLER:
         plan.status = ExecutionStatus.FAILED
@@ -780,7 +807,7 @@ def _tool_params(ctx: dict[str, Any]) -> dict[str, Any]:
             out["prompt"] = prompt
     if not str(out.get("sceneId") or "").strip() and ctx.get("scene_id"):
         out["sceneId"] = str(ctx["scene_id"])
-    # ORDER19: chat attachments → assetId/sourceAssetId for timeline.add_asset / place_asset
+    # ORDER19: chat attachments â†’ assetId/sourceAssetId for timeline.add_asset / place_asset
     attachments = ctx.get("attachment_asset_ids") or []
     if isinstance(attachments, list):
         primary = next((str(a).strip() for a in attachments if str(a or "").strip()), None)
@@ -828,7 +855,7 @@ async def _prepare_tool_proposal(
 
     Uses the canonical ToolExecutionService.propose so the proposal gets
     the same server-side preview, sanitization, resource pinning, and input
-    hash as any chat-path tool proposal. Nothing is applied here — the human
+    hash as any chat-path tool proposal. Nothing is applied here â€” the human
     decision happens at approve time.
     """
     from ..tools.execution import ToolExecutionService
@@ -859,7 +886,7 @@ async def _approve_tool_execution(
 
     The proposal was created at dispatch time (PREVIEW status). Approving it
     records the human decision and replays the proposal's stored arguments
-    through ToolExecutionService.execute_approved_proposal — the same
+    through ToolExecutionService.execute_approved_proposal â€” the same
     approved path a chat proposal approval uses (CDX-084).
     """
     from ..bible.proposals import ProposalService
@@ -922,9 +949,9 @@ async def _dispatch_tool(
 
     Routes by the tool's own contract instead of assuming every tool executes
     through the audited path:
-    - read tools → ToolExecutionService.execute_read
-    - audited mutating tools (requires_approval=False) → execute_audited
-    - approval-gated mutating tools → ProposalService bridge: the proposal is
+    - read tools â†’ ToolExecutionService.execute_read
+    - audited mutating tools (requires_approval=False) â†’ execute_audited
+    - approval-gated mutating tools â†’ ProposalService bridge: the proposal is
       created (preview + pinned args), and only a pre-approved dispatch (or the
       approve endpoint) executes it through execute_approved_proposal.
     """
@@ -1026,7 +1053,7 @@ async def _dispatch_tool(
             asset_id = _extract_asset_id(tool_result)
             error = None if ok else (invocation.errorMessage or "TOOL_EXECUTION_FAILED")
         else:
-            # Approval-gated mutating tool → ProposalService bridge. The
+            # Approval-gated mutating tool â†’ ProposalService bridge. The
             # proposal is created even for a pre-approved dispatch so the
             # approval decision stays in the audit ledger.
             proposal = await ToolExecutionService.propose(

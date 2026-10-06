@@ -1,0 +1,63 @@
+{
+  "timestamp": "2026-09-18 18:42 PT",
+  "status": "CODE_READY_AWAITING_API_BOUNCE_AND_CHIEF_CLEAR",
+  "no_prove_burn": true,
+  "reason": "Chief forensic freeze: no prove until bounce + CLEAR; generate_audio=false path landed",
+  "files_patched": [
+    "studio-api/app/director_timeline_w46/generation/request_builder.py",
+    "studio-api/app/workflows/h3_ref2v_builder.py",
+    "studio-api/app/queue_worker.py"
+  ],
+  "backup": "C:\\Users\\bradj\\AppData\\Local\\Temp\\wave6_live_cert\\p6_audio_false_backup_20260918_184000",
+  "unit_prove": {
+    "syntax": "PASS all three files",
+    "build_h3_ref2v_generate_audio_true": {
+      "VAEDecodeAudio": true,
+      "CreateVideo.audio": true
+    },
+    "build_h3_ref2v_generate_audio_false": {
+      "VAEDecodeAudio": false,
+      "CreateVideo.audio": false
+    },
+    "assert_h3_ref2v_graph_false": "PASS",
+    "resolve_audio_authority_NONE": {
+      "authority": "silence_locked",
+      "nativeAudio": "disabled",
+      "generateAudio": false
+    },
+    "resolve_audio_authority_SPEECH": {
+      "authority": "generator_native",
+      "nativeAudio": "enabled",
+      "generateAudio": true
+    },
+    "resolve_audio_authority_empty_manifest": {
+      "generateAudio": false
+    }
+  },
+  "chain": [
+    "1. request_builder._batch_silence_locked(batch) from dialogueManifest expectedSpeech=NONE / empty silence-locked / speechKind=none",
+    "2. _resolve_audio_authority \u2192 audioAuthority.generateAudio=false, nativeAudio=disabled",
+    "3. providerOptions.generate_audio=false + audio_generation=false (re-assert after manifest apply)",
+    "4. queue_worker._build_and_run_h3_ref2v reads generate_audio / audio_generation / audioAuthority \u2192 gen_audio=False",
+    "5. build_h3_ref2v(..., generate_audio=False) omits VAEDecodeAudio + CreateVideo.audio; skips LoadAudio voice binds",
+    "6. history.r2v.generate_audio stamped for chain dump"
+  ],
+  "live_prove_gate": {
+    "requires": [
+      "Systems :8758 bounce to load patches + CD empty-ASR gate",
+      "Chief CLEAR for one W2 prove"
+    ],
+    "scene": "02b06ec5-a177-41f9-b40a-3d3e6ff46658",
+    "take": "stk_ae5b66e9d0a7",
+    "window": "W2 bb_b5794fa154fe",
+    "expect_on_prove": {
+      "normalized_request.generate_audio": false,
+      "audioAuthority.generateAudio": false,
+      "Comfy graph VAEDecodeAudio": "absent",
+      "Omni speech": "none (or FAIL QC if residual)",
+      "CandidateReady vs NeedsDialogueRetake": "per CD gate after bounce"
+    },
+    "no_bp_wording_escalation": true
+  },
+  "cd_fyi": "empty ASR can no longer PASS silence-lock (UNCERTAIN/FAIL) \u2014 needs same bounce"
+}

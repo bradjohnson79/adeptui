@@ -1,0 +1,23 @@
+{
+  "source_prompt_id": "3681e2dd-d69f-4980-acf4-5d24e223d229",
+  "canvas_change": [
+    {
+      "node_id": "8",
+      "old": [
+        2048,
+        2048
+      ],
+      "new": [
+        1328,
+        1328
+      ]
+    }
+  ],
+  "test": "A/B 1328 vs 2048",
+  "prompt_id": "46999c20-310d-47c6-b6c7-b6651bed3aa4",
+  "status": "success",
+  "output_filename": "studio/2bc632b8_imagegen_00010_.png",
+  "runtime_seconds": 180.4,
+  "png_saved": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\visual-cert\\qwen_front4_1328.png",
+  "png_bytes": 1461669
+}

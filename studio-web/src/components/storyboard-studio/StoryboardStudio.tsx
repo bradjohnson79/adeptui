@@ -8,10 +8,10 @@ import type { Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
 import type {
   ScriptLinkStatus,
+  StoryboardAspect,
   StoryboardDocument,
   StoryboardPageSize,
   StoryboardPanelLink,
-  TimelinePrepProposal,
 } from "../../contracts/storyboardStudio";
 import { STORYBOARD_CAPTION_MAX } from "../../contracts/storyboardStudio";
 import { SCRIPT_LINK_LABELS } from "../../contracts/scriptSync";
@@ -24,6 +24,7 @@ import {
 import "./storyboard-studio.css";
 
 const PAGE_SIZES: StoryboardPageSize[] = [6, 9, 12];
+const ASPECTS: StoryboardAspect[] = ["16:9", "9:16"];
 const LIBRARY_ASSET_MIME = "application/x-adept-library-asset";
 
 function syncClass(status: ScriptLinkStatus): string {
@@ -45,10 +46,6 @@ export function StoryboardStudio({
   const [pageIndex, setPageIndex] = useState(0);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [proposal, setProposal] = useState<TimelinePrepProposal | null>(null);
-  const [timelinePayload, setTimelinePayload] = useState<Array<Record<string, unknown>> | null>(
-    null
-  );
   const [dragId, setDragId] = useState<string | null>(null);
   const [undoPanelId, setUndoPanelId] = useState<string | null>(null);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
@@ -91,6 +88,7 @@ export function StoryboardStudio({
   }, [libraryOpen, loadLibrary]);
 
   const pageSize = (document?.pageSize || 9) as StoryboardPageSize;
+  const aspectRatio: StoryboardAspect = document?.aspectRatio === "9:16" ? "9:16" : "16:9";
   const pages = document?.pages?.length
     ? document.pages
     : [{ pageIndex: 0, pageSize, panelIds: [], title: "Page 1" }];
@@ -117,6 +115,21 @@ export function StoryboardStudio({
     try {
       const res = await api.storyboardStudio.setPageSize(project.id, document.id, size);
       setDocument(res.document);
+      await reload();
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setAspect = async (next: StoryboardAspect) => {
+    if (!document || next === aspectRatio) return;
+    setBusy(true);
+    try {
+      const res = await api.storyboardStudio.setAspectRatio(project.id, document.id, next);
+      setDocument(res.document);
+      setMsg(next === "9:16" ? "Board is 9:16. Existing panels stay linked." : "Board is 16:9. Existing panels stay linked.");
       await reload();
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : String(e));
@@ -175,43 +188,6 @@ export function StoryboardStudio({
     }, 400);
   };
 
-  const prepareTimeline = async (panelIds?: string[]) => {
-    setBusy(true);
-    setMsg(null);
-    setTimelinePayload(null);
-    try {
-      const res = await api.storyboardStudio.prepareTimeline(project.id, {
-        documentId: document?.id,
-        panelIds,
-        approvedOnly: false,
-      });
-      setProposal(res.proposal);
-      setMsg("Timeline prep ready — captions stay as shot labels, not spoken lines.");
-    } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const confirmProposal = async () => {
-    if (!proposal) return;
-    setBusy(true);
-    try {
-      const res = await api.storyboardStudio.confirmTimelineProposal(project.id, proposal.id, {
-        panelIds: selectedPanelId ? [selectedPanelId] : undefined,
-      });
-      setProposal(res.proposal as unknown as TimelinePrepProposal);
-      setTimelinePayload(res.timelinePayload || []);
-      setMsg(`Proposal confirmed — ${res.createdSceneIds.length} Timeline scene(s). No clips generated.`);
-      await onChange();
-    } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const openInImageGen = (panel: StoryboardPanelLink, mode: "open" | "replace" = "open") => {
     try {
       sessionStorage.setItem(
@@ -221,6 +197,7 @@ export function StoryboardStudio({
           panelId: mode === "replace" ? panel.panelId : undefined,
           continuitySessionId: panel.continuitySessionId,
           assetId: panel.assetId || undefined,
+          aspectRatio,
         })
       );
     } catch {
@@ -339,17 +316,6 @@ export function StoryboardStudio({
           >
             {libraryOpen ? "Hide Library" : "Library"}
           </button>
-          <button
-            type="button"
-            className="primary"
-            disabled={busy}
-            data-testid="sb-prepare-timeline"
-            onClick={() =>
-              void prepareTimeline(selectedPanelId ? [selectedPanelId] : undefined)
-            }
-          >
-            {t("storyboard:prepareTimeline")}
-          </button>
           <a
             className="button"
             href={api.storyboardStudio.exportPdfUrl(project.id, document?.id)}
@@ -381,6 +347,21 @@ export function StoryboardStudio({
       {msg && <p className="pill warn" data-testid="sb-message">{msg}</p>}
 
       <div className="sb-toolbar">
+        <div className="sb-page-sizes" role="group" aria-label="Aspect ratio" data-testid="sb-aspect">
+          <span className="sb-toolbar-label">Aspect</span>
+          {ASPECTS.map((ratio) => (
+            <button
+              key={ratio}
+              type="button"
+              className={aspectRatio === ratio ? "primary" : undefined}
+              disabled={busy}
+              data-testid={`sb-aspect-${ratio.replace(":", "-")}`}
+              onClick={() => void setAspect(ratio)}
+            >
+              {ratio}
+            </button>
+          ))}
+        </div>
         <div className="sb-page-sizes" role="group" aria-label="Panels per page">
           {PAGE_SIZES.map((size) => (
             <button
@@ -453,7 +434,12 @@ export function StoryboardStudio({
       </div>
 
       <div className={`sb-workspace ${libraryOpen ? "sb-workspace--library" : ""}`}>
-        <div className={`sb-grid sb-grid-${pageSize}`} onDragOver={(e) => e.preventDefault()} data-testid="sb-grid">
+        <div
+          className={`sb-grid sb-grid-${pageSize} ${aspectRatio === "9:16" ? "sb-aspect-portrait" : "sb-aspect-landscape"}`}
+          onDragOver={(e) => e.preventDefault()}
+          data-testid="sb-grid"
+          data-aspect={aspectRatio}
+        >
           {slots.map((panel, idx) => (
             <div
               key={panel?.panelId || `empty-${idx}`}
@@ -566,34 +552,6 @@ export function StoryboardStudio({
         )}
       </div>
 
-      {proposal && (
-        <section className="sb-proposal card-panel">
-          <h2>Timeline prep proposal</h2>
-          <p className="muted">{proposal.note}</p>
-          <ul data-testid="sb-timeline-shots">
-            {proposal.shots.map((s) => (
-              <li key={s.panelId}>
-                <strong>{s.label}</strong> · {s.durationEst}s · {s.cameraNote || "—"}
-                {s.dialogue ? ` — spoken: “${s.dialogue.slice(0, 80)}”` : " — no spoken line"}
-              </li>
-            ))}
-          </ul>
-          <p className="muted tiny">
-            Status: {proposal.status} · id {proposal.id.slice(0, 8)}
-          </p>
-          {proposal.status !== "applied" && (
-            <button type="button" className="primary" disabled={busy} onClick={() => void confirmProposal()}>
-              Confirm Proposal
-            </button>
-          )}
-          {timelinePayload && (
-            <div className="sb-timeline-payload">
-              <h3>Timeline payload</h3>
-              <pre>{JSON.stringify(timelinePayload, null, 2)}</pre>
-            </div>
-          )}
-        </section>
-      )}
     </div>
   );
 }

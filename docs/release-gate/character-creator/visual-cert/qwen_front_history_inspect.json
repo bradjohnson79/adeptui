@@ -1,0 +1,18 @@
+{
+  "top_keys": [
+    "6049e12e-25ff-4731-8d82-c90ba8464ee4"
+  ],
+  "entry_keys": [
+    "prompt",
+    "outputs",
+    "status",
+    "meta"
+  ],
+  "prompt_field_type": "list",
+  "prompt_field_len": 5,
+  "node_count": 0,
+  "class_types": [],
+  "load_image_nodes": [],
+  "qwen_encode_nodes": [],
+  "reference_conditioning_verified": false
+}

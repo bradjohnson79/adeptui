@@ -1,0 +1,65 @@
+{
+  "purpose": "Test E diagnostic fixtures only. Not a production cropper.",
+  "addex": {
+    "sourcePath": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\assets\\beffd3d8-791d-4adf-9c4d-681ec9d4efb0\\91b82df6-6c5a-410a-bdb8-6cd3f79753c7.jpeg",
+    "sourceBytes": 611011,
+    "sourceSha256": "36190988a32f36b66beb14cb37418e98d779aaa0f301b2df6088711f5c1bf584",
+    "sourceSize": [
+      1536,
+      1024
+    ],
+    "boxLeftTopRightBottom": [
+      20,
+      170,
+      200,
+      730
+    ],
+    "cropPath": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\minimax-h3-identity\\fixtures\\addex_generation_ref_front.png",
+    "cropBytes": 122453,
+    "cropSha256": "29e95769e9696906bd0be8fbbd10f24c6ca88e67e826f255fa9b7b92ac7298d4",
+    "cropSize": [
+      180,
+      560
+    ],
+    "method": "PIL.Image.crop explicit pixel box; no enhance/redraw/face-restore"
+  },
+  "korri": {
+    "sourcePath": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\assets\\beffd3d8-791d-4adf-9c4d-681ec9d4efb0\\a42e77e0-dfe3-4ac9-85af-ab98dfc510e5.jpeg",
+    "sourceBytes": 539249,
+    "sourceSha256": "18ff6de4a163958e2c9319450e92909914b1f839834b4bbfed0c7dfdec428e72",
+    "sourceSize": [
+      1536,
+      864
+    ],
+    "boxLeftTopRightBottom": [
+      15,
+      155,
+      150,
+      655
+    ],
+    "cropPath": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\minimax-h3-identity\\fixtures\\korri_generation_ref_front.png",
+    "cropBytes": 93886,
+    "cropSha256": "fb1ac40c61513b12dc5539aa8c72b8ca0a48ea6ad24bf0b0ffa0a4436038c7a4",
+    "cropSize": [
+      135,
+      500
+    ],
+    "method": "PIL.Image.crop explicit pixel box; no enhance/redraw/face-restore"
+  },
+  "staged": {
+    "addex": {
+      "comfyName": "studio/test_e_addex_front.png",
+      "path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\input\\studio\\test_e_addex_front.png",
+      "sha256": "29e95769e9696906bd0be8fbbd10f24c6ca88e67e826f255fa9b7b92ac7298d4"
+    },
+    "korri": {
+      "comfyName": "studio/test_e_korri_front.png",
+      "path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\input\\studio\\test_e_korri_front.png",
+      "sha256": "fb1ac40c61513b12dc5539aa8c72b8ca0a48ea6ad24bf0b0ffa0a4436038c7a4"
+    },
+    "testBCrsLeftUnchanged": [
+      "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\input\\studio\\91b82df6-6c5a-410a-bdb8-6cd3f79753c7.jpeg",
+      "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\input\\studio\\a42e77e0-dfe3-4ac9-85af-ab98dfc510e5.jpeg"
+    ]
+  }
+}

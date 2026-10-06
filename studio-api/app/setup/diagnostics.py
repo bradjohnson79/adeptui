@@ -376,6 +376,34 @@ def _service(url: str, suffix: str, name: str) -> Verification:
         )
 
 
+def _verify_staged_video_pack(component: ComponentDefinition) -> Verification:
+    """Installed when the staged shared-model files are already on disk. Never downloads."""
+
+    from ..video_runtime.local_video_profiles import H3_BO_FILES, HUNYUAN_FILES
+    from .paths import default_models_root
+
+    files = H3_BO_FILES if component.id == "minimax_h3_base_optimized" else HUNYUAN_FILES
+    root = default_models_root()
+    missing = [f"{folder}/{name}" for folder, name in files if not (root / folder / name).is_file()]
+    if missing:
+        return Verification(
+            False,
+            True,
+            "required_files_missing",
+            f"{component.name} is missing staged weights.",
+            str(root),
+            details=tuple(f"Missing: {name}" for name in missing),
+            recommendation="correct_path",
+            requires_user_interaction=True,
+        )
+    note = (
+        "Installed. Existing files detected. No download."
+        if component.id == "minimax_h3_base_optimized"
+        else "Installed. Staged 480p distilled weights are on disk."
+    )
+    return Verification(True, False, None, note, str(root))
+
+
 def verify_component(component_id: str, state: dict[str, Any] | None = None) -> Verification:
     cached = _VERIFY_CACHE.get(component_id)
     if cached and (time.monotonic() - cached[0]) < _VERIFY_CACHE_TTL_SEC:
@@ -420,6 +448,9 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
     # Keep in-memory state aligned with Adept-owned defaults so callers that do
     # not go through build_status still see an obvious configured path.
     ensure_configured_paths(state)
+
+    if component.verifier == "staged_video_pack":
+        return _verify_staged_video_pack(component)
 
     if component.verifier == "wonder3d_multiview" or component.id == "wonder3d_multiview":
         return Verification(

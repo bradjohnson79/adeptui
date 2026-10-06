@@ -129,6 +129,117 @@ def test_ers_generate_pins_environment_reference_sheet_purpose(monkeypatch) -> N
     assert result["child_jobs"][0]["status"] == "queued"
 
 
+def test_ers_fal_gpt_image_2_never_pins_kie(monkeypatch) -> None:
+    """fal.ai + GPT Image 2 must stay on fal even if a Kie Market id leaked in."""
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    sheet = _sheet(project_id, spatial_map_id)
+    captured: list[dict] = []
+    document = SpatialMapDocument(
+        projectId=project_id,
+        id=spatial_map_id,
+        backgroundAssetId="atlas-ref-1",
+    )
+    _patch_handler(monkeypatch, sheet, document, captured)
+
+    ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
+        spatial_map_id=spatial_map_id,
+        environmentPrompt="coffee shop with a wooden bar",
+        requested_provider="fal",
+        provider="fal",
+        providerKind="fal",
+        hostedModelId="gpt-image-2-fal",
+        hosted_model_id="gpt-image-2-fal",
+        model="gpt-image-2-fal",
+        falImageModelId="openai/gpt-image-2",
+        fal_image_model_id="openai/gpt-image-2",
+        kieImageModelId="gpt-image-2-image-to-image",
+        kie_image_model_id="gpt-image-2-image-to-image",
+    )
+
+    assert len(captured) == 1
+    body = captured[0]
+    assert body.get("provider") == "fal"
+    assert body.get("requested_provider") == "fal"
+    assert body.get("falImageModelId") == "openai/gpt-image-2"
+    assert not body.get("kieImageModelId")
+    assert body.get("creativeContext", {}).get("resolvedProvider") == "fal"
+    assert body.get("creativeContext", {}).get("resolvedAdapter") == "fal"
+
+
+def test_ers_kie_selection_never_pins_fal(monkeypatch) -> None:
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    sheet = _sheet(project_id, spatial_map_id)
+    captured: list[dict] = []
+    document = SpatialMapDocument(
+        projectId=project_id,
+        id=spatial_map_id,
+        backgroundAssetId="atlas-ref-1",
+    )
+    _patch_handler(monkeypatch, sheet, document, captured)
+
+    ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id="279a7474-d93c-4dc7-8936-4b649ef06256",
+        spatial_map_id=spatial_map_id,
+        environmentPrompt="coffee shop with a wooden bar",
+        requested_provider="kie",
+        provider="kie",
+        providerKind="kie",
+        hostedModelId="flux-kie",
+        model="flux-kie",
+        kieImageModelId="flux",
+        falImageModelId="openai/gpt-image-2",
+    )
+
+    body = captured[0]
+    assert body.get("provider") == "kie"
+    assert body.get("kieImageModelId") == "flux"
+    assert not body.get("falImageModelId")
+    assert body.get("creativeContext", {}).get("resolvedAdapter") == "kie"
+
+
+def test_ers_wavespeed_selection_drops_fal_and_kie(monkeypatch) -> None:
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    sheet = _sheet(project_id, spatial_map_id)
+    captured: list[dict] = []
+    document = SpatialMapDocument(
+        projectId=project_id,
+        id=spatial_map_id,
+        backgroundAssetId="atlas-ref-1",
+    )
+    _patch_handler(monkeypatch, sheet, document, captured)
+
+    ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id="279a7474-d93c-4dc7-8936-4b649ef06257",
+        spatial_map_id=spatial_map_id,
+        environmentPrompt="coffee shop with a wooden bar",
+        requested_provider="wavespeed",
+        provider="wavespeed",
+        providerKind="wavespeed",
+        hostedModelId="flux-wavespeed",
+        model="flux-wavespeed",
+        wavespeedImageModelId="wavespeed-ai/flux-dev",
+        kieImageModelId="gpt-image-2-text-to-image",
+        falImageModelId="openai/gpt-image-2",
+    )
+
+    body = captured[0]
+    assert body.get("provider") == "wavespeed"
+    assert body.get("wavespeedImageModelId") == "wavespeed-ai/flux-dev"
+    assert not body.get("falImageModelId")
+    assert not body.get("kieImageModelId")
+    assert body.get("creativeContext", {}).get("resolvedAdapter") == "wavespeed"
+
+
 def test_ers_generate_blocks_non_i2i_hosted_model(monkeypatch) -> None:
     """Binding law: ERS requires an image-to-image-capable generator. A hosted
     model without an ERS-authorized I2I path is blocked, never silently run as
@@ -597,4 +708,106 @@ def test_ers_generate_source_path_still_uses_gpt_i2i(monkeypatch) -> None:
     assert "text-to-image" not in str(body.get("kieImageModelId") or "")
     assert body.get("sourceAssetId") == "atlas-ref-1"
     assert body.get("input_urls")
+
+
+def test_ers_fal_dock_id_resolves_endpoint(monkeypatch) -> None:
+    """fal.ai + gpt-image-2-fal dock id must resolve to openai/gpt-image-2, not fail start."""
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    sheet = _sheet(project_id, spatial_map_id)
+    captured: list[dict] = []
+    document = SpatialMapDocument(
+        projectId=project_id,
+        id=spatial_map_id,
+        backgroundAssetId="atlas-ref-1",
+    )
+    _patch_handler(monkeypatch, sheet, document, captured)
+
+    ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id="279a7474-d93c-4dc7-8936-4b649ef06258",
+        spatial_map_id=spatial_map_id,
+        environmentPrompt="coffee shop with a wooden bar",
+        requested_provider="fal",
+        provider="fal",
+        providerKind="fal",
+        hostedModelId="gpt-image-2-fal",
+        model="gpt-image-2-fal",
+        falImageModelId="gpt-image-2-fal",
+    )
+
+    assert len(captured) == 1
+    body = captured[0]
+    assert body.get("provider") == "fal"
+    assert body.get("falImageModelId") == "openai/gpt-image-2"
+    assert not body.get("kieImageModelId")
+
+
+def test_ers_fal_unresolvable_model_fails_before_new_sheet(monkeypatch) -> None:
+    """ENVIRONMENT_DRAFT_ERS_SEPARATION: failed fal start must not mint a new ERS row."""
+    import pytest
+
+    project_id = f"proj-{uuid.uuid4()}"
+    created: list[str] = []
+    monkeypatch.setattr("app.environment_reference_sheet.store.list_sheets", lambda pid: [])
+    def _forbid_create(**kwargs):
+        created.append(str(kwargs.get("name") or "sheet"))
+        raise AssertionError("create_sheet must not run")
+
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.orchestrator.create_sheet",
+        _forbid_create,
+    )
+    monkeypatch.setattr(ers_generate, "_fal_still_endpoint", lambda model_id, dock_id="": "")
+    monkeypatch.setattr(
+        "app.spatial_map.service.get_document",
+        lambda *args, **kwargs: None,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="fal.ai could not start"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id="279a7474-d93c-4dc7-8936-4b649ef06259",
+            environmentPrompt="warehouse night exterior",
+            requested_provider="fal",
+            provider="fal",
+            providerKind="fal",
+            hostedModelId="not-a-real-fal-model",
+            model="not-a-real-fal-model",
+            falImageModelId="not-a-real-fal-model",
+        )
+
+    assert created == []
+
+
+def test_fal_image_route_resolves_dock_pin() -> None:
+    from app.image_product.compile import _fal_image_route
+    from app.fal_catalog import resolve_fal_still_endpoint, build_fal_image_arguments, fal_still_edit_model_id
+
+    route = _fal_image_route(
+        {
+            "source": "api",
+            "requested_provider": "fal",
+            "hostedModelId": "gpt-image-2-fal",
+            "falImageModelId": "gpt-image-2-fal",
+        }
+    )
+    assert route is not None
+    assert route["official"] == "openai/gpt-image-2"
+    assert resolve_fal_still_endpoint("gpt-image-2-fal") == "openai/gpt-image-2"
+    assert fal_still_edit_model_id("openai/gpt-image-2") == "openai/gpt-image-2/edit"
+    # Edit mode (source pixels): large custom size, not a downscaled preset.
+    args = build_fal_image_arguments(
+        model_id="openai/gpt-image-2/edit",
+        prompt="ers sheet",
+        width=2560,
+        height=1440,
+        image_urls=["https://example.com/atlas.png"],
+    )
+    assert args["image_urls"] == ["https://example.com/atlas.png"]
+    assert args["image_size"] == {"width": 2560, "height": 1440}
+    assert args["quality"] == "high"
 

@@ -7,8 +7,8 @@ describe("Pose Intelligence UI copy", () => {
     expect(src).toContain("Co-Director Pose Intelligence");
     expect(src).toContain("Analyze Pose");
     expect(src).toContain("Check Motion Continuity");
-    expect(src).toContain("Send to Scene Creator");
-    expect(src).toContain("Send to Timeline");
+    expect(src).toContain("Send to Storyboard");
+    expect(src).not.toContain("Send to Timeline");
     expect(src).toContain("posecraft-analyze-pose");
     expect(src).toContain("Your pose is unchanged");
     expect(src).not.toMatch(/data-testid="[^"]*jepa/i);

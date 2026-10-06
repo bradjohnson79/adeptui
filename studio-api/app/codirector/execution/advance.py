@@ -256,6 +256,13 @@ def heal_zero_job_plan(
         total=0,
         timestamp=_now(),
     ))
+    try:
+        from .generation_ready_notice import emit_after_terminal
+
+        emit_after_terminal(db, project_id, plan, previous_status="queued")
+        save_pack(db, project_id, plan)
+    except Exception:
+        logger.debug("generation ready notice emit skipped", exc_info=True)
     return plan
 
 
@@ -438,6 +445,17 @@ def advance_execution_pack(
                 surface_type=plan.surface_type,
                 timestamp=_now(),
             ))
+
+        # Conversational generation ready / fail / cancel notice (exactly-once).
+        if plan.status in (ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED):
+            try:
+                from .generation_ready_notice import emit_after_terminal
+
+                prev_s = str(getattr(previous_status, "value", previous_status) or "")
+                emit_after_terminal(db, project_id, plan, previous_status=prev_s)
+                save_pack(db, project_id, plan)
+            except Exception:
+                logger.debug("generation ready notice emit skipped", exc_info=True)
 
     return plan
 

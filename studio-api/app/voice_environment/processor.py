@@ -12,6 +12,26 @@ import numpy as np
 from .contracts import VoiceEnvironmentTiming
 
 
+def _ffmpeg_to_wav(path: Path) -> Path | None:
+    """Decode a non-wav Library recording into a new wav. The source file is not changed."""
+    import shutil
+    import subprocess
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    dest = path.with_name(f"{path.stem}-environment-dry.wav")
+    try:
+        subprocess.run(
+            [ffmpeg, "-y", "-i", str(path), "-ac", "1", str(dest)],
+            check=True,
+            capture_output=True,
+        )
+    except Exception:
+        return None
+    return dest if dest.is_file() else None
+
+
 def _read_wav_mono(path: Path) -> tuple[np.ndarray, int]:
     try:
         import soundfile as sf
@@ -20,6 +40,10 @@ def _read_wav_mono(path: Path) -> tuple[np.ndarray, int]:
         mono = data.mean(axis=1).astype(np.float32)
         return mono, int(sr)
     except Exception:
+        if path.suffix.lower() != ".wav":
+            decoded = _ffmpeg_to_wav(path)
+            if decoded is not None:
+                return _read_wav_mono(decoded)
         with wave.open(str(path), "rb") as wf:
             sr = wf.getframerate()
             frames = wf.readframes(wf.getnframes())

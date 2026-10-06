@@ -107,9 +107,11 @@ test.describe("MAGI Operational Integrity (real backend)", () => {
     try {
       await openMagi(page, project.id);
 
-      // Banner copy renders without being clipped into a one-line scroll.
-      await expect(page.getByTestId("magi-strip")).toBeVisible();
-      await expect(page.getByTestId("magi-strip-copy")).toContainText(/MAGI Editor/);
+      await expect(page.getByTestId("magi-strip")).toHaveCount(0);
+      await expect(page.getByTestId("magi-workspace-status")).toBeVisible();
+      await expect(page.getByTestId("magi-viewer-mode-histogram")).toHaveCount(0);
+      await expect(page.getByTestId("magi-viewer-mode-vectorscope")).toHaveCount(0);
+      await expect(page.getByTestId("magi-viewer-fit")).toHaveCount(0);
 
       // Fullscreen: workspace-level control is distinct from the viewer focus toggle.
       const workspaceFs = page.getByTestId("workspace-fullscreen-toggle-magi");
@@ -147,11 +149,12 @@ test.describe("MAGI Operational Integrity (real backend)", () => {
       await page.locator("#magi-acc-btn-export").click();
       await expect(page.getByTestId("magi-inspector-export")).toBeVisible();
 
-      // Render queue is collapsible and collapsed by default.
-      const queue = page.getByTestId("magi-render-queue");
-      await expect(queue.locator(".magi-queue__toggle")).toHaveAttribute("aria-expanded", "false");
-      await queue.locator(".magi-queue__toggle").click();
-      await expect(queue.locator(".magi-queue__toggle")).toHaveAttribute("aria-expanded", "true");
+      // Render queue lives under Recipes in the left drawer and is collapsed by default.
+      const queue = page.getByTestId("magi-drawer-left").getByTestId("magi-render-queue");
+      await expect(queue.locator(".magi-acc__header")).toHaveAttribute("aria-expanded", "false");
+      await queue.locator(".magi-acc__header").click();
+      await expect(queue.locator(".magi-acc__header")).toHaveAttribute("aria-expanded", "true");
+      await expect(page.locator(".magi-queue")).toHaveCount(0);
 
       await page.screenshot({ path: path.join(OUT, "op-01-workspace.png"), fullPage: true });
     } finally {

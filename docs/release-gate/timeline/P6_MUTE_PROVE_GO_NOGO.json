@@ -1,0 +1,68 @@
+{
+  "timestamp": "2026-09-18 18:52 PT",
+  "overall": "GO_MUTE_PATH",
+  "overall_detail": "generate_audio=false wired end-to-end; raw+asset video-only (no audio stream). Gate NeedsDialogueRetake from OMNI_UNAVAILABLE (UNCERTAIN), not from detected speech.",
+  "ids": {
+    "PROJ": "fb24ff0f-8772-4d50-a602-ac69d14b5a6b",
+    "SCENE": "02b06ec5-a177-41f9-b40a-3d3e6ff46658",
+    "STK": "stk_ae5b66e9d0a7",
+    "W2": "bb_b5794fa154fe",
+    "JOB": "abb41127-d993-43e7-8d23-1143504f0d0f",
+    "queueJobId": "abb41127-d993-43e7-8d23-1143504f0d0f",
+    "comfy_prompt_id": "bacc8802-2509-4898-855d-ac7509499ff1",
+    "timeline_job": "job_c45856ff6418",
+    "candidateId": "cand_cbef635fc3aa",
+    "takeId": "take_7dd602e798a9",
+    "assetId": "1f9a69f7-5b37-48f5-bd16-05574f9b15bd",
+    "prior_frame": "dfbe6d3f5aba4cdbb86941da77b5fc1a",
+    "bridge": "cbr_5a029d173cba"
+  },
+  "request_prove": {
+    "generate_audio": false,
+    "audio_generation": false,
+    "audioAuthority": {
+      "authority": "silence_locked",
+      "dialogue": "manifest_locked_script",
+      "nativeAudio": "disabled",
+      "generateAudio": false,
+      "reason": "expectedSpeech_NONE_or_empty_silence_locked_manifest",
+      "allowAdLibs": false,
+      "allowLanguageSwitch": false,
+      "spokenLanguage": null,
+      "exactScriptEnforcedBy": "omni_post_gen_qc"
+    },
+    "same_stk_prior_frame": true
+  },
+  "comfy_graph_prove": {
+    "omit_VAEDecodeAudio": true,
+    "CreateVideo_has_audio_input": false,
+    "prompt_id": "bacc8802-2509-4898-855d-ac7509499ff1"
+  },
+  "speech": {
+    "raw_render_has_audio": false,
+    "asset_has_audio": false,
+    "instrumental": "SILENT_NO_AUDIO_STREAM",
+    "pre_mute_v3_generate_audio": true,
+    "omni": "UNAVAILABLE",
+    "dialogueQc_verdict": "UNCERTAIN",
+    "dialogueQc_reason": "OMNI_UNAVAILABLE",
+    "batch_status": "NeedsDialogueRetake"
+  },
+  "lighting": {
+    "this_run": "INCONCLUSIVE_OMNI_UNAVAILABLE",
+    "prior_v3_instrumental": "GO (\u0394luma ~2-5 historically)"
+  },
+  "regression_assert": true,
+  "no_bp_wording_escalation": true,
+  "evidence_files": [
+    "p6_mute_prove_request_dump.json",
+    "p6_mute_prove_comfy_graph_audio.json",
+    "p6_mute_prove_ffmpeg.json",
+    "p6_mute_prove_asset_ffprobe.json",
+    "p6_mute_prove_qc_refs.json",
+    "p6_mute_prove_raw_w2.mp4",
+    "p6_mute_prove_asset_w2.mp4",
+    "p6_mute_regression_assert.json",
+    "forensic_freeze/20260918_184548/"
+  ]
+}

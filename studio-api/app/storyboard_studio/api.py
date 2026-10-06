@@ -27,6 +27,7 @@ from .documents import (
     list_documents,
     next_free_slot,
     reorder_panels,
+    set_aspect_ratio,
     set_page_size,
 )
 from .export import export_adept_json, export_contact_sheet_html, export_pdf_bytes
@@ -113,6 +114,10 @@ class ComposeBody(BaseModel):
     pageIndex: int = 0
 
 
+class AspectBody(BaseModel):
+    aspectRatio: Literal["16:9", "9:16"]
+
+
 @router.get("/projects/{project_id}/documents")
 def api_list_docs(project_id: str) -> dict[str, Any]:
     return {"documents": [d.model_dump() for d in list_documents(project_id)]}
@@ -128,6 +133,14 @@ def api_ensure_doc(project_id: str, body: PageSizeBody | None = None) -> dict[st
 @router.get("/projects/{project_id}/workspace")
 def api_workspace(project_id: str, documentId: Optional[str] = None) -> dict[str, Any]:
     return hydrate_panels(project_id, documentId)
+
+
+@router.patch("/projects/{project_id}/documents/{document_id}/aspect-ratio")
+def api_aspect_ratio(project_id: str, document_id: str, body: AspectBody) -> dict[str, Any]:
+    doc = set_aspect_ratio(project_id, document_id, body.aspectRatio)
+    if not doc:
+        raise HTTPException(status_code=404, detail="document not found")
+    return {"document": doc.model_dump()}
 
 
 @router.patch("/projects/{project_id}/documents/{document_id}/page-size")

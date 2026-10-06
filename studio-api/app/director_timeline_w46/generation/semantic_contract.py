@@ -326,13 +326,62 @@ def _slot_field(slot: Any, *names: str) -> Any:
     return None
 
 
+def compile_h3_av_natural_tags(prompt: str, slots: Iterable[Any]) -> str:
+    """Rewrite Adept natural @VideoN / @AudioN tags to MiniMax <Video N> / <Audio N>.
+
+    Only rewrites indices that have a wired Library asset on the matching R2V
+    slot. Never invents media from bare strings. Does not rewrite @Character /
+    #Environment / %Prop sheet tags.
+    """
+    text = prompt or ""
+    if not text:
+        return text
+    video_ok: set[int] = set()
+    audio_ok: set[int] = set()
+    for slot in slots or []:
+        role = str(_slot_field(slot, "role") or "").strip().lower()
+        asset_id = str(_slot_field(slot, "assetId", "asset_id") or "").strip()
+        if not asset_id:
+            continue
+        if role == "video":
+            raw = _slot_field(slot, "videoIndex", "video_index")
+            try:
+                idx = int(raw) if raw is not None else 0
+            except (TypeError, ValueError):
+                idx = 0
+            if idx > 0:
+                video_ok.add(idx)
+        elif role == "audio":
+            raw = _slot_field(slot, "audioIndex", "audio_index")
+            try:
+                idx = int(raw) if raw is not None else 0
+            except (TypeError, ValueError):
+                idx = 0
+            if idx > 0:
+                audio_ok.add(idx)
+
+    def _video_sub(match: re.Match[str]) -> str:
+        idx = int(match.group(1))
+        return f"<Video {idx}>" if idx in video_ok else match.group(0)
+
+    def _audio_sub(match: re.Match[str]) -> str:
+        idx = int(match.group(1))
+        return f"<Audio {idx}>" if idx in audio_ok else match.group(0)
+
+    # Natural Adept tags used in Timed Prompt. Word-boundary style; case-insensitive.
+    text = re.sub(r"@Video\s*([1-9]\d*)\b", _video_sub, text, flags=re.IGNORECASE)
+    text = re.sub(r"@Audio\s*([1-9]\d*)\b", _audio_sub, text, flags=re.IGNORECASE)
+    return text
+
+
 def apply_bound_reference_tokens(prompt: str, slots: Iterable[Any]) -> str:
     """Prepend missing H3 picture/subject binds. Never overwrite creator action.
 
     Maps @/%/# tags to the slot that owns that assetId. Does not invent a
-    second person or swap identities.
+    second person or swap identities. Compiles @VideoN/@AudioN natural tags to
+    MiniMax <Video N>/<Audio N> when those slots carry Library assets.
     """
-    text = (prompt or "").strip()
+    text = compile_h3_av_natural_tags((prompt or "").strip(), slots)
     defs: list[str] = []
     characters: list[CharacterIdentityLayer] = []
     for slot in slots or []:

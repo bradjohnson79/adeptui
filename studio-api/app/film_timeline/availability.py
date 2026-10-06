@@ -37,10 +37,28 @@ def _comfy_reachable() -> bool:
 def _provider_for(generator_id: str, execution_type: str) -> str:
     if execution_type == "local":
         return "comfy"
-    lowered = generator_id.lower()
-    if "veo" in lowered:
-        return "kie"
+    # Every hosted Timeline adapter submits through fal.ai today. Veo's row is
+    # labelled for the Kie-era catalog entry but executes via fal (fal_veo).
     return "fal"
+
+
+def continuation_copy(mode: str | None) -> dict[str, str]:
+    """Creator wording for the capability already stored on the generator."""
+
+    token = str(mode or "none").strip().lower()
+    if token == "hard":
+        return {"mode": "hard", "label": "Continuation: Hard start-frame", "helper": ""}
+    if token == "soft":
+        return {
+            "mode": "soft",
+            "label": "Continuation: Soft reference",
+            "helper": "Exact opening pose continuity is not guaranteed by this model.",
+        }
+    return {
+        "mode": "none",
+        "label": "",
+        "helper": "This model cannot perform continuity anchoring.",
+    }
 
 
 def list_generator_status() -> list[dict[str, Any]]:
@@ -76,16 +94,37 @@ def list_generator_status() -> list[dict[str, Any]]:
                 "unavailableReason": reason,
             }
         )
+        if str(payload.get("qualityControl") or "") == "seedance_resolution":
+            # Adept's hosted Seedance path implements 480p and 720p only
+            # (legal_canvas._SEEDANCE_16_9). The fal OpenAPI ladder advertises
+            # higher tiers this route cannot execute; never offer them.
+            payload["supportedResolutions"] = ["480p", "720p"]
         rows.append(payload)
-    # Local MiniMax is one Director row. Text-to-video and image-to-video stay hidden.
-    h3_local = "minimax-h3-i2v-local"
+    # Local MiniMax Timeline rows: Standard H3 and Base Optimized.
+    # The text-to-video adapter id stays hidden.
+    h3_keep = {"minimax-h3-i2v-local", "minimax-h3-base-optimized"}
+    local_order = {
+        "minimax-h3-i2v-local": 0,
+        "minimax-h3-base-optimized": 1,
+        "ltx-2.5-distilled": 2,
+        "hunyuan-video-1.5-distilled": 3,
+    }
     collapsed: list[dict[str, Any]] = []
     for row in rows:
         generator_id = str(row.get("id") or "")
-        if "minimax-h3" in generator_id and row.get("local") and generator_id != h3_local:
+        if "minimax-h3" in generator_id and row.get("local") and generator_id not in h3_keep:
             continue
-        if generator_id == h3_local:
-            row["label"] = "MiniMax H3 Director — Local"
+        if generator_id == "minimax-h3-i2v-local":
+            row["label"] = "MiniMax H3 — Local"
+        if generator_id == "veo-api":
+            # Execution is fal.ai (fal_veo); the stored label still says Kie.
+            row["label"] = "Veo 3.1 (fal.ai)"
         collapsed.append(row)
-    collapsed.sort(key=lambda item: (0 if item.get("local") else 1, str(item.get("label") or "")))
+    collapsed.sort(
+        key=lambda item: (
+            0 if item.get("local") else 1,
+            local_order.get(str(item.get("id") or ""), 50),
+            str(item.get("label") or ""),
+        )
+    )
     return collapsed

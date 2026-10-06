@@ -5,16 +5,21 @@ import {
   chordFromEvent,
   chordsEqual,
   DEFAULT_HOTKEYS,
+  dispatchWorkspaceShortcut,
   findConflict,
   formatChord,
+  getActiveShortcutWorkspace,
   isEditableTarget,
   loadHotkeys,
   matchHotkey,
   registerTimelineCommand,
+  registerWorkspaceKeyHandler,
   resetHotkeys,
+  resetShortcutWorkspaceForTests,
   resetTimelineCommandsForTests,
   runTimelineCommand,
   saveHotkeys,
+  setActiveShortcutWorkspace,
   TIMELINE_HOTKEYS_KEY,
 } from "./timelineHotkeys.ts";
 
@@ -112,6 +117,40 @@ test("unbound drawer commands do not steal keystrokes", () => {
 test("ctrl/meta chords match", () => {
   const event = { key: "d", ctrlKey: true, metaKey: false, shiftKey: false, altKey: false } as KeyboardEvent;
   assert.ok(chordsEqual(chordFromEvent(event), { key: "d", ctrl: true }));
+});
+
+test("workspace dispatcher fires only the active map", () => {
+  resetShortcutWorkspaceForTests();
+  const hits: string[] = [];
+  const stopTimeline = registerWorkspaceKeyHandler("timeline", () => hits.push("timeline"));
+  const stopMagi = registerWorkspaceKeyHandler("magi", () => hits.push("magi"));
+  const space = { key: " ", ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, target: null } as KeyboardEvent;
+  setActiveShortcutWorkspace("timeline");
+  assert.equal(dispatchWorkspaceShortcut(space), true);
+  setActiveShortcutWorkspace("magi");
+  assert.equal(dispatchWorkspaceShortcut(space), true);
+  setActiveShortcutWorkspace("timeline");
+  assert.equal(dispatchWorkspaceShortcut(space), true);
+  assert.deepEqual(hits, ["timeline", "magi", "timeline"]);
+  const typing = { key: " ", ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, target: { tagName: "TEXTAREA", isContentEditable: false, closest: () => null, dataset: {} } } as unknown as KeyboardEvent;
+  assert.equal(dispatchWorkspaceShortcut(typing), false);
+  assert.deepEqual(hits, ["timeline", "magi", "timeline"]);
+  stopMagi();
+  setActiveShortcutWorkspace("magi");
+  assert.equal(dispatchWorkspaceShortcut(space), false);
+  stopTimeline();
+  setActiveShortcutWorkspace(null);
+  assert.equal(getActiveShortcutWorkspace(), null);
+  assert.equal(dispatchWorkspaceShortcut(space), false);
+});
+
+test("timeline registry does not absorb magi-only commands", () => {
+  const ids = DEFAULT_HOTKEYS.map((item) => item.actionId);
+  assert.equal(ids.includes("generateScene"), true);
+  assert.equal(ids.includes("playPause"), true);
+  assert.equal(ids.includes("compare"), false);
+  assert.equal(ids.includes("splitAtPlayhead"), false);
+  assert.equal(ids.includes("splitView"), false);
 });
 
 test("Shift+/ opens Hot Keys and letters in prose would match only when not typing", () => {

@@ -60,6 +60,21 @@ def duplicate_tag(references: list[ReferenceAsset], tag: str, *, except_id: str 
     return None
 
 
+def generation_role(ref_type: str) -> str:
+    """How a stored Timeline reference reaches MiniMax H3 picture slots."""
+
+    return {
+        "character": "character",
+        "environment": "place",
+        "prop": "prop",
+        "video": "video",
+        "audio": "audio",
+        "first_frame": "prior_frame",
+        "storyboard": "reference",
+        "image": "reference",
+    }.get(str(ref_type or ""), "reference")
+
+
 def provider_reference_slots(references: list[ReferenceAsset], capabilities) -> list[ReferenceAsset]:
     """Stored references the selected model is allowed to receive."""
 

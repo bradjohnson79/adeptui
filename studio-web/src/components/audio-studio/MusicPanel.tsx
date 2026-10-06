@@ -32,7 +32,6 @@ type MusicPanelProps = {
   onCancelGeneration?: () => Promise<void> | void;
   onPreview: (candidate: AudioCandidate) => void;
   onApprove: (candidate: AudioCandidate) => Promise<void> | void;
-  onAddToTimeline: (candidate: AudioCandidate) => Promise<void> | void;
 };
 
 const MOODS = ["Hopeful", "Tense", "Playful", "Epic", "Melancholic", "Dreamy"];
@@ -72,7 +71,6 @@ export function MusicPanel({
   onCancelGeneration,
   onPreview,
   onApprove,
-  onAddToTimeline,
 }: MusicPanelProps) {
   return (
     <section className="audio-studio-panel" data-testid="audio-music-panel">
@@ -215,15 +213,13 @@ export function MusicPanel({
               approved={Boolean(candidate.assetId && approvedAssetIds[candidate.assetId])}
               onPreview={() => onPreview(candidate)}
               onApprove={() => onApprove(candidate)}
-              onPrimary={() => onAddToTimeline(candidate)}
-              primaryLabel="Add to Timeline"
             />
           ))}
         </div>
       ) : (
         <div className="audio-empty-state">
           <strong>Your tracks will appear here.</strong>
-          <p className="muted">Play them, pick one, approve it, then send it to Timeline.</p>
+          <p className="muted">Play them, pick one, then approve it.</p>
         </div>
       )}
     </section>

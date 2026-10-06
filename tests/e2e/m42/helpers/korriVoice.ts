@@ -63,37 +63,51 @@ export async function ensureKorriCharacter(request: APIRequestContext): Promise<
   }
 
   const seed = await request.post(`/api/projects/${projectId}/characters/seed-korri`, { data: {} });
-  expect(seed.ok(), `seed-korri failed: ${seed.status()} ${await seed.text()}`).toBeTruthy();
-  const korri = await seed.json();
-  const characterId = String(korri.id);
-  expect(characterId).toBeTruthy();
-
-  return { projectId, characterId };
+  if (seed.ok()) {
+    const korri = await seed.json();
+    const characterId = String(korri.id);
+    expect(characterId).toBeTruthy();
+    return { projectId, characterId };
+  }
+  // Korri already exists as a Global Character: reuse the existing profile
+  // instead of failing the fixture (global scope makes it visible here).
+  const seedBody = await seed.json().catch(() => null);
+  const existingId = String(seedBody?.detail?.existingId || seedBody?.detail?.details?.existingId || "");
+  expect(
+    seed.status() === 409 && existingId,
+    `seed-korri failed: ${seed.status()} ${JSON.stringify(seedBody)}`,
+  ).toBeTruthy();
+  return { projectId, characterId: existingId };
 }
 
 export async function openCharacterVoice(page: Page, projectId: string): Promise<void> {
-  await page.goto(`/project/${projectId}?workspace=characters`);
-  await expect(page.getByTestId("character-profile-workspace")).toBeVisible({ timeout: 45_000 });
-  const select = page.getByTestId("character-select");
-  await expect(select).toBeVisible();
+  // Canonical creator path: the Voice Studio workspace owns character voice work.
+  // Character Creator's "Voice Studio" button navigates here; the shell selects
+  // the character from the URL or the chooser grid.
+  await page.goto(`/project/${projectId}?workspace=voicestudio`);
+  await expect(page.getByTestId("voice-studio-shell")).toBeVisible({ timeout: 45_000 });
 
-  await expect
-    .poll(async () => {
-      let value = await findKorriOptionValue(page);
-      if (!value) {
-        const seed = page.getByRole("button", { name: /Seed Korri/i });
-        if ((await seed.count()) > 0) await seed.click();
-        value = await findKorriOptionValue(page);
-      }
-      return value;
-    }, { timeout: 45_000 })
-    .toBeTruthy();
+  const activeName = page.getByTestId("voice-studio-active-name");
+  const workspace = page.getByTestId("voice-creator-workspace");
+  const korriCard = page.locator('[data-testid="voice-studio-open-character"][data-character-name="Korri"]');
 
-  const korriValue = await findKorriOptionValue(page);
-  expect(korriValue, "Korri must appear in character-select after seed").toBeTruthy();
-  await select.selectOption(korriValue);
-  await page.getByTestId("character-tabs").getByRole("button", { name: "Voice Studio", exact: true }).click();
-  await expect(page.getByTestId("voice-creator-workspace")).toBeVisible({ timeout: 30_000 });
+  // The shell settles into one of two states after load: it auto-restores the
+  // remembered character workspace, or it shows the chooser grid. Wait for
+  // either settled state before deciding — otherwise a restore that lands
+  // while we wait for the chooser leaves us waiting on a card that never
+  // renders (and vice versa).
+  await expect(workspace.or(korriCard.first())).toBeVisible({ timeout: 60_000 });
+
+  const currentName = ((await activeName.textContent().catch(() => "")) || "").trim();
+  if (currentName !== "Korri") {
+    if (await workspace.isVisible().catch(() => false)) {
+      await page.getByTestId("voice-studio-choose-another").click();
+    }
+    await expect(korriCard).toBeVisible({ timeout: 45_000 });
+    await korriCard.click();
+  }
+  await expect(workspace).toBeVisible({ timeout: 30_000 });
+  await expect(activeName).toHaveText("Korri", { timeout: 30_000 });
 }
 
 export async function openVoicePerformance(page: Page): Promise<void> {

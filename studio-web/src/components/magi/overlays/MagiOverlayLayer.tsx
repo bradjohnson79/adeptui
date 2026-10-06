@@ -1,6 +1,6 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { MagiOverlayComposition, MagiOverlayElement } from "./types";
-import { compareOverlayPaintOrder, composeOverlayPaintZ, overlayVisibleAtFrame } from "./types";
+import { compareOverlayPaintOrder, composeOverlayPaintZ, overlayObjectsTrack, overlayVisibleAtFrame } from "./types";
 
 function pct(n: number) {
   return `${(n * 100).toFixed(3)}%`;
@@ -219,6 +219,7 @@ export function MagiOverlayLayer({
   frameRate = 24,
   assetUrl,
   interactive = true,
+  hiddenObjectsSlots,
 }: {
   composition: MagiOverlayComposition;
   selectedId: string | null;
@@ -229,6 +230,7 @@ export function MagiOverlayLayer({
   frameRate?: number;
   assetUrl?: (id: string) => string;
   interactive?: boolean;
+  hiddenObjectsSlots?: ReadonlySet<number>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -245,6 +247,7 @@ export function MagiOverlayLayer({
 
   const visibleOverlays = [...composition.overlays]
     .filter((el) => overlayVisibleAtFrame(el, playheadFrame))
+    .filter((el) => !hiddenObjectsSlots?.has(overlayObjectsTrack(el)))
     .sort(compareOverlayPaintOrder);
 
   const onPointerDown = (e: ReactPointerEvent) => {

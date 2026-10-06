@@ -66,7 +66,7 @@ _ALIGN32_PRODUCTS = frozenset(
         "ltx-2.5-comfy",
     }
 )
-_SEEDANCE_PRODUCTS = frozenset({"seedance-2.0", "seedance-2.0-mini", "seedance-2.5"})
+_SEEDANCE_PRODUCTS = frozenset({"seedance-2.0", "seedance-2.0-mini", "seedance-2.0-fast", "seedance-2.5"})
 
 
 class SpecFidelityError(ValueError):
@@ -141,6 +141,8 @@ def _canonical_product(product_id: str) -> str:
         return "seedance-2.5"
     if token in {"fal_seedance_mini", "seedance-mini", "seedance-2.0-mini"}:
         return "seedance-2.0-mini"
+    if token in {"fal_seedance_fast", "seedance-fast", "seedance-2.0-fast"}:
+        return "seedance-2.0-fast"
     return token
 
 
@@ -253,10 +255,34 @@ def resolve_legal_canvas(
             workflow_key=workflow,
         )
 
+    if product == "hunyuan-video-1.5-distilled":
+        # Staged checkpoints are 480p distilled. A higher requested tier stays
+        # 480p-class; Adept does not relabel that output as 720p.
+        sizes = {"16:9": (848, 480), "9:16": (480, 848), "1:1": (480, 480)}
+        dims = sizes.get(aspect_key)
+        if dims is None:
+            raise SpecFidelityError(
+                "HunyuanVideo 1.5 Distilled supports 16:9, 9:16, and 1:1.",
+                suggestions=["16:9", "9:16", "1:1"],
+                code="HUNYUAN_ASPECT_UNSUPPORTED",
+            )
+        return LegalCanvas(
+            tier="480p",
+            aspect=aspect_key,
+            width=dims[0],
+            height=dims[1],
+            alignment=16,
+            generation_mode="native",
+            honesty_label="480p-class",
+            product_id=product,
+            workflow_key=workflow,
+            notes="Staged HunyuanVideo 1.5 Distilled checkpoints are 480p-class. The finished video keeps its real size.",
+        )
+
     if product not in _ALIGN32_PRODUCTS:
         raise SpecFidelityError(
             f"{product} is not an active v1.1 local or hosted video family for canvas resolution.",
-            suggestions=["minimax-h3", "ltx-2.5", "seedance-2.0", "seedance-2.5"],
+            suggestions=["minimax-h3", "ltx-2.5", "hunyuan-video-1.5-distilled", "seedance-2.0", "seedance-2.5"],
             code="UNKNOWN_PRODUCT",
         )
 
@@ -343,6 +369,17 @@ def check_canvas(product_id: str, width: int, height: int) -> CanvasCheck:
     # the H3-specific resolution validator, never the generic /32 Scene-canvas gate.
     if product in {"minimax-h3", "minimax-h3-i2v-local"} or product.startswith("minimax-h3"):
         return check_h3_resolution(w, h)
+    if product == "hunyuan-video-1.5-distilled":
+        if w % 16 == 0 and h % 16 == 0 and max(w, h) <= 848 and min(w, h) <= 480:
+            return CanvasCheck(True, w, h, 16, "", [])
+        return CanvasCheck(
+            False,
+            w,
+            h,
+            16,
+            "HunyuanVideo 1.5 Distilled renders at 480p-class sizes (multiples of 16).",
+            ["848×480", "480×848", "480×480"],
+        )
     if product in _SEEDANCE_PRODUCTS:
         return CanvasCheck(True, w, h, 1, "", [])
     if product not in _ALIGN32_PRODUCTS:
@@ -548,6 +585,26 @@ def _nearest_ltx_frames(frames: int) -> list[int]:
     hi = lo + 8
     out = [n for n in (lo, hi) if n >= 9]
     return out[:2]
+
+
+def ltx_execution_frames(length_seconds: float, fps: int = 24) -> int:
+    """Nearest legal 8n+1 count for a Timeline whole-second LTX request.
+
+    CREATE and txt2vid stay fail-closed in assert_legal_duration. Timeline keeps
+    the creator's whole seconds and renders the nearer legal count, taking the
+    longer count when both neighbors are equally far.
+    """
+
+    frames = exact_frame_count(length_seconds, fps)
+    if _ltx_legal_frames(frames):
+        return frames
+    near = _nearest_ltx_frames(frames)
+    if not near:
+        raise SpecFidelityError(
+            f"LTX 2.5 cannot render {length_seconds}s at {fps} fps.",
+            code="ILLEGAL_DURATION",
+        )
+    return min(near, key=lambda count: (abs(count - frames), -count))
 
 
 def _nearest_h3_frames(frames: int) -> list[int]:

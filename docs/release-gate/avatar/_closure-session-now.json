@@ -1,0 +1,34 @@
+{
+  "id": "avs-a10ef709c2",
+  "name": "Anadriya Presenter Session",
+  "mode": "talking_portrait",
+  "provider_choice": "infinitetalk-local",
+  "dialogue_original": "Absolutely not.\n\nFresh pot, coming up.",
+  "speakers": [
+    {
+      "id": "speaker-a",
+      "label": "Korri",
+      "character_id": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+      "bbox": null,
+      "mask_asset_id": null,
+      "voice": {
+        "audio_asset_id": null,
+        "approved_record_id": null,
+        "approved_take_id": null,
+        "profile_id": null
+      }
+    },
+    {
+      "id": "speaker-b",
+      "label": "Anadriya",
+      "character_id": "b7086f85-3ee3-44db-a395-ae1a94e37fe1",
+      "voice": {
+        "audio_asset_id": null,
+        "approved_record_id": null,
+        "approved_take_id": null,
+        "profile_id": null
+      }
+    }
+  ],
+  "speaking_order": null
+}

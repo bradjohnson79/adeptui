@@ -1,0 +1,117 @@
+{
+  "prompt_id": "9d24fab9-b03a-4c78-8cfd-898f5ccde165",
+  "samples": [
+    {
+      "elapsed": 0.0,
+      "running": true,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 30.39,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 10.0,
+      "running": true,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 30.4,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 20.1,
+      "running": true,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 31.31,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 30.2,
+      "running": true,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 30.55,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 40.2,
+      "running": true,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 29.82,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 50.3,
+      "running": true,
+      "in_history": false,
+      "status_str": null,
+      "vram_used_gb": 31.68,
+      "cached_nodes": null
+    },
+    {
+      "elapsed": 60.3,
+      "running": false,
+      "in_history": true,
+      "status_str": "success",
+      "vram_used_gb": 32.79,
+      "cached_nodes": [
+        "1",
+        "3",
+        "4",
+        "6",
+        "7",
+        "8"
+      ]
+    }
+  ],
+  "final_status": {
+    "status_str": "success",
+    "completed": true,
+    "messages": [
+      [
+        "execution_start",
+        {
+          "prompt_id": "9d24fab9-b03a-4c78-8cfd-898f5ccde165",
+          "timestamp": 1788933977076
+        }
+      ],
+      [
+        "execution_cached",
+        {
+          "nodes": [
+            "1",
+            "3",
+            "4",
+            "6",
+            "7",
+            "8"
+          ],
+          "prompt_id": "9d24fab9-b03a-4c78-8cfd-898f5ccde165",
+          "timestamp": 1788933977083
+        }
+      ],
+      [
+        "execution_success",
+        {
+          "prompt_id": "9d24fab9-b03a-4c78-8cfd-898f5ccde165",
+          "timestamp": 1788934048823
+        }
+      ]
+    ]
+  },
+  "final_outputs": {
+    "14": {
+      "images": [
+        {
+          "filename": "h3_comfy_parity_00001_.mp4",
+          "subfolder": "identity_test",
+          "type": "output"
+        }
+      ],
+      "animated": [
+        true
+      ]
+    }
+  }
+}

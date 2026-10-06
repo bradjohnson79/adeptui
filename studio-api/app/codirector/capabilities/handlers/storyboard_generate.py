@@ -76,6 +76,25 @@ def handle(
     The dispatcher wraps this into an ExecutionPlan.
     """
     from ....storyboard_jobs import enqueue_imagegen_job
+    from ....storyboard_studio.aspect import (
+        apply_storyboard_board,
+        board_aspect_of,
+        generation_dimensions,
+        storyboard_board_intent,
+    )
+
+    explicit_aspect, explicit_page = storyboard_board_intent(user_instructions)
+    try:
+        apply_storyboard_board(project_id, explicit_aspect, explicit_page)
+    except Exception:
+        logger.exception("Storyboard board aspect could not be saved")
+    board_aspect = explicit_aspect or board_aspect_of(project_id)
+    if explicit_page in (6, 9, 12):
+        count = explicit_page
+    if board_aspect == "9:16":
+        frame_w, frame_h = generation_dimensions("9:16")
+    else:
+        frame_w, frame_h = 1280, 720
 
     # Resolve script scene context if not provided.
     ctx = scene_context or {}
@@ -150,12 +169,12 @@ def handle(
             body: dict[str, Any] = {
                 "prompt": sheet["compiled_prompt"],
                 "negative_prompt": "",
-                "width": 1280,
-                "height": 720,
+                "width": frame_w,
+                "height": frame_h,
                 "tag": f"codirector_storyboard_{execution_id[:8]}_sheet{i + 1}",
                 "modelFamilyPreference": "zimage",
                 "purpose": "codirector_storyboard",
-                "aspectRatio": "16:9",
+                "aspectRatio": board_aspect,
                 "batchCount": 1,
                 "creativeContext": {
                     "objective": "storyboard_sheet",
@@ -270,12 +289,12 @@ def handle(
                 body: dict[str, Any] = {
                     "prompt": prompt,
                     "negative_prompt": "",
-                    "width": 1280,
-                    "height": 720,
+                    "width": frame_w,
+                    "height": frame_h,
                     "tag": f"codirector_storyboard_{execution_id[:8]}_sheet{i + 1}",
                     "modelFamilyPreference": "zimage",
                     "purpose": "codirector_storyboard",
-                    "aspectRatio": "16:9",
+                    "aspectRatio": board_aspect,
                     "batchCount": 1,
                     "creativeContext": {
                         "objective": "storyboard_sheet",
@@ -293,12 +312,12 @@ def handle(
                 body: dict[str, Any] = {
                     "prompt": prompt,
                     "negative_prompt": "",
-                    "width": 1280,
-                    "height": 720,
+                    "width": frame_w,
+                    "height": frame_h,
                     "tag": f"codirector_storyboard_{execution_id[:8]}_frame{i + 1}",
                     "modelFamilyPreference": "zimage",
                     "purpose": "codirector_storyboard",
-                    "aspectRatio": "16:9",
+                    "aspectRatio": board_aspect,
                     "batchCount": 1,
                     "creativeContext": {
                         "objective": "storyboard_frame",
@@ -359,12 +378,12 @@ def handle(
         body: dict[str, Any] = {
             "prompt": shot.prompt_fragment,
             "negative_prompt": "",
-            "width": 1280,
-            "height": 720,
+            "width": frame_w,
+            "height": frame_h,
             "tag": f"codirector_storyboard_{execution_id[:8]}_frame{i + 1}",
             "modelFamilyPreference": "zimage",
             "purpose": "codirector_storyboard",
-            "aspectRatio": "16:9",
+            "aspectRatio": board_aspect,
             "batchCount": 1,
             "creativeContext": {
                 "objective": "storyboard_frame",

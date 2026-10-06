@@ -9,6 +9,7 @@ from app.image_product.compile import (
     _kie_image_route,
     compile_image_request,
 )
+from app.image_product.resolve import choose_imagegen_adapter
 from app.image_runtime.provenance import executed_image_stamp
 
 
@@ -369,4 +370,47 @@ def test_resolver_ers_without_source_cannot_execute_t2i() -> None:
     assert cap["canExecute"] is False
     assert "text-to-image" in str(cap.get("reason") or "").lower()
     assert cap.get("workflowKey") != "qwen2512.txt2img"
+
+
+def test_explicit_fal_beats_stale_kie_gpt_pin() -> None:
+    body = {
+        "prompt": "a coffee shop",
+        "purpose": "environment_reference_sheet",
+        "provider": "fal",
+        "requested_provider": "fal",
+        "providerKind": "fal",
+        "hostedModelId": "gpt-image-2-fal",
+        "falImageModelId": "openai/gpt-image-2",
+        "kieImageModelId": "gpt-image-2-image-to-image",
+        "source": "api",
+    }
+    pin = _hosted_execution_pin(body)
+    assert pin is not None
+    assert pin["provider"] == "fal"
+    assert pin["adapter"] == "fal"
+    assert pin["officialModelId"] == "openai/gpt-image-2"
+    assert "kieImageModelId" not in pin
+    assert choose_imagegen_adapter(body) == "fal"
+    assert choose_imagegen_adapter({**body, "provider": "kie", "requested_provider": "kie", "providerKind": "kie"}) == "kie"
+
+
+def test_explicit_wavespeed_is_not_compiled_as_fal() -> None:
+    body = {
+        "prompt": "a coffee shop",
+        "purpose": "environment_reference_sheet",
+        "provider": "wavespeed",
+        "requested_provider": "wavespeed",
+        "hostedModelId": "flux-wavespeed",
+        "wavespeedImageModelId": "wavespeed-ai/flux-dev",
+        "kieImageModelId": "gpt-image-2-text-to-image",
+        "falImageModelId": "openai/gpt-image-2",
+        "source": "api",
+    }
+    compiled = compile_image_request("proj-provider-bind", body)
+    runtime = compiled["imageRuntime"]
+    assert runtime["provider"] == "wavespeed"
+    assert compiled.get("wavespeedImageModelId") == "wavespeed-ai/flux-dev"
+    assert not compiled.get("falImageModelId")
+    assert not compiled.get("kieImageModelId")
+    assert choose_imagegen_adapter(body) == "wavespeed"
 

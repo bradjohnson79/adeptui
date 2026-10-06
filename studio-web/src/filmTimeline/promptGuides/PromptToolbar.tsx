@@ -118,6 +118,7 @@ export function PromptToolbar({
   prompt,
   onPrompt,
   onReferences,
+  showReferences = true,
 }: {
   projectId: string;
   sceneId: string;
@@ -125,6 +126,7 @@ export function PromptToolbar({
   prompt: string;
   onPrompt: (value: string) => void;
   onReferences?: () => void;
+  showReferences?: boolean;
 }) {
   const [modal, setModal] = useState<ModalKind>(null);
   const [memory, setMemory] = useState<HelperMemory>({});
@@ -266,9 +268,11 @@ export function PromptToolbar({
           </div>
         ) : null}
       </div>
-      <button type="button" data-testid="film-timeline-references" onClick={() => onReferences?.()}>
-        References
-      </button>
+      {showReferences ? (
+        <button type="button" data-testid="film-timeline-references" onClick={() => onReferences?.()}>
+          References
+        </button>
+      ) : null}
       {modal === "scene" ? (
         <GuideModal
           title="Scene"

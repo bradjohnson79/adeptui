@@ -307,10 +307,55 @@ export function clampMonitorHeight(px: number, viewportHeight: number, dockSafe 
 export const MAGI_CENTER_SPLIT_KEY = "adept_magi_center_split_v1";
 export const MAGI_LAYOUT_EVENT = "adept-magi-center-split";
 export const MAGI_SPLIT_MIGRATED_KEY = "adept_magi_center_split_v1_migrated";
-export const MAGI_DEFAULT_VIEWER_RATIO = 0.5;
+/** Resting Preview Monitor share of the MAGI center stack. The splitter sits in the 60–70% band. */
+export const MAGI_DEFAULT_VIEWER_RATIO = 0.62;
 export const MAGI_VIEWER_MIN_PX = 240;
-/** Toolbar + ruler + VIDEO/AUDIO/MUSIC/SFX must stay in the stack. */
-export const MAGI_REGION_MIN_PX = 268;
+/**
+ * Shortest region under the preview splitter.
+ * Leaves the timeline toolbar, zoom, and a scrollable track stack
+ * so a 60–70% preview cannot collapse the lanes.
+ */
+export const MAGI_REGION_MIN_PX = 280;
+/** One-time adoption of the 75% rest. Later drags stay where the creator put them. */
+export const MAGI_RATIO75_MIGRATED_KEY = "adept_magi_center_split_v1_ratio75";
+/** One-time move onto the 60–70% preview band. Later drags stay where the creator put them. */
+export const MAGI_PREVIEW_BAND_KEY = "adept_magi_center_split_v1_ratio65";
+/** Ratios saved while the old 268px timeline floor clamped the resting split. */
+const MAGI_LEGACY_RATIO_CEILING = 0.72;
+
+function magiRatio75Pending(): boolean {
+  try {
+    return localStorage.getItem(MAGI_RATIO75_MIGRATED_KEY) !== "1";
+  } catch {
+    return false;
+  }
+}
+
+function previewBandPending(): boolean {
+  try {
+    return localStorage.getItem(MAGI_PREVIEW_BAND_KEY) !== "1";
+  } catch {
+    return false;
+  }
+}
+
+function inPreviewBand(value: number): boolean {
+  return value >= 0.6 && value <= 0.7;
+}
+
+/** First read after the 60–70% rest: pull a saved ratio into that band. Does not mark the migration finished. */
+function takePreviewBand(value: number): number {
+  if (!previewBandPending() || inPreviewBand(value)) return value;
+  return MAGI_DEFAULT_VIEWER_RATIO;
+}
+
+function finishPreviewBand(): void {
+  try {
+    localStorage.setItem(MAGI_PREVIEW_BAND_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
 
 export function magiPreviewHeightStorageKey(projectId?: string | null): string {
   const id = (projectId || "").trim() || "global";
@@ -319,10 +364,31 @@ export function magiPreviewHeightStorageKey(projectId?: string | null): string {
 
 export function loadMagiProjectPreviewHeightRatio(projectId?: string | null): number | null {
   try {
-    const raw = localStorage.getItem(magiPreviewHeightStorageKey(projectId));
-    if (!raw) return null;
+    const key = magiPreviewHeightStorageKey(projectId);
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      if (magiRatio75Pending()) localStorage.setItem(MAGI_RATIO75_MIGRATED_KEY, "1");
+      finishPreviewBand();
+      return null;
+    }
     const value = Number(raw);
-    return Number.isFinite(value) && value > 0 ? value : null;
+    if (!Number.isFinite(value) || value <= 0) return null;
+    let next = value;
+    if (magiRatio75Pending() && value < MAGI_LEGACY_RATIO_CEILING) {
+      next = MAGI_DEFAULT_VIEWER_RATIO;
+      const centerRaw = localStorage.getItem(MAGI_CENTER_SPLIT_KEY);
+      const center = centerRaw ? (JSON.parse(centerRaw) as { viewerHeight?: number }) : null;
+      if (typeof center?.viewerHeight !== "number" || center.viewerHeight < MAGI_LEGACY_RATIO_CEILING) {
+        localStorage.setItem(MAGI_CENTER_SPLIT_KEY, JSON.stringify({ viewerHeight: MAGI_DEFAULT_VIEWER_RATIO }));
+      }
+      localStorage.setItem(MAGI_RATIO75_MIGRATED_KEY, "1");
+    } else if (magiRatio75Pending()) {
+      localStorage.setItem(MAGI_RATIO75_MIGRATED_KEY, "1");
+    }
+    next = takePreviewBand(next);
+    if (next !== value) localStorage.setItem(key, String(next));
+    finishPreviewBand();
+    return next;
   } catch {
     return null;
   }
@@ -362,7 +428,16 @@ export function loadMagiCenterSplit(): { viewerHeight: number } {
     if (raw) {
       const parsed = JSON.parse(raw) as { viewerHeight?: number };
       if (typeof parsed.viewerHeight === "number" && parsed.viewerHeight > 0) {
-        return { viewerHeight: parsed.viewerHeight };
+        let viewerHeight = parsed.viewerHeight;
+        if (magiRatio75Pending() && parsed.viewerHeight < MAGI_LEGACY_RATIO_CEILING) {
+          viewerHeight = MAGI_DEFAULT_VIEWER_RATIO;
+          localStorage.setItem(MAGI_RATIO75_MIGRATED_KEY, "1");
+        }
+        viewerHeight = takePreviewBand(viewerHeight);
+        if (viewerHeight !== parsed.viewerHeight) {
+          localStorage.setItem(MAGI_CENTER_SPLIT_KEY, JSON.stringify({ viewerHeight }));
+        }
+        return { viewerHeight };
       }
     }
   } catch {

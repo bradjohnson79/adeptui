@@ -55,6 +55,13 @@ def cancel_execution(db: Session, project_id: str, execution_id: str) -> Executi
             total=0,
             timestamp=_now(),
         ))
+        try:
+            from .generation_ready_notice import emit_after_terminal
+
+            emit_after_terminal(db, project_id, plan, previous_status="queued")
+            save_pack(db, project_id, plan)
+        except Exception:
+            logger.debug("generation cancel notice emit skipped", exc_info=True)
         return plan
 
     any_cancelled = False
@@ -94,6 +101,14 @@ def cancel_execution(db: Session, project_id: str, execution_id: str) -> Executi
                 surface_type=plan.surface_type,
                 timestamp=_now(),
             ))
+            try:
+                from .generation_ready_notice import emit_after_terminal
+
+                prev_s = str(getattr(previous, "value", previous) or "")
+                emit_after_terminal(db, project_id, plan, previous_status=prev_s)
+                save_pack(db, project_id, plan)
+            except Exception:
+                logger.debug("generation cancel notice emit skipped", exc_info=True)
 
     return plan
 

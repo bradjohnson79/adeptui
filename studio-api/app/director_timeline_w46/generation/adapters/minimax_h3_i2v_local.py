@@ -35,7 +35,7 @@ def _h3_capability_aspect_ratios() -> list[str]:
 def _capabilities() -> VideoGeneratorCapabilities:
     return VideoGeneratorCapabilities(
         id=GENERATOR_ID,
-        label="MiniMax H3 Director — Local",
+        label="MiniMax H3 — Local",
         executionType="local",
         supportsTextToVideo=False,
         supportsImageToVideo=False,
@@ -44,6 +44,7 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportsMultipleImageReferences=True,
         supportsReferenceToVideo=True,
         supportsVideoReferences=True,
+        continuationMode="hard",
         supportsAudioReferences=True,
         maximumReferenceImages=9,
         maximumReferenceVideos=3,
@@ -64,11 +65,9 @@ def _capabilities() -> VideoGeneratorCapabilities:
         },
         executable=True,
         notes=(
-            "MiniMax H3 Director — Local. Character, place, and prior-frame pictures "
-            "enter MiniMaxH3ReferenceToVideo as ref_images. Approved character voices "
-            "enter as ref_audios with <Audio j> tags. Ordinary first-frame I2V "
-            "is refused. Duration comes from the Inspector (max 15s) and snaps "
-            "to the 17k+5 frame grid. Fast reuses similar steps. Quality runs every step."
+            "MiniMax H3 — Local. Uses the characters, places, and props you choose, "
+            "and can continue from the previous finished part. Sound is included. "
+            "Each part is 3 to 15 seconds."
         ),
         draftPathway="local_live",
         supportsQueuedCancel=True,
@@ -119,7 +118,7 @@ class MiniMaxH3I2VLocalAdapter:
             request,
             engine=ENGINE,
             generator_id=GENERATOR_ID,
-            queue_message="Timeline batch MiniMax H3 Director — Local queued",
+            queue_message="Timeline batch MiniMax H3 — Local queued",
         )
 
     def get_status(self, job: NormalizedJobSubmission) -> NormalizedJobStatus:

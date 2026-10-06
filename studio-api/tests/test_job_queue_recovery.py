@@ -138,6 +138,27 @@ def test_recent_queued_job_is_re_enqueued(db_session, project):
     assert job.id in drained
 
 
+def test_interrupted_comfy_prompt_is_not_called_a_finished_render(db_session, project, monkeypatch):
+    from app.db import Job
+    from app.queue_worker import ENGINE_STOPPED_BEFORE_SAVE, JobQueue
+
+    job = _make_job(db_session, project.id, status="running", kind="render_scene")
+    job.comfy_prompt_id = "prompt-interrupted"
+    job.updated_at = datetime.utcnow() - timedelta(seconds=120)
+    db_session.commit()
+    queue = _fresh_queue()
+    monkeypatch.setattr(JobQueue, "_comfy_prompt_activity", staticmethod(lambda _pid: "failed"))
+
+    failed = queue.fail_stale_running_comfy(older_than_sec=60)
+
+    assert job.id in failed
+    db_session.expire_all()
+    row = db_session.get(Job, job.id)
+    assert row.status == "failed"
+    assert row.message == ENGINE_STOPPED_BEFORE_SAVE
+    assert "did not fail" not in row.message
+
+
 def test_stale_running_comfy_job_is_failed_when_prompt_already_done(db_session, project, monkeypatch):
     from app.db import Job
     from app.queue_worker import RESULT_NOT_REGISTERED_MESSAGE, JobQueue

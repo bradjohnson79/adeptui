@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "availability": "unavailable",
+  "unavailableReason": "[SSL: SSLV3_ALERT_BAD_RECORD_MAC] ssl/tls alert bad record mac (_ssl.c:2590)",
+  "sourceAssetId": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+  "mapId": "6bc36d92-d21a-4c2f-b85f-71d1f6aa9081",
+  "sceneIntentVersion": 1,
+  "groundingFingerprint": "a759c5d50d02741a",
+  "fingerprint": "",
+  "analyzedAt": "2026-08-16T20:00:39Z",
+  "provenance": "",
+  "identity": {},
+  "geometry": {},
+  "fixedArchitecture": {},
+  "furniture": {},
+  "spatialRelationships": [],
+  "hardInvariants": [],
+  "uncertainty": []
+}

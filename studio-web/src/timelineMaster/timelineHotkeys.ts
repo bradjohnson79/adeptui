@@ -2,7 +2,7 @@
 
 export const TIMELINE_HOTKEYS_KEY = "adept_timeline_hotkeys_v1";
 
-export type HotkeyCategory = "Playback" | "Editing" | "Generation" | "Clips & Tracks" | "Reference Authoring";
+export type HotkeyCategory = "Playback" | "Editing" | "Generation" | "Clips & Tracks" | "Reference Authoring" | "View";
 
 export type ShortcutChord = {
   key: string;
@@ -147,14 +147,18 @@ export function applyUserShortcut(
   return { bindings: next, conflict: null };
 }
 
-export function resetHotkeys(): TimelineHotkeyBinding[] {
-  return DEFAULT_HOTKEYS.map((item) => ({ ...item, userShortcut: null, enabled: true }));
+export function resetHotkeyBindings(defaults: TimelineHotkeyBinding[]): TimelineHotkeyBinding[] {
+  return defaults.map((item) => ({ ...item, userShortcut: null, enabled: true }));
 }
 
-export function loadHotkeys(): TimelineHotkeyBinding[] {
-  const base = resetHotkeys();
+export function resetHotkeys(): TimelineHotkeyBinding[] {
+  return resetHotkeyBindings(DEFAULT_HOTKEYS);
+}
+
+export function loadHotkeyBindings(storageKey: string, defaults: TimelineHotkeyBinding[]): TimelineHotkeyBinding[] {
+  const base = resetHotkeyBindings(defaults);
   try {
-    const raw = localStorage.getItem(TIMELINE_HOTKEYS_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) return base;
     const parsed = JSON.parse(raw) as TimelineHotkeysFile;
     if (!parsed || parsed.version !== 1 || !parsed.bindings) return base;
@@ -172,7 +176,7 @@ export function loadHotkeys(): TimelineHotkeyBinding[] {
   }
 }
 
-export function saveHotkeys(bindings: TimelineHotkeyBinding[]): void {
+export function saveHotkeyBindings(storageKey: string, bindings: TimelineHotkeyBinding[]): void {
   const file: TimelineHotkeysFile = { version: 1, bindings: {} };
   for (const item of bindings) {
     file.bindings[item.actionId] = {
@@ -180,7 +184,15 @@ export function saveHotkeys(bindings: TimelineHotkeyBinding[]): void {
       enabled: item.enabled,
     };
   }
-  localStorage.setItem(TIMELINE_HOTKEYS_KEY, JSON.stringify(file));
+  localStorage.setItem(storageKey, JSON.stringify(file));
+}
+
+export function loadHotkeys(): TimelineHotkeyBinding[] {
+  return loadHotkeyBindings(TIMELINE_HOTKEYS_KEY, DEFAULT_HOTKEYS);
+}
+
+export function saveHotkeys(bindings: TimelineHotkeyBinding[]): void {
+  saveHotkeyBindings(TIMELINE_HOTKEYS_KEY, bindings);
 }
 
 export function isEditableTarget(target: EventTarget | null): boolean {
@@ -223,4 +235,51 @@ export function runTimelineCommand(actionId: string): void {
 
 export function resetTimelineCommandsForTests(): void {
   commandHandlers.clear();
+}
+
+export type ShortcutWorkspace = "timeline" | "magi";
+
+type WorkspaceKeyHandler = (event: KeyboardEvent) => void;
+
+const workspaceHandlers = new Map<ShortcutWorkspace, WorkspaceKeyHandler>();
+let activeShortcutWorkspace: ShortcutWorkspace | null = null;
+let shortcutDispatcherInstalled = false;
+
+/** Canonical workspace for the one shortcut listener. Mount state is not the scope. */
+export function setActiveShortcutWorkspace(workspace: ShortcutWorkspace | null): void {
+  activeShortcutWorkspace = workspace;
+}
+
+export function getActiveShortcutWorkspace(): ShortcutWorkspace | null {
+  return activeShortcutWorkspace;
+}
+
+export function registerWorkspaceKeyHandler(workspace: ShortcutWorkspace, handler: WorkspaceKeyHandler): () => void {
+  workspaceHandlers.set(workspace, handler);
+  ensureShortcutDispatcher();
+  return () => {
+    if (workspaceHandlers.get(workspace) === handler) workspaceHandlers.delete(workspace);
+  };
+}
+
+function ensureShortcutDispatcher(): void {
+  if (shortcutDispatcherInstalled || typeof window === "undefined") return;
+  shortcutDispatcherInstalled = true;
+  window.addEventListener("keydown", dispatchWorkspaceShortcut);
+}
+
+/** One keydown, one workspace. Editable fields are dropped before either map runs. */
+export function dispatchWorkspaceShortcut(event: KeyboardEvent): boolean {
+  if (isEditableTarget(event.target)) return false;
+  const workspace = activeShortcutWorkspace;
+  if (!workspace) return false;
+  const handler = workspaceHandlers.get(workspace);
+  if (!handler) return false;
+  handler(event);
+  return true;
+}
+
+export function resetShortcutWorkspaceForTests(): void {
+  workspaceHandlers.clear();
+  activeShortcutWorkspace = null;
 }

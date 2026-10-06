@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { matchHotkey, registerWorkspaceKeyHandler } from "../timelineMaster/timelineHotkeys";
 import {
   canControlPlayback,
   canDeleteTimelineSelection,
@@ -7,6 +8,7 @@ import {
   canUseMagiUndo,
   isTypingTarget,
 } from "./focus";
+import { loadMagiHotkeys } from "./magiHotkeys";
 import type { MagiFocusRegion } from "./types";
 
 type KeyboardHandlers = {
@@ -23,6 +25,11 @@ type KeyboardHandlers = {
   onPaste: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  onSplit: () => void;
+  onCompare: () => void;
+  onSplitView: () => void;
+  onOpenHotkeys: () => void;
+  onZoom: (dir: -1 | 1) => void;
 };
 
 export function useMagiKeyboard(handlers: KeyboardHandlers) {
@@ -33,79 +40,89 @@ export function useMagiKeyboard(handlers: KeyboardHandlers) {
   }, [handlers]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
+    return registerWorkspaceKeyHandler("magi", (event) => {
       const currentHandlers = handlersRef.current;
       const region = currentHandlers.focusRegion;
-      const typing = isTypingTarget(event.target);
+      if (isTypingTarget(event.target)) return;
+      const binding = matchHotkey(event, loadMagiHotkeys());
+      if (!binding) return;
 
-      if (event.key === "Delete" || event.key === "Backspace") {
-        if (typing || !canDeleteTimelineSelection(region)) return;
+      const act = (fn: () => void) => {
         event.preventDefault();
-        currentHandlers.onDeleteSelection();
-        return;
-      }
+        fn();
+      };
+      const id = binding.actionId;
 
-      if (event.key === " " || event.code === "Space") {
-        if (typing || !canControlPlayback(region)) return;
-        event.preventDefault();
-        currentHandlers.onTogglePlay();
+      if (id === "deleteClip" || id === "deleteClipBackspace") {
+        if (!canDeleteTimelineSelection(region)) return;
+        act(currentHandlers.onDeleteSelection);
         return;
       }
-
-      const key = event.key.toLowerCase();
-      if (key === "j" || key === "k" || key === "l") {
-        if (typing || !canControlPlayback(region)) return;
-        event.preventDefault();
-        if (key === "k") currentHandlers.onTogglePlay();
-        if (key === "j") currentHandlers.onJog(-1);
-        if (key === "l") currentHandlers.onJog(1);
+      if (id === "playPause" || id === "playPauseK") {
+        if (!canControlPlayback(region)) return;
+        act(currentHandlers.onTogglePlay);
         return;
       }
-
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        if (typing || !canFrameStep(region)) return;
-        event.preventDefault();
-        currentHandlers.onFrameStep(event.key === "ArrowLeft" ? -1 : 1);
+      if (id === "jogBack" || id === "jogForward") {
+        if (!canControlPlayback(region)) return;
+        act(() => currentHandlers.onJog(id === "jogBack" ? -1 : 1));
         return;
       }
-
-      if (event.key === "Home") {
-        if (typing || !canFrameStep(region)) return;
-        event.preventDefault();
-        currentHandlers.onHome();
+      if (id === "frameBack" || id === "frameForward") {
+        if (!canFrameStep(region)) return;
+        act(() => currentHandlers.onFrameStep(id === "frameBack" ? -1 : 1));
         return;
       }
-      if (event.key === "End") {
-        if (typing || !canFrameStep(region)) return;
-        event.preventDefault();
-        currentHandlers.onEnd();
+      if (id === "goToStart") {
+        if (!canFrameStep(region)) return;
+        act(currentHandlers.onHome);
         return;
       }
-
-      const mod = event.metaKey || event.ctrlKey;
-      if (!mod) return;
-      const lower = event.key.toLowerCase();
-      if (lower === "c") {
-        if (typing || !canUseMagiClipboard(region, currentHandlers.hasSelection)) return;
-        event.preventDefault();
-        currentHandlers.onCopy();
+      if (id === "goToEnd") {
+        if (!canFrameStep(region)) return;
+        act(currentHandlers.onEnd);
         return;
       }
-      if (lower === "v") {
-        if (typing || !canUseMagiClipboard(region, true)) return;
-        event.preventDefault();
-        currentHandlers.onPaste();
+      if (id === "copy") {
+        if (!canUseMagiClipboard(region, currentHandlers.hasSelection)) return;
+        act(currentHandlers.onCopy);
         return;
       }
-      if (lower === "z") {
-        if (typing || !canUseMagiUndo(region)) return;
-        event.preventDefault();
-        if (event.shiftKey) currentHandlers.onRedo();
-        else currentHandlers.onUndo();
+      if (id === "paste") {
+        if (!canUseMagiClipboard(region, true)) return;
+        act(currentHandlers.onPaste);
+        return;
       }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+      if (id === "undo") {
+        if (!canUseMagiUndo(region)) return;
+        act(currentHandlers.onUndo);
+        return;
+      }
+      if (id === "redo") {
+        if (!canUseMagiUndo(region)) return;
+        act(currentHandlers.onRedo);
+        return;
+      }
+      if (id === "splitAtPlayhead") {
+        if (!canDeleteTimelineSelection(region)) return;
+        act(currentHandlers.onSplit);
+        return;
+      }
+      if (id === "zoomIn" || id === "zoomOut") {
+        act(() => currentHandlers.onZoom(id === "zoomIn" ? 1 : -1));
+        return;
+      }
+      if (id === "compare") {
+        act(currentHandlers.onCompare);
+        return;
+      }
+      if (id === "splitView") {
+        act(currentHandlers.onSplitView);
+        return;
+      }
+      if (id === "openHotkeys") {
+        act(currentHandlers.onOpenHotkeys);
+      }
+    });
   }, []);
 }

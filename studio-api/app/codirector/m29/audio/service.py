@@ -122,100 +122,38 @@ def _write_scene_clip(
     title: str | None = None,
     description: str | None = None,
 ) -> bool:
-    """Upsert one cue onto SceneTimelineMaster audio/SFX arrays. False when the scene is unusable."""
+    """Place one cue through the Film Timeline insertion command."""
 
-    from ....db import Asset, Scene
-    from ....director_timeline_w46 import store as timeline_store
-    from ....director_timeline_w46.contracts import BatchClip
-    from ....director_timeline_w46.master_clip_mutate import (
-        append_clip,
-        ensure_windows,
-        flatten_attr,
-    )
-    from ....director_timeline_w46.service import load_timeline_bundle
-    from ....timeline_media_labels import resolve_media_clip_labels
+    from ....db import Scene
+    from ....film_timeline.insertion import add_to_timeline, update_clip
 
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         return False
-    bundle = load_timeline_bundle(db, project_id, scene_id)
-    if not bundle.get("ok"):
+    lane = kind if kind in {"voice", "music", "sfx", "ambience"} else None
+    if lane is None:
         return False
-    master = bundle["master"]
-    ensure_windows(master, scene_id=scene_id, duration_sec=float(scene.duration_sec or 5))
-    # music/ambience land on audioClips; sfx on sfxClips (existing law).
-    from ....director_timeline_w46.same_track_no_overlap import (
-        SameTrackOverlapError,
-        audio_lane_kind,
-        find_same_track_intersection,
+    result = add_to_timeline(
+        db,
+        project_id,
+        scene_id,
+        media_type=lane,
+        asset_id=asset_id,
+        target_track_type=lane,
+        start_time=start_sec,
+        duration_sec=duration_sec,
+        label=(title or label or kind),
+        metadata={
+            "syncEvent": sync_event,
+            "volume": volume,
+            "description": description,
+            "source": "codirector",
+        },
     )
-
-    lane = audio_lane_kind(kind)
-    attr = "sfxClips" if lane == "sfx" else "audioClips"
-    track = flatten_attr(master, attr)
-    asset_row = db.get(Asset, asset_id) if asset_id else None
-    resolver_kind = "sfx" if kind == "sfx" else ("music" if kind == "music" else ("ambience" if kind == "ambience" else "audio"))
-    resolved = resolve_media_clip_labels(
-        {
-            "kind": resolver_kind,
-            "clip": {
-                "title": title,
-                "description": description,
-                "label": label,
-                "asset_id": asset_id,
-            },
-            "asset": {
-                "tag": getattr(asset_row, "tag", None) if asset_row else None,
-                "filename": getattr(asset_row, "filename", None) if asset_row else None,
-            },
-        }
-    )
-    clip_title = resolved.get("title")
-    clip_description = resolved.get("description")
-    # Persist FULL title as label; Timeline UI truncates via resolveMediaClipLabels.
-    clip_label = (
-        (clip_title or "").strip()
-        or (label or "").strip()
-        or (f"sync:{sync_event}" if sync_event else "")
-        or kind
-    )
-    upsert = None
-    for existing in track:
-        existing_asset = getattr(existing, "assetId", None) or getattr(existing, "asset_id", None)
-        if existing_asset == asset_id and abs(float(existing.start) - start_sec) < 1e-6:
-            upsert = existing
-            break
-    candidate = {
-        "id": getattr(upsert, "id", None),
-        "start": start_sec,
-        "length": duration_sec,
-    }
-    hit = find_same_track_intersection(track, candidate)
-    if hit is not None:
-        other = getattr(hit, "id", None) or "(other)"
-        raise SameTrackOverlapError(
-            f"SAME_TRACK_OVERLAP: clip intersects {other} on the {lane} track"
-        )
-    if upsert is not None:
-        upsert.length = duration_sec
-        upsert.volume = volume
-        upsert.label = clip_label
-    else:
-        append_clip(
-            master,
-            BatchClip(
-                kind="sfx" if lane == "sfx" else "audio",
-                assetId=asset_id,
-                start=start_sec,
-                length=duration_sec,
-                volume=volume,
-                label=clip_label,
-            ),
-            start_sec,
-            attr,
-        )
-    timeline_store.save_master(db, project_id, scene_id, master, bump_revision=True)
-    return True
+    clip = result.get("clip") if result.get("ok") else None
+    if isinstance(clip, dict) and clip.get("id"):
+        update_clip(db, project_id, scene_id, clip["id"], {"volume": volume})
+    return bool(result.get("ok"))
 
 
 def _cue_row(db: Session, cue_id: str) -> dict[str, Any] | None:

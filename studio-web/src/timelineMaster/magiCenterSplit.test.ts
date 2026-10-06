@@ -6,10 +6,13 @@ import {
   MAGI_VIEWER_MIN_PX,
   TIMELINE_WORKSPACE_KEY,
   clampMagiViewerHeight,
+  loadMagiCenterSplit,
+  loadMagiProjectPreviewHeightRatio,
   magiPreviewHeightStorageKey,
   magiViewerHeightBounds,
   previewHeightStorageKey,
   resetMagiCenterSplit,
+  resolveMagiViewerHeight,
 } from "./workspaceLayout";
 
 function fakeStorage() {
@@ -45,5 +48,18 @@ describe("MAGI center split isolation", () => {
   it("reset restores the balanced MAGI ratio", () => {
     fakeStorage();
     expect(resetMagiCenterSplit("proj-1").viewerHeight).toBe(MAGI_DEFAULT_VIEWER_RATIO);
+    expect(MAGI_DEFAULT_VIEWER_RATIO).toBe(0.62);
+  });
+
+  it("rests the preview in the 60–70% band and adopts a legacy split once", () => {
+    fakeStorage();
+    localStorage.setItem(MAGI_CENTER_SPLIT_KEY, JSON.stringify({ viewerHeight: 0.5958 }));
+    localStorage.setItem(magiPreviewHeightStorageKey("proj-1"), "0.5958");
+    expect(loadMagiCenterSplit().viewerHeight).toBe(0.62);
+    expect(loadMagiProjectPreviewHeightRatio("proj-1")).toBe(0.62);
+    localStorage.setItem(magiPreviewHeightStorageKey("proj-1"), "0.6");
+    expect(loadMagiProjectPreviewHeightRatio("proj-1")).toBe(0.6);
+    expect(resolveMagiViewerHeight(0.62, 1100)).toBe(682);
+    expect(resolveMagiViewerHeight(0.7, 663)).toBe(663 - MAGI_REGION_MIN_PX);
   });
 });

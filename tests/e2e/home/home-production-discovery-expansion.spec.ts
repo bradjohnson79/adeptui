@@ -30,9 +30,6 @@ const RUN_ID = `DISCOVERY-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 // Explore grid: 4×3 creator/tool roster. Timeline/MAGI remain Home feature cards.
 const EXPECTED_IDS = [
   "imagegen",
-  "txt2vid",
-  "one",
-  "three",
   "characters",
   "propcreator",
   "environmentcreator",
@@ -45,9 +42,6 @@ const EXPECTED_IDS = [
 
 const EXPECTED_TITLES = [
   "Image Generation",
-  "Text to Video",
-  "1 Frame",
-  "3 Frame",
   "Character Creator",
   "Prop Creator",
   "Environment Creator",
@@ -329,9 +323,12 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
 
       await test.step("Scenario F: Web Series and Brand Ad templates create correct project types", async () => {
         await gotoHome(page);
-        await expect(page.getByTestId("browse-templates-card")).toBeVisible();
-        await expect(page.getByTestId("carousel-slide-web-series")).toBeAttached();
-        await expect(page.getByTestId("carousel-slide-brand-ad")).toBeAttached();
+        await expect(page.getByTestId("browse-templates-card")).toHaveCount(0);
+        await page.getByTestId("create-project-open").click();
+        await page.getByTestId("create-project-templates-toggle").click();
+        await expect(page.getByTestId("create-project-template-web-series")).toBeVisible();
+        await expect(page.getByTestId("create-project-template-brand-ad")).toBeVisible();
+        await page.getByTestId("create-project-modal-backdrop").click();
 
         const templates: Array<{ id: string; expectedType: string; expectedTrait: string }> = [
           // The resolve engine promotes the series+web_series trait to the concrete web_series subtype.
@@ -343,7 +340,9 @@ test.describe.serial("Home + Production discovery expansion @critical", () => {
           const baseline = monitors.createCount();
           await page.goto("/");
           await expect(page.getByTestId("generation-studio-home")).toBeVisible({ timeout: 30_000 });
-          await page.getByTestId(`carousel-slide-${tpl.id}`).click({ force: true });
+          await page.getByTestId("create-project-open").click();
+          await page.getByTestId("create-project-templates-toggle").click();
+          await page.getByTestId(`create-project-template-${tpl.id}`).click();
           await expect
             .poll(() => monitors.createCount(), { timeout: 30_000 })
             .toBe(baseline + 1);

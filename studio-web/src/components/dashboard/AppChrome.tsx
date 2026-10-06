@@ -251,16 +251,23 @@ export function AppChrome({
   const setupItems: MenuItem[] = [
     {
       id: "wizard",
-      label: "Wizard",
+      label: "Setup",
       onSelect: () => {
         if (onSetup) onSetup();
         else goWorkspace("setup");
       },
     },
     {
-      id: "source-manager",
-      label: "Source Manager",
-      onSelect: () => navigate("/source-manager"),
+      id: "comfy-manager",
+      label: "Comfy Manager",
+      onSelect: () => {
+        setOpenMenu(null);
+        if (projectId) {
+          navigate(`/project/${encodeURIComponent(projectId)}?workspace=setup&setupSection=comfy`);
+          return;
+        }
+        navigate("/setup/comfy");
+      },
     },
   ];
 
@@ -291,8 +298,7 @@ export function AppChrome({
     }));
     const tools: CommandItem[] = [
       { id: "home", title: "Home / Project Library", meta: "Navigate", run: () => browseAllProjects(navigate) },
-      { id: "setup", title: "Setup Wizard", meta: "Setup", run: () => (onSetup ? onSetup() : goWorkspace("setup")) },
-      { id: "sm", title: "Source Manager", meta: "Setup", run: () => navigate("/source-manager") },
+      { id: "setup", title: "Adept Setup", meta: "Setup", run: () => (onSetup ? onSetup() : goWorkspace("setup")) },
       { id: "cd", title: "Co-Director", meta: "Assistant", run: () => openCoDirectorFull() },
     ];
     const recentCmds = loadRecentProjects().map((p) => ({

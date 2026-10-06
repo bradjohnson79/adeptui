@@ -3,12 +3,21 @@
 export const TIMELINE_ZOOM_MIN = 0.2;
 export const TIMELINE_ZOOM_MAX = 5;
 export const TIMELINE_ZOOM_DEFAULT = 1;
+/** Timeline V2 track scale. Separate from the Timeline Master 0.2×–5× range. */
+export const FILM_TIMELINE_ZOOM_MIN = 1;
+export const FILM_TIMELINE_ZOOM_MAX = 8;
+export const FILM_TIMELINE_ZOOM_DEFAULT = 1;
 /** Multiplicative button/wheel step so 1× stays finely controllable. */
 export const TIMELINE_ZOOM_STEP_FACTOR = 1.08;
 
-export function clampTimelineZoom(value: number): number {
-  if (!Number.isFinite(value)) return TIMELINE_ZOOM_DEFAULT;
-  return Math.min(TIMELINE_ZOOM_MAX, Math.max(TIMELINE_ZOOM_MIN, value));
+export function clampTimelineZoom(
+  value: number,
+  min = TIMELINE_ZOOM_MIN,
+  max = TIMELINE_ZOOM_MAX,
+): number {
+  const fallback = min <= TIMELINE_ZOOM_DEFAULT && TIMELINE_ZOOM_DEFAULT <= max ? TIMELINE_ZOOM_DEFAULT : min;
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
 }
 
 export function zoomToSlider(zoom: number): number {
@@ -31,6 +40,17 @@ export function stepTimelineZoom(zoom: number, direction: -1 | 1): number {
   return clampTimelineZoom(next);
 }
 
-export function pixelsPerSecond(zoom: number, basePxPerSec = 90): number {
-  return Math.max(1, basePxPerSec * clampTimelineZoom(zoom));
+export function pixelsPerSecond(
+  zoom: number,
+  basePxPerSec = 90,
+  min = TIMELINE_ZOOM_MIN,
+  max = TIMELINE_ZOOM_MAX,
+): number {
+  return Math.max(1, basePxPerSec * clampTimelineZoom(zoom, min, max));
+}
+
+/** Whole-stop Timeline V2 zoom. 1× through 8×, never past either end. */
+export function stepFilmTimelineZoom(zoom: number, direction: -1 | 1): number {
+  const current = clampTimelineZoom(zoom, FILM_TIMELINE_ZOOM_MIN, FILM_TIMELINE_ZOOM_MAX);
+  return clampTimelineZoom(current + direction, FILM_TIMELINE_ZOOM_MIN, FILM_TIMELINE_ZOOM_MAX);
 }

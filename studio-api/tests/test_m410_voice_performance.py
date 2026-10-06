@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -496,3 +498,99 @@ def test_m410_records_collection_requires_project_id():
         m410_list_records_query(project_id=None, db=None)
     assert exc.value.status_code == 400
     assert (exc.value.detail or {}).get("code") == "PROJECT_ID_REQUIRED"
+
+
+def _seed_take_with_file(db, tmp_path, *, take_id="take-dl", number=1, status="completed", suffix=".wav"):
+    record = make_record(db)
+    audio = tmp_path / f"{take_id}{suffix}"
+    audio.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+    asset = Asset(
+        id=f"asset-{take_id}",
+        project_id="proj-m410",
+        tag="dialogue",
+        kind="audio",
+        filename=audio.name,
+        path=str(audio),
+    )
+    db.add(asset)
+    db.add(
+        VoicePerformanceTakeRow(
+            id=take_id,
+            record_id=record.id,
+            take_number=number,
+            label=f"Take {number}",
+            audio_asset_id=asset.id,
+            duration_ms=1234,
+            status=status,
+            direction_snapshot_json={"source": "codirector"},
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+    )
+    db.commit()
+    return record
+
+
+def test_take_download_serves_exact_generated_file(db, tmp_path):
+    record = _seed_take_with_file(db, tmp_path)
+    path, filename, media_type = svc.take_download(db, record.id, "take-dl")
+    assert Path(path).is_file()
+    assert filename == "Korri_Take_1.wav"
+    assert media_type == "audio/wav"
+
+
+def test_take_download_requires_finished_take(db, tmp_path):
+    record = _seed_take_with_file(db, tmp_path, take_id="take-pending", status="generating")
+    with pytest.raises(HTTPException) as exc:
+        svc.take_download(db, record.id, "take-pending")
+    assert exc.value.status_code == 409
+    assert (exc.value.detail or {}).get("code") == "TAKE_NOT_READY"
+
+
+def test_save_take_to_library_records_session_provenance(db, tmp_path):
+    record = _seed_take_with_file(db, tmp_path, take_id="take-lib")
+    saved = svc.save_take_to_library(db, record.id, "take-lib")
+    assert saved["ok"] is True
+    assert saved["alreadySaved"] is False
+
+    asset = db.get(Asset, saved["assetId"])
+    assert asset is not None
+    assert asset.kind == "audio"
+    assert asset.tag == "voice"
+    meta = json.loads(asset.prompt_meta_json or "{}")
+    assert meta["voicePerformanceRecordId"] == record.id
+    assert meta["takeId"] == "take-lib"
+    assert meta["takeNumber"] == 1
+    assert meta["durationMs"] == 1234
+    assert meta["sourceStudio"] == "voice-studio-takes"
+    assert meta["libraryClass"] == "audio"
+    assert meta["audioRole"] == "voice"
+    assert meta["characterId"] == "char-m410"
+    assert meta["prompt"] == "(softly) I thought we had more time..."
+    # Never persist secrets or raw provider payloads.
+    assert "apiKey" not in meta
+    assert "requestBody" not in meta
+
+    # Idempotent: a second save returns the same Library asset.
+    again = svc.save_take_to_library(db, record.id, "take-lib")
+    assert again["alreadySaved"] is True
+    assert again["assetId"] == saved["assetId"]
+
+
+def test_codirector_send_take_to_environment_registers_library_asset(db, tmp_path):
+    from app.codirector.tools import registry as tool_registry
+    from app.codirector.tools.definitions import ToolContext
+    from app.codirector.tools.handlers import voice_performance as vp_handlers
+
+    assert tool_registry.find("voice_performance.send_take_to_environment") is not None
+
+    record = _seed_take_with_file(db, tmp_path, take_id="take-env")
+    ctx = ToolContext(db=db, project_id="proj-m410")
+    out = vp_handlers.apply_send_take_to_environment(ctx, {"recordId": record.id, "takeNumber": 1})
+    assert out["ok"] is True
+    asset_id = out["assetId"]
+    assert out["environmentSource"] == {"libraryAssetId": asset_id}
+    asset = db.get(Asset, asset_id)
+    assert asset is not None
+    assert asset.kind == "audio"
+    assert asset.tag == "voice"

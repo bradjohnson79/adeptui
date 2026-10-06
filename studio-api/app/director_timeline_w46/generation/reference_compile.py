@@ -273,11 +273,13 @@ def apply_compiled_references(
 
     caps = _generator_caps(batch.generatorId)
     supports_video = bool(caps and caps.supportsVideoReferences and caps.maximumReferenceVideos > 0)
+    supports_audio = bool(caps and caps.supportsAudioReferences and caps.maximumReferenceAudio > 0)
     supports_image = bool(
         caps and (caps.supportsMultipleImageReferences or (caps.maximumReferenceImages or 0) > 0)
     )
     max_images = int(caps.maximumReferenceImages or 0) if caps else 0
     max_videos = int(caps.maximumReferenceVideos or 0) if caps else 0
+    max_audios = int(caps.maximumReferenceAudio or 0) if caps else 0
 
     end = float(window_end) if window_end is not None else (
         float(window_start) + float(batch.duration.plannedDuration or 5.0)
@@ -302,6 +304,7 @@ def apply_compiled_references(
 
     image_consumed = 0
     video_consumed = 0
+    audio_consumed = 0
 
     for binding_id in binding_ids:
         resolved = resolve_binding_id(db, project_id, binding_id)
@@ -328,7 +331,51 @@ def apply_compiled_references(
             continue
 
         is_video = kind == "video" or ref_type == "video"
+        is_audio = kind == "audio" or ref_type in ("audio", "voice")
         is_entity = kind == "entity" or ref_type in ("character", "prop")
+
+        if is_audio:
+            consumed = bool(supports_audio and resolved["assetId"])
+            if not supports_audio:
+                warnings.append(
+                    {
+                        "code": "AUDIO_REFERENCE_UNSUPPORTED",
+                        "message": "Selected generator does not support audio references.",
+                        "bindingId": resolved["bindingId"],
+                        "assetId": resolved["assetId"],
+                    }
+                )
+                consumed = False
+            elif audio_consumed >= max_audios:
+                consumed = False
+                warnings.append(
+                    {
+                        "code": "AUDIO_REFERENCE_OVER_LIMIT",
+                        "message": (
+                            f"This generator supports up to {max_audios} audio reference(s) for this clip."
+                        ),
+                        "bindingId": resolved["bindingId"],
+                    }
+                )
+            if consumed:
+                audio_consumed += 1
+            named = _prompt_name_fields(binding_id, names_by_id, str(resolved.get("alias") or ""))
+            batch.references = list(batch.references or []) + [
+                {
+                    "kind": "audio",
+                    "role": "audio_reference",
+                    "assetId": resolved["assetId"],
+                    "bindingId": resolved["bindingId"],
+                    "identityId": resolved.get("identityId"),
+                    "label": named["label"],
+                    "promptName": named["promptName"],
+                    "tag": named["tag"] or resolved.get("canonicalTag"),
+                    "bindingType": named["bindingType"],
+                    "consumed": bool(consumed and resolved["assetId"]),
+                    "source": "prompt_clip",
+                }
+            ]
+            continue
 
         if is_video:
             consumed = supports_video

@@ -94,19 +94,20 @@ def dispatch(
             "mock": False,
         }
 
-    if tool_id == "timeline.propose_generate_scene":
-        return orchestrator.generate_scene(
-            db, project_id, scene_id, scope=args.get("scope") or "full", batch_ids=args.get("batchBlockIds")
-        )
-    if tool_id == "timeline.propose_add_batch":
-        return service.add_batch(
-            db,
-            project_id,
-            scene_id,
-            label=args.get("label"),
-            planned_duration=float(args.get("plannedDuration") or 5.0),
-            generator_id=args.get("generatorId"),
-        )
+    if tool_id in {
+        "timeline.propose_generate_scene",
+        "timeline.propose_add_batch",
+        "timeline.propose_repair_range",
+        "timeline.propose_cancel",
+        "timeline.propose_retake",
+    }:
+        _ = (db, project_id, scene_id, args)
+        return {
+            "ok": False,
+            "error": "FILM_TIMELINE_REQUIRED",
+            "message": "Generate Shot, Continue Shot, and Add to Timeline are the production Timeline actions.",
+            "mock": False,
+        }
     if tool_id == "timeline.propose_add_image_clip":
         return {
             "ok": False,
@@ -121,50 +122,5 @@ def dispatch(
             "message": "timeline.propose_add_prompt_segment executes via Co-Director ProposalService only.",
             "mock": False,
         }
-    if tool_id == "timeline.propose_repair_range":
-        return orchestrator.add_repair_range(
-            db,
-            project_id,
-            scene_id,
-            args["batchBlockId"],
-            {
-                "start": args.get("start", 0),
-                "length": args.get("length", 1),
-                "label": args.get("label") or "Co-Director repair",
-                "inPaintStrategy": args.get("inPaintStrategy") or "range_replacement",
-            },
-            policy=args.get("policy"),
-        )
-    if tool_id == "timeline.propose_cancel":
-        return orchestrator.cancel_scene(
-            db,
-            project_id,
-            scene_id,
-            CancelRequest(
-                action=args.get("action") or "stop_remaining_scene_jobs",
-                batchBlockIds=list(args.get("batchBlockIds") or []),
-            ),
-        ).model_dump()
-    if tool_id == "timeline.propose_retake":
-        batch_id = args["batchBlockId"]
-        start = args.get("start")
-        length = args.get("length")
-        prompt = str(args.get("prompt") or args.get("delta") or "").strip()
-        if start is not None and length is not None and prompt:
-            return orchestrator.retake_range(
-                db,
-                project_id,
-                scene_id,
-                batch_id,
-                start=float(start),
-                length=float(length),
-                prompt=prompt,
-                mask_png_base64=args.get("maskPngBase64"),
-                reference_frame_time=args.get("referenceFrameTime"),
-                frame_asset_id=args.get("frameAssetId"),
-                remove_background=bool(args.get("removeBackground")),
-            )
-        # Directed full-shot retake = new generation job + new snapshot
-        return orchestrator.submit_batch_generation(db, project_id, scene_id, batch_id)
 
     return {"ok": False, "error": "UNKNOWN_TOOL", "toolId": tool_id, "mock": False}

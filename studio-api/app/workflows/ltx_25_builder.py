@@ -63,6 +63,43 @@ def _ltx25_sampler_supports_av_latent() -> bool:
     return True
 
 
+def _preprocess_guide_image(wf: dict[str, Any], image_ref: list[Any]) -> list[Any]:
+    """Match the official first/last workflow: LTXVPreprocess at compression 18."""
+    n_pre = _nid()
+    wf[n_pre] = {
+        "class_type": "LTXVPreprocess",
+        "inputs": {"image": image_ref, "img_compression": 18},
+    }
+    return [n_pre, 0]
+
+
+def _add_frame_guide(
+    wf: dict[str, Any],
+    *,
+    positive: list[Any],
+    negative: list[Any],
+    vae: list[Any],
+    latent: list[Any],
+    image_ref: list[Any],
+    frame_idx: int,
+) -> tuple[list[Any], list[Any], list[Any]]:
+    """Native LTXVAddGuide. frame_idx 0 is the start; -1 is the last frame."""
+    n_guide = _nid()
+    wf[n_guide] = {
+        "class_type": "LTXVAddGuide",
+        "inputs": {
+            "positive": positive,
+            "negative": negative,
+            "vae": vae,
+            "latent": latent,
+            "image": _preprocess_guide_image(wf, image_ref),
+            "frame_idx": int(frame_idx),
+            "strength": 0.7,
+        },
+    }
+    return [n_guide, 0], [n_guide, 1], [n_guide, 2]
+
+
 def _wire_av_init_latents(
     wf: dict[str, Any],
     *,
@@ -74,10 +111,13 @@ def _wire_av_init_latents(
     n_avae: str,
     start_image_ref: list[Any] | None = None,
     img_strength: float = 0.95,
-) -> str:
-    """Build EmptyVideo (+ optional ImgToVideoInplace) + EmptyAudio + ConcatAV.
+    first_last: tuple[list[Any], list[Any], list[Any], list[Any]] | None = None,
+) -> tuple[str, list[Any] | None, list[Any] | None]:
+    """Build EmptyVideo (+ optional start or first/last guides) + EmptyAudio + ConcatAV.
 
-    Returns the ConcatAV node id (NestedTensor AV latent) for SamplerCustomAdvanced.
+    Returns the ConcatAV node id and, when first/last guides are applied, the
+    guided positive and negative conditioning. Start-only still uses
+    LTXVImgToVideoInplace. Start + end uses LTXVAddGuide at frame 0 and -1.
     """
     n_empty_vid = _nid()
     wf[n_empty_vid] = {
@@ -90,7 +130,30 @@ def _wire_av_init_latents(
         },
     }
     video_latent_ref: list[Any] = [n_empty_vid, 0]
-    if start_image_ref is not None:
+    guided_pos: list[Any] | None = None
+    guided_neg: list[Any] | None = None
+    if first_last is not None:
+        pos, neg, first_ref, last_ref = first_last
+        pos, neg, video_latent_ref = _add_frame_guide(
+            wf,
+            positive=pos,
+            negative=neg,
+            vae=[n_vae, 0],
+            latent=video_latent_ref,
+            image_ref=first_ref,
+            frame_idx=0,
+        )
+        pos, neg, video_latent_ref = _add_frame_guide(
+            wf,
+            positive=pos,
+            negative=neg,
+            vae=[n_vae, 0],
+            latent=video_latent_ref,
+            image_ref=last_ref,
+            frame_idx=-1,
+        )
+        guided_pos, guided_neg = pos, neg
+    elif start_image_ref is not None:
         n_inplace = _nid()
         wf[n_inplace] = {
             "class_type": "LTXVImgToVideoInplace",
@@ -122,7 +185,7 @@ def _wire_av_init_latents(
             "audio_latent": [n_empty_aud, 0],
         },
     }
-    return n_concat
+    return n_concat, guided_pos, guided_neg
 
 
 
@@ -383,7 +446,7 @@ def build_ltx_25_t2v(
             "class_type": "VAELoader",
             "inputs": {"vae_name": settings.ltx_2_5_audio_vae},
         }
-        n_av_init = _wire_av_init_latents(
+        n_av_init, _, _ = _wire_av_init_latents(
             wf,
             width=width,
             height=height,
@@ -581,7 +644,10 @@ def build_ltx_25_i2v(
         }
         cond_images = [n_batch_mid, 0]
         cond_indices.append(str(mid_idx))
-    if end_image_path:
+    # Sound-on start+end uses LTXVAddGuide, not the video-only optional_cond batch.
+    first_last_av = bool(generate_audio and end_image_path)
+    n_end = ""
+    if end_image_path and not first_last_av:
         n_end = _nid()
         wf[n_end] = {"class_type": "LoadImage", "inputs": {"image": end_image_path}}
         n_batch_end = _nid()
@@ -591,21 +657,30 @@ def build_ltx_25_i2v(
         }
         cond_images = [n_batch_end, 0]
         cond_indices.append(str(last_idx))
+    elif first_last_av:
+        n_end = _nid()
+        wf[n_end] = {"class_type": "LoadImage", "inputs": {"image": end_image_path}}
 
-    wf[n_i2v] = {
-        "class_type": "LTXVImgToVideo",
-        "inputs": {
-            "positive": [n_cond, 0],
-            "negative": [n_cond, 1],
-            "vae": [n_vae, 0],
-            "image": [n_img, 0],
-            "width": width,
-            "height": height,
-            "length": total_frames,
-            "batch_size": 1,
-            "strength": 0.95,
-        },
-    }
+    if not first_last_av:
+        wf[n_i2v] = {
+            "class_type": "LTXVImgToVideo",
+            "inputs": {
+                "positive": [n_cond, 0],
+                "negative": [n_cond, 1],
+                "vae": [n_vae, 0],
+                "image": [n_img, 0],
+                "width": width,
+                "height": height,
+                "length": total_frames,
+                "batch_size": 1,
+                "strength": 0.95,
+            },
+        }
+        guider_pos: list[Any] = [n_i2v, 0]
+        guider_neg: list[Any] = [n_i2v, 1]
+    else:
+        guider_pos = [n_cond, 0]
+        guider_neg = [n_cond, 1]
 
     wf[n_model_patch] = {
         "class_type": "ModelSamplingLTXV",
@@ -652,17 +727,31 @@ def build_ltx_25_i2v(
         "inputs": {"sampler_name": "euler"},
     }
 
-    wf[n_guider] = {
-        "class_type": "STGGuiderNode",
-        "inputs": {
-            "model": [model_for_sampler, 0],
-            "positive": [n_i2v, 0],
-            "negative": [n_i2v, 1],
-            "cfg": 3.0,
-            "stg": 1.0,
-            "rescale": 0.7,
-        },
-    }
+    if first_last_av:
+        # Guide frames change the video token count. The packed-AV guider is the
+        # native first/last guider; STG rejects that token count.
+        wf[n_guider] = {
+            "class_type": "LTXVDualCFGGuider",
+            "inputs": {
+                "model": [model_for_sampler, 0],
+                "positive": guider_pos,
+                "negative": guider_neg,
+                "video_cfg": 1.0,
+                "audio_cfg": 1.0,
+            },
+        }
+    else:
+        wf[n_guider] = {
+            "class_type": "STGGuiderNode",
+            "inputs": {
+                "model": [model_for_sampler, 0],
+                "positive": guider_pos,
+                "negative": guider_neg,
+                "cfg": 3.0,
+                "stg": 1.0,
+                "rescale": 0.7,
+            },
+        }
 
     n_sep = _nid() if generate_audio else None
     n_dec_audio = _nid() if generate_audio else None
@@ -673,17 +762,33 @@ def build_ltx_25_i2v(
             "class_type": "VAELoader",
             "inputs": {"vae_name": settings.ltx_2_5_audio_vae},
         }
-        n_av_init = _wire_av_init_latents(
-            wf,
-            width=width,
-            height=height,
-            total_frames=total_frames,
-            fps=fps,
-            n_vae=n_vae,
-            n_avae=n_avae,
-            start_image_ref=[n_img, 0],
-            img_strength=0.95,
-        )
+        if first_last_av:
+            n_av_init, guided_pos, guided_neg = _wire_av_init_latents(
+                wf,
+                width=width,
+                height=height,
+                total_frames=total_frames,
+                fps=fps,
+                n_vae=n_vae,
+                n_avae=n_avae,
+                start_image_ref=None,
+                first_last=([n_cond, 0], [n_cond, 1], [n_img, 0], [n_end, 0]),
+            )
+            if guided_pos is not None and guided_neg is not None:
+                wf[n_guider]["inputs"]["positive"] = guided_pos
+                wf[n_guider]["inputs"]["negative"] = guided_neg
+        else:
+            n_av_init, guided_pos, guided_neg = _wire_av_init_latents(
+                wf,
+                width=width,
+                height=height,
+                total_frames=total_frames,
+                fps=fps,
+                n_vae=n_vae,
+                n_avae=n_avae,
+                start_image_ref=[n_img, 0],
+                img_strength=0.95,
+            )
         n_adv = n_base_sampler
         wf[n_adv] = {
             "class_type": "SamplerCustomAdvanced",
@@ -706,7 +811,19 @@ def build_ltx_25_i2v(
                 "audio_vae": [n_avae, 0],
             },
         }
-        video_latent_src = [n_sep, 0]
+        if first_last_av and guided_pos is not None and guided_neg is not None:
+            n_crop = _nid()
+            wf[n_crop] = {
+                "class_type": "LTXVCropGuides",
+                "inputs": {
+                    "positive": guided_pos,
+                    "negative": guided_neg,
+                    "latent": [n_sep, 0],
+                },
+            }
+            video_latent_src = [n_crop, 2]
+        else:
+            video_latent_src = [n_sep, 0]
     else:
         wf[n_base_sampler] = {
             "class_type": "LTXVBaseSampler",

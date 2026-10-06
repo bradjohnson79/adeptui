@@ -1,0 +1,12 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Change Korri's line to \"Absolutely not.\""
+    }
+  ],
+  "project_id": "2347bf46-3762-4763-86c5-4a6032522278",
+  "mode": "chat",
+  "workspace_tab": "avatar",
+  "workspaceTab": "avatar"
+}

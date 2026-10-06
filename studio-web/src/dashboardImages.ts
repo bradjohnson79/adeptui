@@ -35,7 +35,7 @@ export const dashboardImages = {
   },
   editor: fromAurora("workspaces.editor"),
   magi: {
-    src: "/images/hero/MAGI_Editor_Hero_Korri.png",
+    src: "/images/hero/MAGI_Editor_Hero_Korri.webp",
     alt: "Adept UI MAGI Editor — Korri",
     motif: "motif-edit",
     plate: "plate-aurora",

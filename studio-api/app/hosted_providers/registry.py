@@ -87,7 +87,7 @@ PROVIDERS: dict[str, HostedProviderDefinition] = {
 
     "elevenlabs": HostedProviderDefinition(
         provider_id="elevenlabs",
-        display_name="ElevenLabs (via fal/kie/wavespeed)",
+        display_name="ElevenLabs API",
         role="third",
         recommended=False,
         secret_name="elevenlabs_api_key",
@@ -96,11 +96,11 @@ PROVIDERS: dict[str, HostedProviderDefinition] = {
         dashboard_url="https://elevenlabs.io/app",
         billing_url="https://elevenlabs.io/app/subscription",
         docs_url="https://elevenlabs.io/docs",
-        adapter_version="elevenlabs.2-routed",
-        integration_status="Available but Uncertified",
+        adapter_version="elevenlabs.direct",
+        integration_status="Available",
         supported_modalities=("audio",),
         certified_models=("eleven_multilingual_v2", "eleven_text_to_sound_v2"),
-        estimated_pricing_notes="DEMOTED: capability ElevenLabs routes via USER fal/kie/wavespeed keys. No Adept-owner EL key. Direct elevenlabs_api_key is optional personal BYOK only.",
+        estimated_pricing_notes="Direct ElevenLabs API. Voice, sound effects, and music use the saved ElevenLabs API key.",
     ),
 }
 

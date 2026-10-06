@@ -140,11 +140,11 @@
         "height",
         "frames",
         "fps",
-        "audio"
+        "audio",
+        "end_frame"
       ],
       "unsupportedInputs": [
-        "middle_frame",
-        "end_frame"
+        "middle_frame"
       ],
       "supportedOutputs": [
         "mp4"
@@ -181,6 +181,14 @@
         [
           "LTXVBaseSampler",
           "SamplerCustomAdvanced"
+        ],
+        [
+          "LTXVImgToVideo",
+          "LTXVAddGuide"
+        ],
+        [
+          "STGGuiderNode",
+          "LTXVDualCFGGuider"
         ]
       ],
       "workflowId": "WF-LTX-005",

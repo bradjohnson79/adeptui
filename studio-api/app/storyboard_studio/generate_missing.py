@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from ..db import SessionLocal
 from ..script_storyboard import ScriptSegmentRow, StoryboardPanelRow, ensure_script_tables
+from .aspect import generation_dimensions, normalize_storyboard_aspect
 from .documents import hydrate_panels, pad_empty_slots
 
 GenerateFamily = Literal["qwen2512", "imagen"]
@@ -80,6 +81,8 @@ def generate_missing_panels(
             if not prompt:
                 skipped.append({"panelId": panel_id, "reason": SKIP_NEEDS_SHOT})
                 continue
+            aspect = normalize_storyboard_aspect(doc.get("aspectRatio"))
+            width, height = generation_dimensions(aspect)
             body: dict[str, Any] = {
                 "projectId": project_id,
                 "prompt": prompt,
@@ -88,7 +91,12 @@ def generate_missing_panels(
                 "lockModelFamily": True,
                 "panelId": panel_id,
                 "batchSize": 1,
-                "cinematic": {"category": "storyboard"},
+                "aspectRatio": aspect,
+                "aspect": aspect,
+                "width": width,
+                "height": height,
+                "resolution": "1080p",
+                "cinematic": {"category": "storyboard", "aspectRatio": aspect},
             }
             if family == "imagen":
                 body["providerId"] = "gpt-image-2-kie"

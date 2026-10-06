@@ -271,6 +271,30 @@ def m410_list_takes(record_id: str, db: Session = Depends(get_db)):
     return m410_service.list_takes(db, record_id)
 
 
+@router.post("/m410/records/{record_id}/takes/{take_id}/library")
+def m410_save_take_library(record_id: str, take_id: str, db: Session = Depends(get_db)):
+    return m410_service.save_take_to_library(db, record_id, take_id)
+
+
+@router.post("/m410/records/{record_id}/takes/{take_id}/voice-reference")
+def m410_save_take_voice_reference(record_id: str, take_id: str, db: Session = Depends(get_db)):
+    return m410_service.save_take_as_voice_reference(db, record_id, take_id)
+
+
+@router.get("/m410/records/{record_id}/takes/{take_id}/download")
+def m410_download_take(record_id: str, take_id: str, db: Session = Depends(get_db)):
+    """Browser download of the exact generated take audio (no re-encode)."""
+    from fastapi.responses import FileResponse
+
+    path, filename, media_type = m410_service.take_download(db, record_id, take_id)
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/m410/records/{record_id}/takes/{take_id}/approve")
 def m410_approve_take(
     record_id: str,

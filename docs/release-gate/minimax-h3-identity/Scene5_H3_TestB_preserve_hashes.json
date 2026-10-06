@@ -1,0 +1,22 @@
+{
+  "test_b_graph": {
+    "path": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\minimax-h3-identity\\Scene5_H3_TestB_SubjectBinding.json",
+    "bytes": 5302,
+    "sha256": "608c04dbab097335946fd59d50ffc63acd94bc7fd1eb0ec611c8ea2798ece317"
+  },
+  "test_b_mp4": {
+    "path": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\minimax-h3-identity\\h3_subject_binding_00001_.mp4",
+    "bytes": 819536,
+    "sha256": "16ccd8ca3e78c1676f0551b43134bfd9be6565cf71c279fdd20bcaf5ed8d8465"
+  },
+  "addex_crs": {
+    "path": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\assets\\beffd3d8-791d-4adf-9c4d-681ec9d4efb0\\91b82df6-6c5a-410a-bdb8-6cd3f79753c7.jpeg",
+    "bytes": 611011,
+    "sha256": "36190988a32f36b66beb14cb37418e98d779aaa0f301b2df6088711f5c1bf584"
+  },
+  "korri_crs": {
+    "path": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\assets\\beffd3d8-791d-4adf-9c4d-681ec9d4efb0\\a42e77e0-dfe3-4ac9-85af-ab98dfc510e5.jpeg",
+    "bytes": 539249,
+    "sha256": "18ff6de4a163958e2c9319450e92909914b1f839834b4bbfed0c7dfdec428e72"
+  }
+}

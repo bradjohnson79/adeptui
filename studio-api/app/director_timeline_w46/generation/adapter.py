@@ -73,7 +73,34 @@ def validate_against_capabilities(
                 )
             elif len(audio_ids) > caps.maximumReferenceAudio:
                 errors.append(
-                    f"Too many voice references ({len(audio_ids)}); max is {caps.maximumReferenceAudio}."
+                    f"Too many voice/audio references ({len(audio_ids)}); max is {caps.maximumReferenceAudio}."
+                )
+        if audio_ids and not visual_ids:
+            video_present = any(
+                str(getattr(slot, "assetId", "") or "").strip()
+                for slot in (payload.slots if payload is not None else [])
+                if getattr(slot, "role", None) == "video"
+            )
+            if not video_present:
+                errors.append(
+                    f"{caps.label} audio references must accompany at least one image or video "
+                    "reference — audio cannot be the sole Ref2VA input."
+                )
+        video_slot_ids = [
+            str(slot.assetId).strip()
+            for slot in (payload.slots if payload is not None else [])
+            if slot.role == "video" and str(slot.assetId or "").strip()
+        ]
+        if video_slot_ids:
+            if not caps.supportsVideoReferences or caps.maximumReferenceVideos <= 0:
+                errors.append(
+                    f"{caps.label} does not support video references. Remove the video "
+                    "reference or choose a model that supports motion reference — the "
+                    "reference will not be dropped silently."
+                )
+            elif len(video_slot_ids) > caps.maximumReferenceVideos:
+                errors.append(
+                    f"Too many video references ({len(video_slot_ids)}); max is {caps.maximumReferenceVideos}."
                 )
 
     if request.startImageAssetId and mode == "image_to_video" and not caps.supportsImageToVideo:
@@ -111,16 +138,24 @@ def validate_against_capabilities(
     max_d = getattr(caps, "maxDurationSec", None)
     if max_d is None and caps.supportedDurations:
         max_d = max(caps.supportedDurations)
-    if max_d is not None and request.duration > float(max_d) + 1e-6:
+    dur = int(request.duration)
+    if max_d is not None and dur > int(max_d):
         errors.append(
-            f"Duration {request.duration}s exceeds {caps.label} max {max_d}s — no silent truncate."
+            f"Duration {dur}s exceeds {caps.label} max {int(max_d)}s — no silent truncate."
         )
-    elif caps.supportedDurations and request.duration not in caps.supportedDurations:
-        if not any(abs(request.duration - d) < 0.05 for d in caps.supportedDurations):
-            listed_max = max(caps.supportedDurations)
-            if request.duration > listed_max + 1e-6:
+    elif caps.supportedDurations:
+        listed_ints = [int(d) for d in caps.supportedDurations]
+        if dur not in listed_ints:
+            listed_max = max(listed_ints)
+            if dur > listed_max:
                 errors.append(
-                    f"Duration {request.duration}s exceeds {caps.label} max {listed_max}s — no silent truncate."
+                    f"Duration {dur}s exceeds {caps.label} max {listed_max}s — no silent truncate."
+                )
+            else:
+                listed = ", ".join(f"{d}s" for d in caps.supportedDurations)
+                errors.append(
+                    f"Duration {dur}s is not supported by {caps.label}. "
+                    f"Supported durations: {listed}."
                 )
 
     if request.negativePrompt and not caps.supportsNegativePrompt:

@@ -162,4 +162,14 @@ export type EnvironmentReferenceSheetSummary = {
   /** Prompt-facing #tag when backend sends it (never invent aliases). */
   canonicalTag?: string | null;
   canonical_tag?: string | null;
+  /** original = editable master; snapshot = frozen baked SS-N instance. */
+  recordKind?: "original" | "snapshot" | string | null;
+  isEditableMaster?: boolean;
+  isSnapshot?: boolean;
+  snapshotNumber?: number | null;
+  snapshotOfSheetId?: string | null;
+  parentSheetId?: string | null;
+  rootSheetId?: string | null;
+  directionMovement?: string | null;
+  movementSequenceIndex?: number | null;
 };

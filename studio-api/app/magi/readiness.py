@@ -59,7 +59,7 @@ def deferred_surfaces() -> list[dict[str, Any]]:
             "name": "Audio tracks",
             "status": "Deferred",
             "executable": False,
-            "reason": "Preview mix is real. EQ, compression, limiter, and 5.1/surround stay deferred.",
+            "reason": "Preview mix is real. EQ, compression, and limiter stay off the timeline. Cinema upmix is a MAGI Upscale sound profile.",
         },
         {
             "id": "ai_timeline_actions",
@@ -105,10 +105,10 @@ def deferred_surfaces() -> list[dict[str, Any]]:
         },
         {
             "id": "surround_5_1",
-            "name": "5.1 / spatial surround",
-            "status": "Deferred",
+            "name": "5.1 Cinema Upmix",
+            "status": "Available",
             "executable": False,
-            "reason": "5.1 and spatial surround are not implemented.",
+            "reason": "Choose 5.1 Cinema Upmix inside MAGI Upscale. There is no separate surround control.",
         },
         {
             "id": "frame_interpolation",
@@ -243,5 +243,5 @@ def readiness_payload() -> dict[str, Any]:
         "honestNonExecutableCount": sum(1 for s in deferred if not s.get("executable", False)),
         "noFakeExecution": True,
         "previewMix": "real",
-        "notSupported": ["eq", "surround_5_1", "frame_interpolation"],
+        "notSupported": ["eq", "frame_interpolation"],
     }

@@ -28,6 +28,7 @@ ERSThreeDTruthLabel = Literal["illustrative", "isometric", "derived", "true"]
 ERSContinuitySeverity = Literal["info", "warning", "error"]
 ERSExportKind = Literal["png", "pdf", "offline_html"]
 ERSExportStatus = Literal["not_created", "created", "failed"]
+ERSRecordKind = Literal["original", "snapshot"]
 
 
 def utc_now() -> str:
@@ -211,3 +212,13 @@ class EnvironmentReferenceSheet(BaseModel):
     parentSheetId: str | None = None
     rootSheetId: str | None = None
     versionNumber: int = 1
+    # Editable master vs frozen snapshot (instant bake; never replaces master).
+    recordKind: ERSRecordKind = "original"
+    isEditableMaster: bool = True
+    snapshotNumber: int | None = None
+    snapshotOfSheetId: str | None = None
+    snapshotSequenceHighWater: int = 0
+    overlayState: dict[str, Any] | None = None
+    # Direction / Movement note (max 50 words). Independent per original + each SS-N.
+    directionMovement: str | None = None
+    movementSequenceIndex: int | None = None

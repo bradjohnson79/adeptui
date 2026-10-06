@@ -74,15 +74,19 @@ def submit_render_scene(
     )
     if isinstance(continuity, dict) and continuity:
         params["continuity"] = dict(continuity)
-    # Director bridge flag — routes to h3_director_bridge in queue_worker.
-    # Fail-closed: local MiniMax H3 Timeline always gets useDirector=True so
-    # queue_worker cannot silently fall back to legacy ref2v.
+    # MiniMax H3 Local uses the fast renderer. Other callers that already set
+    # useDirector keep that flag. LTX does not submit through this H3 branch.
     _gen_tok = str(timeline_model or gen_id or "").strip().lower()
-    _is_local_h3 = "minimax-h3" in _gen_tok and "local" in _gen_tok
-    if _is_local_h3 or request.providerOptions.get("useDirector"):
+    _is_bo = _gen_tok == "minimax-h3-base-optimized"
+    _is_local_h3 = _is_bo or ("minimax-h3" in _gen_tok and "local" in _gen_tok)
+    if _is_bo:
+        params["h3Profile"] = "base_optimized"
+    if _is_local_h3:
+        params["useH3FastRenderer"] = True
+    elif request.providerOptions.get("useDirector"):
         params["useDirector"] = True
-    # Whole-second duration authority for Director (also via copy_r2v).
-    if params.get("useDirector") and params.get("requestedDurationSec") is None:
+    # Whole-second duration for local H3 (also via copy_r2v).
+    if (params.get("useH3FastRenderer") or params.get("useDirector")) and params.get("requestedDurationSec") is None:
         try:
             params["requestedDurationSec"] = int(request.duration)
         except (TypeError, ValueError):

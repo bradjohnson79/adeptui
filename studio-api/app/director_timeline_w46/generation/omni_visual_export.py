@@ -11,12 +11,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ...db import Asset
-from ...magi.timeline_handoff import SCENE_SHOT_CLIP_PREFIX, export_to_timeline
 from .. import store
-from ..contracts import BatchClip, SceneTimelineMaster
-
-OMNI_EXPORT_CLIP_PREFIX = "omni_export_"
-
 
 def export_completed_video_to_timeline(
     db: Session,
@@ -60,72 +55,33 @@ def export_completed_video_to_timeline(
     if not scene:
         return {"ok": False, "error": "SCENE_NOT_FOUND", "mock": False}
 
-    bundle = store.load_master(db, project_id, scene_id)
-    if not bundle.get("ok"):
-        return {**bundle, "mock": False}
-    master = SceneTimelineMaster.model_validate(bundle["master"])
-
     length = max(0.15, float(scene.duration_sec or 5.0))
     clip_label = (label or asset.tag or asset.filename or "Exported take").strip()
     surface = (source_surface or "omni").strip() or "omni"
-    clip_id = f"{OMNI_EXPORT_CLIP_PREFIX}{aid.replace('-', '')[:16]}"
+    from ...film_timeline.insertion import add_to_timeline
 
-    blocks = sorted(master.batchBlocks, key=lambda b: int(getattr(b, "order", 0) or 0))
-    target = blocks[-1] if blocks else None
-    if target is None:
-        return {"ok": False, "error": "NO_EXECUTION_WINDOW", "mock": False}
-
-    retained = [c for c in (target.visualClips or []) if str(c.id) != clip_id]
-    cursor = 0.0
-    for c in retained:
-        cursor = max(cursor, float(c.start or 0.0) + float(c.length or 0.0))
-
-    clip = BatchClip(
-        id=clip_id,
-        kind="video",
-        assetId=aid,
-        start=cursor,
-        length=length,
-        trimStart=0.0,
+    placed = add_to_timeline(
+        db,
+        project_id,
+        scene_id,
+        media_type="video",
+        asset_id=aid,
+        target_track_type="video",
+        duration_sec=length,
         label=clip_label,
+        metadata={"sourceSurface": surface, "mediaType": "video"},
     )
-    target.visualClips = retained + [clip]
-
-    store.save_master(
-        db,
-        project_id,
-        scene_id,
-        master,
-        bump_revision=True,
-    )
-
-    magi_clips = [
-        {
-            "clipId": f"{SCENE_SHOT_CLIP_PREFIX}omni_{aid.replace('-', '')[:12]}",
-            "assetId": aid,
-            "name": clip_label,
-            "startFrame": 0,
-            "durationFrames": max(1, int(round(length * 24.0))),
-        }
-    ]
-    magi = export_to_timeline(
-        db,
-        project_id,
-        scene_id,
-        magi_clips,
-        label=f"{surface} export",
-        batch_block_id=None,
-    )
-
+    if not placed.get("ok"):
+        return {"ok": False, "error": placed.get("error") or "INSERT_FAILED", "message": placed.get("message"), "mock": False}
+    clip = placed.get("clip") or {}
     return {
         "ok": True,
         "mock": False,
         "assetId": aid,
         "sceneId": scene_id,
         "mediaType": "video",
-        "visualClipId": clip_id,
+        "visualClipId": clip.get("id"),
         "mediaMode": "video",
         "sourceSurface": surface,
-        "w46": magi,
         "message": "Completed video deposited on Timeline Visual.",
     }

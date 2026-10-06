@@ -248,24 +248,50 @@ def list_color_presets() -> list[dict[str, Any]]:
 # ── FFmpeg Filter Compilation ──────────────────────────────────────────────
 
 
+def viewer_display_params(params: ColorPresetParams) -> ColorPresetParams:
+    """Fold a stored grade into the MAGI viewer display transform.
+
+    The viewer picture is brightness, contrast, saturation, and hue only.
+    Shadows and highlights are already inside that brightness and contrast.
+    Gamma and channel-mixer keys are not part of the viewer picture, so the
+    bake must not apply them again as a second look.
+    """
+    shadows = float(params.get("shadows") or 0.0)
+    highlights = float(params.get("highlights") or 0.0)
+    brightness = float(params.get("brightness") or 0.0) + shadows * 0.35 + highlights * 0.12
+    contrast = float(params.get("contrast") or 0.0) + highlights * 0.55 - shadows * 0.2
+    saturation = float(params.get("saturation") or 0.0)
+    temperature = float(params.get("temperature") or 0.0)
+    folded: ColorPresetParams = {}
+    if abs(brightness) >= 0.001:
+        folded["brightness"] = brightness
+    if abs(contrast) >= 0.001:
+        folded["contrast"] = contrast
+    if abs(saturation) >= 0.001:
+        folded["saturation"] = saturation
+    if abs(temperature) >= 0.001:
+        folded["temperature"] = temperature
+    return folded
+
+
 def _param_to_filter(p: float, param_name: str) -> str | None:
     """Convert a single color parameter to an FFmpeg filter expression fragment."""
     eq_contrast = 1.0 + max(-0.5, min(0.5, p))
     eq_saturation = max(0.0, 1.0 + p)
-    eq_gamma = max(0.1, 1.0 + (p * -1))
-    eq_brightness = max(-1.0, min(1.0, p))
 
     if param_name == "contrast":
         return f"eq=contrast={eq_contrast:.3f}"
     if param_name == "saturation":
         return f"eq=saturation={eq_saturation:.3f}"
-    if param_name == "gamma":
-        return f"eq=gamma={eq_gamma:.3f}"
     if param_name == "brightness":
-        return f"eq=brightness={eq_brightness:.3f}"
+        # CSS brightness() multiplies the displayed frame. Commas are escaped
+        # so this stays one filter in the grade chain.
+        factor = 1.0 + float(p)
+        expr = f"clip(val*{factor:.4f}\\,0\\,255)"
+        return f"lutrgb=r={expr}:g={expr}:b={expr}"
     if param_name == "temperature":
-        r = max(-1.0, min(1.0, p))
-        return f"colorbalance=rs={r:.3f}:gs={0}:bs={-r:.3f}"
+        degrees = -float(p) * 28.0
+        return f"hue=h={degrees:.2f}"
     if param_name == "tint":
         t = max(-1.0, min(1.0, p))
         return f"colorbalance=gs={t:.3f}"
@@ -291,26 +317,32 @@ def _param_to_filter(p: float, param_name: str) -> str | None:
 
 
 def compile_filter_string(params: ColorPresetParams) -> str:
-    """Compile color parameters into a single FFmpeg filter chain string."""
+    """Compile the viewer display transform into one FFmpeg filter chain.
+
+    Order matches the viewer: brightness, then contrast and saturation, then hue.
+    """
+    display = viewer_display_params(params)
     filters: list[str] = []
-    for param_name, value in sorted(params.items()):
+    for param_name, value in display.items():
         if value == 0:
             continue
-        flt = _param_to_filter(value, param_name)
+        flt = _param_to_filter(float(value), param_name)
         if flt:
             filters.append(flt)
 
-    # Merge filters by type
     eq_parts: list[str] = []
-    cb_parts: list[str] = []
-    for f in filters:
-        if f.startswith("eq="):
-            eq_parts.append(f[3:])
-        elif f.startswith("colorbalance="):
-            cb_args = f[13:]
-            cb_parts.append(cb_args)
+    brightness: list[str] = []
+    hue: list[str] = []
+    for flt in filters:
+        if flt.startswith("eq="):
+            eq_parts.append(flt[3:])
+        elif flt.startswith("lutrgb="):
+            brightness.append(flt)
+        elif flt.startswith("hue="):
+            hue.append(flt)
 
     chain: list[str] = []
+    chain.extend(brightness)
     if eq_parts:
         eq_values: dict[str, str] = {}
         for part in eq_parts:
@@ -320,10 +352,7 @@ def compile_filter_string(params: ColorPresetParams) -> str:
                     eq_values[k] = v
         merged = ":".join(f"{k}={v}" for k, v in eq_values.items())
         chain.append(f"eq={merged}")
-    if cb_parts:
-        merged_cb = ":".join(cb_parts)
-        chain.append(f"colorbalance={merged_cb}")
-
+    chain.extend(hue)
     return ",".join(chain)
 
 

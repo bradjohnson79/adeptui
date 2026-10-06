@@ -153,6 +153,7 @@ def from_route_decision(route_decision: Optional[Any]) -> UnifiedIntent:
 # ids registered in ``capabilities.registry`` (atlas.generate, ers.generate,
 # scene.generate).
 _CAPABILITY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bsend\b.+\bmagi\b", re.I), "film.send_to_magi"),
     # --- Production-orchestrator milestone: conversational production commands ---
     # "images from the ERS" / "shots using the saved cameras" → scene.generate
     (re.compile(r"\b(?:create|generate|make|render)\b.*\bimages?\b.*\bfrom\s+(?:the\s+)?(?:ers|environment\s+reference\s+(?:sheet|package))\b", re.I), "scene.generate"),
@@ -196,6 +197,11 @@ _CAPABILITY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # mapping ("9:16" alone → timeline.add_asset) minted executions from
     # format mentions and was removed in the 2026-09-19 intelligence repair.
 
+    # Adept UI v1.1 — Environment Creator Express (not Spatial Map, not Scene Creator Standard)
+    (re.compile(r"\b(?:create|make|build|design|plan|set\s+up|setup)\b.+\b(?:an?\s+)?(?:new\s+)?environment\b", re.I), "environment.creator"),
+    (re.compile(r"\b(?:mess\s+hall|canteen|galley)\s+environment\b", re.I), "environment.creator"),
+    (re.compile(r"\bcreate\b.+\bmess\s+hall\b", re.I), "environment.creator"),
+    (re.compile(r"\b(?:open|show|switch to|take me to|go to)\b.+\benvironment\s+creator\b", re.I), "environment.creator"),
     # --- m413 Spatial Map + Atlas + ERS + Scene Creator (specific first) ---
     # Atlas shot (roofless top-down environment reference) — must precede the
     # generic "shot"/"image" patterns so it wins.

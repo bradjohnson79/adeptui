@@ -137,21 +137,24 @@ def workspace(db: Session, project_id: str, scene_id: str) -> dict[str, Any]:
         from .scene_takes import close_previous_session_render
 
         changed = ensure_scene_takes(master)
+        from .generation.request_builder import (
+            strip_codirector_continuity_from_master,
+            strip_machine_window_notes_from_master,
+        )
+        from .scene_takes import take_render_is_live
+
+        # Continuation headers and window-scope notes are not the creator's
+        # Timed Prompt. Remove them even while a take is open.
+        changed = strip_machine_window_notes_from_master(master) or changed
+        if not take_render_is_live(master):
+            changed = strip_codirector_continuity_from_master(master) or changed
         # SINGLE-STORE: adopt_legacy_retakes reads Master batch.visualClips.
         changed = adopt_legacy_retakes(master) or changed
         changed = close_previous_session_render(master) or changed
         if changed:
             store.save_master(db, project_id, scene_id, master, touch_batches=False)
-        try:
-            from .orchestrator import submit_next_queued_batch
-
-            chain = submit_next_queued_batch(db, project_id, scene_id)
-            if chain.get("submitted"):
-                reloaded = store.load_master(db, project_id, scene_id)
-                if reloaded.get("ok"):
-                    master = SceneTimelineMaster.model_validate(reloaded["master"])
-        except Exception:
-            pass
+        # Opening or refreshing Timeline reports state. It does not submit
+        # the next window. Completion and the watcher own that advance.
         for batch in master.batchBlocks:
             stamp_current_take_fields(batch, master)
         result["master"] = master.model_dump()

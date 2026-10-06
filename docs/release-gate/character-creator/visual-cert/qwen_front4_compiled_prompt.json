@@ -1,0 +1,25 @@
+{
+  "positive_prompt": "1. Reference Reproduction: IDENTITY-REFERENCE ONLY: The attached image is identity and appearance reference only, not a composition to reproduce. Generate exactly one single image containing exactly one full-body character. Do NOT reproduce the reference image's composition, layout, framing, panels, multiple views, inset portraits, alternate poses, contact sheet, or multiple figures. Preserve the same face, hairstyle, eye color, ears, skin tone, body proportions, wardrobe, accessories, tattoos/circuitry, and silhouette as the reference. Do not redesign or reinterpret the character's identity. The written profile is supplemental guidance only and must not override clearly visible reference identity details.\n2. Request Intent: Create one person, full body, front-facing, neutral standing pose, centered, simple background, no collage, no text, no second person for Mira Vale Cert V2.\n3. Subject Identity: Mira Vale Cert V2; woman; human; young adult; slender. personality/bio: A young woman stands centered, facing forward. She has fair complexion, dark brown wavy hair falling just past her shoulders, brown eyes, and a symmetrical face. She wears a muted olive-green long-sleeved crew-neck sweater with ribbed cuffs and dark charcoal-green denim pants. Neutral standing pose, arms at her sides. The style is a clean studio portrait..\n4. Identity Lock: locked traits: eyes, skin, slender; preserve every locked identity trait exactly with no substitutions or character drift\n5. Face Features: \n6. Wardrobe Materials: \n7. Pose Expression: \n8. Composition Camera: Single-subject composition with the character clearly readable.\n9. Environment Lighting: soft studio lighting with readable facial clarity\n10. Style Profile: medium: photoreal cinematic character reference; palette: grounded natural color separation with identity-safe materials; lighting: soft studio lighting with readable facial clarity; finish: clean production-ready render\n11. Continuity References: locked continuity traits: eyes, skin, slender.\n12. Single Camera: Single approved image output. One camera pose only. one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image.\n13. Negative Constraints: multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality, identity drift, wrong character, No close-up, No headshot, No bust portrait, No waist-up framing, Do not crop head, arms, hands, legs, or feet, one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image\n14. Output Guardrails: Use direct production language for Qwen-Image-2512. Do not write conversational fluff, do not merge character identity with style, and keep the final render faithful to the structured blocks above.",
+  "negative_prompt": "multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality, identity drift, wrong character, No close-up, No headshot, No bust portrait, No waist-up framing, Do not crop head, arms, hands, legs, or feet, one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image",
+  "leak1_old_reproduce_present": false,
+  "leak1_new_identity_only_present": true,
+  "leak2_negative_has_collage_concepts": true,
+  "leak2_negative_is_only_blurry_default": false,
+  "continuity_has_role_enumeration": false,
+  "negative_has_blonde_aqua": false,
+  "reference_count": 1,
+  "extras_used": [
+    "No close-up",
+    "No headshot",
+    "No bust portrait",
+    "No waist-up framing",
+    "Do not crop head, arms, hands, legs, or feet",
+    "one person only",
+    "one figure",
+    "no other people",
+    "no grid",
+    "no collage",
+    "no turnaround sheet",
+    "no multiple poses in one image"
+  ]
+}

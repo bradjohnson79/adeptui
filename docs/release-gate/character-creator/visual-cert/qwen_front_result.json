@@ -1,0 +1,110 @@
+{
+  "character_id": "94eb7937-67ed-40ec-b482-439ec1e6dbdf",
+  "generator": "qwen2512",
+  "view": "front",
+  "runtime_seconds": 18.2,
+  "final_front_view": {
+    "status": "ready",
+    "jobId": "1768abb2-1d67-4f63-9042-6ad9e27b82ac",
+    "promptId": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+    "assetId": "a0d692fd-af20-40b2-bc92-d3b1a5aef937",
+    "assetUrl": "/api/assets/a0d692fd-af20-40b2-bc92-d3b1a5aef937/file",
+    "workflowKey": "qwen2512.ref",
+    "generator": "qwen2512",
+    "error": null,
+    "approved": false,
+    "approvedAt": null,
+    "progress": {
+      "percent": 100,
+      "stage": "ready",
+      "label": "Front Ready",
+      "source": "job",
+      "jobId": "1768abb2-1d67-4f63-9042-6ad9e27b82ac",
+      "providerJobId": "6049e12e-25ff-4731-8d82-c90ba8464ee4"
+    },
+    "provenance": {
+      "generator_family": "qwen2512",
+      "provider": "comfyui",
+      "local_or_api": "local",
+      "workflow_key": "qwen2512.ref",
+      "provider_model": "qwen2512.ref",
+      "source_reference_asset_id": "dedfb244-dca7-4093-ac6e-698feaaa6705",
+      "approved_front_asset_id": null,
+      "prompt_id": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+      "provider_job_id": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+      "view_role": "front",
+      "created_at": "2026-08-24T05:27:21Z",
+      "label": "Qwen Image \u00b7 Local",
+      "selected_as": "qwen2512"
+    }
+  },
+  "progress_log": [
+    {
+      "t": 0.0,
+      "status": "generating",
+      "percent": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+      "assetId": null
+    },
+    {
+      "t": 6.1,
+      "status": "generating",
+      "percent": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+      "assetId": null
+    },
+    {
+      "t": 12.1,
+      "status": "generating",
+      "percent": 55,
+      "stage": "generating",
+      "label": "Generating Front\u2026",
+      "promptId": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+      "assetId": null
+    },
+    {
+      "t": 18.1,
+      "status": "ready",
+      "percent": 100,
+      "stage": "ready",
+      "label": "Front Ready",
+      "promptId": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+      "assetId": "a0d692fd-af20-40b2-bc92-d3b1a5aef937"
+    }
+  ],
+  "workflow_key": "qwen2512.ref",
+  "prompt_id": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+  "output_asset_id": "a0d692fd-af20-40b2-bc92-d3b1a5aef937",
+  "asset_url": "/api/assets/a0d692fd-af20-40b2-bc92-d3b1a5aef937/file",
+  "generator_field": "qwen2512",
+  "provenance": {
+    "generator_family": "qwen2512",
+    "provider": "comfyui",
+    "local_or_api": "local",
+    "workflow_key": "qwen2512.ref",
+    "provider_model": "qwen2512.ref",
+    "source_reference_asset_id": "dedfb244-dca7-4093-ac6e-698feaaa6705",
+    "approved_front_asset_id": null,
+    "prompt_id": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+    "provider_job_id": "6049e12e-25ff-4731-8d82-c90ba8464ee4",
+    "view_role": "front",
+    "created_at": "2026-08-24T05:27:21Z",
+    "label": "Qwen Image \u00b7 Local",
+    "selected_as": "qwen2512"
+  },
+  "error_field": null,
+  "source_reference_asset_id": "dedfb244-dca7-4093-ac6e-698feaaa6705",
+  "comfy_history_keys": [
+    "6049e12e-25ff-4731-8d82-c90ba8464ee4"
+  ],
+  "comfy_history_error": "'list' object has no attribute 'get'",
+  "qwen_encode_nodes_in_submitted_graph": [],
+  "reference_conditioning_verified": false,
+  "png_bytes": 3483194,
+  "png_content_type": "image/png",
+  "png_path": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\visual-cert\\qwen_front.png"
+}

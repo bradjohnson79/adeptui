@@ -1,0 +1,247 @@
+/* Preview Monitor Fullscreen — fullscreens ONLY the preview stage, not the
+   entire Timeline UI. Media is contained (not cropped), centered, with a
+   black background. Controls remain accessible. */
+
+/* Standard Fullscreen API */
+.live-preview-stage:fullscreen {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* WebKit fallback */
+.live-preview-stage:-webkit-full-screen {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* MS fallback */
+.live-preview-stage:-ms-fullscreen {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* When in fullscreen, ensure the video/image fills the screen without cropping */
+.live-preview-stage:fullscreen video,
+.live-preview-stage:fullscreen img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.live-preview-stage:-webkit-full-screen video,
+.live-preview-stage:-webkit-full-screen img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* The close button should remain visible in fullscreen */
+.live-preview-stage:fullscreen .live-preview-close {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 10;
+}
+
+.live-preview-stage:-webkit-full-screen .live-preview-close {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 10;
+}
+
+/* When the is-preview-fullscreen class is present (state-driven), ensure
+   the stage fills the screen even before the browser fully enters
+   fullscreen mode (prevents layout flash). */
+.live-preview-stage.is-preview-fullscreen {
+  background: #000;
+}
+
+/* ---------------------------------------------------------------------------
+ * Fullscreen Transport Bar — visible ONLY while Preview Monitor is in
+ * browser fullscreen. Floats over the bottom of the video, remains readable
+ * against bright/dark video, uses Adept button styles.
+ * --------------------------------------------------------------------------- */
+
+.preview-fullscreen-transport {
+  display: none;
+}
+
+/* Only show in fullscreen (standard + webkit) */
+.live-preview-stage:fullscreen .preview-fullscreen-transport,
+.live-preview-stage:-webkit-full-screen .preview-fullscreen-transport {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1rem 2rem 1.5rem;
+  z-index: 20;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(0, 0, 0, 0.6) 60%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  border-radius: 0;
+  width: 100%;
+  max-width: 600px;
+  pointer-events: auto;
+}
+
+/* Time display */
+.preview-fullscreen-time {
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Transport controls row */
+.preview-fullscreen-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Individual transport buttons */
+.preview-transport-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.5rem;
+  height: 2.5rem;
+  padding: 0 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 0.5rem;
+  background: rgba(20, 20, 30, 0.8);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.preview-transport-btn:hover {
+  background: rgba(40, 40, 60, 0.9);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.preview-transport-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.preview-transport-btn:disabled:hover,
+.preview-transport-btn:disabled:active {
+  background: rgba(20, 20, 30, 0.8);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: none;
+}
+
+.preview-transport-icon {
+  display: block;
+}
+
+.preview-transport-btn:active {
+  transform: scale(0.95);
+}
+
+.preview-transport-btn:focus-visible {
+  outline: 2px solid #2dd4bf;
+  outline-offset: 2px;
+  border-color: #2dd4bf;
+}
+
+/* Play/Pause button — slightly larger */
+.preview-transport-play {
+  min-width: 3rem;
+  height: 3rem;
+  font-size: 1.3rem;
+  background: rgba(45, 212, 191, 0.25);
+  border-color: rgba(45, 212, 191, 0.5);
+}
+
+.preview-transport-play:hover {
+  background: rgba(45, 212, 191, 0.4);
+  border-color: rgba(45, 212, 191, 0.7);
+}
+
+/* Bottom row: Re-Take + Exit Fullscreen */
+.preview-fullscreen-bottom-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.preview-fs-retake {
+  background: rgba(60, 60, 80, 0.85);
+}
+
+.preview-fs-retake:hover {
+  background: rgba(80, 80, 100, 0.95);
+}
+
+.preview-fs-exit {
+  background: rgba(30, 30, 40, 0.85);
+}
+
+.preview-fs-exit:hover {
+  background: rgba(50, 50, 60, 0.95);
+}
+
+
+/* Simulated / state-driven fullscreen (headless Playwright when requestFullscreen blocked) */
+.live-preview-stage.is-preview-fullscreen .preview-fullscreen-transport {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1rem 2rem 1.5rem;
+  z-index: 20;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(0, 0, 0, 0.6) 60%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  width: 100%;
+  max-width: 600px;
+  pointer-events: auto;
+}

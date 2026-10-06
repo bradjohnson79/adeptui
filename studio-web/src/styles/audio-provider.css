@@ -1,0 +1,56 @@
+/* ORDER 15 — Local | ElevenLabs provider selector */
+.adept-provider-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 11rem;
+}
+.adept-provider-source--compact {
+  min-width: 9.5rem;
+}
+.adept-provider-source__label {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+.adept-provider-source__select {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.35);
+  color: inherit;
+}
+.adept-provider-source__hint,
+.adept-provider-source__ok {
+  margin: 0;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+.adept-provider-source__alert {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #f0a0a0;
+  line-height: 1.35;
+}
+.adept-provider-source__ok {
+  color: #9ed4a8;
+}
+
+
+/* Voice Studio LOCAL-ONLY static engine badge */
+.adept-provider-source--local-only {
+  gap: 0.35rem;
+}
+.adept-provider-source__static {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text, inherit);
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+}

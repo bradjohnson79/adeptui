@@ -1,0 +1,188 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    }
+  },
+  "5": {
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "audio_vae": [
+        "4",
+        0
+      ],
+      "prompt": "subject_definitions:\n<Subject 1> is @Addex, the person defined by <Picture 1>. Preserve their facial identity, hair, body proportions, clothing, and distinguishing appearance from <Picture 1>.\n<Subject 2> is @Korri40YearsOld, the person defined by <Picture 2>. Preserve their facial identity, hair, body proportions, clothing, and distinguishing appearance from <Picture 2>.\n\nCHARACTER IDENTITY\n<Picture 1> @Addex \u2014 Preserve the supplied visual identity. Do not invent a replacement person. Keep the face, hair, body, wardrobe, and distinguishing marks from the reference picture. The setting must not redesign their clothes or recast them as generic extras.\n<Picture 2> @Korri40YearsOld \u2014 Preserve the supplied visual identity. Do not invent a replacement person. Keep the face, hair, body, wardrobe, and distinguishing marks from the reference picture. The setting must not redesign their clothes or recast them as generic extras.\nThe people in this shot are <Subject 1> (<Picture 1> @Addex) and <Subject 2> (<Picture 2> @Korri40YearsOld).\nThese are the characters. Preserve them. The reference pictures are identity authority.\n\nVISUAL STYLE\nRealistic Anime\nHybrid realistic-anime illustration with refined line control, grounded shading, believable depth, and stylized clarity.\nApply this style to the entire scene while preserving reference identity. A style change is a rendering treatment of the same referenced characters, not a recast.\n\nACTION\nSci-fi living quarters.\n\n<Subject 1> is already seated on the couch, thinking.\n\n<Subject 2> stands beside him, then sits next to him. They hold hands. Keep both people looking exactly like their reference pictures, including face, hair, body, and clothes. The room may be sci-fi; do not put them in new uniforms.\n\n<Subject 2> (S2): Hey babe, are you ready for some fun?\n\n<Subject 1> smiles.\n\n<Subject 1> (S1): You know I am.\n\nCAMERA\nIllustrative cinematic coverage with grounded lenses, flattering perspective, and composition that protects facial recognition.",
+      "width": 1280,
+      "height": 704,
+      "length": 124,
+      "ref_image_size": "max",
+      "ref_images": {
+        "ref_image_0": [
+          "15",
+          0
+        ],
+        "ref_image_1": [
+          "16",
+          0
+        ]
+      }
+    }
+  },
+  "6": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 2248151181
+    }
+  },
+  "7": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "res_multistep"
+    }
+  },
+  "8": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": 20,
+      "denoise": 1.0
+    }
+  },
+  "9": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "conditioning": [
+        "5",
+        0
+      ]
+    }
+  },
+  "10": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "6",
+        0
+      ],
+      "guider": [
+        "9",
+        0
+      ],
+      "sampler": [
+        "7",
+        0
+      ],
+      "sigmas": [
+        "8",
+        0
+      ],
+      "latent_image": [
+        "5",
+        1
+      ]
+    }
+  },
+  "11": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "10",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "12": {
+    "class_type": "VAEDecodeAudio",
+    "inputs": {
+      "samples": [
+        "10",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    }
+  },
+  "13": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "fps": 24.0,
+      "audio": [
+        "12",
+        0
+      ],
+      "bit_depth": 8
+    }
+  },
+  "14": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "13",
+        0
+      ],
+      "filename_prefix": "identity_test/h3_single_subject",
+      "format": "auto",
+      "codec": "auto",
+      "format.codec": "auto"
+    }
+  },
+  "15": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "studio/test_e_addex_front.png"
+    }
+  },
+  "16": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "studio/test_e_korri_front.png"
+    }
+  }
+}

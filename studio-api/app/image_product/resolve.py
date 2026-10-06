@@ -161,9 +161,53 @@ def _api_model_selected(src: dict[str, Any], intent: dict[str, Any]) -> bool:
     return False
 
 
-def _pick_hosted_route(src: dict[str, Any]) -> tuple[dict[str, str] | None, str]:
-    from .compile import _fal_image_route, _kie_image_route
+def _wavespeed_image_route(src: dict[str, Any]) -> dict[str, str] | None:
+    pinned = str(src.get("wavespeedImageModelId") or src.get("wavespeed_image_model_id") or "").strip()
+    provider = str(src.get("provider") or src.get("providerKind") or src.get("requested_provider") or "").strip().lower()
+    if provider != "wavespeed" and not pinned:
+        return None
+    official = pinned or str(src.get("hostedModelId") or src.get("model") or "").strip()
+    if not official:
+        return None
+    dock = str(src.get("hostedModelId") or official).strip() or official
+    return {"dock": dock, "official": official}
 
+
+def choose_imagegen_adapter(params: dict[str, Any] | None) -> str:
+    """Which hosted adapter may run. An explicit provider is never replaced."""
+    from .compile import explicit_hosted_provider
+
+    src = dict(params or {})
+    named = explicit_hosted_provider(src)
+    if named:
+        return named
+    if str(src.get("wavespeedImageModelId") or src.get("wavespeed_image_model_id") or "").strip():
+        return "wavespeed"
+    if str(src.get("provider") or "").strip().lower() == "wavespeed":
+        return "wavespeed"
+    if str(src.get("falImageModelId") or src.get("fal_image_model_id") or "").strip():
+        return "fal"
+    if str(src.get("kieImageModelId") or src.get("kie_image_model_id") or "").strip():
+        return "kie"
+    return ""
+
+
+def _pick_hosted_route(src: dict[str, Any]) -> tuple[dict[str, str] | None, str]:
+    from .compile import _fal_image_route, _kie_image_route, explicit_hosted_provider
+
+    named = explicit_hosted_provider(src)
+    if named == "wavespeed":
+        route = _wavespeed_image_route(src)
+        return (route, "wavespeed") if route else (None, "")
+    if named == "fal":
+        route = _fal_image_route(src)
+        return (route, "fal") if route else (None, "")
+    if named == "kie":
+        route = _kie_image_route(src)
+        return (route, "kie") if route else (None, "")
+    wavespeed_route = _wavespeed_image_route(src)
+    if wavespeed_route:
+        return wavespeed_route, "wavespeed"
     explicit_kie = str(src.get("kieImageModelId") or src.get("kie_image_model_id") or "").strip()
     explicit_fal = str(src.get("falImageModelId") or src.get("fal_image_model_id") or "").strip()
     kie_route = _kie_image_route(src)
@@ -368,7 +412,7 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
             intent=intent,
         )
 
-    if route and provider in {"kie", "fal"}:
+    if route and provider in {"kie", "fal", "wavespeed"}:
         official = str(route.get("official") or "")
         dock = str(route.get("dock") or model or official)
         if continuity and has_pixels and "text-to-image" in official:

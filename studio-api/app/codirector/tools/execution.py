@@ -550,6 +550,18 @@ class ToolExecutionService:
         # A successful write invalidates the project's short-lived read cache so the model's
         # next read reflects authoritative post-mutation state, not a pre-write snapshot.
         clear_project(project_id)
+        if isinstance(raw, dict) and str(definition.tool_id).startswith("timeline.") and "verified" not in raw:
+            scene = str(raw.get("destinationSceneId") or raw.get("sceneId") or scene_id or "")
+            stored = False
+            if scene and raw.get("ok", True) is not False:
+                try:
+                    from ...director_timeline_w46.service import load_timeline_bundle
+
+                    loaded = load_timeline_bundle(db, project_id, scene)
+                    stored = bool(isinstance(loaded, dict) and loaded.get("master") is not None)
+                except Exception:
+                    stored = False
+            raw["verified"] = stored
         result, truncated = sanitize.sanitize_result(raw, char_budget=definition.result_char_budget)
         return _log_invocation(
             db,
@@ -788,6 +800,18 @@ class ToolExecutionService:
         # A successful write invalidates the project's short-lived read cache so the model's
         # next read reflects authoritative post-mutation state, not a pre-write snapshot.
         clear_project(proposal.project_id)
+        if isinstance(raw, dict) and str(definition.tool_id).startswith("timeline.") and "verified" not in raw:
+            scene = str(raw.get("destinationSceneId") or raw.get("sceneId") or payload.arguments.get("sceneId") or "")
+            stored = False
+            if scene and raw.get("ok", True) is not False:
+                try:
+                    from ...director_timeline_w46.service import load_timeline_bundle
+
+                    loaded = load_timeline_bundle(db, proposal.project_id, scene)
+                    stored = bool(isinstance(loaded, dict) and loaded.get("master") is not None)
+                except Exception:
+                    stored = False
+            raw["verified"] = stored
         result, truncated = sanitize.sanitize_result(raw, char_budget=definition.result_char_budget)
         invocation = _log_invocation(
             db,

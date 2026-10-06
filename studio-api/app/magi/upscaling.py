@@ -28,6 +28,7 @@ from .media import (
 )
 from .upscale_targets import (
     UpscaleTargetError,
+    aspect_label,
     parse_resolution,
     resolve_apply_target,
 )
@@ -50,6 +51,11 @@ def _realesrgan_models_dir() -> Path:
 
 def _parse_resolution(resolution_str: str) -> tuple[int, int]:
     return parse_resolution(resolution_str)
+
+
+def scale_filter(width: int, height: int, flags: str = "lanczos") -> str:
+    """Spatial scale to exact pixels. No crop, pad, letterbox, or stretch."""
+    return f"scale={int(width)}:{int(height)}:flags={flags or 'lanczos'},setsar=1"
 
 
 def _gpu_model_ready(model_id: str) -> bool:
@@ -144,7 +150,7 @@ def upscale_frame(
             "-i",
             str(input_path),
             "-vf",
-            f"scale={target_width}:{target_height}:flags={model or 'lanczos'}",
+            scale_filter(target_width, target_height, model or "lanczos"),
             "-c:v",
             "libx264",
             "-preset",
@@ -189,6 +195,7 @@ def _upscale_video_realesrgan(
     *,
     preview_seconds: float | None = None,
     cancel_check: Any | None = None,
+    include_audio: bool = True,
 ) -> dict[str, Any]:
     probe = probe_media(src)
     frames = max(int(probe.get("frames") or 1), 1)
@@ -238,7 +245,7 @@ def _upscale_video_realesrgan(
                 "-i",
                 str(frames_out / "frame_%06d.png"),
                 "-vf",
-                f"scale={target_width}:{target_height}:flags=lanczos",
+                scale_filter(target_width, target_height, "lanczos"),
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -251,7 +258,7 @@ def _upscale_video_realesrgan(
             ]
         )
         dest.parent.mkdir(parents=True, exist_ok=True)
-        if probe.get("hasAudio") and not preview_seconds:
+        if include_audio and probe.get("hasAudio") and not preview_seconds:
             assembled_probe = probe_media(assembled)
             video_dur = float(assembled_probe.get("duration") or probe.get("duration") or 0)
             mux = [
@@ -300,6 +307,7 @@ def upscale_asset(
     target_resolution: str,
     *,
     preview: bool = False,
+    sound_profile: str = "preserve_original",
 ) -> dict[str, Any]:
     source = db.get(Asset, asset_id)
     if not source:
@@ -317,34 +325,50 @@ def upscale_asset(
     probe = probe_media(source_path)
     src_w = int(probe.get("width") or 0)
     src_h = int(probe.get("height") or 0)
+    from .sound_enhancement import analyze_source, attach_soundtrack, output_layout, profile_label, recommend, resolve_profile
+
+    analysis = analyze_source(source_path)
+    chosen_sound = resolve_profile(sound_profile, analysis)
+    recommendation = recommend(analysis)
+    prior_meta: dict[str, Any] = {}
     try:
-        target_w, target_h, _label = resolve_apply_target(src_w, src_h, target_resolution)
+        import json
+
+        prior_meta = json.loads(getattr(source, "prompt_meta_json", None) or "{}")
+    except (TypeError, ValueError):
+        prior_meta = {}
+    already_baked = bool(prior_meta.get("audioEnhancementBaked")) and str(prior_meta.get("audioEnhancement") or "") == chosen_sound
+    if already_baked:
+        chosen_sound = "preserve_original"
+    try:
+        target_w, target_h, target_label = resolve_apply_target(src_w, src_h, target_resolution)
     except UpscaleTargetError:
         raise
     work = new_temp_dir("upscale_asset")
+    picture = work / f"picture_{target_w}x{target_h}.mp4"
     dest = work / f"upscaled_{target_w}x{target_h}.mp4"
     try:
         if chosen_engine == ENGINE_GPU:
             meta = _upscale_video_realesrgan(
                 Path(source_path),
-                dest,
+                picture,
                 model,
                 target_w,
                 target_h,
                 preview_seconds=3.0 if preview else None,
+                include_audio=False,
             )
         else:
             args = ["-i", source_path]
             if preview:
                 args = ["-t", "3", "-i", source_path]
-            audio_args = ["-c:a", "copy"] if probe.get("hasAudio") and not preview else ["-an"]
             fps = float(probe.get("fps") or 0)
             rate_args = ["-r", f"{fps:.6f}"] if fps > 1 else []
             run_ffmpeg(
                 [
                     *args,
                     "-vf",
-                    f"scale={target_w}:{target_h}:flags={model or 'lanczos'}",
+                    scale_filter(target_w, target_h, model or "lanczos"),
                     *rate_args,
                     "-c:v",
                     "libx264",
@@ -352,14 +376,34 @@ def upscale_asset(
                     "fast",
                     "-crf",
                     "23",
-                    *audio_args,
+                    "-an",
                     "-pix_fmt",
                     "yuv420p",
-                    str(dest),
+                    str(picture),
                 ]
             )
             meta = {"engine": ENGINE_FFMPEG, "model": model or "lanczos"}
+        picture_probe = probe_media(picture)
+        sound_duration = 3.0 if preview else float(picture_probe.get("duration") or analysis.get("duration") or 0)
+        sound = attach_soundtrack(
+            picture,
+            source_path,
+            dest,
+            chosen_sound,
+            analysis,
+            duration=sound_duration,
+        )
         out_probe = probe_media(dest)
+        if not preview and analysis.get("hasAudio"):
+            src_dur = float(analysis.get("duration") or 0)
+            out_dur = float(out_probe.get("duration") or 0)
+            if src_dur > 0.4 and abs(out_dur - src_dur) > 0.35:
+                raise RuntimeError("The enhanced soundtrack drifted from the picture.")
+        sound_probe_channels = int(sound.get("channels") or 0)
+        sound_layout = str(sound.get("layout") or "")
+        expected_channels, expected_layout = output_layout(chosen_sound, analysis)
+        out_w = int(out_probe.get("width") or target_w)
+        out_h = int(out_probe.get("height") or target_h)
         asset = register_derived_asset(
             db,
             project_id=project_id,
@@ -370,14 +414,33 @@ def upscale_asset(
             op="upscale",
             model=str(meta.get("model") or model),
             prompt_meta={
-                "operation": "upscale",
+                "operation": "magi_upscale",
                 "engine": chosen_engine,
                 "model": meta.get("model") or model,
-                "target": f"{target_w}x{target_h}",
+                "target": f"{out_w}x{out_h}",
+                "videoTarget": target_label,
+                "upscaleTarget": target_label,
+                "width": out_w,
+                "height": out_h,
+                "aspectRatio": round(out_w / out_h, 6) if out_h else None,
+                "aspect": aspect_label(out_w, out_h),
+                "sourceWidth": src_w,
+                "sourceHeight": src_h,
+                "sourceAspect": aspect_label(src_w, src_h),
                 "preview": preview,
                 "sourceAssetId": source.id,
                 "sourceProbe": probe,
                 "outputProbe": out_probe,
+                "audioEnhancement": chosen_sound,
+                "audioEnhancementLabel": profile_label(chosen_sound),
+                "audioChannels": sound_probe_channels or expected_channels,
+                "audioLayout": sound_layout or expected_layout,
+                "audioEnhancementBaked": chosen_sound != "preserve_original",
+                "audioAlreadyBaked": already_baked,
+                "analysisVersion": analysis.get("version"),
+                "analysisSummary": analysis.get("summary"),
+                "recommendation": recommendation.get("profile"),
+                "recommendationReason": recommendation.get("reason"),
                 "device": realesrgan_runtime.readiness().get("device") if chosen_engine == ENGINE_GPU else "cpu",
             },
             library_key="video.generated",
@@ -390,9 +453,22 @@ def upscale_asset(
             "engine": chosen_engine,
             "model": meta.get("model") or model,
             "input_resolution": f"{probe.get('width')}x{probe.get('height')}",
-            "output_resolution": f"{out_probe.get('width')}x{out_probe.get('height')}",
+            "output_resolution": f"{out_w}x{out_h}",
+            "width": out_w,
+            "height": out_h,
+            "aspect": aspect_label(out_w, out_h),
+            "upscaleTarget": target_label,
             "preview": preview,
             "sourcePreserved": True,
+            "audioEnhancement": chosen_sound,
+            "audioChannels": sound_probe_channels or expected_channels,
+            "audioLayout": sound_layout or expected_layout,
+            "recommendation": recommendation,
+            "analysis": {
+                "hasAudio": analysis.get("hasAudio"),
+                "channels": analysis.get("channels"),
+                "summary": analysis.get("summary"),
+            },
         }
     finally:
         cleanup_dir(work)
@@ -405,8 +481,18 @@ def preview_upscale(
     engine: str,
     model: str,
     target_resolution: str,
+    sound_profile: str = "preserve_original",
 ) -> dict[str, Any]:
-    return upscale_asset(db, project_id, asset_id, engine, model, target_resolution, preview=True)
+    return upscale_asset(
+        db,
+        project_id,
+        asset_id,
+        engine,
+        model,
+        target_resolution,
+        preview=True,
+        sound_profile=sound_profile,
+    )
 
 
 def apply_upscale(
@@ -419,6 +505,7 @@ def apply_upscale(
     *,
     scene_id: str = "",
     persist_scene_publish: bool = False,
+    sound_profile: str = "preserve_original",
 ) -> dict[str, Any]:
     return enqueue_upscale(
         db,
@@ -430,7 +517,27 @@ def apply_upscale(
         preview=False,
         scene_id=scene_id,
         persist_scene_publish=persist_scene_publish,
+        sound_profile=sound_profile,
     )
+
+
+def analyze_upscale_sound(db: Session, project_id: str, asset_id: str) -> dict[str, Any]:
+    from .sound_enhancement import analyze_source, profile_catalog, recommend
+
+    source = db.get(Asset, asset_id)
+    if not source or source.project_id != project_id:
+        raise ValueError("Asset is not in this project.")
+    source_path = str(source.path or "")
+    if not source_path or not Path(source_path).is_file():
+        raise ValueError("Asset file is missing.")
+    analysis = analyze_source(source_path)
+    return {
+        "ok": True,
+        "assetId": asset_id,
+        "analysis": analysis,
+        "recommendation": recommend(analysis),
+        "profiles": profile_catalog(),
+    }
 
 
 def enqueue_upscale(
@@ -444,7 +551,10 @@ def enqueue_upscale(
     preview: bool,
     scene_id: str = "",
     persist_scene_publish: bool = False,
+    sound_profile: str = "preserve_original",
 ) -> dict[str, Any]:
+    from .sound_enhancement import normalize_sound_request
+
     source = db.get(Asset, asset_id)
     if not source or source.project_id != project_id:
         raise ValueError("Asset is not in this project.")
@@ -458,7 +568,8 @@ def enqueue_upscale(
         target_resolution,
     )
     target_resolution = f"{target_w}x{target_h}"
-    fingerprint = f"{asset_id}|{engine}|{model}|{target_resolution}|{int(preview)}|{scene_id}"
+    profile = normalize_sound_request(sound_profile)
+    fingerprint = f"{asset_id}|{engine}|{model}|{target_resolution}|{profile}|{int(preview)}|{scene_id}"
     if engine == ENGINE_GPU:
         _require_gpu_ready()
     existing = magi_jobs.find_active_duplicate(db, project_id, "magi_upscale", fingerprint)
@@ -480,6 +591,7 @@ def enqueue_upscale(
         "engine": engine,
         "model": model,
         "targetResolution": target_resolution,
+        "soundProfile": profile,
         "preview": preview,
         "fingerprint": fingerprint,
         "sceneId": scene_id,
@@ -507,6 +619,7 @@ def enqueue_upscale(
         "engine": engine,
         "preview": preview,
         "targetResolution": target_resolution,
+        "soundProfile": profile,
     }
 
 
@@ -532,6 +645,7 @@ def run_upscale_job(db: Session, job: Job) -> dict[str, Any]:
         str(params.get("model") or "lanczos"),
         str(params.get("targetResolution") or ""),
         preview=preview,
+        sound_profile=str(params.get("soundProfile") or "preserve_original"),
     )
     if (
         result.get("ok")

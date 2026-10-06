@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { loadMagiHotkeys, resetMagiHotkeys, saveMagiHotkeys } from "../../magiSequence/magiHotkeys";
 import {
   applyUserShortcut,
   effectiveChord,
@@ -12,25 +13,33 @@ import {
   chordFromEvent,
 } from "../../timelineMaster/timelineHotkeys";
 
-const CATEGORIES: HotkeyCategory[] = ["Playback", "Editing", "Generation", "Clips & Tracks", "Reference Authoring"];
+const TIMELINE_CATEGORIES: HotkeyCategory[] = ["Playback", "Editing", "Generation", "Clips & Tracks", "Reference Authoring"];
+const MAGI_CATEGORIES: HotkeyCategory[] = ["Playback", "Editing", "View"];
 
 export function TimelineHotKeysPane({
   onCloseOverlay,
+  workspace = "timeline",
 }: {
   onCloseOverlay?: () => void;
+  workspace?: "timeline" | "magi";
 }) {
-  const [bindings, setBindings] = useState(() => loadHotkeys());
+  const [bindings, setBindings] = useState(() => (workspace === "magi" ? loadMagiHotkeys() : loadHotkeys()));
   const [capturingId, setCapturingId] = useState<string | null>(null);
   const capturingIdRef = useRef<string | null>(null);
   const [conflict, setConflict] = useState<{ actionId: string; chord: ShortcutChord; other: TimelineHotkeyBinding } | null>(null);
   const [status, setStatus] = useState("");
 
+  const categories = workspace === "magi" ? MAGI_CATEGORIES : TIMELINE_CATEGORIES;
   const grouped = useMemo(() => {
-    return CATEGORIES.map((category) => ({
+    return categories.map((category) => ({
       category,
-      rows: bindings.filter((item) => item.category === category),
+      rows: bindings.filter((item) => {
+        if (item.category !== category) return false;
+        if (workspace !== "magi") return true;
+        return item.enabled && Boolean(effectiveChord(item).key);
+      }),
     })).filter((group) => group.rows.length);
-  }, [bindings]);
+  }, [bindings, categories]);
 
   const assign = (actionId: string, chord: ShortcutChord, replace: boolean) => {
     const result = applyUserShortcut(bindings, actionId, chord, replace);
@@ -45,12 +54,28 @@ export function TimelineHotKeysPane({
   };
 
   return (
-    <section className="panel timeline-hotkeys-pane" data-testid="timeline-hotkeys-pane">
+    <section
+      className="panel timeline-hotkeys-pane"
+      data-testid={workspace === "magi" ? "magi-hotkeys-pane" : "timeline-hotkeys-pane"}
+      data-hotkey-workspace={workspace}
+    >
       <div className="timeline-inspector__eyebrow">Hot Keys</div>
-      <p className="scene-meta">Shortcuts run the same Timeline buttons. They stay off while you type.</p>
-      <p className="scene-meta">@ # * stay inside Prompt fields. They are not global shortcuts.</p>
+      <p className="scene-meta">
+        {workspace === "magi"
+          ? "Shortcuts run MAGI while MAGI is open. They stay off while you type."
+          : "Shortcuts run the same Timeline buttons. They stay off while you type."}
+      </p>
+      {workspace === "timeline" ? <p className="scene-meta">@ # * stay inside Prompt fields. They are not global shortcuts.</p> : null}
       {grouped.map((group) => (
-        <details key={group.category} className="timeline-inspector__accordion" open={group.category === "Generation" || group.category === "Playback"}>
+        <details
+          key={group.category}
+          className="timeline-inspector__accordion"
+          open={
+            workspace === "magi"
+              ? group.category === "Playback" || group.category === "Editing" || group.category === "View"
+              : group.category === "Generation" || group.category === "Playback"
+          }
+        >
           <summary>{group.category}</summary>
           <div className="timeline-hotkeys-pane__rows">
             {group.rows.map((row) => (
@@ -111,7 +136,8 @@ export function TimelineHotKeysPane({
           className="primary"
           data-testid="hotkey-save"
           onClick={() => {
-            saveHotkeys(bindings);
+            if (workspace === "magi") saveMagiHotkeys(bindings);
+            else saveHotkeys(bindings);
             setStatus("Saved");
             onCloseOverlay?.();
           }}
@@ -123,9 +149,10 @@ export function TimelineHotKeysPane({
           className="ghost"
           data-testid="hotkey-reset"
           onClick={() => {
-            const next = resetHotkeys();
+            const next = workspace === "magi" ? resetMagiHotkeys() : resetHotkeys();
             setBindings(next);
-            saveHotkeys(next);
+            if (workspace === "magi") saveMagiHotkeys(next);
+            else saveHotkeys(next);
             setStatus("Defaults restored");
           }}
         >

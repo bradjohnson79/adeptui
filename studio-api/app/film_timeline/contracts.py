@@ -34,6 +34,8 @@ ReferenceType = Literal[
     "audio",
     "other",
 ]
+CompositionRole = Literal["generated", "source", "retake"]
+SegmentOrigin = Literal["generated", "library"]
 
 
 def _nid(prefix: str) -> str:
@@ -64,6 +66,14 @@ class Segment(BaseModel):
     continuationStrategy: Optional[str] = None
     firstFrameAssetId: Optional[str] = None
     lastFrameAssetId: Optional[str] = None
+    # Visible range inside assetId. trimOutSec null means the piece uses durationSec from trimInSec.
+    trimInSec: float = 0.0
+    trimOutSec: Optional[float] = None
+    compositionRole: CompositionRole = "generated"
+    sourceSegmentId: Optional[str] = None
+    origin: SegmentOrigin = "generated"
+    # Stable creator identity. Assigned once at creation. Not track position.
+    shotNumber: int = 0
     # Provider job dump and continuation handle. Not a Timeline owner.
     generationMetadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -90,6 +100,24 @@ class ShotState(BaseModel):
     modelPrompt: str = ""
     # Model-specific output settings (H3 megapixels, LTX quality, etc.)
     resolvedGeneration: dict[str, Any] = Field(default_factory=dict)
+    # Spoken language for this shot. Not inferred from generated audio.
+    spokenLanguage: str = "en"
+    spokenLanguageCustom: str = ""
+    # Who speaks. Native Model lets the video generator speak. Character Voice
+    # uses the character's saved voice. The voice binding itself stays on the character.
+    dialogueAuthority: str = "native_model"
+
+    @model_validator(mode="after")
+    def _spoken_language_authority(self):
+        from .spoken_language import normalize
+
+        spoken = normalize(self.spokenLanguage, self.spokenLanguageCustom)
+        self.spokenLanguage = spoken.code
+        self.spokenLanguageCustom = spoken.custom
+        from .dialogue_authority import normalize_mode
+
+        self.dialogueAuthority = normalize_mode(self.dialogueAuthority)
+        return self
 
 
 class Shot(BaseModel):
@@ -157,8 +185,13 @@ class FilmTimeline(BaseModel):
     sfx: list[MediaClip] = Field(default_factory=list)
     videoClips: list[MediaClip] = Field(default_factory=list)
     publishedAssetId: Optional[str] = None
+    # Stitch asset that the published picture was copied from. Send to MAGI
+    # stays closed when the current ready stitch is a different id.
+    publishedSourceAssetId: Optional[str] = None
     publishVersion: int = 0
     upscaledAssetId: Optional[str] = None
+    # High-water mark for shotNumber. Never decreases, so a deleted number is not reused.
+    highestShotNumber: int = 0
 
     @model_validator(mode="before")
     @classmethod

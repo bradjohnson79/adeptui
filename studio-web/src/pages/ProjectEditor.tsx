@@ -20,9 +20,8 @@ import { ScriptStoryboardWorkspace } from "../components/ScriptStoryboardWorkspa
 import { StoryboardStudio } from "../components/storyboard-studio/StoryboardStudio";
 import { useBindCoDirectorWorkspace, useOpenCoDirector } from "../components/CoDirector";
 import { ImageToolsPanel } from "../components/ImageTools";
-import { DirectorTracks } from "../components/DirectorTracks";
 import { TimelineWorkspaceStack } from "../components/timeline-master/TimelineWorkspaceStack";
-import { TimelineEditorShell } from "../components/timeline-master/TimelineEditorShell";
+import { FilmTimelineShell } from "../components/film-timeline/FilmTimelineShell";
 import { OneFramePanel, ThreeFramePanel } from "../components/FrameModes";
 import { DirectorSelectionProvider, useDirectorSelection } from "../components/DirectorSelectionContext";
 import { ContextInspector } from "../components/ContextInspector";
@@ -41,6 +40,7 @@ import { VoiceStudioShell } from "../components/VoiceStudioShell";
 import { CharacterProfileWorkspace } from "../components/CharacterProfileWorkspace";
 import { readEditorialContext } from "../components/EditorWorkspace";
 import { MagiEditorWorkspace } from "../components/magi/MagiEditorWorkspace";
+import { setActiveShortcutWorkspace } from "../timelineMaster/timelineHotkeys";
 import { AudioStudioWorkspace } from "../components/AudioStudioWorkspace";
 import { GenerationToolsHub } from "../components/GenerationTools/GenerationToolsHub";
 import { PoseCraftWorkspace } from "../components/GenerationTools/PoseCraftWorkspace";
@@ -76,7 +76,6 @@ function DirectorWorkspaceShell({
   setSelectedScene,
   tab,
   refresh,
-  onGoEditor,
   onOpenCharacterCreator,
 }: {
   project: Project;
@@ -84,7 +83,6 @@ function DirectorWorkspaceShell({
   setSelectedScene: (id: string) => void;
   tab: "one" | "three" | "timeline" | "director";
   refresh: () => Promise<void>;
-  onGoEditor?: () => void;
   onOpenCharacterCreator?: () => void;
 }) {
   const { workspaceTab, setWorkspaceTab, setSelection, clearSelection } = useDirectorSelection();
@@ -120,46 +118,14 @@ function DirectorWorkspaceShell({
       const scene = selected;
       if (!scene) return;
       try {
-        const duration = scene.duration_sec || 5;
-        const id = Math.random().toString(36).slice(2, 10);
-        if (asset.kind === "image") {
-          // Omni Wave 3A Law 2: Library image → References only (mediaType=image).
-          // Do NOT write Visual image_clips guide takes. No silent generation.
-          await api.sceneReferences.attach(project.id, {
-            asset_id: asset.id,
-            scope_type: "scene",
-            scope_id: scene.id,
-            reference_type: "image",
-            media_kind: "image",
-            usage_modes: ["appearance"],
-            reference_roles: ["image"],
-          });
-          await refresh();
-          return;
-        } else if (asset.kind === "video" || asset.kind === "audio") {
-          const masterResp = await api.directorTimelineMaster(project.id, scene.id);
-          const master = masterResp?.master;
-          if (master) {
-            const { patchMasterClips } = await import("../timelineMaster/masterTimelineMutate");
-            if (asset.kind === "video") {
-              await patchMasterClips(
-                project.id,
-                scene.id,
-                master,
-                [{ id, kind: "video", start: 0, length: duration, label: "Video", assetId: asset.id }],
-                "visualClips",
-              );
-            } else {
-              await patchMasterClips(
-                project.id,
-                scene.id,
-                master,
-                [{ id, kind: "audio", start: 0, length: duration, label: asset.tag || "Audio", assetId: asset.id }],
-                "audioClips",
-              );
-            }
-          }
-        }
+        const { addToTimeline } = await import("../filmTimeline/addToTimeline");
+        const mediaType = asset.kind === "image" ? "image" : asset.kind === "video" ? "video" : "audio";
+        await addToTimeline(project.id, scene.id, {
+          mediaType,
+          assetId: asset.id,
+          label: asset.tag || asset.kind,
+          metadata: { source: "library" },
+        });
         await refresh();
       } catch (e) {
         console.error(e);
@@ -310,18 +276,12 @@ function DirectorWorkspaceShell({
       </div>
 
       {(workspaceTab === "timeline" || workspaceTab === "prompt") && (
-        <>
-          <DirectorTracks
-            project={project}
-            scene={selected}
-            onChange={refresh}
-            viewMode={workspaceTab === "prompt" ? "prompt" : "tracks"}
-            onGoEditor={onGoEditor}
-            hideEmbeddedStage={stackedTimeline}
-            externalPlayhead={stackedTimeline ? playheadSec : undefined}
-            onPlayheadChange={stackedTimeline ? setPlayheadSec : undefined}
-          />
-        </>
+        <FilmTimelineShell
+          project={project}
+          selectedScene={selectedScene || ""}
+          setSelectedScene={setSelectedScene}
+          refresh={refresh}
+        />
       )}
       {workspaceTab === "settings" && (
         <PromptComposer project={project} sceneId={selectedScene} onChange={refresh} showContinuity />
@@ -331,7 +291,7 @@ function DirectorWorkspaceShell({
 
   if (tab === "timeline") {
     return (
-      <TimelineEditorShell
+      <FilmTimelineShell
         project={project}
         selectedScene={selectedScene}
         setSelectedScene={setSelectedScene}
@@ -466,6 +426,13 @@ export default function ProjectEditor() {
   }, []);
 
   useEffect(() => {
+    const view = resolveShelvedCreatorWorkspace(tab);
+    const workspace = view === "magi" || view === "editor" ? "magi" : view === "timeline" || view === "director" ? "timeline" : null;
+    setActiveShortcutWorkspace(workspace);
+    return () => setActiveShortcutWorkspace(null);
+  }, [tab]);
+
+  useEffect(() => {
     bindAssetUrlProject(id || null);
     return () => bindAssetUrlProject(null);
   }, [id]);
@@ -501,6 +468,14 @@ export default function ProjectEditor() {
           livePersisted && p.scenes.some((scene) => scene.id === livePersisted) ? livePersisted : null;
         if (livePersisted && !liveValid) {
           clearLastSelectedScene(p.id, persistKey);
+        }
+        // A same-project refresh must never yank a selection that is already a
+        // valid scene of this project — URL-first precedence is for ARRIVAL
+        // (deep link, project switch), and Effect B owns real URL navigations.
+        // Without this guard, a refresh landing mid-transition reverts a fresh
+        // New Scene selection back to the stale address-bar scene.
+        if (prev && p.id === id && p.scenes.some((scene) => scene.id === prev)) {
+          return prev;
         }
         const next = resolveSelectedScene({
           sceneIds: p.scenes.map((scene) => scene.id),
@@ -653,12 +628,20 @@ export default function ProjectEditor() {
 
   useEffect(() => {
     if (!id || !project || !isTimelineShellWorkspace(tab)) return;
+    // ONE-WAY LAW: this effect writes selection → URL only. It must NOT
+    // subscribe to locationSearch — the URL→selection effect below already
+    // reacts to URL changes, and two effects that both fire on locationSearch
+    // while writing to each other's source ping-pong sceneId old↔new whenever
+    // a selection commit and a navigate land in different renders (React
+    // external-store navigation can split one logical commit). That war was
+    // the Priority-One New Scene request storm. Read the live search via ref.
+    const liveSearch = locationSearchRef.current;
     // Stale-tab guard: Production dropdown (and any explicit workspace nav) can
     // update the URL to a non-timeline workspace one render before `tab` catches
     // up. Never rewrite that destination back to workspace=timeline.
     const urlWorkspace = resolveWorkspace(
-      new URLSearchParams(locationSearch).get("workspace") ??
-        new URLSearchParams(locationSearch).get("tab"),
+      new URLSearchParams(liveSearch).get("workspace") ??
+        new URLSearchParams(liveSearch).get("tab"),
     );
     if (urlWorkspace && !isTimelineShellWorkspace(urlWorkspace)) return;
     const validScene =
@@ -666,23 +649,34 @@ export default function ProjectEditor() {
     const next = buildTimelineSearch({
       workspace: tab,
       sceneId: validScene,
-      currentSearch: validScene ? locationSearch : "",
+      currentSearch: validScene ? liveSearch : "",
     });
-    if (!next || locationSearch === next) return;
-    const current = new URLSearchParams(locationSearch);
+    if (!next || liveSearch === next) return;
+    const current = new URLSearchParams(liveSearch);
     const nextParams = new URLSearchParams(next);
     const workspaceUnchanged =
       (current.get("workspace") || current.get("tab") || "") === (nextParams.get("workspace") || "");
     navigate({ pathname: `/project/${id}`, search: next }, { replace: workspaceUnchanged });
-  }, [id, selectedScene, tab, locationSearch, navigate, project]);
+    // locationSearch is read via ref on purpose — see ONE-WAY LAW above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, selectedScene, tab, navigate, project]);
 
+  const prevSceneSearchRef = useRef(locationSearch);
   useEffect(() => {
     if (!project) return;
     const urlSceneId = parseSceneIdFromSearch(locationSearch);
+    const urlChanged = prevSceneSearchRef.current !== locationSearch;
+    prevSceneSearchRef.current = locationSearch;
     if (!urlSceneId) return;
     // URL → selection only when the URL itself changed. A creator click must
     // be allowed to rewrite the previous first-scene canonicalize; do not let
     // the stale sceneId in the address bar win over that click.
+    // A project-refresh fire (project identity changed, URL did not) must not
+    // yank a selection that is already a valid scene of this project — that
+    // reverts an in-flight New Scene transition back to the stale URL scene.
+    const selectionValid =
+      selectedScene && project.scenes.some((scene) => scene.id === selectedScene);
+    if (!urlChanged && selectionValid) return;
     const next = resolveSelectedScene({
       sceneIds: project.scenes.map((scene) => scene.id),
       urlSceneId,
@@ -799,7 +793,7 @@ export default function ProjectEditor() {
     );
   }
 
-  // 1 Frame / 3 Frame are standalone CREATE surfaces — no Timeline shell.
+  // Retired Text to Video / 1 Frame / 3 Frame routes already resolve to Timeline.
   const viewTab = resolveShelvedCreatorWorkspace(tab);
   const showTimelineShell = viewTab === "timeline" || viewTab === "director";
   // Viewport-locked shell only for multi-pane app layouts; document pages use native window scroll.
@@ -947,7 +941,6 @@ export default function ProjectEditor() {
             setSelectedScene={commitSelectedScene}
             tab={viewTab}
             refresh={refresh}
-            onGoEditor={() => go("magi")}
             onOpenCharacterCreator={() => go("characters")}
           />
         </DirectorSelectionProvider>

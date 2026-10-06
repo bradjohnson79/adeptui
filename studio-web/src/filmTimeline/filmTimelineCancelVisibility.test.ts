@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FILM_TIMELINE_ACTIVE_STATUSES,
+  filmTimelineCancelPresentation,
   filmTimelineHasCancellableJob,
 } from "./filmTimelineCancelVisibility";
 
@@ -32,5 +33,23 @@ describe("filmTimelineHasCancellableJob", () => {
         { status: "cancelled" },
       ]),
     ).toBe(false);
+  });
+
+  it("keeps Cancel armed during API preparation and hides it once generation starts", () => {
+    const preparing = filmTimelineCancelPresentation([
+      { status: "generating", generationMetadata: { renderStatus: { apiPhase: "preparing" } } },
+    ]);
+    expect(preparing).toEqual({ visible: true, armed: true });
+
+    const generating = filmTimelineCancelPresentation([
+      { status: "generating", generationMetadata: { renderStatus: { apiPhase: "generating" } } },
+    ]);
+    expect(generating).toEqual({ visible: false, armed: false });
+    expect(filmTimelineHasCancellableJob([
+      { status: "generating", generationMetadata: { renderStatus: { apiPhase: "generating" } } },
+    ])).toBe(false);
+
+    const done = filmTimelineCancelPresentation([{ status: "completed" }]);
+    expect(done).toEqual({ visible: true, armed: false });
   });
 });

@@ -703,11 +703,14 @@ def generate_prepared_scene(
     scene_id: str,
     shot_id: str,
 ) -> dict[str, Any]:
-    from ...director_timeline_w46.orchestrator import submit_batch_generation
+    from ...film_timeline.orchestrator import FilmTimelineError, generate_shot
 
     if not scene_id or not shot_id:
         raise GenerationSubmissionError("Timeline shot is not prepared yet.")
-    result = submit_batch_generation(db, project_id, scene_id, shot_id)
+    try:
+        result = generate_shot(db, project_id, scene_id, shot_id)
+    except FilmTimelineError as exc:
+        raise GenerationSubmissionError(exc.message) from exc
     if not result.get("ok"):
         raise GenerationSubmissionError(
             str(result.get("message") or result.get("error") or "Timeline generation failed."),

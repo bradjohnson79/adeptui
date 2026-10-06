@@ -10,6 +10,15 @@ describe("PRODUCTION_MENU_CATALOG routing", () => {
     expect(catalogEntries().some((entry) => entry.id === "avatar")).toBe(false);
   });
 
+  it("does not list Text to Video, 1 Frame, or 3 Frame as production systems", () => {
+    const ids = catalogEntries().map((entry) => entry.id);
+    expect(ids).not.toContain("txt2vid");
+    expect(ids).not.toContain("one");
+    expect(ids).not.toContain("three");
+    const create = PRODUCTION_MENU_CATALOG.find((cat) => cat.id === "create");
+    expect(create?.entries.map((entry) => entry.id)).toEqual(["imagegen", "script", "timeline"]);
+  });
+
   it("keeps Character Creator on the characters workspace", () => {
     const characters = catalogEntries().find((entry) => entry.id === "characters");
     expect(characters?.workspace).toBe("characters");

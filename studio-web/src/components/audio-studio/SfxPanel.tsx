@@ -47,7 +47,6 @@ type SfxPanelProps = {
   onRefine: (op: string) => Promise<void> | void;
   onPreview: (candidate: AudioCandidate) => void;
   onApprove: (candidate: AudioCandidate) => Promise<void> | void;
-  onAddToTimeline: (candidate: AudioCandidate) => Promise<void> | void;
 };
 
 const INTENSITIES = ["Subtle", "Normal", "Bold"] as const;
@@ -112,7 +111,6 @@ export function SfxPanel({
   onCancelGeneration,
   onPreview,
   onApprove,
-  onAddToTimeline,
 }: SfxPanelProps) {
   const [negativesDraft, setNegativesDraft] = useState(intent.negatives.join(", "));
 
@@ -473,15 +471,13 @@ export function SfxPanel({
               approved={Boolean(candidate.assetId && approvedAssetIds[candidate.assetId])}
               onPreview={() => onPreview(candidate)}
               onApprove={() => onApprove(candidate)}
-              onPrimary={() => onAddToTimeline(candidate)}
-              primaryLabel="Add to Timeline"
             />
           ))}
         </div>
       ) : (
         <div className="audio-empty-state">
           <strong>Your sounds will appear here.</strong>
-          <p className="muted">Play, select, approve, then add to the SFX track.</p>
+          <p className="muted">Play a sound, select it, then approve it.</p>
         </div>
       )}
     </section>

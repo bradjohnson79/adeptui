@@ -202,6 +202,17 @@ export function exactFrameCount(seconds: number, fps: number): number {
   return Math.max(1, Math.round(Number(seconds) * Number(fps)));
 }
 
+/** Nearest legal LTX 8n+1 count for a Timeline whole-second request. Ties take the longer count. */
+export function ltxTimelineFrameCount(seconds: number, fps = 24): number {
+  const frames = exactFrameCount(seconds, fps);
+  if (frames >= 9 && (frames - 1) % 8 === 0) return frames;
+  const lo = Math.floor((Math.max(1, frames) - 1) / 8) * 8 + 1;
+  const hi = lo + 8;
+  const near = [lo, hi].filter((count) => count >= 9);
+  near.sort((a, b) => Math.abs(a - frames) - Math.abs(b - frames) || b - a);
+  return near[0] || frames;
+}
+
 export function durationFidelityMessage(engine: string, seconds: number, fps: number): string {
   const id = String(engine || "").toLowerCase();
   if (!id.includes("ltx-2.5")) return "";

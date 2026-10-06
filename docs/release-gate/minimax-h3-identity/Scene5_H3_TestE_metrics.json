@@ -1,0 +1,73 @@
+{
+  "prompt_id": "fde23980-4782-4df9-ab4b-ba8ee929fe01",
+  "elapsed_seconds": 350.543,
+  "peak_vram_used_gb_observed": 30.29,
+  "cached_nodes": [],
+  "uncached_required_nodes": true,
+  "first_queue_invalid_cache_hit": {
+    "prompt_id": "1ca86f2c-5204-41d3-8b9f-301df08f3b92",
+    "elapsed_seconds": 11.003,
+    "cached_nodes": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "12",
+      "13"
+    ],
+    "note": "Discarded. Sampler/H3 node reused Test B cache. Not scored."
+  },
+  "history_status": {
+    "status_str": "success",
+    "completed": true,
+    "messages": [
+      [
+        "execution_start",
+        {
+          "prompt_id": "fde23980-4782-4df9-ab4b-ba8ee929fe01",
+          "timestamp": 1788932226777
+        }
+      ],
+      [
+        "execution_cached",
+        {
+          "nodes": [],
+          "prompt_id": "fde23980-4782-4df9-ab4b-ba8ee929fe01",
+          "timestamp": 1788932226787
+        }
+      ],
+      [
+        "execution_success",
+        {
+          "prompt_id": "fde23980-4782-4df9-ab4b-ba8ee929fe01",
+          "timestamp": 1788932577320
+        }
+      ]
+    ]
+  },
+  "outputs": {
+    "14": {
+      "images": [
+        {
+          "filename": "h3_single_subject_00002_.mp4",
+          "subfolder": "identity_test",
+          "type": "output"
+        }
+      ],
+      "animated": [
+        true
+      ]
+    }
+  },
+  "output_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\output\\identity_test\\h3_single_subject_00002_.mp4",
+  "localCopy": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\minimax-h3-identity\\h3_single_subject_00001_.mp4",
+  "bytes": 759297,
+  "sha256": "7986f4837831ad693abff4a7adad03da5710389eabd5f74822b3d0316e9ebf5d",
+  "comfy_view": "http://127.0.0.1:8188/view?filename=h3_single_subject_00002_.mp4&subfolder=identity_test&type=output"
+}

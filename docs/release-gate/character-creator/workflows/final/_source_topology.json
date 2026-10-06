@@ -1,0 +1,106 @@
+{
+  "qwen2512.ref": {
+    "class_types": [
+      "CLIPLoader",
+      "EmptyLatentImage",
+      "KSampler",
+      "LoadImage",
+      "ModelSamplingAuraFlow",
+      "SaveImage",
+      "TextEncodeQwenImageEdit",
+      "UNETLoader",
+      "VAEDecode",
+      "VAELoader"
+    ],
+    "load_image_id": "5",
+    "image_scale_id": null,
+    "omni_id": null,
+    "qwen_encode_ids": [
+      "6",
+      "7"
+    ],
+    "vae_encode_id": null,
+    "ksampler_id": "9",
+    "qwen_reference_conditioning": [
+      {
+        "node_id": "6",
+        "image": [
+          "5",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ],
+        "image_is_reference": true,
+        "vae_bound": true
+      },
+      {
+        "node_id": "7",
+        "image": [
+          "5",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ],
+        "image_is_reference": true,
+        "vae_bound": true
+      }
+    ],
+    "ksampler_latent_image": [
+      "8",
+      0
+    ]
+  },
+  "zimage.ref_edit": {
+    "class_types": [
+      "CLIPLoader",
+      "CLIPTextEncode",
+      "ImageScale",
+      "KSampler",
+      "LoadImage",
+      "ModelSamplingAuraFlow",
+      "SaveImage",
+      "TextEncodeZImageOmni",
+      "UNETLoader",
+      "VAEDecode",
+      "VAEEncode",
+      "VAELoader"
+    ],
+    "load_image_id": "4",
+    "image_scale_id": "4b",
+    "omni_id": "7",
+    "qwen_encode_ids": [],
+    "vae_encode_id": "9",
+    "ksampler_id": "10",
+    "zimage_omni_inputs": {
+      "image1": [
+        "4b",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "auto_resize_images": false,
+      "image1_is_scaled_reference": true
+    },
+    "vae_encode_inputs": {
+      "pixels": [
+        "4b",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "pixels_is_scaled_reference": true
+    },
+    "ksampler_latent_image": [
+      "9",
+      0
+    ]
+  }
+}

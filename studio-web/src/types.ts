@@ -22,6 +22,10 @@ export interface Asset {
   shared_project_ids_json?: string;
   labels_json?: string;
   prompt_meta_json?: string;
+  /** Transient. Derived by the library API. Not a stored taxonomy field. */
+  effectiveReferenceRole?: string | null;
+  referenceRoleSource?: string | null;
+  creatorReferenceRole?: string | null;
   parent_asset_id?: string | null;
   created_at: string;
 }

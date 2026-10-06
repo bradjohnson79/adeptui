@@ -117,7 +117,8 @@ export const WORKSPACES = {
     order: 40,
     description: "Animate a single keyframe.",
     capabilityBadges: ["Video", "Director"],
-    commandPalette: true,
+    commandPalette: false,
+    menuHidden: true,
   },
   txt2vid: {
     label: "Text to Video",
@@ -130,7 +131,8 @@ export const WORKSPACES = {
     description:
       "Text-to-video from a prompt alone. Local MiniMax H3 and LTX 2.5 can do Text to Video when those workflows are Ready. Use 1 Frame or Timeline for picture-guided shots.",
     capabilityBadges: ["Video"],
-    commandPalette: true,
+    commandPalette: false,
+    menuHidden: true,
   },
   three: {
     label: "3 Frame",
@@ -142,7 +144,8 @@ export const WORKSPACES = {
     order: 50,
     description: "Build motion from start, middle, and end frames.",
     capabilityBadges: ["Video", "Timeline"],
-    commandPalette: true,
+    commandPalette: false,
+    menuHidden: true,
   },
   timeline: {
     label: "Timeline Generator",
@@ -522,6 +525,8 @@ export function resolveWorkspace(value: unknown): EditorTab | null {
   if (resolved === "editor") return "magi";
   // Wave 4C: Director product renamed Timeline — never surface two products.
   if (resolved === "director") return "timeline";
+  // Text to Video, 1 Frame, and 3 Frame are LTX modes inside Timeline, not destinations.
+  if (resolved === "txt2vid" || resolved === "one" || resolved === "three") return "timeline";
   // M4.7: writing entry points resolve to Scriptwriter Studio.
   // Storyboard remains available via workspace=storyboard / script-storyboard.
   if (normalized === "script-writer" || normalized === "writer") return "scriptwriter";
@@ -558,6 +563,7 @@ export function commandPaletteWorkspaces(): EditorTab[] {
 export function resolveShelvedCreatorWorkspace(tab: EditorTab): EditorTab {
   if (tab === "spatial" && !isSpatialMapEnabled()) return "environmentcreator";
   if (tab === "posecraft" && !isPoseCraftEnabled()) return "imagegen";
+  if (tab === "txt2vid" || tab === "one" || tab === "three") return "timeline";
   return tab;
 }
 

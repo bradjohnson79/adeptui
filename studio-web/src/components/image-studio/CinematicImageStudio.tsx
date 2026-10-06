@@ -31,6 +31,15 @@ import { CisAccordion } from "./CisAccordion";
 import { LoRASelector, type LoraSelection } from "../lora/LoRASelector";
 import { isReferenceImage } from "./ReferenceBrowser";
 import { ImageProviderBrowser } from "./ImageProviderBrowser";
+import {
+  HOSTED_AUTO_ID,
+  hostedCostLabel,
+  hostedExecutionFields,
+  hostedModelOptions,
+  hostedSelectionBlockReason,
+  resolveHostedProvider,
+  usingModelLabel,
+} from "./hostedModelSelection";
 import { providerSubLabel } from "./providerDisplay";
 import { ProductionPipelinePanel } from "./ProductionPipelinePanel";
 import type {
@@ -129,15 +138,6 @@ function continuityGrade(session: VisualContinuitySession | null): string {
   return "Building";
 }
 
-function estimateCostLabel(targets: ImageProviderDescriptor[]): string {
-  const hosted = targets.filter((t) => t.requiresPaidConfirmation);
-  if (!hosted.length) return "Local GPU";
-  // Honest estimate band — not a live quote.
-  const low = Math.max(0.04, hosted.length * 0.04);
-  const high = hosted.length * 0.18;
-  return `~$${low.toFixed(2)}–$${high.toFixed(2)}`;
-}
-
 function estimateTimeLabel(targets: ImageProviderDescriptor[], batchSize: number): string {
   if (!targets.length) return "—";
   const localHeavy = targets.every((t) => t.source !== "hosted");
@@ -227,6 +227,7 @@ export function CinematicImageStudio({
   const [bestMatch, setBestMatch] = useState<ImageProviderDescriptor | null>(null);
   const [paidConfirmIds, setPaidConfirmIds] = useState<string[]>([]);
   const [hostedChoice, setHostedChoice] = useState<"local_only" | "allow_hosted">("local_only");
+  const [hostedModelId, setHostedModelId] = useState(HOSTED_AUTO_ID);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [loraSelection, setLoraSelection] = useState<LoraSelection | null>(null);
   const [seed, setSeed] = useState(project.seed ?? -1);
@@ -242,6 +243,7 @@ export function CinematicImageStudio({
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const jobStartedAtRef = useRef<Record<string, number>>({});
   const poseHandoffRef = useRef(false);
+  const boardAspectRef = useRef<"16:9" | "9:16" | null>(null);
   const [sceneId, setSceneId] = useState("");
   const [continuityOn, setContinuityOn] = useState(false);
   const [continuitySession, setContinuitySession] = useState<VisualContinuitySession | null>(null);
@@ -362,6 +364,8 @@ export function CinematicImageStudio({
 
   useEffect(() => {
     // Project-scoped Journey 1 refs — reset when project changes, then apply seed/handoff.
+    // Dev StrictMode runs this effect twice. Drop the seed only after the surviving run.
+    let dropSeed: number | undefined;
     setAuthorityRefs([]);
     setUnresolvedTags([]);
     setIgCatalogs([]);
@@ -382,7 +386,15 @@ export function CinematicImageStudio({
           panelId?: string;
           continuitySessionId?: string;
           assetId?: string;
+          aspectRatio?: string;
         };
+        const seededAspect = seedPayload.aspectRatio === "9:16" || seedPayload.aspectRatio === "16:9"
+          ? seedPayload.aspectRatio
+          : null;
+        boardAspectRef.current = seededAspect;
+        if (seededAspect) {
+          setControls((c) => ({ ...c, aspectRatio: seededAspect }));
+        }
         if (seedPayload.prompt) setPrompt(seedPayload.prompt);
         if (seedPayload.panelId) setReplacePanelId(seedPayload.panelId);
         if (seedPayload.assetId) {
@@ -400,10 +412,11 @@ export function CinematicImageStudio({
               setSpatialMapVersion(r.spatialMapVersion ? String(r.spatialMapVersion) : undefined);
               setSpatialCameraId(r.spatialCameraId ? String(r.spatialCameraId) : undefined);
               if (r.controls) {
+                const boardAspect = boardAspectRef.current;
                 setControls((c) => ({
                   ...c,
                   ...(r.controls as Partial<CinematicControls>),
-                  aspectRatio: String(r.controls.aspectRatio || c.aspectRatio),
+                  aspectRatio: boardAspect || String(r.controls.aspectRatio || c.aspectRatio),
                   shotIntent: (r.controls.shotIntent as ShotIntent) || c.shotIntent,
                   category: (r.controls.category as ImageCategory) || c.category,
                   colorGradePreset: resolveColorGradeId(
@@ -427,7 +440,7 @@ export function CinematicImageStudio({
             })
             .catch(() => undefined);
         }
-        sessionStorage.removeItem("adept_cis_seed");
+        dropSeed = window.setTimeout(() => sessionStorage.removeItem("adept_cis_seed"), 0);
       }
     } catch {
       /* ignore */
@@ -461,6 +474,9 @@ export function CinematicImageStudio({
       applyPose(backend);
       if (!backend) applyPose(consumePoseCraftHandoff(project.id));
     });
+    return () => {
+      if (dropSeed !== undefined) window.clearTimeout(dropSeed);
+    };
   }, [project.id]);
 
   useEffect(() => {
@@ -573,19 +589,23 @@ export function CinematicImageStudio({
   };
 
   const resolveTargets = (): ImageProviderDescriptor[] => {
+    const catalog = allProviders.length ? allProviders : providers;
+    if (hostedChoice === "allow_hosted") {
+      const hosted = resolveHostedProvider(catalog, hostedModelId, refIds.length, bestMatch?.family);
+      return hosted ? [hosted] : [];
+    }
     if (mode === "all_models") {
-      const catalog = allProviders.length ? allProviders : providers;
-      let selected = catalog.filter((p) => selectedProviderIds.includes(p.id) && p.readiness === "ready");
-      if (hostedChoice === "local_only") {
-        selected = selected.filter((p) => !p.requiresPaidConfirmation);
-      }
-      return selected;
+      return catalog.filter(
+        (p) => selectedProviderIds.includes(p.id) && p.readiness === "ready" && p.source !== "hosted",
+      );
     }
     if (mode === "choose_model") {
-      const chosen = providers.find((p) => p.id === chosenProviderId);
+      const chosen = providers.find((p) => p.id === chosenProviderId && p.source !== "hosted");
       return chosen ? [chosen] : [];
     }
-    return bestMatch ? [bestMatch] : providers[0] ? [providers[0]] : [];
+    if (bestMatch && bestMatch.source !== "hosted") return [bestMatch];
+    const local = catalog.find((p) => p.source !== "hosted" && p.readiness === "ready" && p.imageCapable !== false);
+    return local ? [local] : [];
   };
 
   const generate = async () => {
@@ -593,6 +613,13 @@ export function CinematicImageStudio({
     setMsg(null);
     try {
       const targets = resolveTargets();
+      if (hostedChoice === "allow_hosted") {
+        const blocked = hostedSelectionBlockReason(targets[0] || null, refIds.length);
+        if (blocked) {
+          setMsg(blocked);
+          return;
+        }
+      }
       if (!targets.length) {
         setMsg(
           mode === "all_models"
@@ -674,7 +701,8 @@ export function CinematicImageStudio({
 
           const body: Record<string, unknown> = {
             ...(preview.imageProductBody || {}),
-            lockModelFamily: true,
+            lockModelFamily: target.source !== "hosted",
+            ...(target.source === "hosted" ? hostedExecutionFields(target) : {}),
             referenceAssetIds: resolvedRefIds,
             authorityReferences: resolved.refs.map((r) => ({
               key: r.key,
@@ -684,6 +712,10 @@ export function CinematicImageStudio({
               chip: r.chip,
             })),
           };
+          if (target.source === "hosted") {
+            delete body.forceWorkflowKey;
+            delete body.allow_force_workflow_key;
+          }
           // Locked creator constraints — stamp visualStyle for Co-Director / compile routing.
           {
             const vs = String(controls.visualStyle || "").trim();
@@ -925,18 +957,19 @@ export function CinematicImageStudio({
 
   const generateTargets = resolveTargets();
   const paidOk = hostedChoice === "allow_hosted";
+  const hostedCatalog = allProviders.length ? allProviders : providers;
+  const hostedOptions = hostedModelOptions(hostedCatalog, refIds.length);
   const accordionKey = `adept_cis_accordion_${project.id}`;
   const supportsRefs = providerSupportsReferences(generateTargets[0] || bestMatch);
   const showHostedCard =
     mode === "all_models" ||
     paidConfirmIds.length > 0 ||
+    hostedOptions.length > 0 ||
     generateTargets.some((t) => t.requiresPaidConfirmation);
   const pipelineDeploymentPreference: ImagePipelineDeploymentPreference =
-    hostedChoice === "local_only"
-      ? "local"
-      : mode === "choose_model"
-        ? (providers.find((provider) => provider.id === chosenProviderId)?.source === "hosted" ? "api" : "local")
-        : "best-match";
+    hostedChoice === "allow_hosted"
+      ? "api"
+      : "local";
 
   return (
     <div className="page cinematic-image-studio" data-testid="cinematic-image-studio">
@@ -1241,8 +1274,32 @@ export function CinematicImageStudio({
                   </label>
                 </div>
               </fieldset>
-              <div className={`cis-hosted-card__cost${paidOk ? "" : " is-muted"}`}>
-                Estimated hosted cost: <strong>{paidOk ? estimateCostLabel(generateTargets) : "$0.00"}</strong>
+              {hostedChoice === "allow_hosted" ? (
+                <div className="field" style={{ marginTop: "0.75rem" }}>
+                  <label htmlFor="cis-hosted-model">Hosted Image Generator</label>
+                  <select
+                    id="cis-hosted-model"
+                    data-testid="cis-hosted-model"
+                    value={hostedOptions.some((option) => option.id === hostedModelId) ? hostedModelId : hostedOptions[0]?.id || ""}
+                    onChange={(e) => setHostedModelId(e.target.value)}
+                  >
+                    {hostedOptions.length ? (
+                      hostedOptions.map((option) => (
+                        <option key={option.id} value={option.id} disabled={option.disabled}>
+                          {option.label}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No hosted image generators are registered</option>
+                    )}
+                  </select>
+                </div>
+              ) : null}
+              <div className={`cis-hosted-card__cost${paidOk ? "" : " is-muted"}`} data-testid="cis-hosted-cost">
+                Estimated hosted cost:{" "}
+                <strong>
+                  {hostedCostLabel(paidOk, paidOk ? generateTargets[0] : null)}
+                </strong>
                 <div className="tiny muted">Hosted cost applies only when hosted models are selected.</div>
               </div>
             </div>
@@ -1356,12 +1413,18 @@ export function CinematicImageStudio({
             <span>
               Estimated Time · <strong>{estimateTimeLabel(generateTargets, batchSize)}</strong>
             </span>
-            <span>
+            <span data-testid="cis-using-model">
               Using ·{" "}
               <strong>
-                {mode === "all_models"
+                {mode === "all_models" && hostedChoice !== "allow_hosted"
                   ? `${generateTargets.length} model${generateTargets.length === 1 ? "" : "s"} selected`
-                  : generateTargets[0]?.displayName || "No model selected"}
+                  : usingModelLabel(generateTargets[0], {
+                      hosted: hostedChoice === "allow_hosted",
+                      auto:
+                        hostedChoice === "allow_hosted" &&
+                        hostedModelId === HOSTED_AUTO_ID &&
+                        !generateTargets[0],
+                    })}
               </strong>
             </span>
             {undoPanelId ? (

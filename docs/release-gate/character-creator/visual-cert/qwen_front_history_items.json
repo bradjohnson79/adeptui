@@ -1,0 +1,32 @@
+[
+  {
+    "index": 0,
+    "type": "int",
+    "repr": "0",
+    "len": null
+  },
+  {
+    "index": 1,
+    "type": "str",
+    "repr": "'6049e12e-25ff-4731-8d82-c90ba8464ee4'",
+    "len": null
+  },
+  {
+    "index": 2,
+    "type": "dict",
+    "repr": "{'1': {'class_type': 'UNETLoader', 'inputs': {'unet_name': 'qwen_image_2512_fp8_e4m3fn.safetensors', 'weight_dtype': 'fp8_e4m3fn'}}, '2': {'class_type': 'CLIPLoader', 'inputs': {'clip_name': 'qwen_2.5_vl_7b_fp8_scaled.safetensors', 'type': 'qwen_image'}}, '3': {'class_type': 'VAELoader', 'inputs': {'vae_name': 'qwen_image_vae.safetensors'}}, '4': {'class_type': 'ModelSamplingAuraFlow', 'inputs': {'model': ['1', 0], 'shift': 1.73}}, '5': {'class_type': 'LoadImage', 'inputs': {'image': 'studio/MiraValeCertV2.png'}}, '6': {'class_type': 'TextEncodeQwenImageEdit', 'inputs': {'clip': ['2', 0], 'prompt': '1. Reference Reproduction: REFERENCE-FIRST AUTHORITY: Reproduce the attached character reference as faithfully as possible. Preserve the same face, hairstyle, eye color, ears, skin tone, body proportions, wardrobe, accessories, tattoos/circuitry, and silhouette. Do not redesign or reinterpret the character. Only vary pose, expression, and background subtly. The attached reference image is the visual identity lock; the written profile is supplemental guidance only and must not override clearly visible reference details.\\n2. Request Intent: Create one person, full body, front-facing, neut",
+    "len": 11
+  },
+  {
+    "index": 3,
+    "type": "dict",
+    "repr": "{'client_id': 'bf619cbe-d8f1-4345-bbc9-7364eaef2f7d', 'create_time': 1787549242189}",
+    "len": 2
+  },
+  {
+    "index": 4,
+    "type": "list",
+    "repr": "['11']",
+    "len": 1
+  }
+]

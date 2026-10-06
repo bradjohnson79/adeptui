@@ -1,0 +1,25 @@
+{
+  "valid": true,
+  "error_count": 0,
+  "warning_count": 2,
+  "errors": [],
+  "warnings": [
+    {
+      "node_id": "15",
+      "code": "node_not_reachable_from_output",
+      "note": "Same autogrow warning as Test B. LoadImage 15/16 are wired through MiniMaxH3ReferenceToVideo.ref_images and do execute."
+    },
+    {
+      "node_id": "16",
+      "code": "node_not_reachable_from_output",
+      "note": "Same autogrow warning as Test B. LoadImage 15/16 are wired through MiniMaxH3ReferenceToVideo.ref_images and do execute."
+    }
+  ],
+  "object_info_source": {
+    "mode": "local",
+    "host": "127.0.0.1",
+    "port": 8188
+  },
+  "vram_free_bytes_before_queue": 18395255752,
+  "comfy_pid_before": 22044
+}

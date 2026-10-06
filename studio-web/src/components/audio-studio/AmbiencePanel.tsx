@@ -26,7 +26,6 @@ type AmbiencePanelProps = {
   onGenerate: () => Promise<void> | void;
   onPreview: (candidate: AudioCandidate) => void;
   onApprove: (candidate: AudioCandidate) => Promise<void> | void;
-  onAddToTimeline: (candidate: AudioCandidate) => Promise<void> | void;
 };
 
 const INTENSITIES = ["Still", "Quiet", "Alive", "Busy"] as const;
@@ -58,7 +57,6 @@ export function AmbiencePanel({
   onCancelGeneration,
   onPreview,
   onApprove,
-  onAddToTimeline,
 }: AmbiencePanelProps) {
   return (
     <section className="audio-studio-panel" data-testid="audio-ambience-panel">
@@ -160,15 +158,13 @@ export function AmbiencePanel({
               approved={Boolean(candidate.assetId && approvedAssetIds[candidate.assetId])}
               onPreview={() => onPreview(candidate)}
               onApprove={() => onApprove(candidate)}
-              onPrimary={() => onAddToTimeline(candidate)}
-              primaryLabel="Add to Timeline"
             />
           ))}
         </div>
       ) : (
         <div className="audio-empty-state">
           <strong>Your scene beds will appear here.</strong>
-          <p className="muted">Approve a bed, then send it to the ambience track.</p>
+          <p className="muted">Approve a bed to keep it with this project.</p>
         </div>
       )}
     </section>

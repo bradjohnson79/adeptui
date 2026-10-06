@@ -159,6 +159,78 @@ def test_global_scope_discoverable_across_projects(client, isolated_data_dir: Pa
 # CDX-066: entity folders by entityId; rename follows
 # ---------------------------------------------------------------------------
 
+def test_global_prop_identity_is_visible_without_copying_the_asset(client, isolated_data_dir: Path) -> None:
+    """An approved global prop reference is searchable from a new project by the same asset id."""
+    from app.creator_scope.contract import ENTITY_PROP
+    from app.creator_scope.service import sync_scope
+    from app.db import Asset
+
+    project_a = _create_project(client, "Prop Home")
+    project_b = _create_project(client, "Prop Visitor")
+    db = _session()
+    try:
+        approved = _make_asset(
+            db, project_a, isolated_data_dir, tag="prop_harbor_lantern_primary", filename="lantern.png"
+        )
+        approved.production_approval = "approved"
+        approved.scope = "project"
+        draft = _make_asset(
+            db, project_a, isolated_data_dir, tag="prop_local_only_primary", filename="local.png"
+        )
+        draft.production_approval = "approved"
+        draft.scope = "project"
+        unapproved = _make_asset(
+            db, project_a, isolated_data_dir, tag="prop_unapproved_beacon", filename="beacon.png"
+        )
+        unapproved.production_approval = "none"
+        unapproved.scope = "project"
+        db.commit()
+        approved_id = approved.id
+        local_id = draft.id
+        unapproved_id = unapproved.id
+        sync_scope(
+            db,
+            entity_type=ENTITY_PROP,
+            entity_id=str(uuid.uuid4()),
+            owning_project_id=project_a,
+            is_global=True,
+            tag="HarborLantern",
+            name="Harbor Lantern",
+            identity_asset_id=approved_id,
+        )
+        sync_scope(
+            db,
+            entity_type=ENTITY_PROP,
+            entity_id=str(uuid.uuid4()),
+            owning_project_id=project_a,
+            is_global=False,
+            tag="LocalOnly",
+            name="Local Only",
+            identity_asset_id=local_id,
+        )
+        sync_scope(
+            db,
+            entity_type=ENTITY_PROP,
+            entity_id=str(uuid.uuid4()),
+            owning_project_id=project_a,
+            is_global=True,
+            tag="UnapprovedBeacon",
+            name="Unapproved Beacon",
+            identity_asset_id=unapproved_id,
+        )
+        found = search_library_assets(db, project_b, query="Lantern")
+        ids = [item["id"] for item in found["items"]]
+        assert approved_id in ids
+        assert local_id not in ids
+        assert unapproved_id not in ids
+        assert db.get(Asset, approved_id).project_id == project_a
+        assert db.get(Asset, approved_id).scope == "project"
+        missing = search_library_assets(db, project_b, query="NoSuchProp")
+        assert missing["items"] == []
+    finally:
+        db.close()
+
+
 def test_entity_folder_id_only_and_rename_follows(client) -> None:
     """Two same-name entities get separate folders; renaming follows the folder."""
     from app.db import Project

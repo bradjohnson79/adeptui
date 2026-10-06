@@ -500,24 +500,6 @@ export function AgentWorkSurface() {
               Open in Library
             </button>
           )}
-          {pack.collection_id && surfaceType === "storyboard_generation" && (
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => uiContext.onGoTab?.("timeline")}
-            >
-              Send to Timeline
-            </button>
-          )}
-          {pack.collection_id && surfaceType === "scene_generation" && (
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => uiContext.onGoTab?.("timeline")}
-            >
-              Send to Timeline
-            </button>
-          )}
           <button
             type="button"
             className="ghost"

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -80,10 +80,43 @@ def _is_stale(proposal: CoDirectorProposal, bible: Optional[ProductionBible]) ->
     return proposal.based_on_version_id != current_id
 
 
+# A project last-modified clock moves when unrelated work is saved. That is not an
+# incompatible target change. Time is only the fallback boundary.
+APPROVAL_LIFETIME = timedelta(minutes=60)
+
+
+def _as_naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is not None:
+        return value.replace(tzinfo=None)
+    return value
+
+
+def _approval_expired(row: CoDirectorProposal, *, now: datetime | None = None) -> bool:
+    created = row.created_at
+    if created is None:
+        return False
+    current = _as_naive_utc(now or datetime.utcnow())
+    return current - _as_naive_utc(created) > APPROVAL_LIFETIME
+
+
+def _target_versions_moved(pinned: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Scene, bible, and plan pins are target identity. The project clock is not."""
+
+    def keep(versions: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in versions.items() if not str(key).startswith("project:")}
+
+    return keep(pinned) != keep(current)
+
+
 def _is_tool_proposal_stale(db: Session, row: CoDirectorProposal) -> bool:
-    """Tool staleness: any resource the proposal pinned has moved since it was created."""
+    """A reviewable tool proposal is stale only for a real reason.
+
+    Unreadable payload, a missing tool, a moved scene/bible/plan pin, or an age past
+    ``APPROVAL_LIFETIME``. A newer ``project.updated_at`` alone does not qualify.
+    """
 
     from ..tools.execution import ToolExecutionService
+    from ..tools.registry import find
 
     try:
         payload = ToolExecutionService.parse_payload(row.payload_json)
@@ -91,7 +124,18 @@ def _is_tool_proposal_stale(db: Session, row: CoDirectorProposal) -> bool:
         # An unreadable payload can never be applied safely; treat it as stale so the only
         # available action is cancel.
         return True
-    return ToolExecutionService.is_stale(db, project_id=row.project_id, payload=payload)
+    if _approval_expired(row):
+        return True
+    definition = find(payload.toolId)
+    if definition is None:
+        return True
+    current = ToolExecutionService.base_resource_versions(
+        db,
+        project_id=row.project_id,
+        definition=definition,
+        arguments=dict(payload.arguments),
+    )
+    return _target_versions_moved(dict(payload.baseResourceVersions), current)
 
 
 def _stale_for_row(db: Session, row: CoDirectorProposal, bible: Optional[ProductionBible]) -> bool:
@@ -242,6 +286,31 @@ class ProposalService:
         rows = query.order_by(CoDirectorProposal.created_at.desc()).all()
         bible = ops.get_bible(db, project_id)
         return [_row_to_out(r, is_stale=_stale_for_row(db, r, bible)) for r in rows]
+
+    @staticmethod
+    def persist_stale_non_terminal(db: Session, project_id: Optional[str] = None) -> int:
+        """Write status=stale only when the approval predicate says the row is no longer current.
+
+        A project clock move inside the approval lifetime does not qualify. Listing a proposal
+        does not call this; startup hydration does.
+        """
+
+        query = db.query(CoDirectorProposal).filter(
+            CoDirectorProposal.status.in_(("pending", "revision_requested"))
+        )
+        if project_id:
+            query = query.filter(CoDirectorProposal.project_id == project_id)
+        changed = 0
+        for row in query.all():
+            bible = ops.get_bible(db, row.project_id)
+            if not _stale_for_row(db, row, bible):
+                continue
+            row.status = "stale"
+            row.updated_at = datetime.utcnow()
+            changed += 1
+        if changed:
+            db.commit()
+        return changed
 
     @staticmethod
     def preview(db: Session, project_id: str, proposal_id: str) -> dict:

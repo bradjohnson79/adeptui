@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
+import type { Project } from "../../types";
 import { Button } from "../ui";
 import { PanelHeading } from "../HelpTip";
+import { AddFromProjectLibraryModal } from "../timeline-master/AddFromProjectLibraryModal";
 import { VoiceMethodCards } from "./VoiceMethodCards";
+import { ElevenLabsVoiceWorkflow, type ElevenLabsGeneratedSample } from "./ElevenLabsVoiceWorkflow";
+import { VoiceEngineLabel } from "./VoiceEngineLabel";
+import { useVoiceStudioProviderSource } from "../../audioProvider/useProviderSource";
+import { setElevenLabsVoiceId, setVoiceStudioProvider } from "../../audioProvider/voiceStudioProviderStore";
 import { ApprovedVoicePlayer } from "./ApprovedVoicePlayer";
 import { VoiceSamplePlayers, type VoiceSamplePlayerItem } from "./VoiceSamplePlayers";
 import { VoiceStudioSelect } from "./VoiceStudioSelect";
 import {
-  canApproveSelectedVoice,
   compileVoiceCloneGenerateBody,
   compileVoiceIdentityGenerateBody,
+  pickNewestGeneratedSample,
   pickRestorableVoiceCandidates,
   voiceStudioErrorMessage,
 } from "./voiceIdentityBrief";
@@ -19,6 +25,8 @@ import {
   approvedVoiceBannerTitle,
   approvedVoiceVersionLabel,
   noApprovedDefaultVoiceMessage,
+  unassignVoiceConfirm,
+  unassignVoiceExplain,
 } from "./defaultVoiceCopy";
 import { choosePortraitAssetId } from "./voicePortrait";
 import { voiceIdentityAction, type VoiceIdentityMethod } from "./voiceIdentityRoute";
@@ -79,6 +87,7 @@ export function VoiceIdentityPanel({
   onOpenFullStudio,
   onCharacterChange,
 }: Props) {
+  const voiceProvider = useVoiceStudioProviderSource();
   const [characters, setCharacters] = useState<any[]>([]);
   const [selectedCharacterId, setSelectedCharacterId] = useState(characterId);
   const [selectedCharacterName, setSelectedCharacterName] = useState(characterName || "");
@@ -122,6 +131,8 @@ export function VoiceIdentityPanel({
   const generatingRef = useRef(false);
   const approvingRef = useRef(false);
   const [samples, setSamples] = useState<GeneratedSample[]>([]);
+  const [playableSamples, setPlayableSamples] = useState<GeneratedSample[]>([]);
+  const [unassignArmed, setUnassignArmed] = useState(false);
   const [approvedVoice, setApprovedVoice] = useState<any | null>(null);
   const [hasApprovedVoice, setHasApprovedVoice] = useState(false);
   const [previousApprovedVoices, setPreviousApprovedVoices] = useState<any[]>([]);
@@ -129,7 +140,11 @@ export function VoiceIdentityPanel({
   const [expanded, setExpanded] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [existingVoices, setExistingVoices] = useState<any[]>([]);
+  const [activeVoice, setActiveVoice] = useState<any | null>(null);
+  const [voicesCharacterId, setVoicesCharacterId] = useState("");
   const [existingVoiceId, setExistingVoiceId] = useState("");
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [assigningReference, setAssigningReference] = useState(false);
   const [cloneFile, setCloneFile] = useState<File | null>(null);
   const [consent, setConsent] = useState(false);
 
@@ -173,6 +188,9 @@ export function VoiceIdentityPanel({
       name: String(active?.name || fallbackName || "Approved Voice"),
       characterName: fallbackName,
       versionNumber: active?.version_number,
+      previewAssetId: previewId,
+      provider: String(active?.provider || ""),
+      modelId: String(active?.providerModelId || active?.model_id || ""),
       audioUrl: previewId ? api.assetUrl(previewId, undefined, projectId) : undefined,
     });
   }, [projectId]);
@@ -253,7 +271,6 @@ export function VoiceIdentityPanel({
           setSamples(next);
           setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || "");
           setGenerationState("done");
-          return;
         }
         if (finished?.status === "failed") {
           setErrors([String(finished.error || "Voice generation failed.")]);
@@ -265,6 +282,9 @@ export function VoiceIdentityPanel({
       if (!isCurrentCharacterRequest(cid, selectedCharacterIdRef.current)) return;
       const voices = ws?.voices || [];
       setExistingVoices(voices);
+      setActiveVoice(ws?.activeVoice || null);
+      setPlayableSamples(mapPlayableSamples(ws?.playableSamples || []));
+      setVoicesCharacterId(cid);
       applyApprovedFromWorkspace(ws, fallbackName || String(ws?.characterName || ""));
       const restored = pickRestorableVoiceCandidates(voices);
       if (!restored) return;
@@ -308,8 +328,11 @@ export function VoiceIdentityPanel({
       setHasApprovedVoice(false);
       setApprovedVoice(null);
       setPortraitUrl("");
+      setVoicesCharacterId("");
+      setVoiceStudioProvider("local");
       return;
     }
+    setVoicesCharacterId("");
     setHasApprovedVoice(false);
     setApprovedVoice(null);
     setPreviousApprovedVoices([]);
@@ -318,12 +341,25 @@ export function VoiceIdentityPanel({
     setVoiceId("");
     setSelectedSampleId("");
     setSamples([]);
+    setPlayableSamples([]);
+    setUnassignArmed(false);
     setBoundCharacterId("");
     setGenerationState("idle");
     setErrors([]);
     void loadPortrait(selectedCharacterId);
     void loadExistingVoices(selectedCharacterId, selectedCharacterNameRef.current);
   }, [selectedCharacterId, loadPortrait, loadExistingVoices]);
+
+  useEffect(() => {
+    if (!selectedCharacterId || voicesCharacterId !== selectedCharacterId) return;
+    if (activeVoice?.provider === "elevenlabs" && activeVoice?.providerVoiceId) {
+      setVoiceStudioProvider("elevenlabs");
+      setElevenLabsVoiceId(String(activeVoice.providerVoiceId));
+      setMethod("elevenlabs");
+      return;
+    }
+    setVoiceStudioProvider("local");
+  }, [selectedCharacterId, voicesCharacterId, activeVoice]);
 
   const handleCreateCharacter = useCallback(async () => {
     if (!newCharName.trim()) return;
@@ -384,13 +420,34 @@ export function VoiceIdentityPanel({
     return errs;
   }, [selectedCharacterId, method, sex, age, existingVoiceId, cloneFile, consent]);
 
-  const mapCandidates = (items: any[]): GeneratedSample[] =>
+  const mapPlayableSamples = (items: any[]): GeneratedSample[] =>
+    (items || []).flatMap((candidate: any) => {
+      const assetId = String(candidate?.assetId || candidate?.asset_id || "");
+      if (!assetId) return [];
+      return [{
+        id: String(candidate?.id || assetId),
+        status: String(candidate?.status || "ready"),
+        assetId,
+        audioUrl: api.assetUrl(assetId, undefined, projectId),
+        voiceProfileId: String(candidate?.voiceProfileId || ""),
+        provider: String(candidate?.provider || ""),
+        name: String(candidate?.name || ""),
+        modelId: String(candidate?.modelId || ""),
+        providerVoiceId: String(candidate?.providerVoiceId || ""),
+        createdAt: String(candidate?.createdAt || ""),
+      }];
+    });
+
+  const mapCandidates = (items: any[], voiceProfileId = ""): GeneratedSample[] =>
     (items || []).map((candidate: any, index: number) => {
       if (typeof candidate === "string") {
         return {
           id: candidate,
           status: "ready",
+          assetId: candidate,
           audioUrl: api.assetUrl(candidate, undefined, projectId),
+          voiceProfileId,
+          provider: "local",
         };
       }
       const assetId = candidate.assetId || candidate.asset_id;
@@ -400,6 +457,11 @@ export function VoiceIdentityPanel({
         assetId: assetId ? String(assetId) : undefined,
         audioUrl: assetId ? api.assetUrl(assetId, undefined, projectId) : undefined,
         error: candidate.error ? String(candidate.error) : undefined,
+        voiceProfileId: String(candidate.voiceProfileId || voiceProfileId || ""),
+        provider: String(candidate.provider || "local"),
+        name: String(candidate.name || ""),
+        modelId: String(candidate.modelId || ""),
+        createdAt: String(candidate.createdAt || ""),
       };
     });
 
@@ -523,65 +585,57 @@ export function VoiceIdentityPanel({
     selectedCharacterId, selectedCharacterName, sex, age, accent, archetype, promptDetails, onMsg,
   ]);
 
-  const handleSelectSample = useCallback(
-    async (sample: GeneratedSample) => {
-      setSelectedSampleId(sample.id);
-      if (!voiceId) return;
-      try {
-        await api.selectVoiceForTesting(projectId, selectedCharacterId, {
-          voiceId,
-          candidateId: sample.id,
-        });
-      } catch {
-        /* selection is still local if the testing bind fails */
-      }
-    },
-    [voiceId, projectId, selectedCharacterId],
-  );
-
   const handleApprove = useCallback(
-    async (sampleId: string) => {
+    async (sample: GeneratedSample | ElevenLabsGeneratedSample) => {
       if (boundCharacterId && boundCharacterId !== selectedCharacterId) {
-        onMsg("That sample belongs to another character. It was not approved here.");
-        return;
+        const reason = "That sample belongs to another character. It was not approved here.";
+        onMsg(reason);
+        throw new Error(reason);
       }
       if (approvingRef.current) return;
+      const assetId = String(sample.assetId || "");
+      const explicitCandidate = "candidateId" in sample ? String(sample.candidateId || "") : "";
+      const listedId = "id" in sample ? String((sample as GeneratedSample).id || "") : "";
+      const candidateId = explicitCandidate || (listedId && listedId !== assetId ? listedId : "");
+      const profileId = String(sample.voiceProfileId || voiceId || "");
+      if (!assetId && !candidateId) {
+        const reason = "Approve needs this generated sample.";
+        onMsg(reason);
+        throw new Error(reason);
+      }
       try {
-        const fromFinal = samples.find((s) => s.id === sampleId);
-        if (!fromFinal?.audioUrl || !voiceId) {
-          onMsg("Approve needs the selected generated sample for this character.");
-          return;
-        }
-        if (selectedSampleId && selectedSampleId !== sampleId) {
-          onMsg("Select the sample you want to approve first.");
-          return;
-        }
         approvingRef.current = true;
         setApproveState("approving");
         setErrors([]);
-        const approved = await api.approveCharacterVoiceCandidate(projectId, selectedCharacterId, {
-          voiceId,
-          candidateId: sampleId,
-        });
+        const approved = candidateId && profileId
+          ? await api.approveCharacterVoiceCandidate(projectId, selectedCharacterId, {
+              voiceId: profileId,
+              candidateId,
+            })
+          : await api.approveCharacterVoiceCandidate(projectId, selectedCharacterId, {
+              assetId,
+            });
         const previewAssetId = String(
-          fromFinal.assetId
-          || approved?.voice?.approved_preview_asset_id
+          approved?.voice?.approved_preview_asset_id
           || approved?.voice?.approvedPreviewAssetId
+          || assetId
           || "",
         );
-        setSelectedSampleId(sampleId);
         setApprovedVoice({
-          id: voiceId,
-          voiceProfileId: voiceId,
-          assetId: previewAssetId,
-          name: String(approved?.voice?.name || selectedCharacterName + " Voice"),
+          id: String(approved?.voice?.id || profileId || ""),
+          name: String(approved?.voice?.name || `${selectedCharacterName} Voice`),
           characterName: selectedCharacterName,
           versionNumber: approved?.voice?.version_number,
-          audioUrl: fromFinal.audioUrl,
-          approvedAt: new Date().toISOString(),
+          previewAssetId,
+          provider: String(approved?.voice?.provider || sample.provider || ""),
+          modelId: String(approved?.voice?.providerModelId || approved?.voice?.model_id || sample.modelId || ""),
+          audioUrl: previewAssetId
+            ? api.assetUrl(previewAssetId, undefined, projectId)
+            : ("audioUrl" in sample ? sample.audioUrl : undefined),
         });
         setHasApprovedVoice(true);
         setApproveState("approved");
+        setUnassignArmed(false);
         onVoiceApproved?.();
         onRefresh?.();
         onMsg(approvedDefaultVoiceMessage(selectedCharacterName));
@@ -591,13 +645,57 @@ export function VoiceIdentityPanel({
         const reason = voiceStudioErrorMessage(error, "Failed to approve voice candidate.");
         setErrors([reason]);
         onMsg(reason);
+        throw error instanceof Error ? error : new Error(reason);
       } finally {
         approvingRef.current = false;
       }
     },
     [
-      boundCharacterId, selectedCharacterId, samples, voiceId, selectedSampleId,
+      boundCharacterId, selectedCharacterId, voiceId,
       projectId, selectedCharacterName, onMsg, onVoiceApproved, onRefresh, loadExistingVoices,
+    ],
+  );
+
+  const handleUnassign = useCallback(async () => {
+    if (!selectedCharacterId || approvingRef.current) return;
+    try {
+      approvingRef.current = true;
+      setErrors([]);
+      await api.unassignCharacterVoice(projectId, selectedCharacterId);
+      setUnassignArmed(false);
+      setHasApprovedVoice(false);
+      setApprovedVoice(null);
+      onMsg(noApprovedDefaultVoiceMessage(selectedCharacterName));
+      onVoiceApproved?.();
+      onRefresh?.();
+      await loadExistingVoices(selectedCharacterId, selectedCharacterName);
+    } catch (error: unknown) {
+      onMsg(voiceStudioErrorMessage(error, "Could not unassign this voice."));
+    } finally {
+      approvingRef.current = false;
+    }
+  }, [selectedCharacterId, projectId, selectedCharacterName, onMsg, onVoiceApproved, onRefresh, loadExistingVoices]);
+
+  const handleAssignLibraryVoice = useCallback(
+    async (assetId: string) => {
+      if (!assetId || assigningReference || !selectedCharacterId) return;
+      try {
+        setAssigningReference(true);
+        setErrors([]);
+        await api.setCharacterVoiceReference(projectId, selectedCharacterId, assetId);
+        onMsg(`${selectedCharacterName || "This character"} now uses that Library audio as their voice reference.`);
+        onVoiceApproved?.();
+        onRefresh?.();
+        await loadExistingVoices(selectedCharacterId, selectedCharacterName);
+      } catch (error: unknown) {
+        onMsg(voiceStudioErrorMessage(error, "Could not assign that Library audio."));
+      } finally {
+        setAssigningReference(false);
+      }
+    },
+    [
+      assigningReference, selectedCharacterId, projectId, selectedCharacterName,
+      onMsg, onVoiceApproved, onRefresh, loadExistingVoices,
     ],
   );
 
@@ -634,6 +732,34 @@ export function VoiceIdentityPanel({
       approvingRef.current = false;
     }
   }, [existingVoiceId, projectId, selectedCharacterId, selectedCharacterName, onMsg, onVoiceApproved, onRefresh, loadExistingVoices]);
+
+  const newestGenerated = pickNewestGeneratedSample(playableSamples);
+  const currentPreviewAssetId = String(approvedVoice?.previewAssetId || "");
+  const historySamples = (() => {
+    const seen = new Set<string>();
+    const rows: GeneratedSample[] = [];
+    for (const sample of [...playableSamples, ...samples]) {
+      const key = String(sample.assetId || sample.id || "");
+      if (!key || seen.has(key)) continue;
+      if (sample.assetId && sample.assetId === newestGenerated?.assetId) continue;
+      seen.add(key);
+      rows.push(sample);
+    }
+    return rows;
+  })();
+  const approvedHistoryId = historySamples.find(
+    (sample) => sample.assetId && sample.assetId === currentPreviewAssetId,
+  )?.id || "";
+  const currentProviderLine = (() => {
+    const provider = String(approvedVoice?.provider || "");
+    const model = String(approvedVoice?.modelId || "");
+    if (provider === "elevenlabs") {
+      const modelLabel = model === "eleven_v4" ? "Eleven v4" : (model.replaceAll("_", " ") || "ElevenLabs");
+      return `ElevenLabs · ${modelLabel}`;
+    }
+    if (provider === "local" || provider === "qwen3-tts") return "Local voice";
+    return provider;
+  })();
 
   return (
     <section className="voice-identity-panel" data-testid="voice-identity-panel">
@@ -676,12 +802,39 @@ export function VoiceIdentityPanel({
             )}
           </div>
           <p className="muted" data-testid="vip-approved-subtitle">{approvedVoiceBannerSubtitle()}</p>
+          {currentProviderLine ? (
+            <p data-testid="vip-approved-provider">{currentProviderLine}</p>
+          ) : null}
           {approvedVoice.audioUrl ? (
             <ApprovedVoicePlayer
               audioUrl={approvedVoice.audioUrl}
               label={String(approvedVoice.name || selectedCharacterName || "approved voice")}
             />
           ) : null}
+          <div className="vip-approved-banner__actions">
+            {unassignArmed ? (
+              <>
+                <p data-testid="vip-unassign-confirm-copy">{unassignVoiceConfirm(selectedCharacterName)}</p>
+                <p className="muted">{unassignVoiceExplain(selectedCharacterName)}</p>
+                <Button
+                  data-testid="vip-unassign-confirm"
+                  onClick={() => void handleUnassign()}
+                >
+                  Unassign
+                </Button>
+                <Button data-testid="vip-unassign-cancel" onClick={() => setUnassignArmed(false)}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button
+                data-testid="vip-unassign-voice"
+                onClick={() => setUnassignArmed(true)}
+              >
+                Unassign
+              </Button>
+            )}
+          </div>
           {previousApprovedVoices.length > 0 ? (
             <div className="vip-voice-history" data-testid="vip-voice-history">
               <p className="muted">Previous versions</p>
@@ -721,6 +874,39 @@ export function VoiceIdentityPanel({
           ))}
         </div>
       )}
+
+      <div className="vip-section" data-testid="voice-provider">
+        <VoiceEngineLabel
+          id="voice-provider"
+          label="Voice Provider"
+          projectId={projectId}
+          characterId={selectedCharacterId}
+          voiceProfileId={approvedVoice?.id}
+          boundVoiceId={
+            activeVoice?.provider === "elevenlabs" ? activeVoice?.providerVoiceId : undefined
+          }
+          boundVoiceName={
+            activeVoice?.provider === "elevenlabs" ? activeVoice?.voiceName || activeVoice?.name : undefined
+          }
+          boundModelId={
+            activeVoice?.provider === "elevenlabs" ? activeVoice?.providerModelId : undefined
+          }
+          showVoiceControls={false}
+          onProviderChange={(next) => {
+            voiceProvider.setSource(next);
+            if (next === "elevenlabs") setMethod("elevenlabs");
+            else if (method === "elevenlabs") setMethod(null);
+            if (!selectedCharacterId) return;
+            void api.activateCharacterVoiceProvider(projectId, selectedCharacterId, next).then(() => {
+              void loadExistingVoices(selectedCharacterId, selectedCharacterName);
+            }).catch((error: any) => {
+              if (next === "elevenlabs") {
+                onMsg(error?.message || "Choose an ElevenLabs voice and save it to this character.");
+              }
+            });
+          }}
+        />
+      </div>
 
       {variant === "express" ? (
       <div className="vip-section" data-testid="vip-character-section">
@@ -770,15 +956,70 @@ export function VoiceIdentityPanel({
         <PanelHeading title="Choose Voice Method" tip="Pick one way to get a voice." as="h3" />
         <VoiceMethodCards
           method={method}
+          disabledReasons={
+            voiceProvider.health && !voiceProvider.health.configured
+              ? { elevenlabs: voiceProvider.health.message || "ElevenLabs API key not configured." }
+              : undefined
+          }
           onSelect={(next) => {
             setMethod(next);
             setErrors([]);
+            if (next === "elevenlabs") voiceProvider.setSource("elevenlabs");
           }}
         />
       </div>
 
+      {method === "elevenlabs" ? (
+        <ElevenLabsVoiceWorkflow
+          projectId={projectId}
+          characterId={selectedCharacterId}
+          configured={Boolean(voiceProvider.health?.configured)}
+          savedVoiceId={activeVoice?.provider === "elevenlabs" ? String(activeVoice.providerVoiceId || "") : ""}
+          savedVoiceName={activeVoice?.provider === "elevenlabs" ? String(activeVoice.voiceName || activeVoice.name || "") : ""}
+          savedModelId={activeVoice?.provider === "elevenlabs" ? String(activeVoice.providerModelId || "") : ""}
+          restoredSample={newestGenerated ? {
+            assetId: newestGenerated.assetId,
+            candidateId: newestGenerated.id && newestGenerated.id !== newestGenerated.assetId ? newestGenerated.id : "",
+            voiceProfileId: newestGenerated.voiceProfileId,
+            provider: "elevenlabs",
+            modelId: newestGenerated.modelId,
+            voiceName: newestGenerated.name,
+            providerVoiceId: newestGenerated.providerVoiceId,
+          } : null}
+          approvedAssetId={currentPreviewAssetId}
+          onSampleReady={() => {
+            if (selectedCharacterId) void loadExistingVoices(selectedCharacterId, selectedCharacterName);
+          }}
+          onApproveSample={handleApprove}
+          onSaved={() => {
+            if (selectedCharacterId) void loadExistingVoices(selectedCharacterId, selectedCharacterName);
+            onVoiceApproved?.();
+            onRefresh?.();
+          }}
+          onMsg={onMsg}
+        />
+      ) : null}
+
       {method === "existing" && (
         <div className="vip-section" data-testid="vip-existing-section">
+          {String(activeVoice?.approvedVoiceReferenceAssetId || "") ? (
+            <div className="vip-existing-assigned" data-testid="vs-existing-assigned">
+              <div className="vip-existing-assigned__header">
+                <strong>Existing Voice</strong>
+                <span className="vip-existing-assigned__state" data-testid="vs-existing-assigned-state">Assigned</span>
+              </div>
+              <p className="vip-existing-assigned__name" data-testid="vs-existing-assigned-name">
+                {String(activeVoice?.approvedVoiceReferenceAssetName || "Library audio")}
+              </p>
+              <audio
+                controls
+                preload="metadata"
+                className="vip-existing-assigned__player"
+                data-testid="vs-existing-assigned-player"
+                src={api.assetUrl(String(activeVoice.approvedVoiceReferenceAssetId), undefined, projectId)}
+              />
+            </div>
+          ) : null}
           <span className="vip-label">
             Saved voices for {selectedCharacterName || "this character"}
             <VoiceStudioSelect
@@ -800,14 +1041,26 @@ export function VoiceIdentityPanel({
               onChange={setExistingVoiceId}
             />
           </span>
-          <Button
-            variant="primary"
-            data-testid="vs-use-existing"
-            disabled={!existingVoiceId || approveState === "approving"}
-            onClick={() => void handleUseExisting()}
-          >
-            {approveState === "approving" ? "Approving..." : "Use this voice"}
-          </Button>
+          <div className="vip-actions">
+            <Button
+              variant="primary"
+              data-testid="vs-use-existing"
+              disabled={!existingVoiceId || approveState === "approving"}
+              onClick={() => void handleUseExisting()}
+            >
+              {approveState === "approving" ? "Approving..." : "Use this voice"}
+            </Button>
+            <Button
+              data-testid="vs-existing-library"
+              disabled={assigningReference || !selectedCharacterId}
+              onClick={() => setLibraryPickerOpen(true)}
+            >
+              {assigningReference ? "Assigning..." : "Select from Library"}
+            </Button>
+          </div>
+          <p className="muted">
+            Select from Library assigns a Project Library audio as this character's approved voice reference.
+          </p>
         </div>
       )}
 
@@ -1044,29 +1297,14 @@ export function VoiceIdentityPanel({
       </div>
       )}
 
-      {generationState === "done" && samples.length > 0 && (
+      {historySamples.length > 0 && (
         <VoiceSamplePlayers
-          samples={samples}
-          selectedId={selectedSampleId}
+          samples={historySamples}
           characterName={selectedCharacterName}
-          onSelect={handleSelectSample}
-          onApprove={handleApprove}
-          approveDisabled={
-            approveState === "approving"
-            || !canApproveSelectedVoice({
-              selectedId: selectedSampleId,
-              voiceId,
-              samples,
-            })
-          }
+          approvedSampleId={approvedHistoryId}
+          onApprove={(sample) => { void handleApprove(sample); }}
+          approveDisabled={approveState === "approving"}
           replacingApproved={hasApprovedVoice}
-          approveLabel={
-            approveState === "approving"
-              ? "Approving..."
-              : approveState === "approved"
-                ? "Approved ✓"
-                : "Approve selected voice"
-          }
         />
       )}
 
@@ -1079,6 +1317,26 @@ export function VoiceIdentityPanel({
             Open Full Voice Studio
           </Button>
         </div>
+      ) : null}
+
+      {libraryPickerOpen ? (
+        <AddFromProjectLibraryModal
+          project={{ id: projectId, name: selectedCharacterName, assets: [] } as Project}
+          alreadyIds={
+            String(activeVoice?.approvedVoiceReferenceAssetId || "")
+              ? [String(activeVoice.approvedVoiceReferenceAssetId)]
+              : []
+          }
+          mediaKind="audio"
+          single
+          confirmLabel="Use this Voice"
+          onAdd={(ids) => {
+            setLibraryPickerOpen(false);
+            const next = ids[0] || "";
+            if (next) void handleAssignLibraryVoice(next);
+          }}
+          onClose={() => setLibraryPickerOpen(false)}
+        />
       ) : null}
     </section>
   );

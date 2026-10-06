@@ -8,16 +8,20 @@ import subprocess
 from app.director_timeline_w46.generation.adapters.ltx_25_local import Ltx25LocalAdapter
 from app.director_timeline_w46.generation.adapters.minimax_h3_i2v_local import MiniMaxH3I2VLocalAdapter
 from app.film_timeline.continuity import (
+    _omni_boundary_text,
     cached_packet,
+    continuation_anchor_kind,
+    continuation_opening_frame,
     continuity_clause,
     fingerprint,
     invalidate_segment_continuity,
     notes_for_prompt,
+    opening_frame_clause,
 )
 from app.film_timeline.contracts import Segment, Shot
 from app.film_timeline.duration import DurationUnsupported, plan_duration
 from app.media_clip import extract_frame_png
-from app.film_timeline.orchestrator import LOCAL_H3_R2V, _canonical_generator
+from app.film_timeline.orchestrator import LOCAL_H3_R2V, _canonical_generator, _last_completed
 from app.film_timeline.strategies import MOTION_CONTEXT_AVAILABLE, choose_strategy
 
 
@@ -55,7 +59,8 @@ def test_retake_invalidates_that_segment_and_the_next_seam_only():
     invalidate_segment_continuity(shot, "a")
     assert "continuity" not in first.generationMetadata
     assert first.lastFrameAssetId is None
-    assert second.generationMetadata["continuity"].get("seam") is None
+    assert second.generationMetadata["continuity"]["seam"]["status"] == "stale"
+    assert "new ending" in second.generationMetadata["continuity"]["seam"]["warning"]
     assert second.generationMetadata["continuity"]["seamStale"] is True
     assert third.generationMetadata["continuity"]["seam"]["status"] == "ok"
 
@@ -105,3 +110,156 @@ def test_timed_prompt_beats_an_omni_camera_note():
     clause = continuity_clause("The camera cranes upward over the table.", previous)
     assert "slow forward push" not in clause
     assert "warm practicals" in clause
+
+
+class _Packet:
+    def __init__(self, summary: str, availability: str = "ready", reason: str | None = None):
+        self.summary = summary
+        self.availability = availability
+        self.reason = reason
+        self.modelEvidence = None
+
+
+def test_omni_boundary_reads_the_packet_model():
+    text, reason = _omni_boundary_text(_Packet("Renkoka is present at the table."))
+    assert reason is None
+    assert text == "Renkoka is present at the table."
+    empty, why = _omni_boundary_text(_Packet("", availability="unavailable", reason="GENERATION_ACTIVE"))
+    assert empty == ""
+    assert why == "GENERATION_ACTIVE"
+
+
+class _Raw:
+    def __init__(self, raw: str):
+        self.rawText = raw
+
+
+class _Evidence:
+    def __init__(self, raw: str):
+        self.qwenOmni = _Raw(raw)
+
+
+def test_omni_boundary_uses_prose_when_the_summary_is_empty():
+    packet = _Packet("", availability="low_confidence")
+    packet.modelEvidence = _Evidence("Renkoka is present, standing at the table, facing the camera.")
+    text, reason = _omni_boundary_text(packet)
+    assert reason is None
+    assert "standing at the table" in text
+
+
+def test_continue_locks_the_previous_last_frame_and_a_new_shot_does_not():
+    previous = Segment(status="completed", assetId="video-1", lastFrameAssetId="frame-1")
+    assert continuation_opening_frame(previous) == "frame-1"
+    assert continuation_opening_frame(None) == ""
+    assert continuation_opening_frame(previous, prepend=True) == ""
+    assert continuation_opening_frame(previous, interior_retake=True) == ""
+    clause = opening_frame_clause(seedance_reference=True)
+    assert clause.startswith("@Image1 is the visual state")
+    assert "Motion starts there" in opening_frame_clause(seedance_reference=False)
+    assert "@Image1" not in opening_frame_clause(seedance_reference=False)
+    assert continuation_anchor_kind(local_h3=True, supports_start_frame=False) == "reference_tail"
+    assert continuation_anchor_kind(local_h3=False, supports_start_frame=True) == "start_image"
+    assert continuation_anchor_kind(local_h3=False, supports_start_frame=False) == "reference_image"
+
+
+def test_base_optimized_continuation_uses_the_standard_h3_inputs():
+    """BO keeps the turbo profile. The last frame and ending clip match Standard H3."""
+
+    from app.film_timeline.contracts import FilmTimeline, ReferenceAsset
+    from app.film_timeline.h3_fast_renderer import plan_references
+    from app.film_timeline.orchestrator import _build_request
+    from app.video_runtime.local_video_profiles import H3_BO_CONTINUATION_SAFE, bo_execution_profile
+
+    previous = Segment(
+        order=0,
+        status="completed",
+        assetId="shot-n-take",
+        lastFrameAssetId="shot-n-last-frame",
+        timedPrompt="Renkoka holds the cup.",
+        durationSec=15,
+        generatorId="minimax-h3-i2v-local",
+    )
+    previous.generationMetadata["continuity"] = {
+        "fingerprint": fingerprint("shot-n-take"),
+        "lastFrameAssetId": "shot-n-last-frame",
+    }
+    film = FilmTimeline(
+        references=[ReferenceAsset(type="character", assetId="renkoka", label="Renkoka", tag="@Renkoka")]
+    )
+
+    def _request(generator_id: str):
+        shot = Shot(timedPrompt="She turns toward the arch.")
+        shot.state.references = [
+            ReferenceAsset(type="environment", assetId="mess-hall", label="Mess hall", tag="@MessHall")
+        ]
+        segment = Segment(order=1, durationSec=15, timedPrompt="She turns toward the arch.", generatorId=generator_id)
+        return _build_request(
+            None,
+            "project",
+            "scene",
+            shot,
+            segment,
+            generator_id,
+            "reference_video",
+            previous,
+            film,
+        )
+
+    standard = _request("minimax-h3-i2v-local")
+    optimized = _request("minimax-h3-base-optimized")
+
+    def _continuity_shape(request):
+        slots = request.providerOptions["directorRefs"]["slots"]
+        pictures = [
+            (slot["role"], slot["assetId"], slot["label"])
+            for slot in slots
+            if slot.get("role") not in {"video", "audio"}
+        ]
+        videos = [(slot["role"], slot["assetId"], slot["label"]) for slot in slots if slot.get("role") == "video"]
+        mode = dict(request.providerOptions["continuity"]["h3Continuity"])
+        return {
+            "pictures": pictures,
+            "videos": videos,
+            "mode": mode,
+            "lastFrame": request.lastFrameAssetId,
+            "video": request.videoReferenceAssetId,
+            "prompt": request.prompt,
+        }
+
+    standard_shape = _continuity_shape(standard)
+    optimized_shape = _continuity_shape(optimized)
+    assert standard_shape == optimized_shape
+    assert ("prior_frame", "shot-n-last-frame", "Last frame") in standard_shape["pictures"]
+    assert ("video", "shot-n-take", "Previous segment") in standard_shape["videos"]
+    assert standard_shape["mode"] == {
+        "tailSeconds": 2,
+        "includeLastFrame": False,
+        "pairAudio": True,
+        "includeOmni": True,
+        "continuation": True,
+    }
+    assert "@Image1 is the visual state" in standard.prompt
+    assert "Begin from that pose" in standard.prompt
+    planned = plan_references(
+        standard.providerOptions["directorRefs"]["slots"],
+        standard.providerOptions["continuity"],
+    )
+    assert [item["assetId"] for item in planned["images"]] == ["renkoka", "mess-hall", "shot-n-last-frame"]
+    assert planned["images"][-1]["label"] == "Last frame"
+    assert planned["videos"][0]["assetId"] == "shot-n-take"
+    assert optimized.generatorId == "minimax-h3-base-optimized"
+    assert standard.generatorId == "minimax-h3-i2v-local"
+    assert bo_execution_profile(has_ending_clip=True)["profile"] == H3_BO_CONTINUATION_SAFE
+
+
+def test_continue_uses_the_last_finished_batch_not_list_order():
+    shot = Shot(
+        segments=[
+            Segment(order=1, status="completed", assetId="selected-ending"),
+            Segment(order=2, status="failed", assetId="abandoned-render"),
+            Segment(order=0, status="completed", assetId="opening"),
+        ]
+    )
+    chosen = _last_completed(shot)
+    assert chosen is not None
+    assert chosen.assetId == "selected-ending"

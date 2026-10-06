@@ -27,6 +27,8 @@ PHASE_SAMPLING = "sampling"
 PHASE_DECODING = "decoding"
 PHASE_FINALIZING = "finalizing"
 PHASE_STALLED = "stalled"
+PHASE_INIT_STALL = "init_stall"
+INIT_STALL_LABEL = "Generation stalled during model initialization."
 
 CREATOR_PHASE_LABELS: dict[str, str] = {
     PHASE_QUEUED: "Queued",
@@ -37,6 +39,7 @@ CREATOR_PHASE_LABELS: dict[str, str] = {
     PHASE_DECODING: "Decoding",
     PHASE_FINALIZING: "Finalizing",
     PHASE_STALLED: "Generation may be stalled",
+    PHASE_INIT_STALL: INIT_STALL_LABEL,
 }
 
 # Activity noun shown beside the scene verb. Sampling stays "Sampling" so the
@@ -50,6 +53,7 @@ PHASE_ACTIVITY_LABELS: dict[str, str] = {
     PHASE_DECODING: "Decoding",
     PHASE_FINALIZING: "Finalizing",
     PHASE_STALLED: "Generation may be stalled",
+    PHASE_INIT_STALL: INIT_STALL_LABEL,
 }
 
 # Fresh Comfy/runtime event within this window → "Runtime active".
@@ -124,6 +128,30 @@ _CLASS_PHASE: dict[str, str] = {
     "vhs_videocombine": PHASE_FINALIZING,
 }
 
+# Timeline H3 fast graph node ids. These numbers also exist on Route A with
+# different jobs, so this map is used only when the running graph is h3_fast.
+# Node 13 is the sampler here. On Route A, node 13 is the mux.
+H3_FAST_NODE_PHASE: dict[str, str] = {
+    "1": PHASE_PREPARING_MODEL,
+    "2": PHASE_PREPARING_MODEL,
+    "3": PHASE_PREPARING_MODEL,
+    "4": PHASE_PREPARING_MODEL,
+    "5": PHASE_PREPARING_MODEL,
+    "6": PHASE_PREPARING_MODEL,
+    "18": PHASE_PREPARING_MODEL,
+    "7": PHASE_ENCODING_PROMPT,
+    "8": PHASE_ENCODING_PROMPT,
+    "9": PHASE_ENCODING_PROMPT,
+    "10": PHASE_ENCODING_PROMPT,
+    "11": PHASE_ENCODING_PROMPT,
+    "12": PHASE_ENCODING_PROMPT,
+    "13": PHASE_SAMPLING,
+    "14": PHASE_DECODING,
+    "15": PHASE_DECODING,
+    "16": PHASE_FINALIZING,
+    "17": PHASE_FINALIZING,
+}
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -188,8 +216,10 @@ def scene_verb(scene_status: str | None, phase: str | None) -> str:
     return "Generating"
 
 
-def phase_from_node(node: Any, class_type: str | None = None) -> str | None:
+def phase_from_node(node: Any, class_type: str | None = None, graph: str | None = None) -> str | None:
     key = str(node or "").strip()
+    if graph == "h3_fast" and key in H3_FAST_NODE_PHASE:
+        return H3_FAST_NODE_PHASE[key]
     if key in H3_REF2V_NODE_PHASE:
         return H3_REF2V_NODE_PHASE[key]
     if key in ROUTE_A_NODE_PHASE:
@@ -230,12 +260,13 @@ def infer_creator_phase(
     node: Any = None,
     class_type: str | None = None,
     job_status: str | None = None,
+    graph: str | None = None,
 ) -> str:
     status = str(job_status or "").strip().lower()
     if status in {"queued", "pending"}:
-        node_phase = phase_from_node(node, class_type)
+        node_phase = phase_from_node(node, class_type, graph)
         return node_phase or PHASE_QUEUED
-    node_phase = phase_from_node(node, class_type)
+    node_phase = phase_from_node(node, class_type, graph)
     if node_phase:
         return node_phase
     msg_phase = phase_from_message(message, stage=stage)
@@ -355,6 +386,8 @@ def apply_heartbeat(
     started_at: str | None = None,
     now_iso: str | None = None,
     stall_threshold_sec: float = STALL_THRESHOLD_SEC,
+    graph: str | None = None,
+    sage_attention: str | None = None,
 ) -> dict[str, Any]:
     """Merge one runtime tick into progressTelemetry. Never invents a percent."""
     prev = dict(previous or {})
@@ -371,6 +404,7 @@ def apply_heartbeat(
         node=node if node is not None else prev.get("currentNode"),
         class_type=class_type,
         job_status=job_status,
+        graph=graph,
     )
     started = str(started_at or prev.get("startedAt") or now)
     last_event = prev.get("lastRuntimeEventAt")
@@ -415,6 +449,60 @@ def apply_heartbeat(
         out["stallLabel"] = (
             f"Generation may be stalled. Last activity: {format_last_activity(last_event, now=parse_iso(now))}"
         )
+    return _apply_fast_kernel_watch(
+        prev,
+        out,
+        message=message,
+        sage_attention=sage_attention,
+        now_iso=now,
+        stall_threshold_sec=stall_threshold_sec,
+    )
+
+
+def _apply_fast_kernel_watch(
+    prev: dict[str, Any],
+    out: dict[str, Any],
+    *,
+    message: str,
+    sage_attention: str | None,
+    now_iso: str,
+    stall_threshold_sec: float,
+) -> dict[str, Any]:
+    """Fast Base Optimized kernels must produce a new step inside the stall window.
+
+    The safe continuation profile leaves sage off and is not watched. A frozen
+    first tick is not inference progress: the percent is cleared and the
+    creator sees the stall sentence instead of a stuck 17%.
+    """
+
+    mode = str(sage_attention or "").strip()
+    if mode in {"", "disabled"}:
+        return out
+    phase = str(out.get("phase") or "")
+    node = str(out.get("currentNode") or "")
+    if phase != PHASE_SAMPLING and node != "13":
+        return out
+    step = comfy_step_fraction(message)
+    prev_value = prev.get("inferenceStepValue")
+    value = float(step[0]) if step is not None else prev_value
+    advanced = prev.get("inferenceStepAdvancedAt")
+    if step is not None and (prev_value is None or float(step[0]) != float(prev_value)):
+        value = float(step[0])
+        advanced = now_iso
+    elif not advanced:
+        advanced = now_iso
+    out["inferenceStepValue"] = 0 if value is None else value
+    out["inferenceStepAdvancedAt"] = advanced
+    silent = seconds_since(advanced, now=parse_iso(now_iso)) or 0.0
+    if silent < float(stall_threshold_sec):
+        return out
+    out["initStalled"] = True
+    out["phase"] = PHASE_INIT_STALL
+    out["phaseLabel"] = INIT_STALL_LABEL
+    out["progressGrounded"] = False
+    out["clearProgress"] = True
+    out["stalled"] = True
+    out["stallLabel"] = INIT_STALL_LABEL
     return out
 
 

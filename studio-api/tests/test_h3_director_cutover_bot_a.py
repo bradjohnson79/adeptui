@@ -21,8 +21,8 @@ def test_is_local_h3_tokens():
     assert not _is_local_h3("ltx-2.5")
 
 
-def test_comfy_render_scene_forces_use_director_for_local_h3(monkeypatch):
-    """Local H3 Timeline jobs must land useDirector=True in params_json."""
+def test_comfy_render_scene_forces_fast_renderer_for_local_h3(monkeypatch):
+    """Local H3 Timeline jobs must land useH3FastRenderer=True and not useDirector."""
     captured: dict = {}
 
     class _FakeJob:
@@ -69,7 +69,7 @@ def test_comfy_render_scene_forces_use_director_for_local_h3(monkeypatch):
             "originalGeneratorId": "minimax-h3-i2v-local",
             "filmTimeline": True,
             "requestedDurationSec": 5,
-            # deliberately omit useDirector — adapter must force it
+            # deliberately omit the renderer flag — the adapter must force it
         },
     )
     sub = crs.submit_render_scene(
@@ -82,12 +82,13 @@ def test_comfy_render_scene_forces_use_director_for_local_h3(monkeypatch):
     import json
 
     params = json.loads(captured["params_json"])
-    assert params.get("useDirector") is True
+    assert params.get("useH3FastRenderer") is True
+    assert params.get("useDirector") is not True
     assert int(params.get("requestedDurationSec")) == 5
     assert params.get("timelineGeneration") is True
 
 
-def test_comfy_render_scene_honors_explicit_use_director(monkeypatch):
+def test_comfy_render_scene_h3_ignores_explicit_use_director(monkeypatch):
     captured: dict = {}
 
     class _FakeJob:
@@ -138,21 +139,22 @@ def test_comfy_render_scene_honors_explicit_use_director(monkeypatch):
     import json
 
     params = json.loads(captured["params_json"])
-    assert params["useDirector"] is True
+    assert params.get("useH3FastRenderer") is True
+    assert params.get("useDirector") is not True
 
 
 def test_queue_worker_ft_h3_has_no_silent_ref2v_fallback():
-    """Static pin: timeline H3 branch must not call _build_and_run_h3_ref2v."""
+    """Static pin: timeline H3 branch must not call _build_and_run_h3_ref2v or Director."""
     src_path = Path(__file__).resolve().parents[1] / "app" / "queue_worker.py"
     src = src_path.read_text(encoding="utf-8")
-    # Find the timeline H3 Director cutover block and ensure ref2v is not in the else.
-    marker = "Director cutover (fail-closed)"
-    assert marker in src, "fail-closed Director cutover marker missing"
+    marker = "H3 fast renderer (fail-closed)"
+    assert marker in src, "fail-closed H3 fast renderer marker missing"
     idx = src.index(marker)
     window = src[idx : idx + 1200]
-    assert "_build_and_run_h3_director" in window
+    assert "_build_and_run_h3_fast" in window
+    assert "_build_and_run_h3_director" not in window
     assert "_build_and_run_h3_ref2v" not in window
-    assert "H3_DIRECTOR_REQUIRED" in window
+    assert "H3_FAST_RENDERER_REQUIRED" in window
 
 
 def test_queue_worker_director_skips_frames_for_duration_authority():
@@ -168,7 +170,7 @@ def test_queue_worker_director_skips_frames_for_duration_authority():
     assert "frames_for_duration" not in dir_body
 
 
-def test_orchestrator_provider_options_include_use_director_for_local_h3():
+def test_orchestrator_provider_options_include_fast_renderer_for_local_h3():
     src_path = (
         Path(__file__).resolve().parents[1]
         / "app"
@@ -176,15 +178,16 @@ def test_orchestrator_provider_options_include_use_director_for_local_h3():
         / "orchestrator.py"
     )
     src = src_path.read_text(encoding="utf-8")
-    assert '**({"useDirector": True} if _is_local_h3(generator_id) else {})' in src
-    assert 'request.providerOptions["useDirector"] = True' in src
+    assert '**({"useH3FastRenderer": True} if _is_local_h3(generator_id) else {})' in src
+    assert 'request.providerOptions["useH3FastRenderer"] = True' in src
+    assert 'request.providerOptions["useDirector"] = True' not in src
 
 
-def test_queue_worker_missing_use_director_raises_human_error():
-    """FT H3 without useDirector must raise H3_DIRECTOR_REQUIRED (no silent ref2v)."""
+def test_queue_worker_missing_fast_renderer_raises_human_error():
+    """FT H3 without the fast renderer flag must fail closed (no silent ref2v or Director)."""
     src = (Path(__file__).resolve().parents[1] / "app" / "queue_worker.py").read_text(encoding="utf-8")
-    idx = src.index("Director cutover (fail-closed)")
+    idx = src.index("H3 fast renderer (fail-closed)")
     window = src[idx : idx + 900]
-    assert "H3_DIRECTOR_REQUIRED" in window
+    assert "H3_FAST_RENDERER_REQUIRED" in window
     assert "_build_and_run_h3_ref2v" not in window
-    assert "forcing Director" not in window
+    assert "_build_and_run_h3_director" not in window

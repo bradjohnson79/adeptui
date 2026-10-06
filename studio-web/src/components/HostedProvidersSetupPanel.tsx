@@ -150,14 +150,16 @@ function HostedProviderSetupCard({
         >
           Test
         </button>
-        <button
-          type="button"
-          data-testid={`setup-hosted-preferred-${meta.id}`}
-          disabled={busy}
-          onClick={onPreferred}
-        >
-          {preferred ? "Preferred ✓" : "Set Preferred"}
-        </button>
+        {meta.id !== "elevenlabs" ? (
+          <button
+            type="button"
+            data-testid={`setup-hosted-preferred-${meta.id}`}
+            disabled={busy}
+            onClick={onPreferred}
+          >
+            {preferred ? "Preferred ✓" : "Set Preferred"}
+          </button>
+        ) : null}
         <button
           type="button"
           data-testid={`setup-hosted-clear-${meta.id}`}
@@ -306,11 +308,11 @@ export function HostedProvidersSetupPanel({
         <div>
           <h2 id="api-key-providers-heading">{API_KEY_PROVIDERS_CATEGORY}</h2>
           <p>
-            Add Kie.ai, fal.ai, WaveSpeed.ai, and ElevenLabs API keys. ElevenLabs is for Voice Studio TTS + Audio Studio SFX (BYOK). Keys stay encrypted on
+            Add Kie.ai, fal.ai, WaveSpeed.ai, and ElevenLabs API keys. ElevenLabs is a direct API for Voice Studio and Audio Studio. Keys stay encrypted on
             this machine — React never calls providers directly.
           </p>
         </div>
-        <span>3 providers</span>
+        <span>{SETUP_PROVIDERS.length} providers</span>
       </summary>
       {panelMessage && (
         <p className="setup-message" role="status" data-testid="setup-hosted-providers-message">

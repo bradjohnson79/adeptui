@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 CAPTION_MAX = 140
 
 StoryboardPageSize = Literal[6, 9, 12]
+StoryboardAspect = Literal["16:9", "9:16"]
 ScriptLinkStatus = Literal[
     "linked",
     "script_updated",
@@ -55,6 +56,7 @@ class StoryboardDocument(BaseModel):
     projectId: str
     title: str = "Storyboard"
     pageSize: StoryboardPageSize = 9
+    aspectRatio: StoryboardAspect = "16:9"
     pages: list[StoryboardPage] = Field(default_factory=list)
     panelOrder: list[str] = Field(default_factory=list)
     legacyDocId: Optional[str] = None
@@ -81,6 +83,7 @@ class TimelinePrepProposal(BaseModel):
     id: str
     projectId: str
     documentId: str
+    aspectRatio: StoryboardAspect = "16:9"
     shots: list[TimelinePrepShotProposal] = Field(default_factory=list)
     status: Literal["draft", "approved", "applied", "rejected"] = "draft"
     createdAt: str = ""

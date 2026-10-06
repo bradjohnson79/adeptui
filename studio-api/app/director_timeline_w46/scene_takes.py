@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from . import store
 from .contracts import (
     ApprovedClip,
+    SceneStitch,
     SceneTake,
     SceneTakeBatchMember,
     SceneTakeQuality,
@@ -32,6 +33,26 @@ PLAYABLE_BATCH = frozenset(
         "ApprovedConfigurationChanged",
         "RegenerationRecommended",
         "NeedsDialogueRetake",
+    }
+)
+# Take completion reads BatchStatus. An output asset is not a success.
+TAKE_SUCCESS_TERMINAL = frozenset({"Approved", "CandidateReady"})
+TAKE_UNRESOLVED = frozenset(
+    {
+        "Draft",
+        "Ready",
+        "Queued",
+        "Generating",
+        "Waiting",
+        "QC_Pending",
+        "QC_RetryRequired",
+    }
+)
+TAKE_CORRECTIVE = frozenset(
+    {
+        "NeedsDialogueRetake",
+        "RegenerationRecommended",
+        "ApprovedConfigurationChanged",
     }
 )
 
@@ -198,6 +219,7 @@ def snapshot_generation_config(master: SceneTimelineMaster) -> dict[str, Any]:
         ],
         "h3Resolution": getattr(first, "h3Resolution", None) if first else None,
         "ltxQuality": getattr(first, "ltxQuality", None) if first else None,
+        "seedanceResolution": getattr(first, "seedanceResolution", None) if first else None,
         "prompts": prompts,
         "references": refs,
         "continuityAuto": bool(getattr(getattr(master, "continuityPolicy", None), "autoContinuity", False)),
@@ -211,6 +233,7 @@ def snapshot_quality(master: SceneTimelineMaster) -> SceneTakeQuality:
     gid = str(master.sceneGeneratorId or (getattr(first, "generatorId", None) if first else "") or "") or None
     h3 = getattr(first, "h3Resolution", None) if first else None
     ltx = getattr(first, "ltxQuality", None) if first else None
+    seedance_resolution = getattr(first, "seedanceResolution", None) if first else None
     megapixels = None
     width = None
     height = None
@@ -244,6 +267,7 @@ def snapshot_quality(master: SceneTimelineMaster) -> SceneTakeQuality:
         width=width,
         height=height,
         ltxQuality=str(ltx) if ltx else None,
+        seedanceResolution=str(seedance_resolution) if seedance_resolution else None,
         durationSec=duration or None,
         batchCount=len(batches),
     )
@@ -285,15 +309,26 @@ def _historical_batch_members(master: SceneTimelineMaster, *, before: str | None
     rows: list[SceneTakeBatchMember] = []
     for batch in sorted(master.batchBlocks or [], key=lambda b: (int(getattr(b, "order", 0) or 0), str(b.id))):
         cands = []
+        belongs_to_this_take = False
         for cand in getattr(batch, "candidateVersions", None) or []:
             asset = str(getattr(cand, "assetId", None) or "").strip()
             if not asset:
                 continue
             created = str(getattr(cand, "createdAt", None) or "")
             if before and created and created >= before:
+                belongs_to_this_take = True
                 continue
             cands.append(cand)
         latest = max(cands, key=lambda c: (str(getattr(c, "createdAt", None) or ""), str(getattr(c, "id", None) or ""))) if cands else None
+        if latest is None and belongs_to_this_take:
+            rows.append(
+                SceneTakeBatchMember(
+                    batchId=batch.id,
+                    order=int(getattr(batch, "order", 0) or 0),
+                    status="pending",
+                )
+            )
+            continue
         if latest is None:
             info = _batch_playable_asset(batch)
             asset = str(info.get("assetId") or "").strip() or None
@@ -379,14 +414,17 @@ def batch_has_unsubmitted_snapshot(batch: Any) -> bool:
 
 
 _SESSION_ABANDON_BATCH = frozenset({"Generating", "Waiting", "Queued"})
+_CLOSED_BATCH = frozenset({"Cancelled", "Failed"})
+_LIVE_JOB = frozenset({"running", "submitted", "pending", "generating"})
 
 
 def close_previous_session_render(master: SceneTimelineMaster) -> bool:
     """Drop a render chain that belongs to an earlier Studio API process.
 
     Completed windows and their assets stay. In-flight and staged windows are
-    closed so opening the project cannot submit them. This does not call a
-    GPU runtime.
+    closed so opening the project cannot submit them. A window already marked
+    Cancelled still drops a leftover running job, so the monitor does not
+    treat that row as a live repair. This does not call a GPU runtime.
     """
     from ..runtime_session import current_runtime_session_id
 
@@ -394,13 +432,22 @@ def close_previous_session_render(master: SceneTimelineMaster) -> bool:
     stored = str(getattr(master, "renderSessionId", None) or "").strip()
     if stored == current:
         return False
+    session_abandoned = bool(stored)
     changed = False
     for batch in master.batchBlocks or []:
-        if str(getattr(batch, "status", "") or "") not in _SESSION_ABANDON_BATCH:
+        status = str(getattr(batch, "status", "") or "")
+        if session_abandoned and status in _SESSION_ABANDON_BATCH:
+            batch.status = "Cancelled"
+            batch.pendingSnapshotId = None
+            changed = True
+            status = "Cancelled"
+        if not session_abandoned and status not in _CLOSED_BATCH:
             continue
-        batch.status = "Cancelled"
-        batch.pendingSnapshotId = None
-        changed = True
+        for job in getattr(batch, "generationJobs", None) or []:
+            if str(getattr(job, "status", "") or "").lower() not in _LIVE_JOB:
+                continue
+            job.status = "cancelled"
+            changed = True
     for take in master.sceneTakes or []:
         if str(getattr(take, "status", "") or "") != "rendering":
             continue
@@ -589,6 +636,15 @@ def reclaim_misallocated_take_a(master: SceneTimelineMaster) -> bool:
     hist = _historical_batch_members(master, before=str(take.createdAt or "") or None)
     if not any(m.assetId for m in hist):
         if take.status == "rendering" and not take_render_is_live(master, take):
+            # A sequential take that has not deposited yet is still this take.
+            # Refresh must not label staged or queued windows as cancelled.
+            if any(
+                str(getattr(b, "status", "") or "") in TAKE_UNRESOLVED
+                or str(getattr(b, "status", "") or "") in TAKE_CORRECTIVE
+                or str(getattr(b, "status", "") or "") == "Failed"
+                for b in (master.batchBlocks or [])
+            ):
+                return False
             take.status = "incomplete" if any(m.assetId for m in take.batches) else "cancelled"
             take.completedAt = take.completedAt or _now()
             master.activeSceneTakeId = None
@@ -912,7 +968,11 @@ def apply_take_to_live_batches(master: SceneTimelineMaster, take: SceneTake) -> 
 
 
 def capture_members_for_active_take(master: SceneTimelineMaster, take: SceneTake) -> list[SceneTakeBatchMember]:
-    """Only assets generated at/after this Take launched — never copy the prior Take."""
+    """Every planned batchBlock is a member, including windows that have not generated.
+
+    Assets are limited to media created at or after this take launched. A missing
+    asset leaves the planned window in the set; it does not drop the window.
+    """
     launched = str(take.createdAt or "")
     current = current_scene_take(master)
     frozen = {m.batchId: str(m.assetId or "") for m in (current.batches if current and current.id != take.id else [])}
@@ -1023,18 +1083,14 @@ def sync_rendering_take(master: SceneTimelineMaster) -> bool:
         return False
     take.batches = capture_members_for_active_take(master, take)
     generating = scene_has_live_render(master)
-    failed = any(str(getattr(b, "status", "") or "") in {"Failed", "Cancelled"} for b in (master.batchBlocks or []))
-    expected = {m.batchId for m in take.batches}
-    have = {m.batchId for m in take.batches if m.assetId}
-    if generating:
+    planned = [str(getattr(b, "status", "") or "") for b in (master.batchBlocks or [])]
+    # ready = every planned window is an accepted success. A deposited asset
+    # does not close the take, and a window that has not started still counts.
+    if take.status == "rendering" and (
+        generating or any(status in TAKE_UNRESOLVED for status in planned)
+    ):
         return True
-    if failed or (expected and have != expected):
-        take.status = "incomplete" if have else "cancelled"
-        take.completedAt = _now()
-        master.activeSceneTakeId = None
-        _heal_current_take_pointer(master, take)
-        return True
-    if expected and have == expected:
+    if planned and all(status in TAKE_SUCCESS_TERMINAL for status in planned):
         take.status = "ready"
         take.completedAt = _now()
         if len(take.batches) == 1 and take.batches[0].assetId:
@@ -1046,6 +1102,16 @@ def sync_rendering_take(master: SceneTimelineMaster) -> bool:
         if current and current.id != take.id:
             apply_take_to_live_batches(master, current)
         return True
+    corrective = any(status in TAKE_CORRECTIVE for status in planned)
+    failed = any(status in {"Failed", "Cancelled"} for status in planned)
+    if not corrective and not failed:
+        return True
+    deposited = any(str(member.assetId or "").strip() for member in take.batches)
+    # Corrective work is incomplete. It is not a cancellation and it is not ready.
+    take.status = "incomplete" if corrective or deposited else "cancelled"
+    take.completedAt = _now()
+    master.activeSceneTakeId = None
+    _heal_current_take_pointer(master, take)
     return True
 
 
@@ -1085,6 +1151,85 @@ def refresh_current_take_after_repair(
     if changed and len(take.batches) == 1:
         take.resultAssetId = asset
     return changed
+
+
+_JOIN_BLOCKED_STATUSES = frozenset({"Draft", "Ready", "Queued", "Generating", "Waiting"})
+
+
+def _take_covers_deposited_plan(take: SceneTake | None, planned_ids: list[str]) -> bool:
+    """True when this take holds a picture for every current planned window."""
+    if take is None or str(take.status or "") not in {"rendering", "incomplete", "ready"}:
+        return False
+    members = {member.batchId: member for member in (take.batches or [])}
+    return all(
+        batch_id in members and str(members[batch_id].assetId or "").strip()
+        for batch_id in planned_ids
+    )
+
+
+def deposited_take_to_join(master: SceneTimelineMaster | None) -> SceneTake | None:
+    """Every planned window has a picture and nothing is still rendering.
+
+    Speech check can still be open. That does not block the joined clip, and
+    it does not mark the take ready. A take already closed as incomplete still
+    joins when its members cover the current plan.
+    """
+    if master is None or scene_has_live_render(master):
+        return None
+    planned = list(master.batchBlocks or [])
+    if len(planned) < 2:
+        return None
+    if any(str(getattr(batch, "status", "") or "") in _JOIN_BLOCKED_STATUSES for batch in planned):
+        return None
+    planned_ids = [str(getattr(batch, "id", "") or "") for batch in planned]
+    take = active_scene_take(master)
+    if not _take_covers_deposited_plan(take, planned_ids):
+        take = next(
+            (
+                item
+                for item in reversed(list(master.sceneTakes or []))
+                if _take_covers_deposited_plan(item, planned_ids)
+            ),
+            None,
+        )
+    return take
+
+
+def ensure_deposited_scene_join(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    master: SceneTimelineMaster,
+) -> str | None:
+    """Join deposited window pictures into one scene clip. Take status stays as-is."""
+    take = deposited_take_to_join(master)
+    if take is None:
+        return None
+    ordered = sorted(take.batches, key=lambda member: int(member.order or 0))
+    sources = [str(member.assetId) for member in ordered if str(member.assetId or "").strip()]
+    batch_ids = [member.batchId for member in ordered]
+    existing = master.sceneStitch
+    if (
+        existing
+        and existing.assetId
+        and list(existing.sourceAssetIds) == sources
+        and take.resultAssetId == existing.assetId
+    ):
+        return existing.assetId
+    if take.resultAssetId and (not existing or list(existing.sourceAssetIds) != sources):
+        take.resultAssetId = None
+    asset_id = assemble_take_result(db, project_id, scene_id, take)
+    if not asset_id:
+        return None
+    master.sceneStitch = SceneStitch(
+        assetId=asset_id,
+        sourceBatchIds=batch_ids,
+        sourceAssetIds=sources,
+        incremental=False,
+        durationSec=sum(float(member.durationSec or 0) for member in ordered) or None,
+        createdAt=_now(),
+    )
+    return asset_id
 
 
 def assemble_take_result(
@@ -1257,89 +1402,13 @@ def start_new_take(
     project_id: str,
     scene_id: str,
 ) -> dict[str, Any]:
-    payload = store.load_master(db, project_id, scene_id)
-    if not payload.get("ok"):
-        return payload
-    master = SceneTimelineMaster.model_validate(payload["master"])
-    ensure_scene_takes(master)
-    sync_rendering_take(master)
-    store.save_master(db, project_id, scene_id, master, touch_batches=False)
-    if take_render_is_live(master):
-        live = active_scene_take(master)
-        return {
-            "ok": False,
-            "error": "TAKE_ALREADY_RENDERING",
-            "message": f"{scene_take_display(live.label if live else 'Take')} is still rendering.",
-            "mock": False,
-        }
-    if not master.batchBlocks:
-        return {"ok": False, "error": "NO_BATCHES", "message": "Add scene batches before creating a new take.", "mock": False}
-
-    previous_take_id = str(master.currentSceneTakeId or "") or None
-    take = allocate_rendering_take(master)
-    store.save_master(db, project_id, scene_id, master, touch_batches=False)
-
-    # Scene length owns the window count. 60s is 4 windows, 75s is 5.
-    # New Take rematerializes before it renders so a stale 3-window scene
-    # cannot compress a longer Timed Prompt.
-    from .service import rematerialize_execution_windows
-
-    rematerialize_execution_windows(
-        db,
-        project_id,
-        scene_id,
-        generator_id=master.sceneGeneratorId,
-        allow_scene_take_id=take.id,
-        previous_scene_take_id=previous_take_id,
-    )
-    refreshed = store.load_master(db, project_id, scene_id)
-    if refreshed.get("ok"):
-        master = SceneTimelineMaster.model_validate(refreshed["master"])
-        live = _take_or_error(master, take.id)
-        if live is not None and live.status == "rendering":
-            live.batches = [
-                SceneTakeBatchMember(batchId=b.id, order=int(b.order or 0), status="pending")
-                for b in sorted(master.batchBlocks or [], key=lambda x: int(x.order or 0))
-            ]
-            store.save_master(db, project_id, scene_id, master, touch_batches=False)
-
-    from . import orchestrator
-
-    gen = orchestrator.generate_scene(
-        db,
-        project_id,
-        scene_id,
-        scope="full",
-        force_all=True,
-        scene_take_id=take.id,
-        take_intent="NEW_TAKE",
-    )
-    payload2 = store.load_master(db, project_id, scene_id)
-    if payload2.get("ok"):
-        master = SceneTimelineMaster.model_validate(payload2["master"])
-        live = _take_or_error(master, take.id)
-        if not gen.get("ok") and live is not None and live.status == "rendering":
-            if not take_has_live_jobs(master, live):
-                live.status = "incomplete" if any(m.assetId for m in live.batches) else "cancelled"
-                live.completedAt = _now()
-                master.activeSceneTakeId = None
-        sync_rendering_take(master)
-        store.save_master(db, project_id, scene_id, master, touch_batches=False)
-        take = _take_or_error(master, take.id) or take
+    _ = (db, project_id, scene_id)
     return {
-        "ok": True,
-        "takeAllocated": True,
-        "generationStarted": bool(gen.get("ok")),
-        "take": take.model_dump(),
-        "takeLabel": scene_take_display(take.label),
-        "generation": gen,
-        "master": master.model_dump(),
-        "message": gen.get("message") or f"Rendering {scene_take_display(take.label)}.",
+        "ok": False,
+        "error": "FILM_TIMELINE_REQUIRED",
+        "message": "New Shot is the production cut. Scene takes no longer start a render.",
         "mock": False,
-        **({k: v for k, v in gen.items() if k in {"error", "errors", "findings"}} if not gen.get("ok") else {}),
     }
-
-
 
 def begin_execution_revision_for_scene(
     db: Session,
@@ -1455,52 +1524,13 @@ def delete_scene_take(db: Session, project_id: str, scene_id: str, take_id: str)
 
 
 def resume_scene_take(db: Session, project_id: str, scene_id: str, take_id: str | None = None) -> dict[str, Any]:
-    payload = store.load_master(db, project_id, scene_id)
-    if not payload.get("ok"):
-        return payload
-    master = SceneTimelineMaster.model_validate(payload["master"])
-    take = _take_or_error(master, take_id) if take_id else None
-    if take is None:
-        take = next((t for t in reversed(master.sceneTakes or []) if t.status in {"incomplete", "cancelled"}), None)
-    if take is None:
-        return {"ok": False, "error": "NO_INCOMPLETE_TAKE", "message": "There is no incomplete take to resume.", "mock": False}
-    done_ids = {m.batchId for m in take.batches if m.assetId}
-    resume_ids = [b.id for b in master.batchBlocks if b.id not in done_ids]
-    if not resume_ids:
-        take.status = "ready"
-        take.completedAt = _now()
-        store.save_master(db, project_id, scene_id, master, touch_batches=False)
-        return {"ok": True, "take": take.model_dump(), "message": f"{scene_take_display(take.label)} is already complete.", "mock": False}
-    take.status = "rendering"
-    master.activeSceneTakeId = take.id
-    store.save_master(db, project_id, scene_id, master, touch_batches=False)
-    from . import orchestrator
-    from .contracts import CancelRequest
-
-    orchestrator.cancel_scene(
-        db,
-        project_id,
-        scene_id,
-        CancelRequest(action="resume_incomplete_only", batchBlockIds=resume_ids),
-    )
-    gen = orchestrator.generate_scene(
-        db,
-        project_id,
-        scene_id,
-        scope="selected",
-        batch_ids=resume_ids,
-        force_all=True,
-        scene_take_id=take.id,
-        take_intent="RENDER_CURRENT_TAKE",
-    )
+    _ = (db, project_id, scene_id, take_id)
     return {
-        "ok": bool(gen.get("ok")),
-        "take": take.model_dump(),
-        "generation": gen,
-        "message": f"Resuming {scene_take_display(take.label)}.",
+        "ok": False,
+        "error": "FILM_TIMELINE_REQUIRED",
+        "message": "Opening Timeline does not resume a render. Generate Shot or Continue Shot starts a new job.",
         "mock": False,
     }
-
 
 def list_scene_takes_payload(master: SceneTimelineMaster) -> dict[str, Any]:
     ensure_scene_takes(master)

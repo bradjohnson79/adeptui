@@ -3885,6 +3885,24 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
         if not all_done:
             centry["status"] = "generating"
             continue
+        required = [str(view).strip() for view in (centry.get("requiredViews") or []) if str(view).strip()]
+        single_front = len(view_jobs) == 1 and (
+            str(centry.get("layout") or "").strip().lower() == "single_view" or required == ["front_full"]
+        )
+        if single_front and not four_panel:
+            aid = str(final_asset_ids[0]) if final_asset_ids else ""
+            if not aid:
+                centry["status"] = "failed"
+                centry["error"] = "The starting image was not created."
+                continue
+            centry["assetId"] = aid
+            centry["sheetAssetId"] = None
+            centry["status"] = "done"
+            centry["layout"] = "single_view"
+            centry["sheetComposition"] = False
+            role_assets["hero_identity"] = aid
+            _attach_role(db, project_id, character_id, aid, "hero_identity")
+            continue
         if four_panel:
             aid = str(final_asset_ids[0]) if final_asset_ids else ""
             if not aid:
@@ -4118,6 +4136,13 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
     elif jobs.get("hero") and jobs["hero"].get("sheetAssetId"):
         pack["candidates"] = [_mirror_candidate(jobs["hero"])]
 
+    if role_assets.get("hero_identity"):
+        hero_asset = str(role_assets["hero_identity"])
+        if isinstance(jobs.get("hero"), dict):
+            jobs["hero"]["assetId"] = hero_asset
+            jobs["hero"]["status"] = "done"
+        pack["status"] = "READY_FOR_OWNER"
+        pack["phase"] = "awaiting_owner"
     hero_id = role_assets.get("hero_identity") or role_assets.get("hero_portrait")
     if not hero_id:
         pack["jobs"] = jobs
@@ -4144,6 +4169,7 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
     law_views_pending = any(
         isinstance(c.get("viewJobs"), list)
         and bool(c.get("viewJobs"))
+        and str(c.get("layout") or "").strip().lower() != "single_view"
         and not str(c.get("sheetAssetId") or "").strip()
         for c in candidate_entries
     )

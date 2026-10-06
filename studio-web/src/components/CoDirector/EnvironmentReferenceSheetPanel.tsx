@@ -5,6 +5,7 @@ import type {
   EnvironmentReferenceSheetSummary,
 } from "../../contracts/environmentReferenceSheet";
 import { CoDirectorEmptyState, CoDirectorErrorState } from "./cards";
+import { isProjectEnvironmentReferenceSheet } from "./EnvironmentCreator/environmentReferenceState";
 
 type SheetTab = "overview" | "views" | "continuity" | "exports";
 
@@ -35,7 +36,7 @@ export function EnvironmentReferenceSheetPanel({ projectId }: { projectId: strin
       try {
         const res = await api.environmentReferenceSheet.listSheets(projectId);
         if (cancelled) return;
-        const next = res.sheets || [];
+        const next = (res.sheets || []).filter((item) => isProjectEnvironmentReferenceSheet(item));
         setSummaries(next);
         setSelectedId((current) => {
           if (current && next.some((item) => item.sheetId === current)) {

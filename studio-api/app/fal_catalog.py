@@ -3,13 +3,22 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
-FalEngine = Literal["fal_seedance", "fal_seedance_25", "fal_kling", "fal_veo", "fal_runway"]
-# Canonical local video: MiniMax H3 + LTX 2.5 only. WAN / LTX 2.3 retired.
-LocalEngine = Literal["ltx-2.5", "minimax-h3"]
+FalEngine = Literal[
+    "fal_seedance",
+    "fal_seedance_25",
+    "fal_seedance_mini",
+    "fal_seedance_fast",
+    "fal_kling",
+    "fal_veo",
+    "fal_runway",
+]
+# Canonical local video families. WAN / LTX 2.3 stay retired.
+LocalEngine = Literal["ltx-2.5", "minimax-h3", "hunyuan-video-1.5-distilled"]
 EngineName = Literal[
     "auto",
     "ltx-2.5",
     "minimax-h3",
+    "hunyuan-video-1.5-distilled",
     "seedance-2.0",
     "seedance-2.5",
     "fal_seedance",
@@ -24,6 +33,7 @@ ALL_ENGINES: tuple[EngineName, ...] = (
     "auto",
     "minimax-h3",
     "ltx-2.5",
+    "hunyuan-video-1.5-distilled",
     "seedance-2.0",
     "seedance-2.5",
     "fal_kling",
@@ -112,6 +122,28 @@ FAL_MODELS: dict[FalEngine, FalModel] = {
         default_duration=5,
         supports_end_image=True,
         description="Seedance 2.5 I2V — Adept CERTIFIED_CURRENT 4–30s (fal OpenAPI).",
+    ),
+    "fal_seedance_mini": FalModel(
+        engine="fal_seedance_mini",
+        label="Seedance 2.0 Mini (fal.ai)",
+        provider="ByteDance via fal.ai",
+        model_id="bytedance/seedance-2.0/mini/reference-to-video",
+        mode="image_to_video",
+        durations=tuple(range(4, 16)),
+        default_duration=5,
+        supports_end_image=False,
+        description="Seedance 2.0 Mini — reference-to-video only (fal OpenAPI).",
+    ),
+    "fal_seedance_fast": FalModel(
+        engine="fal_seedance_fast",
+        label="Seedance 2.0 Fast (fal.ai)",
+        provider="ByteDance via fal.ai",
+        model_id="bytedance/seedance-2.0/fast/image-to-video",
+        mode="image_to_video",
+        durations=tuple(range(4, 16)),
+        default_duration=5,
+        supports_end_image=True,
+        description="Seedance 2.0 Fast — cheapest hosted Seedance tier (fal OpenAPI).",
     ),
     "fal_kling": FalModel(
         engine="fal_kling",
@@ -214,6 +246,18 @@ def fal_image_model_id_for_dock(dock_model_id: str | None) -> str | None:
     return None
 
 
+def resolve_fal_still_endpoint(model_id: str | None, dock_id: str | None = None) -> str:
+    """Resolve a dock id or endpoint to a submit-ready fal still model id."""
+    pin = str(model_id or "").strip()
+    dock = str(dock_id or "").strip()
+    if pin.startswith(("fal-ai/", "openai/", "krea/")):
+        return pin
+    if pin in set(FAL_IMAGE_ENDPOINT_BY_DOCK.values()):
+        return pin
+    mapped = fal_image_model_id_for_dock(dock) or fal_image_model_id_for_dock(pin)
+    return str(mapped or "").strip()
+
+
 def build_fal_image_arguments(
     *,
     model_id: str,
@@ -232,9 +276,20 @@ def build_fal_image_arguments(
     if image_url and str(image_url).strip():
         urls.append(str(image_url).strip())
     if _is_gpt_image_2(mid):
-        args["image_size"] = _gpt_image_size_enum(w, h)
+        # Edit defaults to auto (preserve input). Large custom sizes use explicit dims.
+        # Presets stay for ordinary T2I so fal accepts the enum.
         if urls:
+            if max(w, h) >= 1280 and w > 0 and h > 0 and w % 16 == 0 and h % 16 == 0:
+                args["image_size"] = {"width": w, "height": h}
+            else:
+                args["image_size"] = "auto"
             args["image_urls"] = urls
+        elif max(w, h) >= 1280 and w > 0 and h > 0 and w % 16 == 0 and h % 16 == 0:
+            args["image_size"] = {"width": w, "height": h}
+        else:
+            args["image_size"] = _gpt_image_size_enum(w, h)
+        args["quality"] = "high"
+        args["output_format"] = "png"
         return args
     if seed is not None and int(seed) >= 0:
         args["seed"] = int(seed)
@@ -252,6 +307,53 @@ def build_fal_image_arguments(
     elif urls:
         args["image_urls"] = urls
     return args
+
+
+# fal OpenAPI resolution enums. Mini and Fast stop at 720p. Full 2.0 includes 4k.
+# 2.5 includes 1080p and does not offer 4k.
+SEEDANCE_RESOLUTIONS: dict[str, tuple[str, ...]] = {
+    "seedance-2.0": ("480p", "720p", "1080p", "4k"),
+    "seedance-2.0-mini": ("480p", "720p"),
+    "seedance-2.0-fast": ("480p", "720p"),
+    "seedance-2.5": ("480p", "720p", "1080p"),
+}
+
+
+def normalize_seedance_resolution(engine: str | None, resolution: str | None) -> str:
+    """Return the fal resolution token for this Seedance product.
+
+    The Timeline orchestrator stamps the resolved legal canvas as WxH pixels;
+    accept that form by mapping it back onto the creator tier instead of
+    failing a value Adept itself produced.
+    """
+    product = seedance_product_id(engine) or "seedance-2.0"
+    allowed = SEEDANCE_RESOLUTIONS.get(product, ("480p", "720p"))
+    token = str(resolution or "").strip().lower()
+    if token in {"4k", "2160p"}:
+        token = "4k"
+    if token in allowed:
+        return token
+    if "x" in token:
+        try:
+            w_s, h_s = token.split("x", 1)
+            width, height = int(w_s), int(h_s)
+        except ValueError:
+            width, height = 0, 0
+        if width > 0 and height > 0:
+            from .video_runtime.legal_canvas import infer_tier_from_pixels
+
+            tier = str(infer_tier_from_pixels(width, height)).lower()
+            if tier in allowed:
+                return tier
+    if not token:
+        return "720p" if "720p" in allowed else allowed[0]
+    from .video_runtime.legal_canvas import SpecFidelityError
+
+    raise SpecFidelityError(
+        f"This Seedance model accepts {', '.join(allowed)}. You asked for {resolution}.",
+        suggestions=list(allowed),
+        code="ILLEGAL_CANVAS",
+    )
 
 
 def seedance_product_id(engine: str | None) -> str | None:
@@ -278,6 +380,10 @@ def get_fal_model(engine: str) -> FalModel:
         token = "fal_seedance"
     elif product == "seedance-2.5":
         token = "fal_seedance_25"
+    elif product == "seedance-2.0-mini":
+        token = "fal_seedance_mini"
+    elif product == "seedance-2.0-fast":
+        token = "fal_seedance_fast"
     if token not in FAL_MODELS:
         raise KeyError(f"Unknown fal engine: {engine}")
     return FAL_MODELS[token]  # type: ignore[index]
@@ -363,7 +469,10 @@ def build_fal_arguments(
     model = get_fal_model(engine)
     duration = nearest_duration(duration_sec, model.durations, model.default_duration)
     aspect = (aspect_ratio or "").strip() or aspect_from_size(width, height)
-    if resolution in ("480p", "720p", "1080p"):
+    seedance_early = seedance_product_id(engine)
+    if seedance_early:
+        res = normalize_seedance_resolution(engine, resolution)
+    elif resolution in ("480p", "720p", "1080p"):
         res = resolution
     else:
         res = resolution_label(height)
@@ -373,14 +482,7 @@ def build_fal_arguments(
         seedance = seedance_product_id(engine)
         if seedance:
             ids = SEEDANCE_MODEL_IDS[seedance]
-            if res not in ("480p", "720p"):
-                from .video_runtime.legal_canvas import SpecFidelityError
-
-                raise SpecFidelityError(
-                    f"Seedance in Adept accepts 480p or 720p. You asked for {res}.",
-                    suggestions=["480p", "720p"],
-                    code="ILLEGAL_CANVAS",
-                )
+            res = normalize_seedance_resolution(engine, res)
             args: dict[str, Any] = {
                 "prompt": prompt,
                 "resolution": res,
@@ -410,14 +512,7 @@ def build_fal_arguments(
     seedance = seedance_product_id(engine)
     if seedance:
         ids = SEEDANCE_MODEL_IDS[seedance]
-        if res not in ("480p", "720p"):
-            from .video_runtime.legal_canvas import SpecFidelityError
-
-            raise SpecFidelityError(
-                f"Seedance in Adept accepts 480p or 720p. You asked for {res}.",
-                suggestions=["480p", "720p"],
-                code="ILLEGAL_CANVAS",
-            )
+        res = normalize_seedance_resolution(engine, res)
         args.update(
             {
                 "image_url": image_url,
@@ -471,6 +566,31 @@ def build_fal_arguments(
 SEEDANCE_R2V_MODEL_ID = "bytedance/seedance-2.0/reference-to-video"
 
 
+def seedance_continuation_route(product_id: str, *, has_start_image: bool, has_video: bool) -> str:
+    """Which Seedance input actually starts a continuation.
+
+    image_to_video: fal image_url is the first frame (2.0, 2.5, fast).
+    reference_image: Mini has no image-to-video endpoint. The still is image_urls[0] only.
+    reference_video: a previous clip was sent. That is not a start frame.
+    """
+
+    product = seedance_product_id(product_id) or str(product_id or "")
+    if product == "seedance-2.0-mini":
+        # Mini's fal endpoint is reference-to-video for every mode. A still is
+        # image_urls[0], not an image-to-video start frame. A video reference
+        # is a general clip, not a start frame either.
+        if has_video:
+            return "reference_video"
+        return "reference_image"
+    if has_start_image and not has_video:
+        return "image_to_video"
+    if has_video:
+        return "reference_video"
+    if has_start_image:
+        return "image_to_video"
+    return "text_to_video"
+
+
 def build_seedance_r2v_arguments(
     *,
     prompt: str,
@@ -492,15 +612,7 @@ def build_seedance_r2v_arguments(
     else:
         allowed = (4, 5, 6, 7, 8, 9, 10, 11, 12)
     duration = nearest_duration(float(duration_sec or 5), allowed, 5)
-    if resolution and resolution not in ("480p", "720p"):
-        from .video_runtime.legal_canvas import SpecFidelityError
-
-        raise SpecFidelityError(
-            f"Seedance in Adept accepts 480p or 720p. You asked for {resolution}.",
-            suggestions=["480p", "720p"],
-            code="ILLEGAL_CANVAS",
-        )
-    res = resolution if resolution in ("480p", "720p") else "720p"
+    res = normalize_seedance_resolution(engine, resolution)
     aspect = (aspect_ratio or "auto").strip() or "auto"
     args: dict[str, Any] = {
         "prompt": prompt,
@@ -516,3 +628,148 @@ def build_seedance_r2v_arguments(
     if seed >= 0:
         args["seed"] = seed
     return ids["r2v"], args
+
+
+# Timeline product id → fal catalog engine. Kie ids are absent on purpose.
+# The Timeline registry ids (kling-api / veo-api) execute through these same
+# fal engines; without the mapping their adapters never start a provider job.
+TIMELINE_FAL_ENGINE: dict[str, FalEngine] = {
+    "kling-fal": "fal_kling",
+    "fal_kling": "fal_kling",
+    "kling-api": "fal_kling",
+    "veo-fal": "fal_veo",
+    "fal_veo": "fal_veo",
+    "veo-api": "fal_veo",
+}
+
+
+def timeline_fal_engine(generator_id: str | None) -> str | None:
+    return TIMELINE_FAL_ENGINE.get(str(generator_id or "").strip())
+
+
+def _timeline_asset_path(asset_id: str | None):
+    from pathlib import Path
+
+    if not (asset_id or "").strip():
+        return None
+    from .db import Asset, SessionLocal
+
+    db = SessionLocal()
+    try:
+        row = db.get(Asset, str(asset_id))
+        if row and row.path and Path(str(row.path)).is_file():
+            return Path(str(row.path))
+    finally:
+        db.close()
+    return None
+
+
+def run_timeline_fal_job(rec: dict[str, Any], request: Any, *, engine: str, dest_prefix: str) -> None:
+    """Submit one Timeline window to an existing fal.ai video model and store the file."""
+    import asyncio
+    from uuid import uuid4
+
+    from .config import settings
+    from .fal_client import download_url, extract_video_url, run_fal_model, upload_file_to_fal
+    from .secrets_store import get_secret
+
+    try:
+        api_key = get_secret("fal_api_key")
+        if not api_key:
+            rec["status"] = "failed"
+            rec["error"] = "Hosted AI Provider credential not configured for fal.ai."
+            return
+
+        from .film_timeline.render_status import hold_api_preparation
+
+        if not hold_api_preparation(rec):
+            return
+
+        opts = getattr(request, "providerOptions", None) or {}
+        if "generate_audio" in opts:
+            generate_audio = bool(opts.get("generate_audio"))
+        else:
+            generate_audio = True
+
+        async def _go() -> None:
+            image_url = None
+            start_path = _timeline_asset_path(getattr(request, "startImageAssetId", None))
+            if start_path:
+                image_url = await upload_file_to_fal(start_path, api_key)
+            model_id, args = build_fal_arguments(
+                engine=engine,
+                prompt=str(getattr(request, "prompt", "") or ""),
+                negative=str(getattr(request, "negativePrompt", "") or ""),
+                image_url=image_url,
+                end_image_url=None,
+                duration_sec=float(getattr(request, "duration", 0) or 0),
+                width=0,
+                height=0,
+                seed=int(request.seed) if getattr(request, "seed", None) is not None else -1,
+                aspect_ratio=getattr(request, "aspectRatio", None) or "16:9",
+                resolution=getattr(request, "resolution", None),
+                generate_audio=generate_audio,
+            )
+            rec["falModelId"] = model_id
+            import time as _time
+
+            from .film_timeline.render_status import begin_api_generation, note_api_render_progress
+
+            started = _time.monotonic()
+
+            def _note(message: str) -> None:
+                note_api_render_progress(rec, message=message, elapsed_sec=_time.monotonic() - started)
+
+            async def on_submit_meta(meta: dict[str, Any]) -> None:
+                rec["falCancelUrl"] = meta.get("cancel_url")
+
+            async def on_request_id(request_id: str) -> None:
+                rec["falRequestId"] = request_id
+                rec["providerJobId"] = request_id
+
+            async def on_progress(_progress: float, message: str) -> None:
+                _note(message or "fal in progress")
+
+            if str(rec.get("status") or "") == "cancelled":
+                return
+            begin_api_generation(rec)
+
+            result = await run_fal_model(
+                model_id,
+                args,
+                api_key,
+                on_submit_meta=on_submit_meta,
+                on_request_id=on_request_id,
+                on_progress=on_progress,
+            )
+            _note("fal completed — downloading")
+            out_url = extract_video_url(result)
+            dest_dir = settings.data_dir / "projects" / str(request.projectId) / "renders"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / f"{dest_prefix}_{uuid4().hex[:8]}.mp4"
+            await download_url(out_url, dest)
+            from .db import SessionLocal
+            from .minimax_h3.route_a_adapter import import_output_to_project_library
+
+            db = SessionLocal()
+            try:
+                receipt = import_output_to_project_library(
+                    project_id=request.projectId,
+                    source_mp4=dest,
+                    tag=dest_prefix,
+                    db=db,
+                )
+                asset_id = receipt.get("assetId")
+            finally:
+                db.close()
+            rec["status"] = "completed"
+            rec["progress"] = 1.0
+            rec["outputAssetIds"] = [str(asset_id)] if asset_id else []
+            rec["outputPath"] = str(dest)
+            rec["provider"] = "fal"
+            rec["falModelId"] = model_id
+
+        asyncio.run(_go())
+    except Exception as exc:
+        rec["status"] = "failed"
+        rec["error"] = str(exc)[:800]

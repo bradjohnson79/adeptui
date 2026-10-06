@@ -186,6 +186,24 @@ describe("Env Creator Express � prompt-only vs source planning payload", () =>
     expect(payload.context).not.toHaveProperty("source_asset_id");
     expect(payload.context).not.toHaveProperty("reference_image");
     expect(payload.context.kieImageModelId).toBe("gpt-image-2-text-to-image");
+    expect(payload.context).not.toHaveProperty("sheetId");
+  });
+
+  it("sends sheetId only when this start continues the selected environment", () => {
+    const fresh = buildErsGenerateStartPayload(null, null, {
+      name: "Schnick Coffee House #2",
+      environmentPrompt: "a second coffee house",
+    });
+    expect(fresh.context.name).toBe("Schnick Coffee House #2");
+    expect(fresh.context).not.toHaveProperty("sheetId");
+
+    const same = buildErsGenerateStartPayload(null, null, {
+      name: "Schnick Coffee House",
+      environmentPrompt: "the same coffee house",
+      sheetId: "4ff27b47-bea9-41a7-a0b3-3d98780e6785",
+    });
+    expect(same.context.sheetId).toBe("4ff27b47-bea9-41a7-a0b3-3d98780e6785");
+    expect(same.context.sheet_id).toBe("4ff27b47-bea9-41a7-a0b3-3d98780e6785");
   });
 
   it("with source includes source_asset_id; prompt optional", () => {
@@ -201,6 +219,48 @@ describe("Env Creator Express � prompt-only vs source planning payload", () =>
     expect(sourceOnly.context.source_asset_id).toBe("env-9");
     expect(sourceOnly.context).not.toHaveProperty("environmentPrompt");
     expect(sourceOnly.context.kieImageModelId).toBe("gpt-image-2-image-to-image");
+  });
+
+  it("sends fal.ai GPT Image 2 without a Kie model id", () => {
+    const payload = buildErsGenerateStartPayload(null, "env-1", {
+      environmentPrompt: "coffee shop",
+      apiProvider: "fal",
+      apiModelId: "gpt-image-2-fal",
+      apiOfficialModelId: "openai/gpt-image-2",
+    });
+    expect(payload.context.requested_provider).toBe("fal");
+    expect(payload.context.provider).toBe("fal");
+    expect(payload.context.hostedModelId).toBe("gpt-image-2-fal");
+    expect(payload.context.falImageModelId).toBe("openai/gpt-image-2");
+    expect(payload.context).not.toHaveProperty("kieImageModelId");
+    expect(payload.context).not.toHaveProperty("wavespeedImageModelId");
+  });
+
+  it("sends kie.ai without a fal model id", () => {
+    const payload = buildErsGenerateStartPayload(null, null, {
+      environmentPrompt: "coffee shop",
+      apiProvider: "kie",
+      apiModelId: "flux-kie",
+      apiOfficialModelId: "flux",
+    });
+    expect(payload.context.requested_provider).toBe("kie");
+    expect(payload.context.provider).toBe("kie");
+    expect(payload.context.kieImageModelId).toBe("flux");
+    expect(payload.context).not.toHaveProperty("falImageModelId");
+  });
+
+  it("sends wavespeed.ai without fal or kie model ids", () => {
+    const payload = buildErsGenerateStartPayload(null, null, {
+      environmentPrompt: "coffee shop",
+      apiProvider: "wavespeed",
+      apiModelId: "flux-wavespeed",
+      apiOfficialModelId: "wavespeed-ai/flux-dev",
+    });
+    expect(payload.context.requested_provider).toBe("wavespeed");
+    expect(payload.context.provider).toBe("wavespeed");
+    expect(payload.context.wavespeedImageModelId).toBe("wavespeed-ai/flux-dev");
+    expect(payload.context).not.toHaveProperty("falImageModelId");
+    expect(payload.context).not.toHaveProperty("kieImageModelId");
   });
 });
 

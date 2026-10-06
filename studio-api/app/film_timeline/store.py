@@ -160,7 +160,15 @@ def load_film(db: Session, project_id: str, scene_id: str) -> dict[str, Any]:
             len(film.shots),
             sum(len(shot.segments) for shot in film.shots),
         )
-    if _interrupt_stale(film) or created:
+    from .shot_identity import backfill_shot_numbers, drop_released_attempts, release_uncommitted_shot_numbers
+    from .orchestrator import adopt_finished_segments
+
+    kept = adopt_finished_segments(db, project_id, scene_id, film)
+    stale = _interrupt_stale(film)
+    released = release_uncommitted_shot_numbers(film)
+    dropped = drop_released_attempts(film, keep_failed_notice=True)
+    numbered = backfill_shot_numbers(film)
+    if stale or released or dropped or created or numbered or kept:
         if _normalize_film_durations(film) and not created:
             log.info("film-timeline normalized float-dust durations project=%s scene=%s", project_id, scene_id)
         save_film(db, project_id, scene_id, film)

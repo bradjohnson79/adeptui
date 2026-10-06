@@ -1,0 +1,128 @@
+{
+  "type_a_gpt_structured": {
+    "ok": true,
+    "provider": "fal",
+    "model": "google/gemini-2.5-flash-lite",
+    "raw": "{\n  \"one_identity\": true,\n  \"panel_count_estimate\": 10,\n  \"layout\": \"structured_labeled_sheet\",\n  \"identity\": {\n    \"apparent_age\": \"21\",\n    \"sex_or_gender_presentation\": \"female\",\n    \"face_shape\": \"oval\",\n    \"eye_appearance\": \"almond-shaped with prominent eyeliner\",\n    \"eye_color\": \"purple\",\n    \"skin_tone\": \"fair / light tan\",\n    \"ears\": \"pointed, elven\",\n    \"hairstyle\": \"long, wavy, blonde\",\n    \"hair_color\": \"light sandy blonde\",\n    \"body_proportions\": \"petite, slim, athletic\",\n    \"distinguishing_marks\": \"circuitry-like tattoos on arms\"\n  },\n  \"wardrobe\": {\n    \"top\": \"white ribbed crop top\",\n    \"bottom\": \"distressed blue denim shorts\",\n    \"footwear\": \"white athletic runners\",\n    \"jewelry_or_accessories\": \"hoop earrings, bracelets, hair ties, leather/metal belt\",\n    \"distinctive_materials\": \"denim, ribbed fabric, leather/metal belt\"\n  },\n  \"persistent_identity_features\": [\n    \"pointed ears\",\n    \"long blonde hair\",\n    \"purple eyes\",\n    \"arm tattoos\"\n  ],\n  \"multi_angle_consistency\": \"high\",\n  \"notes\": \"The character sheet is well-structured with multiple views and detailed close-ups. The 'Character Notes' section provides additional personality insights, but these are not included in the identity or wardrobe fields as per instructions.\"\n}",
+    "facts": {
+      "one_identity": true,
+      "panel_count_estimate": 10,
+      "layout": "structured_labeled_sheet",
+      "identity": {
+        "apparent_age": "21",
+        "sex_or_gender_presentation": "female",
+        "face_shape": "oval",
+        "eye_appearance": "almond-shaped with prominent eyeliner",
+        "eye_color": "purple",
+        "skin_tone": "fair / light tan",
+        "ears": "pointed, elven",
+        "hairstyle": "long, wavy, blonde",
+        "hair_color": "light sandy blonde",
+        "body_proportions": "petite, slim, athletic",
+        "distinguishing_marks": "circuitry-like tattoos on arms"
+      },
+      "wardrobe": {
+        "top": "white ribbed crop top",
+        "bottom": "distressed blue denim shorts",
+        "footwear": "white athletic runners",
+        "jewelry_or_accessories": "hoop earrings, bracelets, hair ties, leather/metal belt",
+        "distinctive_materials": "denim, ribbed fabric, leather/metal belt"
+      },
+      "persistent_identity_features": [
+        "pointed ears",
+        "long blonde hair",
+        "purple eyes",
+        "arm tattoos"
+      ],
+      "multi_angle_consistency": "high",
+      "notes": "The character sheet is well-structured with multiple views and detailed close-ups. The 'Character Notes' section provides additional personality insights, but these are not included in the identity or wardrobe fields as per instructions."
+    },
+    "identity_authority": "reference_image",
+    "used_for_video_prompt": false
+  },
+  "type_b_qwen_stitched": {
+    "ok": true,
+    "provider": "fal",
+    "model": "google/gemini-2.5-flash-lite",
+    "raw": "{\n  \"one_identity\": true,\n  \"panel_count_estimate\": 4,\n  \"layout\": \"structured_labeled_sheet\",\n  \"identity\": {\n    \"apparent_age\": \"young adult\",\n    \"sex_or_gender_presentation\": \"female\",\n    \"face_shape\": \"oval\",\n    \"eye_appearance\": \"large, expressive\",\n    \"eye_color\": \"purple\",\n    \"skin_tone\": \"fair\",\n    \"ears\": \"pointed, elven\",\n    \"hairstyle\": \"pigtails\",\n    \"hair_color\": \"black\",\n    \"body_proportions\": \"slender, athletic\",\n    \"distinguishing_marks\": \"intricate arm tattoos\"\n  },\n  \"wardrobe\": {\n    \"top\": \"asymmetrical, cropped tank top\",\n    \"bottom\": \"distressed denim shorts with a layered, fringed skirt overlay\",\n    \"footwear\": \"strappy leather sandals with ankle cuffs\",\n    \"jewelry_or_accessories\": \"hoop earrings, leather belt with rings, ankle cuffs\",\n    \"distinctive_materials\": \"textured, possibly leather or faux leather\"\n  },\n  \"persistent_identity_features\": [\n    \"pointed ears\",\n    \"black pigtail hairstyle\",\n    \"purple eyes\",\n    \"intricate arm tattoos\",\n    \"slender build\",\n    \"dark, textured clothing\"\n  ],\n  \"multi_angle_consistency\": \"The character's appearance, including hairstyle, clothing, tattoos, and facial features, is consistent across all visible panels.\",\n  \"notes\": \"The character has distinct elven features and a tribal or post-apocalyptic aesthetic.\"\n}",
+    "facts": {
+      "one_identity": true,
+      "panel_count_estimate": 4,
+      "layout": "structured_labeled_sheet",
+      "identity": {
+        "apparent_age": "young adult",
+        "sex_or_gender_presentation": "female",
+        "face_shape": "oval",
+        "eye_appearance": "large, expressive",
+        "eye_color": "purple",
+        "skin_tone": "fair",
+        "ears": "pointed, elven",
+        "hairstyle": "pigtails",
+        "hair_color": "black",
+        "body_proportions": "slender, athletic",
+        "distinguishing_marks": "intricate arm tattoos"
+      },
+      "wardrobe": {
+        "top": "asymmetrical, cropped tank top",
+        "bottom": "distressed denim shorts with a layered, fringed skirt overlay",
+        "footwear": "strappy leather sandals with ankle cuffs",
+        "jewelry_or_accessories": "hoop earrings, leather belt with rings, ankle cuffs",
+        "distinctive_materials": "textured, possibly leather or faux leather"
+      },
+      "persistent_identity_features": [
+        "pointed ears",
+        "black pigtail hairstyle",
+        "purple eyes",
+        "intricate arm tattoos",
+        "slender build",
+        "dark, textured clothing"
+      ],
+      "multi_angle_consistency": "The character's appearance, including hairstyle, clothing, tattoos, and facial features, is consistent across all visible panels.",
+      "notes": "The character has distinct elven features and a tribal or post-apocalyptic aesthetic."
+    },
+    "identity_authority": "reference_image",
+    "used_for_video_prompt": false
+  },
+  "addex_structured": {
+    "ok": true,
+    "provider": "fal",
+    "model": "google/gemini-2.5-flash-lite",
+    "raw": "{\n  \"one_identity\": true,\n  \"panel_count_estimate\": 10,\n  \"layout\": \"structured_labeled_sheet\",\n  \"identity\": {\n    \"apparent_age\": \"21\",\n    \"sex_or_gender_presentation\": \"male\",\n    \"face_shape\": \"oval\",\n    \"eye_appearance\": \"almond-shaped, slightly hooded\",\n    \"eye_color\": \"hazel\",\n    \"skin_tone\": \"light warm tan\",\n    \"ears\": \"visible, slightly pointed\",\n    \"hairstyle\": \"medium length, layered, wavy, swept to the side\",\n    \"hair_color\": \"dark brown\",\n    \"body_proportions\": \"lean muscular / athletic\",\n    \"distinguishing_marks\": \"\"\n  },\n  \"wardrobe\": {\n    \"top\": \"black button-collar shirt\",\n    \"bottom\": \"beige pants\",\n    \"footwear\": \"black leather shoes\",\n    \"jewelry_or_accessories\": \"wristwatch\",\n    \"distinctive_materials\": \"leather (shoes), fabric (shirt and pants)\"\n  },\n  \"persistent_identity_features\": [\n    \"dark brown wavy hair\",\n    \"hazel eyes\",\n    \"light warm tan skin tone\",\n    \"lean muscular build\",\n    \"facial structure\"\n  ],\n  \"multi_angle_consistency\": \"high\",\n  \"notes\": \"The sheet provides multiple views of the character, including full body turnarounds and close-up facial features. The details are consistent across all panels.\"\n}",
+    "facts": {
+      "one_identity": true,
+      "panel_count_estimate": 10,
+      "layout": "structured_labeled_sheet",
+      "identity": {
+        "apparent_age": "21",
+        "sex_or_gender_presentation": "male",
+        "face_shape": "oval",
+        "eye_appearance": "almond-shaped, slightly hooded",
+        "eye_color": "hazel",
+        "skin_tone": "light warm tan",
+        "ears": "visible, slightly pointed",
+        "hairstyle": "medium length, layered, wavy, swept to the side",
+        "hair_color": "dark brown",
+        "body_proportions": "lean muscular / athletic",
+        "distinguishing_marks": ""
+      },
+      "wardrobe": {
+        "top": "black button-collar shirt",
+        "bottom": "beige pants",
+        "footwear": "black leather shoes",
+        "jewelry_or_accessories": "wristwatch",
+        "distinctive_materials": "leather (shoes), fabric (shirt and pants)"
+      },
+      "persistent_identity_features": [
+        "dark brown wavy hair",
+        "hazel eyes",
+        "light warm tan skin tone",
+        "lean muscular build",
+        "facial structure"
+      ],
+      "multi_angle_consistency": "high",
+      "notes": "The sheet provides multiple views of the character, including full body turnarounds and close-up facial features. The details are consistent across all panels."
+    },
+    "identity_authority": "reference_image",
+    "used_for_video_prompt": false
+  }
+}

@@ -4,12 +4,13 @@
   # ERS  Environment Reference Sheet
   % PRS  Prop Reference Sheet
   * video / motion
+  & audio / voice reference (conditioning; not Timeline Audio clip)
   ~ Generic Image (Image Generator "Other Image References" authority;
     any project image that is not a CRS/ERS/PRS/video binding)
 */
 
-export type ReferenceMediaKind = "entity" | "image" | "video";
-export type SheetPrefix = "@" | "#" | "%" | "*" | "~";
+export type ReferenceMediaKind = "entity" | "image" | "video" | "audio";
+export type SheetPrefix = "@" | "#" | "%" | "*" | "&" | "~";
 
 /** Canonical sigil for generic image references (Image Generator authority). */
 export const GENERIC_IMAGE_PREFIX = "~" as const;
@@ -35,7 +36,7 @@ export type ReferenceBindingView = {
   duration_sec?: number | null;
 };
 
-export type TimelineSemanticType = "character" | "prop" | "environment" | "video" | "image" | "other";
+export type TimelineSemanticType = "character" | "prop" | "environment" | "video" | "audio" | "image" | "other";
 export type TimedPromptSemanticType = "character" | "prop" | "environment";
 
 export type NormalizedTimelineReference = {
@@ -54,7 +55,7 @@ function leadingSheetPrefix(raw: string | null | undefined): SheetPrefix | null 
   const token = String(raw || "").trim();
   if (!token) return null;
   const ch = token[0];
-  if (ch === "@" || ch === "#" || ch === "%" || ch === "*" || ch === "~") return ch;
+  if (ch === "@" || ch === "#" || ch === "%" || ch === "*" || ch === "&" || ch === "~") return ch;
   return null;
 }
 
@@ -64,6 +65,7 @@ function semanticTypeFromReferenceType(referenceType: string | null | undefined)
   if (type === "environment" || type === "location") return "environment";
   if (type === "prop" || type === "vehicle") return "prop";
   if (type === "video" || type === "motion") return "video";
+  if (type === "audio" || type === "voice") return "audio";
   if (type === GENERIC_IMAGE_REFERENCE_TYPE) return "image";
   // mediaType / reference_type "image" is NOT semantic by itself — never overrides #/@/%.
   return null;
@@ -74,6 +76,7 @@ function semanticTypeFromLeadingPrefix(prefix: SheetPrefix | null | undefined): 
   if (prefix === "#") return "environment";
   if (prefix === "%") return "prop";
   if (prefix === "*") return "video";
+  if (prefix === "&") return "audio";
   if (prefix === "~") return "image";
   return null;
 }
@@ -83,6 +86,7 @@ function prefixForSemanticType(semanticType: TimelineSemanticType): SheetPrefix 
   if (semanticType === "environment") return "#";
   if (semanticType === "prop") return "%";
   if (semanticType === "video") return "*";
+  if (semanticType === "audio") return "&";
   if (semanticType === "image") return "~";
   return "#";
 }
@@ -104,10 +108,11 @@ function mediaKindForSemanticType(
   fallback: ReferenceMediaKind | string | null | undefined,
 ): ReferenceMediaKind {
   if (semanticType === "video") return "video";
+  if (semanticType === "audio") return "audio";
   if (semanticType === "character" || semanticType === "prop") return "entity";
   if (semanticType === "environment" || semanticType === "image") return "image";
   const kind = String(fallback || "").toLowerCase();
-  if (kind === "video" || kind === "entity" || kind === "image") return kind;
+  if (kind === "video" || kind === "audio" || kind === "entity" || kind === "image") return kind;
   return "image";
 }
 
@@ -218,6 +223,7 @@ export function stripReferencePrefix(raw: string): string {
     token.startsWith("@") ||
     token.startsWith("#") ||
     token.startsWith("*") ||
+    token.startsWith("&") ||
     token.startsWith("%") ||
     token.startsWith("~")
   ) {
@@ -241,6 +247,7 @@ export function prefixForBinding(
   mediaKind?: ReferenceMediaKind | string | null,
 ): SheetPrefix {
   const blob = `${referenceType || ""} ${mediaKind || ""}`.toLowerCase();
+  if (blob.includes("audio") || blob.includes("voice")) return "&";
   if (blob.includes("video") || blob.trim() === "motion") return "*";
   if (["character", "wardrobe", "creature"].includes(String(referenceType || ""))) return "@";
   if (["environment", "location"].includes(String(referenceType || ""))) return "#";
@@ -257,12 +264,14 @@ export function prefixForMediaKind(kind: ReferenceMediaKind | string | null | un
 
 export function mediaKindForAssetKind(kind: string): ReferenceMediaKind | null {
   if (kind === "video") return "video";
+  if (kind === "audio") return "audio";
   if (kind === "image") return "image";
   return null;
 }
 
-export function referenceTypeForAssetKind(kind: string): "image" | "video" | null {
+export function referenceTypeForAssetKind(kind: string): "image" | "video" | "audio" | null {
   if (kind === "video") return "video";
+  if (kind === "audio") return "audio";
   if (kind === "image") return "image";
   return null;
 }
@@ -384,6 +393,7 @@ export function mediaKindForReferenceType(
 ): ReferenceMediaKind {
   const type = String(referenceType || "").trim().toLowerCase();
   if (type === "video" || type === "motion") return "video";
+  if (type === "audio" || type === "voice") return "audio";
   if (type === "character" || type === "wardrobe" || type === "creature" || type === "prop" || type === "vehicle") {
     return "entity";
   }
@@ -423,7 +433,8 @@ export function typeLabel(referenceType: string, mediaKind?: string | null): str
   if (referenceType === "vehicle") return "Vehicle";
   if (referenceType === "scene_frame") return "Scene Frame";
   if (referenceType === GENERIC_IMAGE_REFERENCE_TYPE) return "Image Reference";
-  if (mediaKind === "video" || referenceType === "video") return "Video";
+  if (mediaKind === "video" || referenceType === "video" || referenceType === "motion") return "Video";
+  if (mediaKind === "audio" || referenceType === "audio" || referenceType === "voice") return "Audio";
   if (mediaKind === "entity") return "Character";
   if (mediaKind === "image" || referenceType === "image") return "Image";
   return referenceType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -455,6 +466,7 @@ export function chipLabel(binding: ReferenceBindingView): string {
 
 export function mediaKindForType(referenceType: string): ReferenceMediaKind {
   if (referenceType === "video" || referenceType === "motion") return "video";
+  if (referenceType === "audio" || referenceType === "voice") return "audio";
   if (referenceType === "image") return "image";
   return "entity";
 }
@@ -465,6 +477,7 @@ export function parseTokenQuery(raw: string): { prefix: SheetPrefix | null; quer
   if (text.startsWith("#")) return { prefix: "#", query: text.slice(1) };
   if (text.startsWith("%")) return { prefix: "%", query: text.slice(1) };
   if (text.startsWith("*")) return { prefix: "*", query: text.slice(1) };
+  if (text.startsWith("&")) return { prefix: "&", query: text.slice(1) };
   if (text.startsWith("~")) return { prefix: "~", query: text.slice(1) };
   return { prefix: null, query: text };
 }
@@ -496,7 +509,9 @@ export function bindingAcceptedOnTrack(
   if (track === "camera") {
     return kind === "video" || kind === "entity";
   }
-  if (track === "prompt") return Boolean(binding.id) && !String(binding.id).startsWith("character:");
+  if (track === "prompt") {
+    return Boolean(binding.id) && !String(binding.id).startsWith("character:");
+  }
   return kind === "image" || kind === "entity";
 }
 

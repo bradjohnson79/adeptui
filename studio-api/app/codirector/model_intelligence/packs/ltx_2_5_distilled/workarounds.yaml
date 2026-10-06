@@ -1,0 +1,4 @@
+items:
+  - id: external_audio
+    summary: Prefer imported dialogue/ambience/SFX on Director timeline
+    when: music_or_dialogue_control_required

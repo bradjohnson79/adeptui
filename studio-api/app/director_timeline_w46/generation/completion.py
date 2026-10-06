@@ -540,15 +540,27 @@ def place_approved_batches_on_timeline(
         ),
         None,
     )
+    # The take being rendered is what the creator is watching. Its deposited
+    # windows go on Visual as they finish. With no render in flight, the
+    # current take stays the display authority.
+    active_take = next(
+        (
+            t
+            for t in (master.sceneTakes or [])
+            if t.id == getattr(master, "activeSceneTakeId", None) and t.status == "rendering"
+        ),
+        None,
+    )
+    display_take = active_take or current_take
     # A09: only enter current-take fail-closed mode when a current scene take exists.
     # None keeps legacy approved/latest placement for scenes without sceneTakes.
     preferred_assets = (
         {
             str(m.batchId): str(m.assetId or "").strip()
-            for m in (current_take.batches or [])
+            for m in (display_take.batches or [])
             if getattr(m, "assetId", None)
         }
-        if current_take is not None
+        if display_take is not None
         else None
     )
     for batch in sorted(master.batchBlocks, key=lambda b: b.order):
@@ -570,6 +582,11 @@ def place_approved_batches_on_timeline(
             continue
         take = _playable_take_for_batch(batch, preferred_assets)
         if not take:
+            # A window the in-flight take has not deposited yet must not keep
+            # the previous take's bar.
+            if active_take is not None:
+                clip_id = f"{MANAGED_BATCH_VISUAL_PREFIX}{batch.id}"
+                batch.visualClips = [c for c in (batch.visualClips or []) if c.id != clip_id]
             # A09: missing window asset still advances the placement cursor so
             # later batches keep scene-absolute starts (no collapse/borrow).
             planned = float(
@@ -581,6 +598,13 @@ def place_approved_batches_on_timeline(
             cursor += max(0.1, planned)
             continue
         asset_id, length = take
+        dismissed = str(getattr(batch, "dismissedVisualAssetId", None) or "").strip()
+        if dismissed and dismissed == asset_id:
+            # Creator removed this video from Visual. Do not put the same asset back.
+            cursor += length
+            continue
+        if dismissed and dismissed != asset_id:
+            batch.dismissedVisualAssetId = None
         _upsert_managed_visual_take(batch, asset_id, length)
         placed_ids.append(f"{MANAGED_BATCH_VISUAL_PREFIX}{batch.id}")
         cursor += length

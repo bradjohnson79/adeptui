@@ -2,6 +2,7 @@
 
 export const STORYBOARD_CAPTION_MAX = 140;
 export type StoryboardPageSize = 6 | 9 | 12;
+export type StoryboardAspect = "16:9" | "9:16";
 export type ScriptLinkStatus =
   | "linked"
   | "script_updated"
@@ -44,6 +45,7 @@ export type StoryboardDocument = {
   projectId: string;
   title: string;
   pageSize: StoryboardPageSize;
+  aspectRatio?: StoryboardAspect;
   pages: StoryboardPage[];
   panelOrder: string[];
   legacyDocId?: string | null;
@@ -70,6 +72,7 @@ export type TimelinePrepProposal = {
   id: string;
   projectId: string;
   documentId: string;
+  aspectRatio?: StoryboardAspect;
   shots: TimelinePrepShotProposal[];
   status: "draft" | "approved" | "applied" | "rejected";
   createdAt: string;

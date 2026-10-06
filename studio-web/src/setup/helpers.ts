@@ -43,6 +43,12 @@ export const OVERALL_LABELS: Record<SetupOverallStatus, string> = {
 };
 
 export function componentStateLabel(component: SetupComponentStatus): string {
+  if (component.status === "ready" && component.id === "minimax_h3_base_optimized") {
+    return "Installed · Existing Files Detected";
+  }
+  if (component.status === "ready" && component.id === "hunyuan_video_1_5_distilled") {
+    return "Installed";
+  }
   if (component.component_kind === "credential" || component.installer === "credentials") {
     if (component.status === "ready") return "Verified";
     if (component.issue_code === "credential_invalid") return "Key Rejected";

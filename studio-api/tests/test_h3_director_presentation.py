@@ -14,7 +14,7 @@ from app.video_runtime.legal_canvas import resolve_generation_dimensions
 def test_h3_local_filmmaker_label_is_director_not_r2v() -> None:
     caps = MiniMaxH3I2VLocalAdapter.capabilities
     assert caps.id == "minimax-h3-i2v-local"
-    assert caps.label == "MiniMax H3 Director — Local"
+    assert caps.label == "MiniMax H3 — Local"
     assert "Reference to Video" not in caps.label
     assert "Reference-to-Video" not in caps.label
 
@@ -36,7 +36,7 @@ def test_availability_overrides_h3_local_label_to_director() -> None:
     ):
         rows = list_generator_status()
     h3 = next(r for r in rows if r["id"] == "minimax-h3-i2v-local")
-    assert h3["label"] == "MiniMax H3 Director — Local"
+    assert h3["label"] == "MiniMax H3 — Local"
     assert "Reference to Video" not in h3["label"]
 
 

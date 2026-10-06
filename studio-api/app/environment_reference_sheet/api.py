@@ -31,7 +31,7 @@ def _require_project(db: Session, project_id: str) -> Project:
     return project
 
 
-def _summary(sheet) -> dict[str, Any]:
+def _summary(sheet, db: Session | None = None) -> dict[str, Any]:
     from .versioning import version_summary
 
     canonical = get_canonical_sheet_id(sheet.projectId)
@@ -50,6 +50,14 @@ def _summary(sheet) -> dict[str, Any]:
             "exportKinds": [item.exportKind for item in sheet.exports if item.status == "created"],
         }
     )
+    if db is not None:
+        from ..db import Asset
+
+        asset_id = str(base.get("ers_composite_asset_id") or "").strip()
+        asset = db.get(Asset, asset_id) if asset_id else None
+        ready = bool(asset is not None and str(getattr(asset, "path", "") or "").strip() and str(getattr(asset, "project_id", "") or "").strip())
+        base["thumbReady"] = ready
+        base["thumbProjectId"] = str(getattr(asset, "project_id", "") or "") if ready else str(getattr(sheet, "projectId", "") or "")
     return base
 
 
@@ -68,7 +76,7 @@ def api_list_sheets(project_id: str, response: Response, db: Session = Depends(g
     sheets = list_visible_sheets(db, project_id)
     canonical = get_canonical_sheet_id(project_id)
     return {
-        "sheets": [_summary(sheet) for sheet in sheets],
+        "sheets": [_summary(sheet, db) for sheet in sheets],
         "canonicalSheetId": canonical,
     }
 
@@ -331,6 +339,26 @@ def api_ers_gate_use_anyway(
 # --- Backend seam: derivative-only edit enqueue (locked ERS_EDIT_API_CONTRACT) ---
 
 
+
+
+class ErsSnapshotCaptureBody(BaseModel):
+    sourceAssetId: str | None = None
+    legend: dict[str, Any] | None = None
+    drawingOverlay: dict[str, Any] | None = None
+    textLabels: list[dict[str, Any]] | None = None
+    numberedMarkers: list[dict[str, Any]] | None = None
+    directionMovement: str | None = None
+
+
+class ErsEditAnnotationsBody(BaseModel):
+    sourceAssetId: str | None = None
+    legend: dict[str, Any] | None = None
+    drawingOverlay: dict[str, Any] | None = None
+    textLabels: list[dict[str, Any]] | None = None
+    numberedMarkers: list[dict[str, Any]] | None = None
+    overlayBakePolicy: str | None = None
+
+
 class ErsEditEnqueueBody(BaseModel):
     editPrompt: str = Field(..., min_length=1)
     maskAssetId: str | None = None
@@ -342,6 +370,102 @@ class ErsEditEnqueueBody(BaseModel):
     drawingOverlay: dict[str, Any] | None = None
     textLabels: list[dict[str, Any]] | None = None
     numberedMarkers: list[dict[str, Any]] | None = None
+    # Environment Creator selected provider/model (no silent substitute).
+    requestedProvider: str | None = None
+    apiProvider: str | None = None
+    hostedModelId: str | None = None
+    apiModelId: str | None = None
+    falImageModelId: str | None = None
+    kieImageModelId: str | None = None
+    wavespeedImageModelId: str | None = None
+    officialModelId: str | None = None
+    overlayBakePolicy: str | None = None
+
+
+
+@router.post("/projects/{project_id}/{sheet_id}/edit/annotations")
+def api_ers_edit_annotations(
+    project_id: str,
+    sheet_id: str,
+    body: ErsEditAnnotationsBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Persist Legend / spatial annotations without invoking image edit."""
+    _require_project(db, project_id)
+    from .edit import save_ers_edit_annotations
+
+    try:
+        return save_ers_edit_annotations(
+            project_id,
+            sheet_id,
+            source_asset_id=body.sourceAssetId or None,
+            legend=body.legend,
+            drawing_overlay=body.drawingOverlay,
+            text_labels=body.textLabels,
+            numbered_markers=body.numberedMarkers,
+            overlay_bake_policy=body.overlayBakePolicy,
+        )
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+
+
+@router.post("/projects/{project_id}/{sheet_id}/edit/snapshot")
+def api_ers_capture_snapshot(
+    project_id: str,
+    sheet_id: str,
+    body: ErsSnapshotCaptureBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Instant local snapshot capture. ZERO provider image generation."""
+    _require_project(db, project_id)
+    from .snapshots import capture_ers_snapshot
+
+    try:
+        return capture_ers_snapshot(
+            db,
+            project_id,
+            sheet_id,
+            source_asset_id=body.sourceAssetId or None,
+            legend=body.legend,
+            drawing_overlay=body.drawingOverlay,
+            text_labels=body.textLabels,
+            numbered_markers=body.numberedMarkers,
+            direction_movement=body.directionMovement,
+        )
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@router.delete("/projects/{project_id}/{sheet_id}/snapshots/{snapshot_sheet_id}")
+def api_ers_delete_snapshot(
+    project_id: str,
+    sheet_id: str,
+    snapshot_sheet_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Delete a snapshot only. Master / siblings / overlay preserved."""
+    _require_project(db, project_id)
+    from .snapshots import delete_ers_snapshot, is_snapshot_sheet
+    from .store import load_sheet
+
+    master = load_sheet(project_id, sheet_id)
+    if master is None:
+        raise HTTPException(404, "Environment Reference Sheet not found")
+    snap = load_sheet(project_id, snapshot_sheet_id)
+    if snap is None:
+        raise HTTPException(404, "Snapshot not found")
+    if not is_snapshot_sheet(snap):
+        raise HTTPException(400, "Only snapshots can be removed via this endpoint")
+    parent = str(getattr(snap, "snapshotOfSheetId", None) or getattr(snap, "parentSheetId", None) or "").strip()
+    if parent and parent != sheet_id:
+        raise HTTPException(400, "Snapshot does not belong to this master sheet")
+
+    try:
+        return delete_ers_snapshot(project_id, snapshot_sheet_id)
+    except Exception as exc:
+        raise _http_error(exc) from exc
 
 
 @router.post("/projects/{project_id}/{sheet_id}/edit/enqueue")
@@ -369,6 +493,20 @@ def api_ers_edit_enqueue(
             drawing_overlay=body.drawingOverlay,
             text_labels=body.textLabels,
             numbered_markers=body.numberedMarkers,
+            overlay_bake_policy=body.overlayBakePolicy,
+            requested_provider=body.requestedProvider or body.apiProvider,
+            hosted_model_id=body.hostedModelId or body.apiModelId,
+            fal_image_model_id=body.falImageModelId or (
+                body.officialModelId if (body.requestedProvider or body.apiProvider or "").lower() == "fal" else None
+            ),
+            kie_image_model_id=body.kieImageModelId or (
+                body.officialModelId if (body.requestedProvider or body.apiProvider or "").lower() == "kie" else None
+            ),
+            wavespeed_image_model_id=body.wavespeedImageModelId or (
+                body.officialModelId if (body.requestedProvider or body.apiProvider or "").lower() == "wavespeed" else None
+            ),
+            official_model_id=body.officialModelId,
+            api_model_id=body.apiModelId,
         )
     except Exception as exc:
         raise _http_error(exc) from exc

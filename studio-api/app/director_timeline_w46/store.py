@@ -220,12 +220,25 @@ def load_master(db: Session, project_id: str, scene_id: str) -> dict[str, Any]:
             pass
     elif not existing_master or tag_repaired or bootstrapped_empty:
         save_master(db, project_id, scene_id, master, director_tl=tl)
+    from .same_track_no_overlap import audit_master_same_track_overlaps
+
+    overlap_audit = audit_master_same_track_overlaps(master)
+    if overlap_audit:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "same-track overlap audit project=%s scene=%s findings=%s",
+            project_id,
+            scene_id,
+            len(overlap_audit),
+        )
     return {
         "ok": True,
         "projectId": project_id,
         "sceneId": scene_id,
         "master": master.model_dump(),
         "legacyMediaMode": tl.media_mode,
+        "sameTrackOverlapAudit": overlap_audit,
         "mock": False,
     }
 
@@ -259,6 +272,9 @@ def save_master(
             raw = parsed
     except Exception:
         raw = {}
+    existing_film = raw.get("filmTimeline")
+    if isinstance(existing_film, dict) and existing_film.get("version"):
+        return master
     # Preserve any non-Master, non-workspace keys already on disk (legacy blob,
     # lipsync, etc.) without re-serializing a live DirectorTimeline store.
     base = {k: v for k, v in raw.items() if k not in ("timelineMaster", "timelineWorkspace")}

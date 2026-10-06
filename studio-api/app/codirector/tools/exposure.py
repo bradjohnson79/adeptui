@@ -503,3 +503,22 @@ def expose_ordered(
     )
     defs = list(definitions) if definitions is not None else list(all_definitions())
     return [d.tool_id for d in defs if d.tool_id in selected]
+
+
+def is_shelved_tool(tool_id: str) -> bool:
+    """True when a registered tool must never enter the active toolset.
+
+    Spatial, avatar, and legacy ERS mutation tools stay registered and dormant.
+    Exposure failure must not fall back to these ids.
+    """
+
+    tid = (tool_id or "").strip()
+    if not tid:
+        return True
+    if tid in _LEGACY_ERS_MUTATION_TOOL_IDS:
+        return True
+    if _is_shelved_spatial_creator_tool(tid):
+        return True
+    if _is_shelved_avatar_studio_tool(tid):
+        return True
+    return False

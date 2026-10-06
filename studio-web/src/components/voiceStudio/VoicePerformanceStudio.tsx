@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import type {
   VoicePerformanceCapabilities,
@@ -12,7 +12,6 @@ import type {
   VoicePerformanceRecord,
   VoicePerformanceRuntimeStatus,
   VoicePerformanceTake,
-  VoicePerformanceTimelinePlacement,
 } from "../../contracts/voicePerformanceM410";
 import { Button } from "../ui";
 import { HelpTip, PanelHeading } from "../HelpTip";
@@ -20,6 +19,31 @@ import {
   VOICE_PERFORMANCE_EMOTION_PRESETS,
   VOICE_PERFORMANCE_EMOTION_PRESET_LABELS,
 } from "./emotionPresets";
+import {
+  MANNERISM_CUE_OPTIONS,
+  MANNERISM_INTENSITY_OPTIONS,
+  MANNERISM_POSITION_OPTIONS,
+  extractSpokenDialogue,
+  makeMannerismCue,
+  mergeMannerismCues,
+  normalizeMannerismCues,
+  type MannerismCue,
+  type MannerismCueId,
+  type MannerismIntensity,
+  type MannerismPosition,
+} from "./mannerismCues";
+import { getVoiceStudioProvider } from "../../audioProvider/voiceStudioProviderStore";
+import { useVoiceStudioProviderSource } from "../../audioProvider/useProviderSource";
+import {
+  formatVoicePerformanceTakeStatus,
+  mergeVoicePerformanceTakes,
+  nextVoicePerformanceTakeNumber,
+  pendingVoicePerformanceTakes,
+  sortVoicePerformanceTakes,
+  voicePerformanceBatchProgress,
+  type VoicePerformanceGenerationProgress,
+} from "./voicePerformanceGenerate";
+import { pickCanonicalVoiceRecord } from "./canonicalVoiceRecord";
 
 const DEFAULT_DIALOGUE = `Light circuitry, not tattoos, doofus.
 I developed them with my sister in the Abode.`;
@@ -67,6 +91,7 @@ type VoiceIdentitySummary = {
   id: string;
   name: string;
   version?: string | number | null;
+  provider?: string;
 };
 
 type Props = {
@@ -78,6 +103,8 @@ type Props = {
   initialDialogue?: string;
   onMsg: (m: string) => void;
   onOpenVoiceIdentity: () => void;
+  onDialogueChange?: (text: string) => void;
+  onOpenEnvironment?: (libraryAssetId: string) => void;
 };
 
 function emptyPlan(seed?: Partial<VoicePerformancePlan>): VoicePerformancePlan {
@@ -128,6 +155,10 @@ function normalizePlan(plan: Record<string, unknown> | null | undefined, mode: V
       input.emotionVector && typeof input.emotionVector === "object"
         ? (input.emotionVector as VoicePerformanceEmotionVector)
         : {},
+    mannerismCues: normalizeMannerismCues(input.mannerismCues),
+    mannerismNotices: Array.isArray(input.mannerismNotices)
+      ? (input.mannerismNotices as string[])
+      : [],
   });
 }
 
@@ -137,13 +168,11 @@ function topEmotionLabel(vector: VoicePerformanceEmotionVector) {
 }
 
 function formatTakeStatus(status: VoicePerformanceTake["status"]) {
-  if (status === "completed") return "Ready";
-  if (status === "approved") return "Approved";
-  return status.replace(/^\w/, (char) => char.toUpperCase());
+  return formatVoicePerformanceTakeStatus(status);
 }
 
 function takeSort(a: VoicePerformanceTake, b: VoicePerformanceTake) {
-  return a.takeNumber - b.takeNumber || a.createdAt.localeCompare(b.createdAt);
+  return a.takeNumber - b.takeNumber || String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
 }
 
 export function VoicePerformanceStudio({
@@ -155,6 +184,8 @@ export function VoicePerformanceStudio({
   initialDialogue,
   onMsg,
   onOpenVoiceIdentity,
+  onDialogueChange,
+  onOpenEnvironment,
 }: Props) {
   const [runtimeStatus, setRuntimeStatus] = useState<VoicePerformanceRuntimeStatus | null>(null);
   const [capabilities, setCapabilities] = useState<VoicePerformanceCapabilities | null>(null);
@@ -175,27 +206,82 @@ export function VoicePerformanceStudio({
   const [takeCount, setTakeCount] = useState<(typeof TAKE_OPTIONS)[number]>(4);
   const [takes, setTakes] = useState<VoicePerformanceTake[]>([]);
   const [approvedTakeId, setApprovedTakeId] = useState("");
+  const [generationBatch, setGenerationBatch] = useState<{
+    startNumber: number;
+    total: number;
+    batchId: string;
+  } | null>(null);
+  const [displayBatch, setDisplayBatch] = useState<{
+    startNumber: number;
+    total: number;
+    batchId: string;
+  } | null>(null);
+  const [serverGenerationProgress, setServerGenerationProgress] =
+    useState<VoicePerformanceGenerationProgress | null>(null);
+  const [generationCompleteNotice, setGenerationCompleteNotice] = useState(false);
   const [comparison, setComparison] = useState<VoicePerformanceComparison | null>(null);
-  const [timelineResult, setTimelineResult] = useState<VoicePerformanceTimelinePlacement | null>(null);
   const [busyAction, setBusyAction] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [timelineNeedsConfirm, setTimelineNeedsConfirm] = useState(false);
+  const [mannerismCueId, setMannerismCueId] = useState<MannerismCueId | "">("");
+  const [mannerismPosition, setMannerismPosition] = useState<MannerismPosition>("before");
+  const [mannerismIntensity, setMannerismIntensity] = useState<MannerismIntensity>("medium");
+  const [mannerismNotice, setMannerismNotice] = useState("");
 
   const dialogueRef = useRef<HTMLElement | null>(null);
   const performanceRef = useRef<HTMLElement | null>(null);
   const takesRef = useRef<HTMLElement | null>(null);
 
+  const voiceSelection = useVoiceStudioProviderSource();
+  const savedProvider = String(approvedVoiceIdentity?.provider || "").toLowerCase() === "elevenlabs" ? "elevenlabs" : "local";
+  const elevenSelected = voiceSelection.source === "elevenlabs";
   const hasApprovedVoiceIdentity = Boolean(approvedVoiceIdentity?.id);
+  const voiceReady = elevenSelected
+    ? hasApprovedVoiceIdentity && savedProvider === "elevenlabs"
+    : hasApprovedVoiceIdentity && savedProvider !== "elevenlabs";
+  const voiceGateMessage = elevenSelected
+    ? "Save an ElevenLabs voice for this character before generating."
+    : savedProvider === "elevenlabs"
+      ? "This character's saved voice is ElevenLabs. Switch Voice Provider to Local before a Local take."
+      : "Voice Identity Required";
   const selectedPreset = useMemo(
     () => presets.find((preset) => preset.id === selectedPresetId) || null,
     [presets, selectedPresetId],
   );
   const activePlan = directionMode === "manual" ? manualPlan : codirectorPlan;
-  const visibleTakes = useMemo(() => [...takes].sort(takeSort).slice(-4), [takes]);
+  const dialogueMannerismPreview = useMemo(() => extractSpokenDialogue(dialogueText), [dialogueText]);
+  const buildActiveMannerismCues = useCallback((): MannerismCue[] => {
+    const fromUi = mannerismCueId
+      ? [makeMannerismCue(mannerismCueId, { position: mannerismPosition, intensity: mannerismIntensity, source: "ui" })]
+      : [];
+    const fromPlan = normalizeMannerismCues(activePlan.mannerismCues);
+    const fromText = dialogueMannerismPreview.mannerismCues;
+    return mergeMannerismCues(mergeMannerismCues(fromUi, fromPlan), fromText);
+  }, [activePlan.mannerismCues, dialogueMannerismPreview.mannerismCues, mannerismCueId, mannerismIntensity, mannerismPosition]);
+  const sortedTakes = useMemo(() => sortVoicePerformanceTakes(takes), [takes]);
+  const activeBatch = generationBatch || displayBatch;
+  const visibleTakes = useMemo(() => {
+    if (activeBatch) {
+      return sortedTakes.filter(
+        (take) =>
+          take.takeNumber >= activeBatch.startNumber &&
+          take.takeNumber < activeBatch.startNumber + activeBatch.total,
+      );
+    }
+    return sortedTakes.slice(-4);
+  }, [activeBatch, sortedTakes]);
+  const batchProgress = useMemo(
+    () =>
+      voicePerformanceBatchProgress({
+        takes: visibleTakes,
+        expectedTotal: activeBatch?.total || visibleTakes.length,
+        batchStartNumber: activeBatch?.startNumber || visibleTakes[0]?.takeNumber || 1,
+        generating: Boolean(generationBatch),
+        serverProgress: serverGenerationProgress,
+      }),
+    [activeBatch, generationBatch, serverGenerationProgress, visibleTakes],
+  );
   const activeRuntimeMessage = runtimeStatus?.message || capabilities?.message || "";
-  const canGenerateTakes = hasApprovedVoiceIdentity && Boolean(capabilities?.ready);
-  const voiceProvider = useVoiceStudioProviderSource();
-
+  const canGenerateTakes = voiceReady && (elevenSelected || Boolean(capabilities?.ready));
   const recordNeedsReplacement = useCallback(
     (existing: VoicePerformanceRecord | null) =>
       !existing
@@ -216,14 +302,18 @@ export function VoicePerformanceStudio({
         || topEmotionLabel(emotionVector),
       presetId: selectedPresetId || plan.presetId || "",
       emotionVector,
+      mannerismCues: buildActiveMannerismCues(),
+      mannerismNotices: dialogueMannerismPreview.notices,
     }),
-    [emotionVector, selectedPreset?.name, selectedPresetId],
+    [buildActiveMannerismCues, dialogueMannerismPreview.notices, emotionVector, selectedPreset?.name, selectedPresetId],
   );
 
   const syncRecordFromApi = useCallback(
     (nextRecord: VoicePerformanceRecord) => {
       setRecord(nextRecord);
-      setDialogueText(nextRecord.dialogueText || initialDialogue?.trim() || DEFAULT_DIALOGUE);
+      // The session draft is the authoritative authored line; a record sync must
+      // not clobber an in-progress edit made from either Performance or Takes.
+      setDialogueText(initialDialogue?.trim() || nextRecord.dialogueText || DEFAULT_DIALOGUE);
       setDirectionMode(nextRecord.directionMode || "codirector");
       const nextManual = normalizePlan(nextRecord.manualPlan, "manual");
       const nextCodirector = normalizePlan(nextRecord.codirectorPlan || nextRecord.performancePlan, "codirector");
@@ -236,9 +326,23 @@ export function VoicePerformanceStudio({
       );
       setEmotionalReferenceAssetId(String(nextRecord.emotionalReferenceAssetId || ""));
       setEmotionalReferenceStrength(nextRecord.emotionalReferenceStrength ?? 0.65);
-      setTakes([...(nextRecord.takes || [])].sort(takeSort));
+    const hydratedCues = normalizeMannerismCues(
+      nextRecord.performancePlan?.mannerismCues
+        || nextManual.mannerismCues
+        || nextCodirector.mannerismCues
+        || [],
+    );
+    const primary = hydratedCues[0];
+    setMannerismCueId(primary ? (primary.id as MannerismCueId) : "");
+    setMannerismPosition(primary?.position || "before");
+    setMannerismIntensity(primary?.intensity || "medium");
+    setMannerismNotice(
+      Array.isArray(nextRecord.performancePlan?.mannerismNotices)
+        ? String((nextRecord.performancePlan?.mannerismNotices as string[])[0] || "")
+        : "",
+    );
+      setTakes(sortVoicePerformanceTakes(nextRecord.takes || []));
       setApprovedTakeId(String(nextRecord.approvedTakeId || ""));
-      setTimelineResult(null);
           },
     [initialDialogue],
   );
@@ -246,8 +350,20 @@ export function VoicePerformanceStudio({
   const loadTakes = useCallback(async () => {
     if (!record?.id) return;
     const next = await api.voicePerformanceM410.listTakes(record.id);
-    setTakes([...(next.takes || [])].sort(takeSort));
+    setTakes((current) => mergeVoicePerformanceTakes(current, next.takes || []));
     setApprovedTakeId(String(next.approvedTakeId || ""));
+    if (next.generationProgress) {
+      setServerGenerationProgress({
+        source: "take_level",
+        completed: Number(next.generationProgress.completed || 0),
+        total: Number(next.generationProgress.total || 0),
+        percent: Number(next.generationProgress.percent || 0),
+        active: Boolean(next.generationProgress.active),
+        currentTakeNumber: next.generationProgress.currentTakeNumber ?? null,
+        label: String(next.generationProgress.label || ""),
+        batchId: next.generationProgress.batchId ?? null,
+      });
+    }
   }, [record?.id]);
 
   useEffect(() => {
@@ -261,12 +377,30 @@ export function VoicePerformanceStudio({
   }, [activeView]);
 
   useEffect(() => {
-    if (!record?.id || !takes.some((take) => take.status === "queued" || take.status === "running")) return;
+    const inFlight =
+      Boolean(generationBatch) ||
+      takes.some((take) => take.status === "queued" || take.status === "running");
+    if (!record?.id || !inFlight) return;
     const interval = window.setInterval(() => {
       void loadTakes().catch(() => undefined);
-    }, 4000);
+    }, generationBatch ? 1500 : 4000);
     return () => window.clearInterval(interval);
-  }, [loadTakes, record?.id, takes]);
+  }, [generationBatch, loadTakes, record?.id, takes]);
+
+  useEffect(() => {
+    if (!generationBatch) return;
+    const batchTakes = takes.filter(
+      (take) =>
+        take.takeNumber >= generationBatch.startNumber &&
+        take.takeNumber < generationBatch.startNumber + generationBatch.total,
+    );
+    const pendingLeft = batchTakes.some((take) => String(take.id).startsWith("pending-take-"));
+    const stillWorking = batchTakes.some((take) => take.status === "queued" || take.status === "running");
+    if (batchTakes.length >= generationBatch.total && !pendingLeft && !stillWorking && busyAction !== "takes") {
+      setGenerationBatch(null);
+      setGenerationCompleteNotice(true);
+    }
+  }, [busyAction, generationBatch, takes]);
 
   useEffect(() => {
     void (async () => {
@@ -295,10 +429,15 @@ export function VoicePerformanceStudio({
     void (async () => {
       try {
         const response = await api.voicePerformanceM410.listProjectRecords(projectId);
-        const matching = (response.records || []).filter((item) => item.characterId === characterId);
+        const records = response.records || [];
+        // Canonical picker: most recently updated record for the active voice,
+        // falling back to the character's most recent record. List order is not
+        // authoritative — an older session must not hide fresh takes.
         const preferred =
-          matching.find((item) => item.voiceIdentityId === approvedVoiceIdentity?.id)
-          || matching[0]
+          pickCanonicalVoiceRecord(records, characterId, approvedVoiceIdentity?.id)
+          || records
+              .filter((item) => item.characterId === characterId)
+              .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0]
           || null;
         if (preferred) {
           syncRecordFromApi(preferred);
@@ -336,8 +475,8 @@ export function VoicePerformanceStudio({
   );
 
   const ensureRecord = useCallback(async () => {
-    if (!approvedVoiceIdentity?.id) {
-      throw new Error("Voice Identity Required");
+    if (!approvedVoiceIdentity?.id || !voiceReady) {
+      throw new Error(voiceGateMessage);
     }
     if (record && !recordNeedsReplacement(record)) {
       return record;
@@ -381,6 +520,8 @@ export function VoicePerformanceStudio({
     recordNeedsReplacement,
     serializePlan,
     syncRecordFromApi,
+    voiceGateMessage,
+    voiceReady,
   ]);
 
   const persistCurrentPlan = useCallback(async () => {
@@ -500,36 +641,53 @@ export function VoicePerformanceStudio({
   );
 
   const generateTakeLabels = useCallback(
-    (count: number) => {
-      const startingNumber = visibleTakes.length ? visibleTakes[visibleTakes.length - 1].takeNumber + 1 : 1;
-      return Array.from({ length: count }, (_, index) => `Take ${startingNumber + index}`);
+    (count: number, startNumber: number) => {
+      // Fresh Take 1..N labels for the new batch (canonical takeNumber still assigned by API).
+      return Array.from({ length: count }, (_, index) => `Take ${index + 1}`);
     },
-    [visibleTakes],
+    [],
   );
 
   const generateTakes = useCallback(async () => {
-    if (!hasApprovedVoiceIdentity) {
-      onMsg("Voice Identity Required");
+    if (!voiceReady) {
+      onMsg(voiceGateMessage);
       return;
     }
-    if (voiceProvider.source === "elevenlabs") {
-      const health = voiceProvider.health || (await voiceProvider.refreshHealth());
-      if (!health?.configured) {
-        onMsg(health?.message || "API — ElevenLabs is unavailable. Configure fal, Kie, or WaveSpeed in Setup Wizard → Hosted Providers. Generation blocked — Local is not used as a silent fallback.");
-        return;
-      }
-      const fail = ["error", "fail", "failed", "unreachable", "offline"].some((s) =>
-        String(health.connectionStatus || "").toLowerCase().includes(s),
-      );
-      if (fail) {
-        onMsg(health.message || "API — ElevenLabs route failed. Generation blocked — Local is not used as a silent fallback.");
-        return;
-      }
-    } else if (!capabilities?.ready) {
+    if (!elevenSelected && !capabilities?.ready) {
       onMsg(capabilities?.message || "Voice Performance runtime is not ready yet.");
       return;
     }
     setBusyAction("takes");
+    setComparison(null);
+    setGenerationCompleteNotice(false);
+    setServerGenerationProgress(null);
+    const startNumber = nextVoicePerformanceTakeNumber(takes);
+    const batchId = `ui-batch-${Date.now()}`;
+    const pending = pendingVoicePerformanceTakes({
+      recordId: record?.id || "pending",
+      count: takeCount,
+      startNumber,
+      labelStartNumber: 1,
+      batchId,
+    });
+    setGenerationBatch({ startNumber, total: takeCount, batchId });
+    setDisplayBatch({ startNumber, total: takeCount, batchId });
+    setTakes((current) =>
+      mergeVoicePerformanceTakes(
+        current.filter((take) => !String(take.id).startsWith("pending-take-")),
+        pending,
+      ),
+    );
+    setServerGenerationProgress({
+      source: "take_level",
+      completed: 0,
+      total: takeCount,
+      percent: 0,
+      active: true,
+      currentTakeNumber: startNumber,
+      label: `Generating Take 1 of ${takeCount}…`,
+      batchId,
+    });
     try {
       if (directionMode === "codirector" && (emotionSource === "codirector" || emotionSource === "preset")) {
         const base = await ensureRecord();
@@ -545,15 +703,36 @@ export function VoicePerformanceStudio({
         await persistCurrentPlan();
       }
       const usableRecord = await ensureRecord();
-      await api.voicePerformanceM410.generateTakes(usableRecord.id, {
+      // Refresh pending recordId now that the real record is known.
+      setTakes((current) =>
+        current.map((take) =>
+          String(take.id).startsWith("pending-take-")
+            ? { ...take, recordId: usableRecord.id }
+            : take,
+        ),
+      );
+      const provider = getVoiceStudioProvider();
+      const generated = await api.voicePerformanceM410.generateTakes(usableRecord.id, {
         count: takeCount,
-        labels: generateTakeLabels(takeCount),
-        ...(voiceProvider.source === "elevenlabs" ? { preferredProvider: "elevenlabs" } : {}),
+        labels: generateTakeLabels(takeCount, startNumber),
+        preferredProvider: provider,
       });
+      setTakes((current) => mergeVoicePerformanceTakes(current, generated.takes || []));
       await loadTakes();
-      setComparison(null);
-      onMsg(`${takeCount} take${takeCount === 1 ? "" : "s"} queued for generation.`);
+      setGenerationBatch(null);
+      setGenerationCompleteNotice(true);
+      setServerGenerationProgress({
+        source: "take_level",
+        completed: takeCount,
+        total: takeCount,
+        percent: 100,
+        active: false,
+        label: "Generation complete",
+        batchId,
+      });
+      onMsg(`${takeCount} take${takeCount === 1 ? "" : "s"} ready.`);
     } catch (error: any) {
+      setGenerationBatch(null);
       onMsg(error?.message || "Takes could not be generated.");
     } finally {
       setBusyAction("");
@@ -567,13 +746,17 @@ export function VoicePerformanceStudio({
     emotionSource,
     ensureRecord,
     generateTakeLabels,
+    elevenSelected,
     hasApprovedVoiceIdentity,
     loadTakes,
+    voiceGateMessage,
+    voiceReady,
     onMsg,
     persistCurrentPlan,
     selectedPresetId,
     syncRecordFromApi,
     takeCount,
+    takes,
   ]);
 
   const compareTakes = useCallback(async () => {
@@ -581,7 +764,7 @@ export function VoicePerformanceStudio({
     setBusyAction("compare");
     try {
       const next = await api.voicePerformanceM410.compare(record.id, {
-        takeIds: visibleTakes.map((take) => take.id),
+        takeIds: visibleTakes.filter((take) => !String(take.id).startsWith("pending-take-")).map((take) => take.id),
       });
       setComparison(next);
     } catch (error: any) {
@@ -597,10 +780,10 @@ export function VoicePerformanceStudio({
       setBusyAction(`approve-${takeId}`);
       try {
         const next = await api.voicePerformanceM410.approveTake(record.id, takeId, { approvedBy: "owner" });
-        setTakes([...(next.takes || [])].sort(takeSort));
+        setTakes(sortVoicePerformanceTakes(next.takes || []));
         setApprovedTakeId(next.approvedTakeId || takeId);
         setRecord((current) => (current ? { ...current, approvedTakeId: next.approvedTakeId || takeId } : current));
-        onMsg("Take approved for Timeline.");
+        onMsg("Take approved.");
       } catch (error: any) {
         onMsg(error?.message || "Take could not be approved.");
       } finally {
@@ -610,33 +793,35 @@ export function VoicePerformanceStudio({
     [onMsg, record?.id],
   );
 
-  const sendToTimeline = useCallback(async () => {
-    if (!record?.id) return;
-    setBusyAction("timeline");
-    try {
-      const next = await api.voicePerformanceM410.sendToTimeline(record.id, {
-        trackId: "dialogue-main",
-        startMs: 0,
-        confirmReplace: timelineNeedsConfirm,
-      });
-      setTimelineNeedsConfirm(false);
-      setTimelineResult(next);
-      setRecord((current) =>
-        current ? { ...current, timelineLinkage: next.timelineLinkage || current.timelineLinkage } : current,
-      );
-      onMsg(next.wouldReplace ? "Timeline dialogue replaced with the approved take." : "Approved take sent to Timeline.");
-    } catch (error: any) {
-      const code = String(error?.detail?.code || error?.detail?.error_code || error?.code || "");
-      if (code.toLowerCase().includes("timeline_replace_confirm_required")) {
-        setTimelineNeedsConfirm(true);
-        onMsg("Existing dialogue is already on the Timeline. Press Send to Timeline again to replace it.");
-      } else {
-        onMsg(error?.message || "Timeline placement failed.");
+  const updateDialogue = useCallback(
+    (text: string) => {
+      setDialogueText(text);
+      onDialogueChange?.(text);
+    },
+    [onDialogueChange],
+  );
+
+  const openInEnvironment = useCallback(
+    async (take: VoicePerformanceTake) => {
+      if (!record?.id || !take.audioAssetId) return;
+      setBusyAction(`environment-${take.id}`);
+      try {
+        const saved = await api.voicePerformanceM410.saveTakeToLibrary(record.id, take.id);
+        const assetId = String(saved?.assetId || "");
+        if (!assetId) {
+          onMsg("This take could not be registered in the Library.");
+          return;
+        }
+        onMsg(`Take ${take.takeNumber} is ready in Voice Environment.`);
+        onOpenEnvironment?.(assetId);
+      } catch (error: any) {
+        onMsg(error?.message || "This take could not be sent to Voice Environment.");
+      } finally {
+        setBusyAction("");
       }
-    } finally {
-      setBusyAction("");
-    }
-  }, [onMsg, record?.id, timelineNeedsConfirm]);
+    },
+    [onMsg, onOpenEnvironment, record?.id],
+  );
 
 
   return (
@@ -647,38 +832,28 @@ export function VoicePerformanceStudio({
           tip="Direct dialogue like a professional performance session: shape emotion, delivery, pacing, breath, emphasis, and subtext before generating takes."
           as="h3"
         />
-        <div style={{ margin: "0.5rem 0" }}>
-          <ProviderSourceSelector
-            id="voice-performance"
-            label="Provider"
-            source={voiceProvider.source}
-            onChange={voiceProvider.setSource}
-            health={voiceProvider.health}
-            healthBusy={voiceProvider.healthBusy}
-          />
-        </div>
         <div className="voice-performance-studio__meta">
           <p className="muted">
-            {approvedVoiceIdentity
-              ? `Approved voice identity: ${approvedVoiceIdentity.name}`
-              : "Voice Identity Required"}
+            {voiceReady
+              ? `Saved voice: ${approvedVoiceIdentity?.name}`
+              : voiceGateMessage}
           </p>
-          {activeRuntimeMessage ? <p className="muted">{activeRuntimeMessage}</p> : null}
+          {!elevenSelected && activeRuntimeMessage ? <p className="muted">{activeRuntimeMessage}</p> : null}
         </div>
       </header>
 
-      {!hasApprovedVoiceIdentity ? (
+      {!voiceReady ? (
         <section
           className="voice-performance-studio__identity-gate"
           data-testid="vp-voice-identity-required"
         >
           <PanelHeading
-            title="Voice Identity Required"
-            tip="Performance takes only use approved voice identities. The studio will never create one silently for you."
+            title={elevenSelected ? "ElevenLabs voice needed" : voiceGateMessage}
+            tip="Takes use the voice saved on this character. The studio will not switch providers for you."
             as="h4"
           />
           <p className="muted">
-            Approve a Voice Identity first, then come back here to direct dialogue performance.
+            {voiceGateMessage}
           </p>
           <Button
             type="button"
@@ -698,6 +873,7 @@ export function VoicePerformanceStudio({
               activeView === "performance" ? " is-active-anchor" : ""
             }`}
           >
+            {activeView !== "takes" ? (
             <div className="voice-performance-studio__main">
               <section
                 ref={dialogueRef}
@@ -723,11 +899,16 @@ export function VoicePerformanceStudio({
                     rows={7}
                     data-testid="vp-dialogue"
                     value={dialogueText}
-                    onChange={(event) => setDialogueText(event.target.value)}
+                    onChange={(event) => updateDialogue(event.target.value)}
                   />
                 </label>
               </section>
 
+              {elevenSelected ? (
+                <p className="muted" data-testid="vp-elevenlabs-direction">
+                  Write the line the way you want it performed. Directions such as [Warmly] or [Chuckles] are sent with the line.
+                </p>
+              ) : (
               <section className="voice-performance-studio__performance-panel" data-testid="vp-performance-plan">
                 <PanelHeading
                   title="Performance Plan"
@@ -865,6 +1046,127 @@ export function VoicePerformanceStudio({
                       placeholder="soft catches between phrases"
                     />
                   </label>
+
+
+                <div className="voice-performance-studio__mannerism" data-testid="vp-mannerism-cues">
+                  <span className="voice-performance-studio__label">
+                    Mannerism Cues
+                    <HelpTip
+                      label="Mannerism Cues"
+                      content="Discrete performance actions (sigh, chuckle, gasp, whisper, pause…). Cue words are never spoken. Discrete cues render as local vocal-event audio stitched into one Take; whisper/pause/hesitate remain delivery direction."
+                    />
+                  </span>
+                  <div className="voice-performance-studio__grid">
+                    <label className="voice-performance-studio__field">
+                      <span>Cue</span>
+                      <select
+                        data-testid="vp-mannerism-cue"
+                        value={mannerismCueId}
+                        onChange={(event) => {
+                          const next = event.target.value as MannerismCueId | "";
+                          setMannerismCueId(next);
+                          if (next) {
+                            updateActivePlan({
+                              mannerismCues: [
+                                makeMannerismCue(next, {
+                                  position: mannerismPosition,
+                                  intensity: mannerismIntensity,
+                                  source: "ui",
+                                }),
+                              ],
+                            });
+                            setMannerismNotice("");
+                          } else {
+                            updateActivePlan({ mannerismCues: [] });
+                          }
+                        }}
+                      >
+                        <option value="">None</option>
+                        {MANNERISM_CUE_OPTIONS.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="voice-performance-studio__field">
+                      <span>Position</span>
+                      <select
+                        data-testid="vp-mannerism-position"
+                        value={mannerismPosition}
+                        disabled={!mannerismCueId}
+                        onChange={(event) => {
+                          const next = event.target.value as MannerismPosition;
+                          setMannerismPosition(next);
+                          if (mannerismCueId) {
+                            updateActivePlan({
+                              mannerismCues: [
+                                makeMannerismCue(mannerismCueId, {
+                                  position: next,
+                                  intensity: mannerismIntensity,
+                                  source: "ui",
+                                }),
+                              ],
+                            });
+                          }
+                        }}
+                      >
+                        {MANNERISM_POSITION_OPTIONS.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="voice-performance-studio__field">
+                      <span>Intensity</span>
+                      <select
+                        data-testid="vp-mannerism-intensity"
+                        value={mannerismIntensity}
+                        disabled={!mannerismCueId}
+                        onChange={(event) => {
+                          const next = event.target.value as MannerismIntensity;
+                          setMannerismIntensity(next);
+                          if (mannerismCueId) {
+                            updateActivePlan({
+                              mannerismCues: [
+                                makeMannerismCue(mannerismCueId, {
+                                  position: mannerismPosition,
+                                  intensity: next,
+                                  source: "ui",
+                                }),
+                              ],
+                            });
+                          }
+                        }}
+                      >
+                        {MANNERISM_INTENSITY_OPTIONS.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <p className="muted" data-testid="vp-mannerism-hint">
+                    {mannerismCueId
+                      ? `Cue "${MANNERISM_CUE_OPTIONS.find((o) => o.id === mannerismCueId)?.label}" will not be spoken as a word. Discrete mannerisms (sigh/chuckle/gasp/breath…) are local vocal-event audio stitched into one Take. Whisper/pause/hesitate stay delivery direction.`
+                      : "Optional. You can also type [sigh] in dialogue; it will be parsed into the same cue system and stripped from spoken text."}
+                  </p>
+                  {dialogueMannerismPreview.notices[0] || mannerismNotice ? (
+                    <p className="muted" data-testid="vp-mannerism-notice">
+                      {dialogueMannerismPreview.notices[0] || mannerismNotice}
+                    </p>
+                  ) : null}
+                  {dialogueMannerismPreview.mannerismCues.length > 0 ? (
+                    <p className="muted" data-testid="vp-mannerism-parsed">
+                      Parsed from dialogue:{" "}
+                      {dialogueMannerismPreview.mannerismCues.map((c) => c.label).join(", ")}
+                      {" → spoken preview: "}
+                      <em>{dialogueMannerismPreview.spokenText || "(empty)"}</em>
+                    </p>
+                  ) : null}
+                </div>
 
                   <label className="voice-performance-studio__field">
                     <span>
@@ -1069,8 +1371,11 @@ export function VoicePerformanceStudio({
                   </div>
                 </details>
               </section>
+              )}
             </div>
+            ) : null}
 
+            {activeView === "takes" ? (
             <aside
               ref={takesRef}
               className={`voice-performance-studio__takes${
@@ -1079,9 +1384,35 @@ export function VoicePerformanceStudio({
             >
               <PanelHeading
                 title="Takes"
-                tip="Generate up to four takes, compare them side by side, approve one, then send it to Timeline."
+                tip="Write the dialogue, generate up to four performances, audition them, then download the ones you like, add them to the Library, or finish one in Voice Environment."
                 as="h4"
               />
+
+              <p className="muted" data-testid="vp-takes-voice">
+                Voice: {approvedVoiceIdentity?.name}
+              </p>
+
+              <label className="voice-performance-studio__field">
+                <span>
+                  Dialogue
+                  <HelpTip
+                    label="Dialogue"
+                    content="Write the exact line to perform. This is the same line shown in Performance. Changing it creates a fresh take batch so earlier takes stay intact."
+                  />
+                </span>
+                <textarea
+                  className="voice-studio-dialogue"
+                  rows={4}
+                  data-testid="vp-takes-dialogue"
+                  value={dialogueText}
+                  onChange={(event) => updateDialogue(event.target.value)}
+                />
+              </label>
+              {elevenSelected ? (
+                <p className="muted" data-testid="vp-takes-elevenlabs-direction">
+                  Directions such as [Warmly] or [Chuckles] are sent to ElevenLabs exactly as written.
+                </p>
+              ) : null}
 
               <div className="voice-performance-studio__take-count">
                 <span className="voice-performance-studio__label">Generate</span>
@@ -1122,15 +1453,49 @@ export function VoicePerformanceStudio({
                 </Button>
               </div>
 
-              {!capabilities?.ready ? (
+              {!elevenSelected && !capabilities?.ready ? (
                 <p className="muted">
                   Live generation is unavailable until the local runtime reports ready. This UI does not pretend otherwise.
                 </p>
               ) : null}
 
-              <div className="voice-performance-studio__take-list">
+              {(batchProgress.active || generationCompleteNotice || (Boolean(displayBatch) && batchProgress.percent > 0)) && (
+                <div
+                  className="voice-performance-studio__progress"
+                  data-testid="vp-gen-progress"
+                  aria-live="polite"
+                >
+                  <p className="voice-performance-studio__progress-title">
+                    {batchProgress.active
+                      ? batchProgress.label || `Generating takes… ${batchProgress.percent}%`
+                      : generationCompleteNotice || batchProgress.percent >= 100
+                        ? "Generation complete"
+                        : batchProgress.label || `Generating takes… ${batchProgress.percent}%`}
+                  </p>
+                  <div
+                    className="voice-performance-studio__progress-track"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={batchProgress.percent}
+                  >
+                    <div
+                      className="voice-performance-studio__progress-fill"
+                      style={{ width: `${Math.max(0, Math.min(100, batchProgress.percent))}%` }}
+                    />
+                  </div>
+                  <p className="voice-performance-studio__progress-pct" data-testid="vp-gen-progress-pct">
+                    {batchProgress.active ? "Generating" : "Ready"}
+                    {batchProgress.total
+                      ? ` · ${batchProgress.completed} of ${batchProgress.total}`
+                      : ""}
+                  </p>
+                </div>
+              )}
+
+              <div className="voice-performance-studio__take-list" data-testid="vp-take-list">
                 {visibleTakes.map((take) => (
-                  <article key={take.id} className="voice-studio-candidate-card" data-testid="vp-take-card">
+                  <article key={`take-${take.takeNumber}`} className="voice-studio-candidate-card" data-testid="vp-take-card" data-take-number={take.takeNumber} data-take-status={take.status}>
                     <div className="voice-performance-studio__take-header">
                       <strong>{take.label}</strong>
                       <span className="muted">
@@ -1139,8 +1504,66 @@ export function VoicePerformanceStudio({
                       </span>
                     </div>
                     {take.audioAssetId ? <audio controls src={api.assetUrl(take.audioAssetId, undefined, projectId)} /> : null}
+                    {take.directionSnapshot && (take.directionSnapshot as any).mannerismSatisfied === false ? (
+                      <p className="muted" data-testid="vp-mannerism-unsatisfied" style={{ color: "#c45c26" }}>
+                        {String((take.directionSnapshot as any).mannerismFailureMessage || "That mannerism could not be created for this take.")}
+                      </p>
+                    ) : null}
                     {take.errorMessage ? <p className="muted">{take.errorMessage}</p> : null}
                     <div className="voice-studio-actions">
+                      {take.audioAssetId && record?.id ? (
+                        <a
+                          className="voice-studio-download"
+                          data-testid="vp-download-take"
+                          href={api.voicePerformanceM410.takeDownloadUrl(record.id, take.id)}
+                          download
+                        >
+                          Download
+                        </a>
+                      ) : null}
+                      <Button
+                        type="button"
+                        data-testid="vp-save-library"
+                        disabled={!take.audioAssetId || busyAction === `library-${take.id}`}
+                        loading={busyAction === `library-${take.id}`}
+                        onClick={() => {
+                          if (!record?.id) return;
+                          setBusyAction(`library-${take.id}`);
+                          void api.voicePerformanceM410.saveTakeToLibrary(record.id, take.id)
+                            .then(() => onMsg(`Take ${take.takeNumber} added to the Library.`))
+                            .catch((error: any) => onMsg(error?.message || "This take could not be saved."))
+                            .finally(() => setBusyAction(""));
+                        }}
+                      >
+                        Add to Library
+                      </Button>
+                      {onOpenEnvironment ? (
+                        <Button
+                          type="button"
+                          data-testid="vp-open-environment"
+                          disabled={!take.audioAssetId || busyAction === `environment-${take.id}`}
+                          loading={busyAction === `environment-${take.id}`}
+                          onClick={() => void openInEnvironment(take)}
+                        >
+                          Use in Voice Environment
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        data-testid="vp-save-voice-reference"
+                        disabled={!take.audioAssetId || busyAction === `voiceref-${take.id}`}
+                        loading={busyAction === `voiceref-${take.id}`}
+                        onClick={() => {
+                          if (!record?.id) return;
+                          setBusyAction(`voiceref-${take.id}`);
+                          void api.voicePerformanceM410.saveTakeAsVoiceReference(record.id, take.id)
+                            .then(() => onMsg(`Take ${take.takeNumber} is now the voice this character uses in scenes.`))
+                            .catch((error: any) => onMsg(error?.message || "This take could not become the voice reference."))
+                            .finally(() => setBusyAction(""));
+                        }}
+                      >
+                        Save as Character Voice Reference
+                      </Button>
                       <Button
                         type="button"
                         data-testid="vp-approve-take"
@@ -1174,24 +1597,8 @@ export function VoicePerformanceStudio({
                 </section>
               ) : null}
 
-              <div className="voice-studio-actions">
-                <Button
-                  type="button"
-                  data-testid="vp-send-timeline"
-                  disabled={!approvedTakeId}
-                  loading={busyAction === "timeline"}
-                  onClick={() => void sendToTimeline()}
-                >
-                  {timelineNeedsConfirm ? "Replace Existing Dialogue on Timeline" : "Send to Timeline"}
-                </Button>
-              </div>
-
-              {timelineResult ? (
-                <p className="muted">
-                  Timeline ready on track <code>{timelineResult.trackId}</code>.
-                </p>
-              ) : null}
             </aside>
+            ) : null}
           </section>
         </>
       )}

@@ -1,0 +1,61 @@
+{
+  "verdict": "NO-GO — MINIMAX H3 REFERENCE IDENTITY",
+  "primaryHypothesis": "Installing existing compile_h3_prompt / render_h3 onto MiniMaxH3ReferenceToVideo.prompt restores identity",
+  "hypothesisResult": "REJECTED — compiler output reached node 5; identities still did not match the supplied CRS",
+  "secondaryVariablesNotIsolated": [
+    "ref_image_size=max",
+    "EasyCache absent"
+  ],
+  "reasonIsolationSkipped": "Test B did not visually restore Addex and Korri. C/D isolation is only mandatory after a passing Test B.",
+  "testA": {
+    "output": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\projects\\beffd3d8-791d-4adf-9c4d-681ec9d4efb0\\renders\\scene_4_40d9817c.mp4",
+    "prompt": "authored + trailing <Picture 1> <Picture 2>",
+    "ref_image_size": "match",
+    "easyCache": true,
+    "scores": {
+      "addex_face": "fail",
+      "addex_hair": "fail",
+      "addex_wardrobe": "fail",
+      "addex_overall": "fail",
+      "korri_face": "fail",
+      "korri_hair": "fail",
+      "korri_ears": "fail",
+      "korri_wardrobe": "fail",
+      "korri_overall": "fail",
+      "realistic_anime": "fail-3d-cgi",
+      "action": "partial",
+      "dialogue_audio": "present"
+    }
+  },
+  "testB": {
+    "prompt_id": "cc9dd295-b8eb-4e5e-9e2a-59383d144803",
+    "output": "http://127.0.0.1:8188/view?filename=h3_subject_binding_00001_.mp4&subfolder=identity_test&type=output",
+    "localCopy": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\minimax-h3-identity\\h3_subject_binding_00001_.mp4",
+    "elapsed_seconds": 80.2,
+    "peak_vram_gb": 16.29,
+    "audio": "aac stereo present",
+    "prompt": "existing compile_h3_prompt / render_h3 subject_definitions",
+    "ref_image_size": "max",
+    "easyCache": false,
+    "observed": {
+      "addex": "dark-haired man in red/grey tactical jacket, not black henley + khaki pants",
+      "korri": "long brown hair, grey hoodie, blue jeans; no blonde hair, purple eyes, pointed ears, white crop, denim shorts, or circuitry tattoo"
+    },
+    "scores": {
+      "addex_face": "fail",
+      "addex_hair": "fail",
+      "addex_wardrobe": "fail",
+      "addex_overall": "fail",
+      "korri_face": "fail",
+      "korri_hair": "fail",
+      "korri_ears": "fail",
+      "korri_wardrobe": "fail",
+      "korri_overall": "fail",
+      "realistic_anime": "pass-closer",
+      "action": "pass-closer",
+      "dialogue_audio": "present"
+    }
+  },
+  "timelineIntegration": "blocked",
+  "directReferenceRoute": "untouched"
+}

@@ -88,6 +88,7 @@ async def get_cloud_render_status(ctx: ToolContext, args: dict[str, Any]) -> dic
     """Hosted AI Providers status (Kie.ai / WaveSpeed.ai / fal.ai) — no credential material."""
     from ....fal_catalog import list_fal_models
     from ....hosted_providers import service as hosted
+    from ....hosted_providers.elevenlabs_capability import elevenlabs_availability
     from ....hosted_providers.resolver import describe_for_codirector
 
     catalog = hosted.catalog()
@@ -118,6 +119,7 @@ async def get_cloud_render_status(ctx: ToolContext, args: dict[str, Any]) -> dic
         for p in catalog.get("providers") or []
     ]
     any_usable = any(p.get("connectionStatus") == "verified" for p in providers)
+    elevenlabs = elevenlabs_availability()
     return {
         "hostedProviders": providers,
         "recommendationOrder": ["kie", "wavespeed", "fal"],
@@ -127,6 +129,15 @@ async def get_cloud_render_status(ctx: ToolContext, args: dict[str, Any]) -> dic
         "cloudRenderUsable": any_usable or bool(resolution.get("ok")),
         "engines": engines,
         "imageEnginesAvailable": [e for e in engines if e["mediaType"] == "image"],
+        "elevenlabs": {
+            "configured": bool(elevenlabs.get("configured")),
+            "available": bool(elevenlabs.get("available")),
+            "status": elevenlabs.get("status"),
+            "voice": bool((elevenlabs.get("voice") or {}).get("available")),
+            "sfx": bool((elevenlabs.get("sfx") or {}).get("available")),
+            "music": bool((elevenlabs.get("music") or {}).get("available")),
+            "directApi": True,
+        },
         "setupPath": "Setup → AI Providers (Project Settings → Integrations)",
         "silentSwitchForbidden": True,
         "guidance": resolution.get("explanation")

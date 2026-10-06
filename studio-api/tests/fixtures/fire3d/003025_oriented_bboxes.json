@@ -1,0 +1,32 @@
+{
+  "obj_dict": [
+    {
+      "label": "dining table",
+      "obj_id": "table_01",
+      "bbox3d_world_center": [0.12, 0.74, 1.8],
+      "half_length": [0.9, 0.38, 0.55],
+      "obj_tran": [0.12, 0.74, 1.8],
+      "obj_rot": [0, 15, 0]
+    },
+    {
+      "label": "chair",
+      "obj_id": "chair_01",
+      "bbox3d_world_center": [-0.7, 0.45, 1.4],
+      "half_length": [0.28, 0.45, 0.3],
+      "obj_tran": [-0.7, 0.45, 1.4]
+    },
+    {
+      "label": "chair",
+      "obj_id": "chair_02",
+      "bbox3d_world_center": [0.85, 0.45, 1.5],
+      "half_length": [0.28, 0.45, 0.3]
+    },
+    {
+      "label": "person",
+      "obj_id": "human_01",
+      "bbox3d_world_center": [-0.7, 0.9, 1.35],
+      "half_length": [0.25, 0.9, 0.2],
+      "is_human": true
+    }
+  ]
+}

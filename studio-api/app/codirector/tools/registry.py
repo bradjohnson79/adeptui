@@ -353,6 +353,7 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "magi.inspect_job": magi.inspect_job,
     "magi.verify_action": magi.verify_action,
     "magi.readiness": magi.readiness,
+    "film_timeline.send_to_magi": magi.send_scene_to_magi,
     "project.read_context": project_context.read_project_context,
     "script.estimate_timing": script_timing.read_script_timing,
     "storyboard.estimate_runtime": storyboard_timing.read_storyboard_timing,
@@ -471,6 +472,18 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "voice_performance.generate_segments": MutationHandler(
         voice_performance.preview_generate_segments,
         voice_performance.apply_generate_segments,
+    ),
+    "voice_performance.generate_takes": MutationHandler(
+        voice_performance.preview_generate_takes,
+        voice_performance.apply_generate_takes,
+    ),
+    "voice_performance.save_take_to_library": MutationHandler(
+        voice_performance.preview_save_take_to_library,
+        voice_performance.apply_save_take_to_library,
+    ),
+    "voice_performance.send_take_to_environment": MutationHandler(
+        voice_performance.preview_send_take_to_environment,
+        voice_performance.apply_send_take_to_environment,
     ),
     "voice_performance.retry_segment": MutationHandler(
         voice_performance.preview_retry_segment,
@@ -663,6 +676,18 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "spin.build_ers": MutationHandler(
         spatial_m411.preview_build_ers,
         spatial_m411.apply_build_ers,
+    ),
+    "timeline.publish_scene": MutationHandler(
+        scenes.preview_timeline_publish_scene, scenes.apply_timeline_publish_scene
+    ),
+    "timeline.prepend_shot": MutationHandler(
+        scenes.preview_timeline_prepend_shot, scenes.apply_timeline_prepend_shot
+    ),
+    "timeline.continue_shot": MutationHandler(
+        scenes.preview_timeline_continue_shot, scenes.apply_timeline_continue_shot
+    ),
+    "timeline.generate_shot": MutationHandler(
+        scenes.preview_timeline_generate_shot, scenes.apply_timeline_generate_shot
     ),
     "create_scene": MutationHandler(scenes.preview_create_scene, scenes.apply_create_scene),
     "update_scene_title": MutationHandler(scenes.preview_update_scene_title, scenes.apply_update_scene_title),
@@ -871,6 +896,9 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
         generation_tools.preview_propose_video_upscale, generation_tools.apply_propose_video_upscale
     ),
     "magi.color.apply": MutationHandler(magi.preview_color_apply, magi.apply_color_apply),
+    "magi.recipe.apply": MutationHandler(magi.preview_recipe_apply, magi.apply_recipe_apply),
+    "magi.transition.apply": MutationHandler(magi.preview_transition_apply, magi.apply_transition_apply),
+    "magi.compare": MutationHandler(magi.preview_compare, magi.apply_compare),
     "magi.graphics.apply": MutationHandler(magi.preview_graphics_apply, magi.apply_graphics_apply),
     "magi.upscale": MutationHandler(magi.preview_upscale, magi.apply_upscale),
     "magi.audio.generate": MutationHandler(magi.preview_audio_generate, magi.apply_audio_generate),
@@ -1213,6 +1241,10 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     # stay registered so definitions.py closure validation passes, but
     # exposure.py never surfaces them to the model (chat 'generate the ERS'
     # routes to the ers.generate capability).
+    "ers.generate": MutationHandler(
+        environment_reference_sheet.preview_generate,
+        environment_reference_sheet.apply_generate,
+    ),
     "ers.create_sheet": MutationHandler(
         environment_reference_sheet.preview_create_sheet,
         environment_reference_sheet.apply_create_sheet,
@@ -1376,7 +1408,16 @@ def get_definitions(tool_ids: list[str]) -> list[ToolDefinition]:
 
 
 def catalog() -> list[dict[str, Any]]:
-    return [t.to_dict() for t in TOOL_DEFINITIONS]
+    """Tools offered for active Co-Director use.
+
+    Shelved Avatar handlers stay registered for a later revisit. They are not
+    part of the catalog a model or a creator is shown.
+    """
+    return [
+        item.to_dict()
+        for item in TOOL_DEFINITIONS
+        if not str(item.tool_id).startswith("avatar.")
+    ]
 
 
 def get(tool_id: str) -> ToolDefinition:

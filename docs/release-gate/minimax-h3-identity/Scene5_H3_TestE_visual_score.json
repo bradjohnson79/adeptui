@@ -1,0 +1,66 @@
+{
+  "verdict": "NO-GO — H3 IDENTITY FAILS WITH SINGLE-SUBJECT REFERENCES",
+  "hypothesis": "H3 failed Test B because Picture 1 / Picture 2 were multi-panel CRS documents, not because sockets, Subject↔Picture tags, seed, or cache were wrong",
+  "hypothesisResult": "REJECTED — uncached Test E used clean FRONT stills on the same graph; identities are still substitutes",
+  "stopForOwner": true,
+  "noMoreCrops": true,
+  "noPromptRewrite": true,
+  "noTimelineFix": true,
+  "noGenerationReferenceViewArchitecture": true,
+  "scoredRun": {
+    "prompt_id": "fde23980-4782-4df9-ab4b-ba8ee929fe01",
+    "elapsed_seconds": 350.543,
+    "cached_nodes": [],
+    "output": "http://127.0.0.1:8188/view?filename=h3_single_subject_00002_.mp4&subfolder=identity_test&type=output",
+    "localCopy": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\minimax-h3-identity\\h3_single_subject_00001_.mp4",
+    "comfyFilename": "h3_single_subject_00002_.mp4",
+    "bytes": 759297,
+    "audio": "aac stereo present",
+    "duration_seconds": 5.167,
+    "resolution": "1280x704"
+  },
+  "discardedCacheHit": {
+    "prompt_id": "1ca86f2c-5204-41d3-8b9f-301df08f3b92",
+    "elapsed_seconds": 11.003,
+    "cached_nodes": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "13"],
+    "reason": "Sampler and MiniMaxH3ReferenceToVideo reused Test B cache. Not scored."
+  },
+  "fixtures": {
+    "addex": {
+      "path": "fixtures/addex_generation_ref_front.png",
+      "size": [180, 560],
+      "box": [20, 170, 200, 730],
+      "sha256": "29e95769e9696906bd0be8fbbd10f24c6ca88e67e826f255fa9b7b92ac7298d4"
+    },
+    "korri": {
+      "path": "fixtures/korri_generation_ref_front.png",
+      "size": [135, 500],
+      "box": [15, 155, 150, 655],
+      "sha256": "fb1ac40c61513b12dc5539aa8c72b8ca0a48ea6ad24bf0b0ffa0a4436038c7a4"
+    }
+  },
+  "observed": {
+    "addex": "dark-haired man in black tactical jacket with red piping and red chest logo, grey tactical pants, thigh strap; not black henley + khaki pants",
+    "korri": "long brown/auburn hair, rounded ears, white open shirt over black tank, blue jeans, gold pendant; no sandy blonde, purple eyes, pointed ears, white crop, denim shorts, or circuitry tattoo"
+  },
+  "scores": {
+    "addex_face": "fail",
+    "addex_hair": "fail",
+    "addex_clothing": "fail",
+    "addex_overall": "fail",
+    "korri_face": "fail",
+    "korri_hair": "fail",
+    "korri_clothing": "fail",
+    "korri_pointed_ears": "fail",
+    "korri_overall": "fail",
+    "realistic_anime": "pass-style",
+    "action": "pass-closer",
+    "dialogue_audio": "present"
+  },
+  "vsTestB": "Same substitute pair. Single-subject FRONT form did not restore Addex or Korri.",
+  "testBUntouched": {
+    "graphSha256": "608c04dbab097335946fd59d50ffc63acd94bc7fd1eb0ec611c8ea2798ece317",
+    "mp4Sha256": "16ccd8ca3e78c1676f0551b43134bfd9be6565cf71c279fdd20bcaf5ed8d8465",
+    "unchangedAfterTestE": true
+  }
+}

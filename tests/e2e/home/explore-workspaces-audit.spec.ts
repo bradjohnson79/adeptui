@@ -9,9 +9,6 @@ const RUN_ID = `EXPLORE-WS-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 
 const EXPECTED_TITLES = [
   "Image Generation",
-  "Text to Video",
-  "1 Frame",
-  "3 Frame",
   "Character Creator",
   "Prop Creator",
   "Environment Creator",
@@ -19,14 +16,10 @@ const EXPECTED_TITLES = [
   "Scriptwriter",
   "Voice Studio",
   "Audio Studio",
-  "Library",
 ] as const;
 
 const EXPECTED_IDS = [
   "imagegen",
-  "txt2vid",
-  "one",
-  "three",
   "characters",
   "propcreator",
   "environmentcreator",
@@ -34,7 +27,6 @@ const EXPECTED_IDS = [
   "scriptwriter",
   "voicestudio",
   "audiostudio",
-  "library",
 ] as const;
 
 type ProjectSummary = { id: string; name: string; archived?: number };
@@ -186,7 +178,7 @@ test.describe.serial("Explore workspace roster audit @critical", () => {
       await test.step("Scenario A: Explore roster is the canonical 4×3 workspaces", async () => {
         await gotoHome(page);
         const cards = page.getByTestId("explore-adept-ui").locator("[data-testid^='explore-workspace-']");
-        await expect(cards).toHaveCount(12);
+        await expect(cards).toHaveCount(8);
         for (const id of EXPECTED_IDS) {
           await expect(page.getByTestId(`explore-workspace-${id}`)).toBeVisible();
         }
@@ -330,7 +322,7 @@ test.describe.serial("Explore workspace roster audit @critical", () => {
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           await gotoHome(page);
           const grid = page.getByTestId("explore-adept-ui");
-          await expect(grid.locator("[data-testid^='explore-workspace-']")).toHaveCount(12);
+          await expect(grid.locator("[data-testid^='explore-workspace-']")).toHaveCount(8);
           const overflow = await grid.evaluate((el) => {
             const section = el.closest("section") || el;
             return {

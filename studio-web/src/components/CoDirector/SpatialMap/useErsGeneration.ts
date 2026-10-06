@@ -1,10 +1,11 @@
-﻿/**
+/**
  * Shared ERS generation hook for Environment Creator Express + Standard (and Spatial Map when present).
  * One path: project (+ optional Spatial Map) -> ers.generate -> Image Core -> persist composite.
  * Spatial Map is optional enrichment; ERS package/sheet/composite is the environment authority.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../api";
+import { normalizeProfileName } from "../../../creatorScope";
 import { isTerminal, type WorkSurfaceState } from "../AgentWorkSurface/types";
 import { normalizeErsError, stripHandlerError } from "./ersErrorMessage";
 import {
@@ -36,6 +37,11 @@ export type ErsPlanningContext = {
   storyTheme?: string;
   aspectRatio?: string;
   generator?: string;
+  /** Set only when Generate should continue the selected sheet. A new name omits it. */
+  sheetId?: string;
+  apiProvider?: string;
+  apiModelId?: string;
+  apiOfficialModelId?: string;
   characters?: Array<{ characterId: string; crsAssetId?: string }>;
   props?: Array<{
     propId: string;
@@ -333,19 +339,24 @@ export function buildErsGenerateStartPayload(
   const generator: ErsGeneratorId =
     generatorRaw === "qwen2512" ? "qwen2512" : "gpt-image-2";
   const base = buildErsStartContext(generator);
-  // Prompt-only: pin hosted T2I Market id. With source: keep I2I pin from buildErsStartContext.
+  const apiProvider = String((planning as ErsPlanningContext | undefined)?.apiProvider || "").trim().toLowerCase();
+  const apiModelId = String((planning as ErsPlanningContext | undefined)?.apiModelId || "").trim();
+  const officialModelId = String((planning as ErsPlanningContext | undefined)?.apiOfficialModelId || "").trim();
+  // Kie Market pins are only the legacy default. A named provider never inherits them.
   const modelPins =
-    !source && generator !== "qwen2512"
-      ? {
-          kieImageModelId: ERS_GPT_T2I_ID,
-          kie_image_model_id: ERS_GPT_T2I_ID,
-        }
-      : source && generator !== "qwen2512"
+    apiProvider
+      ? {}
+      : !source && generator !== "qwen2512"
         ? {
-            kieImageModelId: ERS_GPT_OFFICIAL_ID,
-            kie_image_model_id: ERS_GPT_OFFICIAL_ID,
+            kieImageModelId: ERS_GPT_T2I_ID,
+            kie_image_model_id: ERS_GPT_T2I_ID,
           }
-        : {};
+        : source && generator !== "qwen2512"
+          ? {
+              kieImageModelId: ERS_GPT_OFFICIAL_ID,
+              kie_image_model_id: ERS_GPT_OFFICIAL_ID,
+            }
+          : {};
   const context: Record<string, unknown> = {
     ...base,
     ...modelPins,
@@ -355,6 +366,38 @@ export function buildErsGenerateStartPayload(
   const envName = String((planning as ErsPlanningContext | undefined)?.name || "").trim();
   if (envName) {
     context.name = envName;
+  }
+  const boundSheet = String((planning as ErsPlanningContext | undefined)?.sheetId || "").trim();
+  if (boundSheet) {
+    context.sheetId = boundSheet;
+    context.sheet_id = boundSheet;
+  }
+  if (apiProvider && apiModelId) {
+    delete context.kieImageModelId;
+    delete context.kie_image_model_id;
+    delete context.falImageModelId;
+    delete context.fal_image_model_id;
+    delete context.wavespeedImageModelId;
+    delete context.wavespeed_image_model_id;
+    context.requested_provider = apiProvider;
+    context.provider = apiProvider;
+    context.providerKind = apiProvider;
+    context.provider_kind = apiProvider;
+    context.source = "api";
+    context.hostedModelId = apiModelId;
+    context.hosted_model_id = apiModelId;
+    context.model = apiModelId;
+    const official = officialModelId || apiModelId;
+    if (apiProvider === "kie") {
+      context.kieImageModelId = official;
+      context.kie_image_model_id = official;
+    } else if (apiProvider === "fal") {
+      context.falImageModelId = official;
+      context.fal_image_model_id = official;
+    } else if (apiProvider === "wavespeed") {
+      context.wavespeedImageModelId = official;
+      context.wavespeed_image_model_id = official;
+    }
   }
   if ((planning as ErsPlanningContext | undefined)?.isGlobal) {
     context.isGlobal = true;
@@ -510,14 +553,18 @@ export function useErsGeneration({
       const listed = await api.environmentReferenceSheet.listSheets(projectId);
       const sheets = (listed.sheets || []) as Array<{
         sheetId?: string;
+        name?: string;
         updatedAt?: string;
         ers_composite_asset_id?: string | null;
       }>;
+      const wantedName = normalizeProfileName((planning as ErsPlanningContext | null)?.name);
       const withAsset = [...sheets]
         .filter((s) => s.ers_composite_asset_id)
         .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
       for (const summary of withAsset.slice(0, 6)) {
         if (!summary.sheetId || !summary.ers_composite_asset_id) continue;
+        const summaryName = normalizeProfileName(summary.name);
+        if (wantedName && summaryName && summaryName !== wantedName) continue;
         let full: Record<string, unknown> | null = null;
         try {
           full = asRecord(await api.environmentReferenceSheet.getSheet(projectId, summary.sheetId));
@@ -536,7 +583,7 @@ export function useErsGeneration({
     } catch {
       // sheet state is best-effort
     }
-  }, [applySheetProvenance, projectId, spatialMapId]);
+  }, [applySheetProvenance, planning, projectId, spatialMapId]);
 
   const useAnyway = useCallback(async () => {
     if (!projectId || !sheetId) return;
@@ -735,6 +782,8 @@ export function useErsGeneration({
       setErrorDetail(null);
       return;
     }
+    const boundSheet = String((mergedPlanning as ErsPlanningContext).sheetId || "").trim();
+    if (!boundSheet) setSheetId(null);
     inFlightRef.current = true;
     setError(null);
     setErrorDetail(null);
@@ -743,7 +792,12 @@ export function useErsGeneration({
     setElapsedSec(0);
     setPhase("queued");
     setBusy(true);
-    setModel(provenanceModelFromSelection("gpt-image-2"));
+    const selectedLabel = String((mergedPlanning as ErsPlanningContext).apiModelLabel || "").trim();
+    setModel(
+      selectedLabel
+        ? { model: `env:${selectedLabel}`, sourceKind: "API" }
+        : provenanceModelFromSelection("gpt-image-2"),
+    );
     setProgress({
       status: "queued",
       progressPercent: null,

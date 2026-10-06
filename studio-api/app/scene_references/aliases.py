@@ -1,4 +1,4 @@
-"""Project-scoped typed reference aliases (@ CRS, # ERS, % PRS, * video)."""
+"""Project-scoped typed reference aliases (@ CRS, # ERS, % PRS, * video, & audio)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .sheet_tags import (
     prefix_for_reference,
 )
 
-MEDIA_KINDS = frozenset({"entity", "image", "video"})
+MEDIA_KINDS = frozenset({"entity", "image", "video", "audio"})
 ENTITY_TYPES = frozenset(
     {
         "character",
@@ -61,11 +61,15 @@ def media_kind_for(reference_type: str, *, asset_kind: str | None = None) -> str
         return "image"
     if reference_type in ("video", "motion"):
         return "video"
+    if reference_type in ("audio", "voice"):
+        return "audio"
     if reference_type in ENTITY_TYPES:
         return "entity"
     kind = (asset_kind or "").lower()
     if kind == "video":
         return "video"
+    if kind == "audio":
+        return "audio"
     if kind == "image":
         return "image"
     return "entity"

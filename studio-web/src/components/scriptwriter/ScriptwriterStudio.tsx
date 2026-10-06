@@ -76,7 +76,6 @@ export function ScriptwriterStudio({
   const [message, setMessage] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null);
   const [proposal, setProposal] = useState<Record<string, unknown> | null>(null);
-  const [timelinePrep, setTimelinePrep] = useState<Record<string, unknown> | null>(null);
   const [activeSceneId, setActiveSceneIdState] = useState<string | null>(null);
   // CDX-058: explicit project-scene selection for Link to Scene (no scenes[0]).
   const [linkSceneId, setLinkSceneId] = useState<string | null>(null);
@@ -393,19 +392,6 @@ export function ScriptwriterStudio({
     syncEditorFromDoc(d);
     setProposal(null);
     setMessage("Co-Director proposal applied via transaction.");
-  };
-
-  const prepareTimeline = async () => {
-    if (!doc || !activeSceneId) return;
-    const res = await api.scriptwriter.prepareTimeline(project.id, doc.id, activeSceneId);
-    setTimelinePrep(res.proposal);
-  };
-
-  const applyTimeline = async () => {
-    if (!doc || !activeSceneId || !timelinePrep) return;
-    await api.scriptwriter.applyTimelineMetadata(project.id, doc.id, activeSceneId, timelinePrep);
-    setMessage("Timeline preparation metadata applied (no clips auto-generated).");
-    await refreshNav();
   };
 
   const exportFountain = async () => {
@@ -745,9 +731,6 @@ export function ScriptwriterStudio({
                 <button type="button" data-testid="scriptwriter-link-scene" onClick={() => void linkScene()}>
                   Link to Scene
                 </button>
-                <button type="button" data-testid="scriptwriter-timeline-prep" onClick={() => void prepareTimeline()}>
-                  Prepare Timeline
-                </button>
                 <button type="button" data-testid="scriptwriter-export-fountain" onClick={() => void exportFountain()}>
                   Export Fountain
                 </button>
@@ -773,16 +756,6 @@ export function ScriptwriterStudio({
                   </>
                 ) : null}
               </div>
-
-              {timelinePrep ? (
-                <div className="sw-proposal" data-testid="scriptwriter-timeline-proposal">
-                  <strong>Timeline preparation</strong>
-                  <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.7rem" }}>{JSON.stringify(timelinePrep, null, 2)}</pre>
-                  <button type="button" className="primary" data-testid="scriptwriter-timeline-apply" onClick={() => void applyTimeline()}>
-                    Apply metadata
-                  </button>
-                </div>
-              ) : null}
 
               <p className="eyebrow">Bible candidates</p>
               <ul data-testid="scriptwriter-bible-candidates">

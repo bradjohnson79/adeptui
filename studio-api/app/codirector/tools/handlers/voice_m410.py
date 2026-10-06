@@ -14,6 +14,23 @@ from ....voice_performance.runtime import index_tts2
 from ..definitions import ToolContext, ToolPreview
 
 
+
+def _enrich_direction_context(args: dict | None, context: dict | None = None) -> dict:
+    """Fold natural-language direction into plan context for mannerism extraction."""
+    ctx = dict(context or {})
+    args = args or {}
+    for key in ("direction", "instruction", "notes", "performanceDirection", "parenthetical"):
+        val = args.get(key)
+        if val and not ctx.get(key):
+            ctx[key] = val
+    for key in ("prompt", "message", "utterance", "request"):
+        val = args.get(key)
+        if val and not ctx.get("direction"):
+            ctx["direction"] = val
+            break
+    return ctx
+
+
 def _record_id(args: dict[str, Any]) -> str:
     record_id = str(args.get("recordId") or "").strip()
     if not record_id:
@@ -196,7 +213,7 @@ async def analyze_dialogue(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
         for key in ("parenthetical", "presetId", "sceneProgression", "sceneArcId")
         if args.get(key) not in (None, "")
     }
-    plan = m410_service.build_codirector_performance_plan(dialogue_text, context)
+    plan = m410_service.build_codirector_performance_plan(dialogue_text, _enrich_direction_context(args, context))
     metrics = _dialogue_metrics(dialogue_text)
     return {
         "ok": True,
@@ -223,7 +240,7 @@ async def create_performance_plan(ctx: ToolContext, args: dict[str, Any]) -> dic
     record_id = _record_id(args)
     record = _record_out(ctx, record_id)
     context = _plan_context(record, args)
-    plan = m410_service.build_codirector_performance_plan(str(record.get("dialogueText") or ""), context)
+    plan = m410_service.build_codirector_performance_plan(str(record.get("dialogueText") or ""), _enrich_direction_context(args, context))
     return {
         "ok": True,
         "recordId": record_id,

@@ -174,6 +174,9 @@ class VoiceProfileRow(Base):
     reference_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     reference_transcript: Mapped[str] = mapped_column(Text, default="")
     approved_preview_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Approved Library audio that generation systems read as this voice. The file
+    # stays in the Library; only its asset id lives here.
+    approved_voice_reference_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     consent_record_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     candidate_asset_ids_json: Mapped[str] = mapped_column(Text, default="[]")
     lineage_json: Mapped[str] = mapped_column(Text, default="{}")

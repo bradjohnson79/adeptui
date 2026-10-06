@@ -1,0 +1,92 @@
+{
+  "cases": [
+    {
+      "id": "capability_vision",
+      "text": "Do you have vision?",
+      "speech_act": "CAPABILITY_QUESTION",
+      "execute": false
+    },
+    {
+      "id": "capability_see",
+      "text": "Can you see this image?",
+      "speech_act": "CAPABILITY_QUESTION",
+      "execute": false
+    },
+    {
+      "id": "capability_model",
+      "text": "What model are you using?",
+      "speech_act": "CAPABILITY_QUESTION",
+      "execute": false
+    },
+    {
+      "id": "narrow_visual_q",
+      "text": "What color are Korri's boots in the current reference?",
+      "speech_act": "QUESTION",
+      "execute": false
+    },
+    {
+      "id": "should_we_crs",
+      "text": "Should we create Korri's CRS?",
+      "speech_act": "QUESTION",
+      "execute": false
+    },
+    {
+      "id": "should_i_regenerate",
+      "text": "Should I regenerate Korri's CRS?",
+      "speech_act": "QUESTION",
+      "execute": false
+    },
+    {
+      "id": "can_you_create_crs",
+      "text": "Can you create Korri's CRS?",
+      "speech_act": "COMMAND",
+      "execute": true,
+      "action": "create_character_reference_sheet"
+    },
+    {
+      "id": "create_korri_crs",
+      "text": "Create Korri's CRS.",
+      "speech_act": "COMMAND",
+      "execute": true,
+      "action": "create_character_reference_sheet"
+    },
+    {
+      "id": "create_character_reference_sheet",
+      "text": "Create Korri's character reference sheet.",
+      "speech_act": "COMMAND",
+      "execute": true,
+      "action": "create_character_reference_sheet"
+    },
+    {
+      "id": "generate_visual_sheet",
+      "text": "Generate a visual sheet for Korri.",
+      "speech_act": "COMMAND",
+      "execute": true,
+      "action": "create_character_reference_sheet"
+    },
+    {
+      "id": "regenerate_crs",
+      "text": "Regenerate Korri's CRS.",
+      "speech_act": "COMMAND",
+      "execute": true
+    },
+    {
+      "id": "approve_crs",
+      "text": "Approve this CRS as the character identity.",
+      "speech_act": "COMMAND",
+      "execute": true
+    },
+    {
+      "id": "use_as_identity",
+      "text": "Use this as Character Identity.",
+      "speech_act": "COMMAND",
+      "execute": true
+    },
+    {
+      "id": "brainstorm",
+      "text": "Give me three alternate costume ideas for Korri.",
+      "speech_act": "CREATIVE_IDEATION",
+      "execute": false
+    }
+  ]
+}

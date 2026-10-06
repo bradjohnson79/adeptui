@@ -1,0 +1,18 @@
+{
+  "prompt_id": "3681e2dd-d69f-4980-acf4-5d24e223d229",
+  "ksampler_positive_link": [
+    "6",
+    0
+  ],
+  "ksampler_negative_link": [
+    "7",
+    0
+  ],
+  "node6_prompt_first120": "1. Reference Reproduction: IDENTITY-REFERENCE ONLY: The attached image is identity and appearance reference only, not a ",
+  "node7_prompt_first120": "multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low qual",
+  "negative_node7_full": "multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality, identity drift, wrong character, No close-up, No headshot, No bust portrait, No waist-up framing, Do not crop head, arms, hands, legs, or feet, one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image, text, letters, watermark, logo, caption, overlay, typography, writing",
+  "negative_node_id": "7",
+  "negative_prompt_actual": "multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality, identity drift, wrong character, No close-up, No headshot, No bust portrait, No waist-up framing, Do not crop head, arms, hands, legs, or feet, one person only, one figure, no other people, no grid, no collage, no turnaround sheet, no multiple poses in one image, text, letters, watermark, logo, caption, overlay, typography, writing",
+  "leak2_negative_has_collage_concepts": true,
+  "leak2_negative_is_only_blurry_default": false
+}

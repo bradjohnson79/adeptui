@@ -103,7 +103,6 @@ export function ProjectHome({
       ? [{ title: WORKSPACES.spatial.label, description: WORKSPACES.spatial.description, image: dashboardImages.spatial, tab: "spatial" as const, badges: WORKSPACES.spatial.capabilityBadges }]
       : []),
     { title: WORKSPACES.imagegen.label, description: WORKSPACES.imagegen.description, image: dashboardImages.imagegen, tab: "imagegen", badges: WORKSPACES.imagegen.capabilityBadges },
-    { title: WORKSPACES.txt2vid.label, description: WORKSPACES.txt2vid.description, image: dashboardImages.video, tab: "txt2vid", badges: WORKSPACES.txt2vid.capabilityBadges },
     { title: WORKSPACES.library.label, description: WORKSPACES.library.description, image: dashboardImages.library, tab: "library", badges: WORKSPACES.library.capabilityBadges },
   ];
 
@@ -237,7 +236,7 @@ export function ProjectHome({
           {!dash?.recent_jobs?.length ? (
             <CinematicEmptyState
               title="No jobs yet"
-              body="Queue a render from Timeline Generator, Image Generation, or Text to Video."
+              body="Queue a render from Timeline."
               actionLabel="Open Timeline"
               onAction={() => onGo("timeline")}
             />

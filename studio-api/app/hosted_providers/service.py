@@ -60,24 +60,25 @@ async def connect_and_verify(provider_id: str, api_key: str) -> dict[str, Any]:
         message=probe.get("message", ""),
         detail={"httpStatus": probe.get("httpStatus"), "probeEndpoint": probe.get("probeEndpoint")},
     )
-    # Prefer this provider after successful connect (primary-provider policy).
-    try:
-        save_preferences(preferred_provider=pid)  # type: ignore[arg-type]
-    except Exception:
-        pass
-    try:
-        from ..production_control.store import patch_user_preferences
-
-        patch_user_preferences({"defaultHostedProviderId": pid})
-    except Exception:
-        pass
     discovery: dict[str, Any] = {}
-    try:
-        from .discovery import discover_provider
+    # ElevenLabs is a direct audio credential. It must not become the preferred image/video provider.
+    if pid != "elevenlabs":
+        try:
+            save_preferences(preferred_provider=pid)  # type: ignore[arg-type]
+        except Exception:
+            pass
+        try:
+            from ..production_control.store import patch_user_preferences
 
-        discovery = await discover_provider(pid, persist_as_active=True)
-    except Exception as exc:
-        discovery = {"ok": False, "error": "DISCOVERY_FAILED", "message": str(exc), "mock": False}
+            patch_user_preferences({"defaultHostedProviderId": pid})
+        except Exception:
+            pass
+        try:
+            from .discovery import discover_provider
+
+            discovery = await discover_provider(pid, persist_as_active=True)
+        except Exception as exc:
+            discovery = {"ok": False, "error": "DISCOVERY_FAILED", "message": str(exc), "mock": False}
     card = provider_card(pid)
     return {
         "ok": True,
@@ -105,12 +106,13 @@ async def test_provider(provider_id: str) -> dict[str, Any]:
         detail={"httpStatus": probe.get("httpStatus"), "probeEndpoint": probe.get("probeEndpoint")},
     )
     discovery: dict[str, Any] = {}
-    try:
-        from .discovery import discover_provider
+    if pid != "elevenlabs":
+        try:
+            from .discovery import discover_provider
 
-        discovery = await discover_provider(pid, persist_as_active=True)
-    except Exception as exc:
-        discovery = {"ok": False, "error": "DISCOVERY_FAILED", "message": str(exc), "mock": False}
+            discovery = await discover_provider(pid, persist_as_active=True)
+        except Exception as exc:
+            discovery = {"ok": False, "error": "DISCOVERY_FAILED", "message": str(exc), "mock": False}
     return {
         "ok": probe.get("valid") is True,
         "provider": provider_card(pid),
@@ -227,8 +229,7 @@ def resolve(
     capability: str | None = None,
     canonical_model: str | None = None,
 ) -> dict[str, Any]:
-    # ORDER 15 amend: ElevenLabs capability routes via USER fal/kie/wavespeed
-    if (capability or "").strip() in ("elevenlabs.voice", "elevenlabs.sfx"):
+    if (capability or "").strip() in ("elevenlabs.voice", "elevenlabs.sfx", "elevenlabs.music"):
         from .elevenlabs_capability import resolve_capability
 
         return resolve_capability(capability.strip())  # type: ignore[arg-type]

@@ -396,6 +396,47 @@ def _record_pack_attempt_cleanup(state: dict[str, Any], component_id: str) -> No
         current["reconciled"] = "missing_files"
 
 
+def rollup_readiness(components: list[dict]) -> dict[str, Any]:
+    """Overall label and counts from component status rows. Does not read or write the machine."""
+    required = [item for item in components if item.get("required")]
+    optional = [item for item in components if not item.get("required")]
+    if any(item.get("status") == "error" for item in required):
+        overall = "needs_attention"
+        overall_label = "Needs Attention"
+    elif any(item.get("status") in ("installing", "checking") for item in required):
+        overall = "preparing"
+        overall_label = "Preparing Studio"
+    elif any(
+        item.get("status") in ("unknown", "not_installed", "download_unavailable", "source_pending")
+        for item in required
+    ):
+        overall = "additional_setup_required"
+        overall_label = "Additional Setup Required"
+    else:
+        overall = "ready"
+        overall_label = "Ready to Generate"
+    counts = {
+        "ready": sum(item.get("status") == "ready" for item in components),
+        "not_installed": sum(
+            item.get("status") in ("not_installed", "download_unavailable") for item in required
+        ),
+        "needs_attention": sum(item.get("status") == "error" for item in required),
+        "update_available": sum(item.get("status") == "update_available" for item in components),
+        "download_unavailable": sum(item.get("status") == "download_unavailable" for item in components),
+        "required_ready": sum(item.get("status") == "ready" for item in required),
+        "required_not_installed": sum(
+            item.get("status") in ("not_installed", "download_unavailable") for item in required
+        ),
+        "required_needs_attention": sum(item.get("status") == "error" for item in required),
+        "optional_ready": sum(item.get("status") == "ready" for item in optional),
+        "optional_not_installed": sum(
+            item.get("status") in ("not_installed", "download_unavailable") for item in optional
+        ),
+        "optional_needs_attention": sum(item.get("status") == "error" for item in optional),
+    }
+    return {"overall_status": overall, "overall_label": overall_label, "counts": counts}
+
+
 def build_status(*, persist: bool = True) -> dict[str, Any]:
     global _STATUS_CACHE
     if persist and _STATUS_CACHE is not None:
@@ -687,48 +728,14 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             "diagnostic": diagnostic,
         }
 
-    required = [item for item in components if item["required"]]
-    if any(item["status"] == "error" for item in required):
-        overall = "needs_attention"
-        overall_label = "Needs Attention"
-    elif any(item["status"] in ("installing", "checking") for item in required):
-        overall = "preparing"
-        overall_label = "Preparing Studio"
-    elif any(
-        item["status"] in ("unknown", "not_installed", "download_unavailable", "source_pending")
-        for item in required
-    ):
-        overall = "additional_setup_required"
-        overall_label = "Additional Setup Required"
-    else:
-        overall = "ready"
-        overall_label = "Ready to Generate"
+    rolled = rollup_readiness(components)
+    overall = rolled["overall_status"]
+    overall_label = rolled["overall_label"]
+    counts = rolled["counts"]
 
     state["status"] = previous_status
     if persist:
         update_state(lambda latest: latest.__setitem__("status", previous_status))
-    optional = [item for item in components if not item["required"]]
-    counts = {
-        "ready": sum(item["status"] == "ready" for item in components),
-        "not_installed": sum(
-            item["status"] in ("not_installed", "download_unavailable") for item in required
-        ),
-        "needs_attention": sum(item["status"] == "error" for item in required),
-        "update_available": sum(item["status"] == "update_available" for item in components),
-        "download_unavailable": sum(
-            item["status"] == "download_unavailable" for item in components
-        ),
-        "required_ready": sum(item["status"] == "ready" for item in required),
-        "required_not_installed": sum(
-            item["status"] in ("not_installed", "download_unavailable") for item in required
-        ),
-        "required_needs_attention": sum(item["status"] == "error" for item in required),
-        "optional_ready": sum(item["status"] == "ready" for item in optional),
-        "optional_not_installed": sum(
-            item["status"] in ("not_installed", "download_unavailable") for item in optional
-        ),
-        "optional_needs_attention": sum(item["status"] == "error" for item in optional),
-    }
     payload = {
         "schema_version": 2,
         "overall_status": overall,

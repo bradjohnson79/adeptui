@@ -84,10 +84,12 @@ test.describe("M42 Production categorized menu", () => {
     }
 
     const create = menu.getByTestId("production-cat-create");
-    for (const id of ["txt2vid", "imagegen", "one", "three", "script", "timeline"]) {
+    for (const id of ["imagegen", "script", "timeline"]) {
       await expect(create.getByTestId(`production-item-${id}`)).toBeVisible();
     }
-    await expect(create.getByTestId("production-item-txt2vid")).toContainText("Text to Video");
+    for (const id of ["txt2vid", "one", "three"]) {
+      await expect(create.getByTestId(`production-item-${id}`)).toHaveCount(0);
+    }
     await expect(create.getByTestId("production-item-script")).toContainText("Storyboard");
     await expect(create.getByTestId("production-item-timeline")).toContainText("Timeline Generator");
 

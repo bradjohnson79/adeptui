@@ -1,0 +1,1 @@
+"""Adept UI startup certification."""

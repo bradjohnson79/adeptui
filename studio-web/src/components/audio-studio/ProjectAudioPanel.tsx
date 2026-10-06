@@ -9,9 +9,7 @@ type FilterId = "all" | "music" | "sfx" | "ambience" | "voice";
 
 type ProjectAudioPanelProps = {
   assets: AudioLibraryAsset[];
-  busy: boolean;
   approvedAssetIds: Record<string, boolean>;
-  onAddToTimeline: (asset: AudioLibraryAsset) => Promise<void> | void;
   onGoLibrary: () => void;
   onGoTimeline: () => void;
 };
@@ -26,9 +24,7 @@ const FILTERS: { id: FilterId; label: string }[] = [
 
 export function ProjectAudioPanel({
   assets,
-  busy,
   approvedAssetIds,
-  onAddToTimeline,
   onGoLibrary,
   onGoTimeline,
 }: ProjectAudioPanelProps) {
@@ -108,11 +104,6 @@ export function ProjectAudioPanel({
                   </div>
                 </div>
                 <AudioRow audioUrl={asset.url} label={label} testId={`audio-library-player-${asset.id}`} />
-                <div className="audio-candidate-card__actions">
-                  <Button variant="secondary" disabled={busy} onClick={() => void onAddToTimeline(asset)}>
-                    Add to Timeline
-                  </Button>
-                </div>
               </article>
             );
           })}

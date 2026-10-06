@@ -34,11 +34,36 @@ class ComfyClient:
         self._object_info_cache: dict[str, Any] | None = None
         self._object_info_cached_at: float = 0.0
 
+    def _read_json(self, path: str, timeout: float) -> tuple[int | None, dict[str, Any]]:
+        """One HTTP reader for Comfy GET probes. Callers do not open their own /system_stats."""
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                response = client.get(f"{self.base_url}{path}")
+                try:
+                    body = response.json()
+                except Exception:
+                    body = {}
+                return response.status_code, body if isinstance(body, dict) else {}
+        except Exception as exc:
+            return None, {"error": type(exc).__name__}
+
+    def read_system_stats(self, timeout: float = 3.0) -> tuple[int | None, dict[str, Any]]:
+        """Authoritative /system_stats read. Boot and Comfy Manager both use this."""
+        return self._read_json("/system_stats", timeout)
+
+    def read_queue(self, timeout: float = 3.0) -> tuple[int | None, dict[str, Any]]:
+        return self._read_json("/queue", timeout)
+
+    def read_history(self, prompt_id: str | None = None, timeout: float = 2.0) -> tuple[int | None, dict[str, Any]]:
+        path = "/history?max_items=1" if not prompt_id else f"/history/{prompt_id}"
+        return self._read_json(path, timeout)
+
     async def health(self) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(f"{self.base_url}/system_stats")
-            r.raise_for_status()
-            return r.json()
+        status, body = await asyncio.to_thread(self.read_system_stats, 5.0)
+        if status != 200:
+            detail = body.get("error") if isinstance(body, dict) else None
+            raise RuntimeError(detail or f"ComfyUI /system_stats returned {status}")
+        return body
 
     async def object_info(self, node_class: str | None = None) -> dict[str, Any]:
         path = f"/object_info/{node_class}" if node_class else "/object_info"

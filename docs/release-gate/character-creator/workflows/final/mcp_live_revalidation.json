@@ -1,0 +1,760 @@
+{
+  "comfy": "http://127.0.0.1:8188",
+  "graphs": {
+    "character_qwen_front_ref.json": {
+      "workflow_key": "qwen2512.ref",
+      "file": "character_qwen_front_ref.json",
+      "validate": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_front_ref.json",
+        "valid": true,
+        "error_count": 0,
+        "warning_count": 0,
+        "errors": [],
+        "warnings": [],
+        "partner_nodes": [],
+        "spends_credits": false,
+        "object_info_source": {
+          "mode": "local",
+          "host": "127.0.0.1",
+          "port": 8188
+        }
+      },
+      "structure": {
+        "node_count": 11,
+        "class_types": [
+          "CLIPLoader",
+          "EmptyLatentImage",
+          "KSampler",
+          "LoadImage",
+          "ModelSamplingAuraFlow",
+          "SaveImage",
+          "TextEncodeQwenImageEdit",
+          "UNETLoader",
+          "VAEDecode",
+          "VAELoader"
+        ],
+        "load_image_id": "5",
+        "image_scale_id": null,
+        "omni_id": null,
+        "qwen_encode_ids": [
+          "6",
+          "7"
+        ],
+        "vae_encode_id": null,
+        "ksampler_id": "9",
+        "qwen_reference_conditioning": [
+          {
+            "node_id": "6",
+            "image": [
+              "5",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "image_is_reference": true,
+            "vae_bound": true
+          },
+          {
+            "node_id": "7",
+            "image": [
+              "5",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "image_is_reference": true,
+            "vae_bound": true
+          }
+        ],
+        "ksampler_latent_image": [
+          "8",
+          0
+        ],
+        "negative_prompt": "multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality",
+        "negative_has_blonde_aqua": false
+      },
+      "nodes_present_on_server": {
+        "CLIPLoader": true,
+        "EmptyLatentImage": true,
+        "KSampler": true,
+        "LoadImage": true,
+        "ModelSamplingAuraFlow": true,
+        "SaveImage": true,
+        "TextEncodeQwenImageEdit": true,
+        "UNETLoader": true,
+        "VAEDecode": true,
+        "VAELoader": true
+      },
+      "all_nodes_present": true,
+      "encoder_input_signature": [
+        "clip",
+        "image",
+        "prompt",
+        "vae"
+      ],
+      "encoder_has_image_input": true,
+      "encoder_has_vae_input": true,
+      "model_checks": {
+        "UNETLoader": {
+          "referenced": "qwen_image_2512_fp8_e4m3fn.safetensors",
+          "available_on_server": true,
+          "choices_count": 31
+        },
+        "CLIPLoader": {
+          "referenced": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "available_on_server": true,
+          "choices_count": 16
+        },
+        "VAELoader": {
+          "referenced": "qwen_image_vae.safetensors",
+          "available_on_server": true,
+          "choices_count": 15
+        }
+      },
+      "all_models_present": true,
+      "reference_pixels_connected": true,
+      "source_class_types": [
+        "CLIPLoader",
+        "EmptyLatentImage",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeQwenImageEdit",
+        "UNETLoader",
+        "VAEDecode",
+        "VAELoader"
+      ],
+      "source_topology_match": true,
+      "source_wiring_match": true
+    },
+    "character_qwen_back_from_front.json": {
+      "workflow_key": "qwen2512.ref",
+      "file": "character_qwen_back_from_front.json",
+      "validate": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_qwen_back_from_front.json",
+        "valid": true,
+        "error_count": 0,
+        "warning_count": 0,
+        "errors": [],
+        "warnings": [],
+        "partner_nodes": [],
+        "spends_credits": false,
+        "object_info_source": {
+          "mode": "local",
+          "host": "127.0.0.1",
+          "port": 8188
+        }
+      },
+      "structure": {
+        "node_count": 11,
+        "class_types": [
+          "CLIPLoader",
+          "EmptyLatentImage",
+          "KSampler",
+          "LoadImage",
+          "ModelSamplingAuraFlow",
+          "SaveImage",
+          "TextEncodeQwenImageEdit",
+          "UNETLoader",
+          "VAEDecode",
+          "VAELoader"
+        ],
+        "load_image_id": "5",
+        "image_scale_id": null,
+        "omni_id": null,
+        "qwen_encode_ids": [
+          "6",
+          "7"
+        ],
+        "vae_encode_id": null,
+        "ksampler_id": "9",
+        "qwen_reference_conditioning": [
+          {
+            "node_id": "6",
+            "image": [
+              "5",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "image_is_reference": true,
+            "vae_bound": true
+          },
+          {
+            "node_id": "7",
+            "image": [
+              "5",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "image_is_reference": true,
+            "vae_bound": true
+          }
+        ],
+        "ksampler_latent_image": [
+          "8",
+          0
+        ],
+        "negative_prompt": "multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality",
+        "negative_has_blonde_aqua": false
+      },
+      "nodes_present_on_server": {
+        "CLIPLoader": true,
+        "EmptyLatentImage": true,
+        "KSampler": true,
+        "LoadImage": true,
+        "ModelSamplingAuraFlow": true,
+        "SaveImage": true,
+        "TextEncodeQwenImageEdit": true,
+        "UNETLoader": true,
+        "VAEDecode": true,
+        "VAELoader": true
+      },
+      "all_nodes_present": true,
+      "encoder_input_signature": [
+        "clip",
+        "image",
+        "prompt",
+        "vae"
+      ],
+      "encoder_has_image_input": true,
+      "encoder_has_vae_input": true,
+      "model_checks": {
+        "UNETLoader": {
+          "referenced": "qwen_image_2512_fp8_e4m3fn.safetensors",
+          "available_on_server": true,
+          "choices_count": 31
+        },
+        "CLIPLoader": {
+          "referenced": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "available_on_server": true,
+          "choices_count": 16
+        },
+        "VAELoader": {
+          "referenced": "qwen_image_vae.safetensors",
+          "available_on_server": true,
+          "choices_count": 15
+        }
+      },
+      "all_models_present": true,
+      "reference_pixels_connected": true,
+      "source_class_types": [
+        "CLIPLoader",
+        "EmptyLatentImage",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeQwenImageEdit",
+        "UNETLoader",
+        "VAEDecode",
+        "VAELoader"
+      ],
+      "source_topology_match": true,
+      "source_wiring_match": true
+    },
+    "character_zimage_front_ref.json": {
+      "workflow_key": "zimage.ref_edit",
+      "file": "character_zimage_front_ref.json",
+      "validate": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_front_ref.json",
+        "valid": true,
+        "error_count": 0,
+        "warning_count": 0,
+        "errors": [],
+        "warnings": [],
+        "partner_nodes": [],
+        "spends_credits": false,
+        "object_info_source": {
+          "mode": "local",
+          "host": "127.0.0.1",
+          "port": 8188
+        }
+      },
+      "structure": {
+        "node_count": 12,
+        "class_types": [
+          "CLIPLoader",
+          "CLIPTextEncode",
+          "ImageScale",
+          "KSampler",
+          "LoadImage",
+          "ModelSamplingAuraFlow",
+          "SaveImage",
+          "TextEncodeZImageOmni",
+          "UNETLoader",
+          "VAEDecode",
+          "VAEEncode",
+          "VAELoader"
+        ],
+        "load_image_id": "4",
+        "image_scale_id": "4b",
+        "omni_id": "7",
+        "qwen_encode_ids": [],
+        "vae_encode_id": "9",
+        "ksampler_id": "10",
+        "zimage_omni_inputs": {
+          "image1": [
+            "4b",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ],
+          "auto_resize_images": false,
+          "image1_is_scaled_reference": true
+        },
+        "vae_encode_inputs": {
+          "pixels": [
+            "4b",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ],
+          "pixels_is_scaled_reference": true
+        },
+        "ksampler_latent_image": [
+          "9",
+          0
+        ],
+        "negative_prompt": "multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality",
+        "negative_has_blonde_aqua": false
+      },
+      "nodes_present_on_server": {
+        "CLIPLoader": true,
+        "CLIPTextEncode": true,
+        "ImageScale": true,
+        "KSampler": true,
+        "LoadImage": true,
+        "ModelSamplingAuraFlow": true,
+        "SaveImage": true,
+        "TextEncodeZImageOmni": true,
+        "UNETLoader": true,
+        "VAEDecode": true,
+        "VAEEncode": true,
+        "VAELoader": true
+      },
+      "all_nodes_present": true,
+      "encoder_input_signature": [
+        "auto_resize_images",
+        "clip",
+        "image1",
+        "image2",
+        "image3",
+        "image_encoder",
+        "prompt",
+        "vae"
+      ],
+      "encoder_has_image1_input": true,
+      "encoder_has_vae_input": true,
+      "model_checks": {
+        "UNETLoader": {
+          "referenced": "z_image_turbo_bf16.safetensors",
+          "available_on_server": true,
+          "choices_count": 31
+        },
+        "CLIPLoader": {
+          "referenced": "qwen_3_4b.safetensors",
+          "available_on_server": true,
+          "choices_count": 16
+        },
+        "VAELoader": {
+          "referenced": "ae.safetensors",
+          "available_on_server": true,
+          "choices_count": 15
+        }
+      },
+      "all_models_present": true,
+      "reference_pixels_connected": true,
+      "source_class_types": [
+        "CLIPLoader",
+        "CLIPTextEncode",
+        "ImageScale",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEEncode",
+        "VAELoader"
+      ],
+      "source_topology_match": true,
+      "source_wiring_match": true
+    },
+    "character_zimage_back_from_front.json": {
+      "workflow_key": "zimage.ref_edit",
+      "file": "character_zimage_back_from_front.json",
+      "validate": {
+        "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\docs\\release-gate\\character-creator\\workflows\\final\\character_zimage_back_from_front.json",
+        "valid": true,
+        "error_count": 0,
+        "warning_count": 0,
+        "errors": [],
+        "warnings": [],
+        "partner_nodes": [],
+        "spends_credits": false,
+        "object_info_source": {
+          "mode": "local",
+          "host": "127.0.0.1",
+          "port": 8188
+        }
+      },
+      "structure": {
+        "node_count": 12,
+        "class_types": [
+          "CLIPLoader",
+          "CLIPTextEncode",
+          "ImageScale",
+          "KSampler",
+          "LoadImage",
+          "ModelSamplingAuraFlow",
+          "SaveImage",
+          "TextEncodeZImageOmni",
+          "UNETLoader",
+          "VAEDecode",
+          "VAEEncode",
+          "VAELoader"
+        ],
+        "load_image_id": "4",
+        "image_scale_id": "4b",
+        "omni_id": "7",
+        "qwen_encode_ids": [],
+        "vae_encode_id": "9",
+        "ksampler_id": "10",
+        "zimage_omni_inputs": {
+          "image1": [
+            "4b",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ],
+          "auto_resize_images": false,
+          "image1_is_scaled_reference": true
+        },
+        "vae_encode_inputs": {
+          "pixels": [
+            "4b",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ],
+          "pixels_is_scaled_reference": true
+        },
+        "ksampler_latent_image": [
+          "9",
+          0
+        ],
+        "negative_prompt": "multiple people, collage, contact sheet, grid, inset portrait, duplicate figure, text, watermark, cropped body, low quality",
+        "negative_has_blonde_aqua": false
+      },
+      "nodes_present_on_server": {
+        "CLIPLoader": true,
+        "CLIPTextEncode": true,
+        "ImageScale": true,
+        "KSampler": true,
+        "LoadImage": true,
+        "ModelSamplingAuraFlow": true,
+        "SaveImage": true,
+        "TextEncodeZImageOmni": true,
+        "UNETLoader": true,
+        "VAEDecode": true,
+        "VAEEncode": true,
+        "VAELoader": true
+      },
+      "all_nodes_present": true,
+      "encoder_input_signature": [
+        "auto_resize_images",
+        "clip",
+        "image1",
+        "image2",
+        "image3",
+        "image_encoder",
+        "prompt",
+        "vae"
+      ],
+      "encoder_has_image1_input": true,
+      "encoder_has_vae_input": true,
+      "model_checks": {
+        "UNETLoader": {
+          "referenced": "z_image_turbo_bf16.safetensors",
+          "available_on_server": true,
+          "choices_count": 31
+        },
+        "CLIPLoader": {
+          "referenced": "qwen_3_4b.safetensors",
+          "available_on_server": true,
+          "choices_count": 16
+        },
+        "VAELoader": {
+          "referenced": "ae.safetensors",
+          "available_on_server": true,
+          "choices_count": 15
+        }
+      },
+      "all_models_present": true,
+      "reference_pixels_connected": true,
+      "source_class_types": [
+        "CLIPLoader",
+        "CLIPTextEncode",
+        "ImageScale",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEEncode",
+        "VAELoader"
+      ],
+      "source_topology_match": true,
+      "source_wiring_match": true
+    }
+  },
+  "tools_available": [
+    "server_info",
+    "auth_status",
+    "auth_login",
+    "run_workflow",
+    "generate_image",
+    "list_partner_models",
+    "partner_model_schema",
+    "partner_generate",
+    "emit_partner_workflow",
+    "run_template",
+    "job",
+    "system_stats",
+    "free_memory",
+    "fetch_outputs",
+    "launch_comfyui",
+    "stop_comfyui",
+    "restart_comfyui",
+    "update_comfyui",
+    "switch_comfyui_version",
+    "install_node",
+    "get_logs",
+    "discover",
+    "which",
+    "project",
+    "search_templates",
+    "get_template",
+    "fetch_template",
+    "nodes",
+    "node_dependencies",
+    "workflow_deps",
+    "search_models",
+    "download_model",
+    "download",
+    "upload_file",
+    "validate_workflow",
+    "list_workflow_slots",
+    "list_workflow_notes",
+    "set_workflow_slot",
+    "vary_workflow"
+  ],
+  "server": {
+    "python": {
+      "version": "3.11.15",
+      "executable": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\venvs\\mcp\\Scripts\\python.exe",
+      "virtualenv": null,
+      "conda_env": null
+    },
+    "config": {
+      "path": "C:\\Users\\bradj\\AppData\\Local\\comfy-cli\\config.ini",
+      "default_workspace": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI\\ComfyUI",
+      "default_launch_extras": null,
+      "recent_workspace": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI\\ComfyUI",
+      "tracking_enabled": false,
+      "background": null
+    },
+    "server": {
+      "running": true,
+      "url": "http://127.0.0.1:8188"
+    },
+    "hardware": {
+      "os": "Windows",
+      "os_version": "10",
+      "arch": "AMD64",
+      "cpu": "AMD64",
+      "ram_bytes": 68135153664,
+      "gpu": {
+        "vendor": "nvidia",
+        "model": "NVIDIA GeForce RTX 5090",
+        "vram_bytes": 34190458880,
+        "unified_memory": false
+      }
+    },
+    "workspace": {
+      "path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI\\ComfyUI",
+      "type": "default",
+      "manager_mode": "enable-gui",
+      "manager_detected": "venv-package",
+      "uv_compile_default": false
+    },
+    "compatibility": {
+      "comfy_cli_version": "1.17.0",
+      "min_comfy_cli_version": null,
+      "envelope_schema_major": 1,
+      "warnings": [],
+      "envelope_schema": "envelope/1"
+    },
+    "freshness": {
+      "core": {
+        "installed": "v0.32.0",
+        "commit": "c2bcbecd",
+        "latest": "v0.33.3",
+        "outdated": true
+      },
+      "packs": [
+        {
+          "name": "ComfyMath",
+          "source": "git",
+          "installed": "c01177221c31b8e5fbc062778fc8254aeb541638",
+          "latest": "c01177221c31b8e5fbc062778fc8254aeb541638",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-easy-use",
+          "source": "registry",
+          "installed": "1.3.6",
+          "latest": "1.3.6",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-hunyuanvideowrapper",
+          "source": "registry",
+          "installed": "1.0.8",
+          "latest": "1.0.8",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-impact-pack",
+          "source": "registry",
+          "installed": "8.28.3",
+          "latest": "8.28.3",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-kjnodes",
+          "source": "registry",
+          "installed": "1.4.7",
+          "latest": "1.5.0",
+          "outdated": true
+        },
+        {
+          "name": "ComfyUI-LTXVideo",
+          "source": "git",
+          "installed": "ac4d99839020b983e956a8ab67ec38aec1b6e65a",
+          "latest": "15d09abb5a187a8dcaea2fc31fe51ee96e6c9d0d",
+          "outdated": true
+        },
+        {
+          "name": "comfyui-manager",
+          "source": "registry",
+          "installed": "3.41",
+          "latest": "3.0.1",
+          "outdated": false
+        },
+        {
+          "name": "ComfyUI-MelBandRoFormer",
+          "source": "registry",
+          "installed": "1.0.2",
+          "latest": "1.0.2",
+          "outdated": false
+        },
+        {
+          "name": "comfyui-videohelpersuite",
+          "source": "registry",
+          "installed": "1.7.9",
+          "latest": "1.7.9",
+          "outdated": false
+        },
+        {
+          "name": "ComfyUI-WanVideoWrapper",
+          "source": "registry",
+          "installed": "1.4.7",
+          "latest": "1.4.7",
+          "outdated": false
+        },
+        {
+          "name": "comfyui_controlnet_aux",
+          "source": "registry",
+          "installed": "1.1.5",
+          "latest": "1.1.5",
+          "outdated": false
+        },
+        {
+          "name": "comfyui_essentials",
+          "source": "registry",
+          "installed": "1.1.0",
+          "latest": "1.1.0",
+          "outdated": false
+        },
+        {
+          "name": "ComfyUI_LatentSync",
+          "source": "git",
+          "installed": "7c08a475d4eb9cd5ef48b69aafbf5549f813b011",
+          "latest": "7c08a475d4eb9cd5ef48b69aafbf5549f813b011",
+          "outdated": false
+        },
+        {
+          "name": "rgthree-comfy",
+          "source": "registry",
+          "installed": "1.0.2606200020",
+          "latest": "1.0.2608210019",
+          "outdated": true
+        },
+        {
+          "name": "WhatDreamsCost-ComfyUI",
+          "source": "registry",
+          "installed": "2.0.5",
+          "latest": "2.0.5",
+          "outdated": false
+        },
+        {
+          "name": "WhatDreamsCost-CSGlide",
+          "source": "git",
+          "installed": "9f933b3c21128ca587f2144f4bb899e7fada12c8",
+          "latest": "9f933b3c21128ca587f2144f4bb899e7fada12c8",
+          "outdated": false
+        }
+      ],
+      "checked_at": "2026-08-24T05:24:46.866216+00:00"
+    }
+  },
+  "node_defs_present": {
+    "CLIPLoader": true,
+    "CLIPTextEncode": true,
+    "EmptyLatentImage": true,
+    "ImageScale": true,
+    "KSampler": true,
+    "LoadImage": true,
+    "ModelSamplingAuraFlow": true,
+    "SaveImage": true,
+    "TextEncodeQwenImageEdit": true,
+    "TextEncodeZImageOmni": true,
+    "UNETLoader": true,
+    "VAEDecode": true,
+    "VAEEncode": true,
+    "VAELoader": true
+  }
+}

@@ -45,6 +45,7 @@ def _fingerprint(batch: BatchBlock) -> str:
         "lora": batch.lora,
         "h3Resolution": batch.h3Resolution,
         "ltxQuality": batch.ltxQuality,
+        "seedanceResolution": batch.seedanceResolution,
     }
     raw = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

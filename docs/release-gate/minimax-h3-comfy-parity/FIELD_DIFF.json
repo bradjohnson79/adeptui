@@ -1,0 +1,110 @@
+{
+  "authority": "46a303cbccf9 (1).json — Comfy UI template, converted then flattened with Lightning LoRA off",
+  "liveSchedulerInTemplate": "simple",
+  "noteSaysBetaOrNormal": true,
+  "schedulerUsedForParity": "simple — the widget value in the working file, not the Markdown note",
+  "fields": [
+    {
+      "field": "model",
+      "template": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "adept": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "match": true
+    },
+    {
+      "field": "text encoder",
+      "template": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors type=minimax device=default",
+      "adept": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors type=minimax (device omitted)",
+      "match": "partial"
+    },
+    {
+      "field": "video VAE",
+      "template": "minimax_h3_video_vae_fp16.safetensors",
+      "adept": "same",
+      "match": true
+    },
+    {
+      "field": "audio VAE",
+      "template": "minimax_h3_audio_vae_fp32.safetensors",
+      "adept": "same",
+      "match": true
+    },
+    {
+      "field": "reference ordering",
+      "template": "ref_image_0 = first LoadImage = <Picture 1>; ref_image_1 = second = <Picture 2>",
+      "adept": "same socket order via Direct Reference",
+      "match": true
+    },
+    {
+      "field": "prompt syntax",
+      "template": "Use <Picture N> as reference frames; describe the shot with those tags. No <Subject N>.",
+      "adept": "compile_h3_prompt / render_h3 invents subject_definitions and <Subject N>",
+      "match": false
+    },
+    {
+      "field": "resolution",
+      "template": "ResolutionSelector 16:9 @ 0.4MP multiple 32 = 864x480 (note table). Node widgets 1344x768 are overridden by the selector.",
+      "adept": "Timeline typically 1280x704; builder default 768x448",
+      "match": false
+    },
+    {
+      "field": "ref_image_size",
+      "template": "match",
+      "adept": "default match; Test A/B/E also tried max",
+      "match": "default-match"
+    },
+    {
+      "field": "sampler",
+      "template": "res_multistep",
+      "adept": "res_multistep",
+      "match": true
+    },
+    {
+      "field": "scheduler",
+      "template": "simple (actual widgets). Note text prefers beta or normal.",
+      "adept": "simple",
+      "match": true
+    },
+    {
+      "field": "steps",
+      "template": "20 when Lightning LoRA boolean is false",
+      "adept": "20",
+      "match": true
+    },
+    {
+      "field": "denoise",
+      "template": 1,
+      "adept": 1.0,
+      "match": true
+    },
+    {
+      "field": "guider",
+      "template": "BasicGuider; model = raw UNET while LoRA switch is false",
+      "adept": "BasicGuider; model = raw UNET unless fast=EasyCache",
+      "match": "when-not-fast"
+    },
+    {
+      "field": "cache",
+      "template": "no EasyCache",
+      "adept": "EasyCache node 90 when fast=True",
+      "match": false
+    },
+    {
+      "field": "optional LoRA",
+      "template": "Lightning LoRA present but switch=false; first parity omits it",
+      "adept": "absent",
+      "match": true
+    },
+    {
+      "field": "FPS",
+      "template": 24,
+      "adept": 24.0,
+      "match": true
+    },
+    {
+      "field": "duration/frame calculation",
+      "template": "duration 5s → max(5, round(a*24)) + (5 - (max(5, round(a*24)) % 17)) % 17 = 124",
+      "adept": "snap_h3_timeline_duration / 17k+5 = 124 for 5s",
+      "match": true
+    }
+  ]
+}

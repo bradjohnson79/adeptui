@@ -134,93 +134,130 @@
   border-color: var(--border-glass-active);
 }
 
-/* ===== Hero =====
-   Native asset is 1983×793 — size from the image so the frame is never cropped. */
+/* ===== Compact hero =====
+   About half the old 1983×793 full-bleed frame (that raster was ~40vw tall). */
 .gs-hero {
   position: relative;
-  /* Break out of .studio-page horizontal padding for a full-bleed header */
   width: 100vw;
   max-width: 100vw;
   margin: 0 0 1.25rem;
   margin-left: calc(50% - 50vw);
   margin-right: calc(50% - 50vw);
-  border-radius: 0 0 28px 28px;
+  border-radius: 0 0 22px 22px;
   overflow: hidden;
   isolation: isolate;
-  background: #04080f;
-  box-shadow: var(--glow-violet), 0 20px 50px rgba(0, 0, 0, 0.45);
+  background: #05080f;
+  box-shadow: var(--glow-violet), 0 16px 36px rgba(0, 0, 0, 0.4);
 }
 
-.gs-hero__picture {
-  display: block;
-  width: 100%;
-  line-height: 0;
-}
-
-.gs-hero__media {
-  display: block;
-  width: 100%;
-  height: auto;
-  aspect-ratio: 1983 / 793;
-  object-fit: contain;
-  object-position: center center;
-  background: #04080f;
-}
-
-.gs-hero__overlay,
-.gs-hero__vignette {
+.gs-hero__atmosphere {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  background-color: #05080f;
+  background-image:
+    radial-gradient(1.2px 1.2px at 14% 28%, rgba(255, 255, 255, 0.75) 50%, transparent 52%),
+    radial-gradient(1px 1px at 32% 70%, rgba(255, 255, 255, 0.4) 50%, transparent 52%),
+    radial-gradient(1.1px 1.1px at 68% 18%, rgba(255, 255, 255, 0.55) 50%, transparent 52%),
+    radial-gradient(1px 1px at 86% 58%, rgba(246, 226, 122, 0.55) 50%, transparent 52%),
+    radial-gradient(ellipse 36% 140% at 0% 50%, rgba(45, 212, 191, 0.18), transparent 68%),
+    radial-gradient(ellipse 32% 120% at 100% 20%, rgba(124, 92, 214, 0.32), transparent 70%),
+    radial-gradient(ellipse 28% 40% at 48% 110%, rgba(212, 175, 55, 0.1), transparent 72%),
+    linear-gradient(180deg, rgba(5, 8, 16, 0.15), rgba(5, 8, 16, 0.55));
 }
 
-.gs-hero__overlay {
-  /* Light wash only — artwork already carries brand lockup */
+.gs-hero__atmosphere::after {
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 0;
+  height: 1px;
   background: linear-gradient(
-    180deg,
-    rgba(4, 8, 16, 0.08) 0%,
-    transparent 35%,
-    rgba(5, 10, 18, 0.35) 100%
+    90deg,
+    transparent,
+    rgba(45, 212, 191, 0.45),
+    rgba(212, 175, 55, 0.7),
+    rgba(167, 139, 250, 0.45),
+    transparent
   );
 }
 
-.gs-hero__vignette {
-  background: radial-gradient(
-    120% 90% at 50% 45%,
-    transparent 55%,
-    rgba(2, 6, 14, 0.35) 100%
-  );
-}
-
-.gs-hero__brand {
-  position: absolute;
-  inset: 0;
+.gs-hero__layout {
+  position: relative;
+  z-index: 1;
   display: grid;
-  place-items: center;
-  pointer-events: none;
-  z-index: 2;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.85rem 1.75rem;
+  min-height: clamp(220px, 20vw, 300px);
+  padding: 0.85rem clamp(1.25rem, 4vw, 3rem);
+  max-width: 1240px;
+  margin: 0 auto;
 }
 
-/* Hero raster already includes the lockup; keep SVG as a soft glow accent only */
 .gs-hero__logo {
-  width: min(42%, 420px);
-  height: auto;
-  opacity: 0.28;
-  mix-blend-mode: soft-light;
-  filter: drop-shadow(0 0 22px rgba(212, 175, 55, 0.35));
+  width: auto;
+  height: clamp(168px, 16vw, 228px);
+  max-width: 100%;
+  object-fit: contain;
+  object-position: center;
+  filter: drop-shadow(0 0 18px rgba(212, 175, 55, 0.42));
 }
 
 .gs-hero__copy {
-  /* Taglines are baked into the hero artwork — keep markup for tests/a11y but hide visually */
-  position: absolute;
-  width: 1px;
-  height: 1px;
+  min-width: 0;
+  color: #e7eef4;
+}
+
+.gs-hero__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.35rem, 2vw, 1.85rem);
+  font-weight: 560;
+  letter-spacing: 0.16em;
+  line-height: 1.05;
+  color: #f6e27a;
+}
+
+.gs-hero__kicker {
+  margin: 0.2rem 0 0.35rem;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  color: #d5ebe8;
+}
+
+.gs-hero__summary {
+  margin: 0 0 0.65rem;
+  max-width: 68ch;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.gs-hero__caps {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.gs-hero__cap-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
   padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  list-style: none;
+}
+
+.gs-hero__cap-row li {
+  border: 1px solid rgba(212, 175, 55, 0.38);
+  border-radius: 999px;
+  background: rgba(6, 12, 22, 0.55);
+  color: #e7f6f3;
+  padding: 0.18rem 0.62rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
 }
 
 /* ===== Co-Director feature card ===== */
@@ -580,12 +617,76 @@
   flex: 0 0 auto;
 }
 
-/* ===== Projects split ===== */
-.gs-projects-split {
-  display: grid;
-  grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.4fr);
+/* ===== Projects header ===== */
+.gs-projects-hero {
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
   margin-bottom: 1.75rem;
+  padding: 1.15rem 1.25rem 1.2rem;
+  background:
+    radial-gradient(ellipse 42% 90% at 0% 0%, rgba(212, 175, 55, 0.1), transparent 62%),
+    radial-gradient(ellipse 36% 80% at 100% 100%, rgba(45, 212, 191, 0.08), transparent 68%),
+    rgba(8, 14, 24, 0.72);
+}
+
+.gs-projects-hero__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+}
+
+.gs-projects-hero__copy {
+  min-width: 0;
+}
+
+.gs-projects-hero h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  color: #f6e27a;
+  letter-spacing: 0.04em;
+}
+
+.gs-projects-hero__summary {
+  margin: 0.35rem 0 0;
+  max-width: 68ch;
+  color: rgba(226, 232, 240, 0.9);
+  line-height: 1.45;
+}
+
+.gs-projects-hero__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.gs-projects-hero__slot {
+  min-width: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(6, 12, 20, 0.46);
+}
+
+.gs-projects-hero__label {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+  color: rgba(210, 225, 238, 0.74);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.gs-projects-hero__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.gs-projects-hero__row strong {
+  min-width: 0;
+  font-size: 1rem;
 }
 
 .gs-create-card {
@@ -1069,14 +1170,35 @@
   .gs-studio-launch-card {
     aspect-ratio: 16 / 10;
   }
-  .gs-projects-split {
+  .gs-projects-hero__top,
+  .gs-projects-hero__pair {
     grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 960px) {
+  .gs-hero__cap-row--extra {
+    display: none;
+  }
+  .gs-hero__summary {
+    max-width: 52ch;
   }
 }
 
 @media (max-width: 720px) {
+  .gs-hero__layout {
+    grid-template-columns: 1fr;
+    justify-items: start;
+    min-height: 0;
+    padding-block: 0.85rem 1rem;
+  }
   .gs-hero__logo {
-    width: min(48%, 280px);
+    height: 148px;
+    width: auto;
+  }
+  .gs-hero__summary {
+    font-size: 0.84rem;
   }
   .gs-codirector-card__footer {
     align-items: stretch;

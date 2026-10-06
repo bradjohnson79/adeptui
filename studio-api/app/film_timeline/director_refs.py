@@ -123,7 +123,7 @@ def mechanism_token(generator_id: str) -> str:
     """Lightweight mechanism tag for job telemetry — not W46 compile authority."""
     token = (generator_id or "").strip().lower()
     if "minimax-h3" in token:
-        return "h3_director"
+        return "h3_fast_renderer"
     if token.startswith("ltx-2.5") or token.startswith("ltx-25"):
         return "ltx25_ref"
     return ""

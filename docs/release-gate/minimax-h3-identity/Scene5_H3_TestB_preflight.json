@@ -1,0 +1,59 @@
+{
+  "primaryHypothesis": "existing compile_h3_prompt / render_h3 output reaches MiniMaxH3ReferenceToVideo.prompt",
+  "secondaryVariables": [
+    "ref_image_size=max",
+    "EasyCache absent"
+  ],
+  "picture_1": {
+    "canonicalTag": "@Addex",
+    "assetId": "91b82df6-6c5a-410a-bdb8-6cd3f79753c7",
+    "socket": "ref_image_0"
+  },
+  "picture_2": {
+    "canonicalTag": "@Korri40YearsOld",
+    "assetId": "a42e77e0-dfe3-4ac9-85af-ab98dfc510e5",
+    "socket": "ref_image_1"
+  },
+  "subject_1": "@Addex",
+  "subject_2": "@Korri40YearsOld",
+  "ref_image_0": "studio/91b82df6-6c5a-410a-bdb8-6cd3f79753c7.jpeg",
+  "ref_image_1": "studio/a42e77e0-dfe3-4ac9-85af-ab98dfc510e5.jpeg",
+  "ref_image_size": "max",
+  "easyCache": false,
+  "steps": 20,
+  "sampler": "res_multistep",
+  "scheduler": "simple",
+  "seed": 2248151181,
+  "length": 124,
+  "resolution": "1280x704",
+  "schedulerModel": [
+    "1",
+    0
+  ],
+  "guiderModel": [
+    "1",
+    0
+  ],
+  "compiledPrompt": "subject_definitions:\n<Subject 1> is @Addex, the person defined by <Picture 1>. Preserve their facial identity, hair, body proportions, clothing, and distinguishing appearance from <Picture 1>.\n<Subject 2> is @Korri40YearsOld, the person defined by <Picture 2>. Preserve their facial identity, hair, body proportions, clothing, and distinguishing appearance from <Picture 2>.\n\nCHARACTER IDENTITY\n<Picture 1> @Addex \u2014 Preserve the supplied visual identity. Do not invent a replacement person. Keep the face, hair, body, wardrobe, and distinguishing marks from the reference picture. The setting must not redesign their clothes or recast them as generic extras.\n<Picture 2> @Korri40YearsOld \u2014 Preserve the supplied visual identity. Do not invent a replacement person. Keep the face, hair, body, wardrobe, and distinguishing marks from the reference picture. The setting must not redesign their clothes or recast them as generic extras.\nThe people in this shot are <Subject 1> (<Picture 1> @Addex) and <Subject 2> (<Picture 2> @Korri40YearsOld).\nThese are the characters. Preserve them. The reference pictures are identity authority.\n\nVISUAL STYLE\nRealistic Anime\nHybrid realistic-anime illustration with refined line control, grounded shading, believable depth, and stylized clarity.\nApply this style to the entire scene while preserving reference identity. A style change is a rendering treatment of the same referenced characters, not a recast.\n\nACTION\nSci-fi living quarters.\n\n<Subject 1> is already seated on the couch, thinking.\n\n<Subject 2> stands beside him, then sits next to him. They hold hands. Keep both people looking exactly like their reference pictures, including face, hair, body, and clothes. The room may be sci-fi; do not put them in new uniforms.\n\n<Subject 2> (S2): Hey babe, are you ready for some fun?\n\n<Subject 1> smiles.\n\n<Subject 1> (S1): You know I am.\n\nCAMERA\nIllustrative cinematic coverage with grounded lenses, flattering perspective, and composition that protects facial recognition.",
+  "authoredPrompt": "Visual style: Realistic Anime with a photorealistic background.\n\nSci-fi living quarters. \n\nAddex is already seated on the couch, thinking. \n\nKorri stands beside him, then sits next to him. They hold hands. Keep both people looking exactly like their reference pictures, including face, hair, body, and clothes. The room may be sci-fi; do not put them in new uniforms.\n\nKORRI: Hey babe, are you ready for some fun?\n\nAddex smiles.\n\nADDEX: You know I am.",
+  "checks": {
+    "picture1_addex": true,
+    "picture2_korri": true,
+    "ref0_addex": true,
+    "ref1_korri": true,
+    "ref_image_size_max": true,
+    "easyCache_absent": true,
+    "steps_20": true,
+    "sampler_res_multistep": true,
+    "scheduler_simple": true,
+    "seed_exact": true,
+    "length_124": true,
+    "resolution_1280x704": true,
+    "raw_unet_to_scheduler": true,
+    "raw_unet_to_guider": true,
+    "subject_tokens_present": true,
+    "picture_tokens_present": true,
+    "no_new_compiler": true
+  },
+  "ok": true
+}

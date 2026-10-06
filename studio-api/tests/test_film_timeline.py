@@ -173,6 +173,33 @@ def test_ambiguous_audio_is_not_silently_routed():
     assert film.sfx == []
 
 
+def test_continuation_mode_matches_each_provider():
+    from app.director_timeline_w46.generation.adapters.ltx_25_local import Ltx25LocalAdapter
+    from app.director_timeline_w46.generation.adapters.minimax_h3_i2v_local import MiniMaxH3I2VLocalAdapter
+    from app.director_timeline_w46.generation.adapters.seedance_api import (
+        Seedance25ApiAdapter,
+        SeedanceApiAdapter,
+        SeedanceFastApiAdapter,
+        SeedanceMiniApiAdapter,
+    )
+    from app.film_timeline.availability import continuation_copy
+
+    assert SeedanceMiniApiAdapter().capabilities.continuationMode == "soft"
+    assert SeedanceApiAdapter().capabilities.continuationMode == "hard"
+    assert SeedanceFastApiAdapter().capabilities.continuationMode == "hard"
+    assert Seedance25ApiAdapter().capabilities.continuationMode == "hard"
+    assert MiniMaxH3I2VLocalAdapter().capabilities.continuationMode == "hard"
+    assert Ltx25LocalAdapter().capabilities.continuationMode == "hard"
+    assert KlingApiAdapter().capabilities.continuationMode == "hard"
+    assert VeoApiAdapter().capabilities.continuationMode == "hard"
+    soft = continuation_copy("soft")
+    assert soft["label"] == "Continuation: Soft reference"
+    assert "not guaranteed" in soft["helper"]
+    assert continuation_copy("hard")["label"] == "Continuation: Hard start-frame"
+    assert continuation_copy("hard")["helper"] == ""
+    assert "cannot perform continuity anchoring" in continuation_copy("none")["helper"]
+
+
 def test_strategy_uses_reference_video_before_motion_context():
     caps = _Caps(supportsVideoReferences=True, supportsImageToVideo=True, supportsStartFrame=True, supportsReferenceToVideo=True)
     assert MOTION_CONTEXT_AVAILABLE is False
@@ -196,10 +223,29 @@ def test_retake_rejects_a_range_that_is_not_one_segment():
     assert resolve_retake_segment(shot, 3, 3)["code"] == "RETAKE_RANGE"
     assert resolve_retake_segment(shot, 0, 12)["code"] == "RETAKE_RANGE"
     partial = resolve_retake_segment(shot, 1, 4)
-    assert partial["code"] == "PARTIAL_RETAKE_UNSUPPORTED"
+    assert partial["ok"] is True
+    assert partial["mode"] == "partial"
+    assert partial["segment"].assetId == "a"
+    assert abs(partial["fileIn"] - 1) < 0.01
+    assert abs(partial["fileOut"] - 4) < 0.01
+    crossed = resolve_retake_segment(shot, 3, 8)
+    assert crossed["code"] == "PARTIAL_RETAKE_UNSUPPORTED"
+    assert "0s–5s" in crossed["message"] and "5s–10s" in crossed["message"]
     exact = resolve_retake_segment(shot, 5, 10)
     assert exact["ok"] is True
     assert exact["segment"].assetId == "b"
+    from app.film_timeline.retake import generate_seconds, plan_replacement_pieces
+
+    source = Segment(id="src", order=0, durationSec=15, status="completed", assetId="clip", origin="library")
+    pieces = plan_replacement_pieces(source, "new", file_in=7, file_out=10, marked=3, generated_sec=3, prompt="turns")
+    assert [item.compositionRole for item in pieces] == ["source", "retake", "source"]
+    assert [round(item.durationSec, 2) for item in pieces] == [7, 3, 5]
+    assert pieces[0].assetId == "clip" and pieces[2].assetId == "clip"
+    assert pieces[1].assetId == "new"
+    assert generate_seconds(2) == 3
+    short = plan_replacement_pieces(source, "new", file_in=7, file_out=9, marked=2, generated_sec=3, prompt="turns")
+    assert short[1].durationSec == 2
+    assert short[1].trimOutSec == 2
 
 
 def test_local_minimax_stays_reference_to_video():
@@ -221,7 +267,7 @@ def test_local_minimax_is_one_capability_row():
     assert [row["id"] for row in rows] == ["minimax-h3-i2v-local"]
     # Owner-certified Director presentation (memory/session-2026-09-27-28-timeline-v2-h3.md
     # section 3B: PRESENTATION LIVE PASS — label "MiniMax H3 Director — Local").
-    assert rows[0]["label"] == "MiniMax H3 Director — Local"
+    assert rows[0]["label"] == "MiniMax H3 — Local"
 
 
 def test_production_routes_refuse_the_old_generator():

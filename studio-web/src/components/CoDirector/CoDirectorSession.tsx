@@ -99,6 +99,7 @@ import {
   type PromptMode,
   type WelcomeSuggestion,
 } from "./types";
+import { approvalResultMessageId, mergeServerMessages, upsertCoDirectorMessage } from "./creatorFacingReply";
 
 import {
   getEnvironmentCreatorPlanningSnapshot,
@@ -147,6 +148,7 @@ type SessionValue = {
   approveProposal: (proposalId: string) => Promise<void>;
   rejectProposal: (proposalId: string, note?: string) => Promise<void>;
   requestProposalRevision: (proposalId: string, note?: string) => Promise<void>;
+  reviseProposal: (proposalId: string, correction: string) => Promise<void>;
   cancelProposal: (proposalId: string) => Promise<void>;
   refreshProposals: () => Promise<void>;
   plan: ActionPlan | null;
@@ -461,6 +463,7 @@ type ServerConversationMessage = {
 // server-side fold (fold_events_for_llm) is the authoritative filter; this
 // client-side filter is defense in depth for legacy paths.
 const EXECUTION_MESSAGE_KINDS = new Set(["execution_status", "completion", "error"]);
+let lastVerifiedTimelineMutationKey = "";
 
 function isConversationalForLlmHistory(m: CoDirectorMessage): boolean {
   if (m.role !== "assistant") return true;
@@ -506,6 +509,29 @@ function normalizeServerMessage(m: ServerConversationMessage): CoDirectorMessage
   const rawType = m.messageType ?? m.message_type;
   const messageType = typeof rawType === "string" && rawType.trim() ? (rawType as CoDirectorMessage["messageType"]) : undefined;
   const execution = m.execution && typeof m.execution === "object" ? (m.execution as CoDirectorMessageExecution) : undefined;
+  let generationReady: CoDirectorMessage["generationReady"] | undefined;
+  if (Array.isArray(m.attachments)) {
+    for (const raw of m.attachments as Array<Record<string, unknown>>) {
+      if (!raw || raw.kind !== "generation_ready") continue;
+      const messageId = String(m.id || raw.messageId || "").trim();
+      const executionId = String(raw.executionId || raw.execution_id || "").trim();
+      const outcomeRaw = String(raw.outcome || "").trim();
+      const outcome =
+        outcomeRaw === "failed" || outcomeRaw === "cancelled" ? outcomeRaw : "ready";
+      generationReady = {
+        messageId: messageId || executionId,
+        executionId,
+        outcome,
+        modality: String(raw.modality || raw.mediaKind || "image"),
+        actionLabel: typeof raw.actionLabel === "string" ? raw.actionLabel : null,
+        assetId: typeof raw.assetId === "string" ? raw.assetId : typeof raw.asset_id === "string" ? raw.asset_id : null,
+        previewKind: typeof raw.previewKind === "string" ? raw.previewKind : null,
+        technical: typeof raw.technical === "string" ? raw.technical : null,
+        content: typeof m.content === "string" ? m.content : undefined,
+      };
+      break;
+    }
+  }
   return {
     id: m.id || newMessageId(),
     role: m.role === "user" ? "user" : "assistant",
@@ -515,6 +541,7 @@ function normalizeServerMessage(m: ServerConversationMessage): CoDirectorMessage
     createdAt: m.created_at || new Date().toISOString(),
     ...(messageType ? { messageType } : {}),
     ...(execution ? { execution } : {}),
+    ...(generationReady ? { generationReady } : {}),
   };
 }
 
@@ -611,7 +638,40 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const [activeExecution, setActiveExecution] = useState<WorkSurfaceState | null>(null);
   useEffect(() => {
     if (!activeExecution?.execution_id) return;
-    setMessages((prev) => applyLiveExecutionToMessages(prev, activeExecution));
+    setMessages((prev) => {
+      let next = applyLiveExecutionToMessages(prev, activeExecution);
+      const pd = (activeExecution.plan_data || {}) as Record<string, unknown>;
+      const emitted = pd.cdGenReady;
+      if (emitted && typeof emitted === "object") {
+        const row = emitted as Record<string, unknown>;
+        const messageId = String(row.messageId || "").trim();
+        const content = String(row.content || "").trim();
+        if (messageId && content) {
+          const outcomeRaw = String(row.outcome || "ready").trim();
+          const outcome =
+            outcomeRaw === "failed" || outcomeRaw === "cancelled" ? outcomeRaw : "ready";
+          next = upsertCoDirectorMessage(next, {
+            id: messageId,
+            role: "assistant",
+            content,
+            createdAt: new Date().toISOString(),
+            messageType: "answer",
+            generationReady: {
+              messageId,
+              executionId: String(row.executionId || activeExecution.execution_id || ""),
+              outcome,
+              modality: String(row.modality || "image"),
+              actionLabel: typeof row.actionLabel === "string" ? row.actionLabel : null,
+              assetId: typeof row.assetId === "string" ? row.assetId : null,
+              previewKind: typeof row.previewKind === "string" ? row.previewKind : null,
+              technical: typeof row.technical === "string" ? row.technical : null,
+              content,
+            },
+          });
+        }
+      }
+      return next;
+    });
   }, [activeExecution]);
   const [proposals, setProposals] = useState<CoDirectorProposal[]>([]);
   const [proposalActingId, setProposalActingId] = useState<string | null>(null);
@@ -637,6 +697,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const [kbDoc, setKbDoc] = useState("");
   const [audit, setAudit] = useState(() => loadAudit().slice(0, 20));
   const [uiContext, setUiContext] = useState<CoDirectorUIContext>({});
+  const selectedCharacterIdRef = useRef("");
   const [statusRegistry, setStatusRegistry] = useState<StatusRegistryCheck[]>([]);
   const [statusLatestRun, setStatusLatestRun] = useState<StatusRun | null>(null);
   const [statusHistory, setStatusHistory] = useState<StatusRun[]>([]);
@@ -935,15 +996,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         conversationRevisionRef.current = server.revision;
       }
       const serverMessages = (server.messages || []).map(normalizeServerMessage);
-      setMessages((prev) => {
-        const localIds = new Set(prev.map((m) => m.id).filter(Boolean) as string[]);
-        const merged = [...prev];
-        for (const sm of serverMessages) {
-          if (sm.id && localIds.has(sm.id)) continue;
-          merged.push(sm);
-        }
-        return merged;
-      });
+      setMessages((prev) => mergeServerMessages(prev, serverMessages));
       conversationHydratedRef.current = true;
       return { ok: true, skipped: false, message: null };
     } catch (err) {
@@ -1227,6 +1280,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         sceneName: bindings.sceneName,
         workspaceId: bindings.workspaceTab,
         activeDocumentId: bindings.activeDocumentId,
+        selectedCharacterIds: prev.selectedCharacterIds,
         onGoTab: bindings.onGoTab,
         environmentCreatorPlanning: pid ? getEnvironmentCreatorPlanningSnapshot(pid) : null,
         imageGeneratorPlanning: pid ? getImageGeneratorPlanningSnapshot(pid) : null,
@@ -1239,6 +1293,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         prev.sceneName === next.sceneName &&
         prev.workspaceId === next.workspaceId &&
         prev.activeDocumentId === next.activeDocumentId &&
+        prev.selectedCharacterIds?.[0] === next.selectedCharacterIds?.[0] &&
         prev.onGoTab === next.onGoTab
       ) {
         return prev;
@@ -1287,6 +1342,24 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   useEffect(() => {
     activeContentTabRef.current = uiContext.activeContentTab ?? null;
   }, [uiContext.activeContentTab]);
+
+  useEffect(() => {
+    selectedCharacterIdRef.current = uiContext.selectedCharacterIds?.[0] || "";
+  }, [uiContext.selectedCharacterIds]);
+
+  useEffect(() => {
+    const onSelected = (event: Event) => {
+      const detail = (event as CustomEvent<{ characterId?: string }>).detail;
+      const id = String(detail?.characterId || "").trim();
+      setUiContext((prev) => {
+        const current = prev.selectedCharacterIds?.[0] || "";
+        if (current === id) return prev;
+        return { ...prev, selectedCharacterIds: id ? [id] : [] };
+      });
+    };
+    window.addEventListener("adept:selected-character", onSelected);
+    return () => window.removeEventListener("adept:selected-character", onSelected);
+  }, []);
 
   // Keep uiContext planning snapshots fresh when Image Generator / Env Creator publish.
   // bindWorkspace equality intentionally ignores planning fields to avoid thrash.
@@ -1973,17 +2046,24 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             toolId: event.toolId,
             title: prev?.title || event.toolId,
             phase: "completed",
-            truncated: prev?.truncated || event.invocation.resultTruncated,
+            truncated: prev?.truncated || Boolean(event.invocation?.resultTruncated),
           }));
+          void refreshProposals();
           const result = (event.invocation?.result || {}) as Record<string, unknown>;
+          const nestedData =
+            result.data && typeof result.data === "object" && !Array.isArray(result.data)
+              ? (result.data as Record<string, unknown>)
+              : {};
           pendingToolRetryRef.current = null;
           syncProjectIdentityFromResult(result);
+          const timelineMutKey = `${String(event.requestId || "")}|${String(event.toolId || "")}|${String(result.segmentId || result.itemId || "")}`;
           if (
-            (event.toolId === "timeline.propose_add_prompt_segment" ||
-              event.toolId === "timeline.remove_item") &&
+            String(event.toolId || "").startsWith("timeline.") &&
             result.verified === true &&
-            bindingsRef.current.projectId
+            bindingsRef.current.projectId &&
+            timelineMutKey !== lastVerifiedTimelineMutationKey
           ) {
+            lastVerifiedTimelineMutationKey = timelineMutKey;
             window.dispatchEvent(
               new CustomEvent("adept:codirector-project-mutated", {
                 detail: {
@@ -1998,7 +2078,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               }),
             );
           }
-          const uiAction = String(result.uiAction || "");
+          const uiAction = String(result.uiAction || nestedData.uiAction || "");
           if (uiAction === "open_voice_performance" || uiAction === "open_voice_creator") {
             const characterId = String(result.characterId || "");
             const workspaceUrl = String(result.workspaceUrl || "");
@@ -2026,6 +2106,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             } catch {
               /* tab binding optional */
             }
+          }
+          if (uiAction === "open_magi") {
+            const workspaceUrl = String(result.workspaceUrl || nestedData.workspaceUrl || "");
+            if (workspaceUrl) navigate(workspaceUrl);
           }
           if (uiAction === "open_scriptwriter") {
             const workspaceUrl = String(result.workspaceUrl || "");
@@ -2336,6 +2420,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             active_content_tab: activeContentTabRef.current || undefined,
             workspace_tab: b.workspaceTab || undefined,
             workspaceTab: b.workspaceTab || undefined,
+            characterId:
+              b.workspaceTab === "characters" || b.workspaceTab === "identityregistry"
+                ? selectedCharacterIdRef.current || undefined
+                : undefined,
             active_document_id: b.activeDocumentId || undefined,
             scriptwriter_scene_id: scriptwriterSceneRef.current || undefined,
             environmentCreatorPlanning: b.projectId
@@ -2522,6 +2610,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               active_content_tab: activeContentTabRef.current || undefined,
               workspace_tab: b.workspaceTab || undefined,
               workspaceTab: b.workspaceTab || undefined,
+              characterId:
+                b.workspaceTab === "characters" || b.workspaceTab === "identityregistry"
+                  ? selectedCharacterIdRef.current || undefined
+                  : undefined,
               active_document_id: b.activeDocumentId || undefined,
               scriptwriter_scene_id: scriptwriterSceneRef.current || undefined,
             },
@@ -2622,7 +2714,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         cancelledByUserRef.current = false;
       }
     },
-    [persistConversation, reconcileConversation, selectedModelId, uiContext, languagePrefs],
+    [persistConversation, reconcileConversation, refreshProposals, selectedModelId, uiContext, languagePrefs],
   );
 
   const uploadPendingAttachments = useCallback(
@@ -2966,29 +3058,39 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             ? (receipt.toolResult as Record<string, unknown>)
             : null;
         if (toolResult) syncProjectIdentityFromResult(toolResult);
-        setMessages((m) => [
-          ...m,
-          {
-            id: newMessageId(),
+        const toolIdStrEarly = String(receipt.toolId || "");
+        const timelineVerified = toolResult?.verified === true;
+        const approvalId = String((receipt as { approvalId?: string }).approvalId || "").trim();
+        const resultId = approvalId ? approvalResultMessageId(approvalId, "verified") : `proposal:${proposalId}:approved`;
+        const content = toolIdStrEarly.startsWith("timeline.")
+          ? timelineVerified
+            ? toolResult?.confirmation && typeof toolResult.confirmation === "string"
+              ? toolResult.confirmation
+              : "Saved on the Timeline."
+            : "I could not verify that Timeline change. The Timeline was not updated."
+          : toolResult?.confirmation && typeof toolResult.confirmation === "string"
+            ? toolResult.confirmation
+            : receipt.toolId || isTool
+              ? `Approved — I applied “${approved?.title || receipt.toolId}”.`
+              : "Proposal approved and applied — a new Production Bible version was created.";
+        setMessages((m) =>
+          upsertCoDirectorMessage(m, {
+            id: resultId,
             role: "assistant",
-            content:
-              toolResult?.confirmation && typeof toolResult.confirmation === "string"
-                ? toolResult.confirmation
-                : receipt.toolId || isTool
-                  ? `Approved — I applied “${approved?.title || receipt.toolId}”.`
-                : "Proposal approved and applied — a new Production Bible version was created.",
+            content,
             createdAt: new Date().toISOString(),
-          },
-        ]);
+            approvalId: approvalId || undefined,
+            proposalId,
+            messageType: "completion",
+          } as CoDirectorMessage),
+        );
         // c5: any tool proposal that mutates native project/scene/character/timeline/voice
         // state should notify the active workspace to refresh without requiring a manual reload.
         if (projectId && isTool) {
           // BOT2: Instant Update after verified destination for Timed Prompt place OR remove.
           const toolIdStr = String(receipt.toolId || "");
-          const timedPromptMut =
-            toolIdStr === "timeline.propose_add_prompt_segment" ||
-            toolIdStr === "timeline.remove_item";
-          const verifiedOk = !timedPromptMut || toolResult?.verified === true;
+          const timelineMut = toolIdStr.startsWith("timeline.");
+          const verifiedOk = !timelineMut || toolResult?.verified === true;
           if (verifiedOk) {
           window.dispatchEvent(
             new CustomEvent("adept:codirector-project-mutated", {
@@ -3003,7 +3105,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
                 segmentId: String((toolResult && (toolResult.segmentId || toolResult.itemId)) || ""),
                 itemId: String((toolResult && toolResult.itemId) || ""),
                 itemKind: String((toolResult && toolResult.itemKind) || ""),
-                verified: timedPromptMut ? true : Boolean(toolResult?.verified),
+                verified: timelineMut ? true : Boolean(toolResult?.verified),
               },
             }),
           );
@@ -3020,20 +3122,28 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         }
       } catch (err) {
         const classified = classifyCoDirectorError(err);
-        setMessages((m) => [
-          ...m,
-          {
-            id: newMessageId(),
+        const details = (classified.details || {}) as Record<string, unknown>;
+        const approvalId = String(details.approvalId || details.approval_id || "").trim();
+        const resultId = approvalId
+          ? approvalResultMessageId(approvalId, "failed")
+          : `proposal:${proposalId}:approval-failed`;
+        const content =
+          classified.code === "PROPOSAL_STALE"
+            ? isTool
+              ? "That action is out of date because the project changed since it was proposed. Cancel it and ask again."
+              : "That proposal is out of date because the Bible changed since it was created. Cancel it and ask again."
+            : `Couldn't approve that proposal: ${classified.message}`;
+        setMessages((m) =>
+          upsertCoDirectorMessage(m, {
+            id: resultId,
             role: "assistant",
-            content:
-              classified.code === "PROPOSAL_STALE"
-                ? isTool
-                  ? "That action is out of date because the project changed since it was proposed. Cancel it and ask again."
-                  : "That proposal is out of date because the Bible changed since it was created. Cancel it and ask again."
-                : `Couldn't approve that proposal: ${classified.message}`,
+            content,
             createdAt: new Date().toISOString(),
-          },
-        ]);
+            approvalId: approvalId || undefined,
+            proposalId,
+            messageType: "error",
+          } as CoDirectorMessage),
+        );
       } finally {
         setProposalActingId(null);
         await refreshProposals();
@@ -3074,6 +3184,25 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       }
     },
     [proposalActingId, refreshProposals],
+  );
+
+  const reviseProposal = useCallback(
+    async (proposalId: string, correction: string) => {
+      const projectId = bindingsRef.current.projectId;
+      const text = correction.trim();
+      if (!projectId || !text || proposalActingId) return;
+      setProposalActingId(proposalId);
+      try {
+        await api.cancelProposal(projectId, proposalId);
+      } catch {
+        setProposalActingId(null);
+        return;
+      }
+      setProposalActingId(null);
+      await refreshProposals();
+      await send(text);
+    },
+    [proposalActingId, refreshProposals, send],
   );
 
   const cancelProposal = useCallback(
@@ -3473,6 +3602,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       approveProposal,
       rejectProposal,
       requestProposalRevision,
+      reviseProposal,
       cancelProposal,
       refreshProposals,
       plan,
@@ -3586,6 +3716,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       approveProposal,
       rejectProposal,
       requestProposalRevision,
+      reviseProposal,
       cancelProposal,
       refreshProposals,
       plan,

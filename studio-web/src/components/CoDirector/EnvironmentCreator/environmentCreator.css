@@ -1,0 +1,8 @@
+.environment-creator-provider-select {
+  width: 100%;
+  max-width: 22rem;
+}
+
+.environment-creator-provider-select option:disabled {
+  color: #9ca3af;
+}

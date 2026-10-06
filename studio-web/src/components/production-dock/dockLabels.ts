@@ -20,7 +20,7 @@ export function formatAudioStudioProviderPill(
     const name = (displayName || "").trim();
     // Prefer Systems displayName when it already names ElevenLabs; otherwise canonical chrome.
     if (name && /eleven/i.test(name) && name.length <= 22) return name;
-    return "API — ElevenLabs";
+    return "ElevenLabs API";
   }
   return "Local";
 }
@@ -34,13 +34,11 @@ type AudioLabelSource = {
 
 /** Drawer row label for hosted audio rows (not used for footer pill). */
 export function formatAudioMenuRowLabel(model: AudioLabelSource): string {
-  if (!model) return "API — ElevenLabs";
+  if (!model) return "ElevenLabs API";
   if (model.locality === "local") return "Local";
   const provider = `${model.providerId || ""}`.toLowerCase();
-  if (provider === "fal") return "ElevenLabs (fal)";
-  if (provider === "kie") return "ElevenLabs (kie)";
-  if (provider === "wavespeed") return "ElevenLabs (wavespeed)";
-  return "API — ElevenLabs";
+  if (provider === "elevenlabs") return "ElevenLabs API";
+  return "Audio";
 }
 
 /**
@@ -51,20 +49,8 @@ export function formatAudioDockPillLabel(
   model: AudioLabelSource,
   _fallbackLabel?: string | null,
 ): string {
-  const locality = `${model?.locality || ""}`.toLowerCase();
-  if (locality === "hosted" || locality === "api") return "API — ElevenLabs";
   const id = `${model?.id || ""}`.toLowerCase();
   const label = `${model?.label || ""}`.toLowerCase();
-  if (
-    id.includes("eleven") ||
-    label.includes("eleven") ||
-    label.includes("hosted audio") ||
-    id.startsWith("audio-") ||
-    id.includes("audio-fal") ||
-    id.includes("audio-kie") ||
-    id.includes("audio-wavespeed")
-  ) {
-    return "API — ElevenLabs";
-  }
+  if (id.includes("eleven") || label.includes("eleven")) return "ElevenLabs API";
   return "Local";
 }

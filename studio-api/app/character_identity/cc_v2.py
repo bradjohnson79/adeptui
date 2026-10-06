@@ -445,6 +445,9 @@ def generate_view(
                 "Create Close-up only after Front is approved and Co-Director vision lock is ready.",
                 409,
             )
+        from .closeup_crop import generate_closeup_from_front
+
+        return generate_closeup_from_front(db, project_id, character_id, profile, state)
 
     from . import service
     from .crs_view_generation import resolve_crs_view_generation_workflow

@@ -116,8 +116,8 @@ test.describe("M3.2e Information Architecture @DETERMINISTIC", () => {
   test("M32E-IA-08 Imagery registry plates present on template cards", async ({ page, request }) => {
     await waitForAppReady(request);
     await page.goto("/");
-    await expect(page.getByTestId("template-carousel")).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator(".aurora-plate").first()).toBeVisible();
+    await expect(page.getByTestId("projects-hero")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("template-carousel")).toHaveCount(0);
     await page.screenshot({ path: path.join(IMG_DIR, "08-template-plates.png"), fullPage: false });
   });
 
@@ -270,14 +270,12 @@ test.describe("M3.2e Information Architecture @DETERMINISTIC", () => {
     expect(ok).toBeTruthy();
   });
 
-  test("M32E-IA-22 Home template carousel still keyboard operable", async ({ page, request }) => {
+  test("M32E-IA-22 Home projects header is present", async ({ page, request }) => {
     await waitForAppReady(request);
     await page.goto("/");
-    const carousel = page.getByTestId("template-carousel");
-    await expect(carousel).toBeVisible({ timeout: 30_000 });
-    await carousel.focus();
-    await page.keyboard.press("ArrowRight");
-    await expect(carousel.getByTestId(/carousel-slide-/).first()).toBeVisible();
+    await expect(page.getByTestId("projects-hero")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("template-carousel")).toHaveCount(0);
+    await expect(page.getByTestId("create-project-open")).toBeVisible();
   });
 
   test("M32E-IA-23 Unknown capability status is not painted healthy", async ({ page, request }) => {
@@ -304,6 +302,7 @@ test.describe("M3.2e Information Architecture @DETERMINISTIC", () => {
     await waitForAppReady(request);
     await page.goto("/");
     await expect(page.getByTestId("create-project-open")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("template-carousel")).toBeVisible();
+    await expect(page.getByTestId("projects-hero")).toBeVisible();
+    await expect(page.getByTestId("template-carousel")).toHaveCount(0);
   });
 });

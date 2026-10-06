@@ -1,0 +1,28 @@
+# Adept UI — Completed System Lock Ledger
+
+**Canon.** Law 30: this is the only lock ledger. Unlock phrase: `Owner unlock: <module>`.
+
+Date format: ISO date of the GO that locked the module.
+
+## Locked
+
+| Module | GO document | Date | Forbidden globs | Exception |
+| --- | --- | --- | --- | --- |
+| DirectorTimeline leftover persist / Master-only SoT | `reports/DIRECTORTIMELINE_LEGACY_EXCISION.md` | 2026-09-21 | Do not restore live leftover SoT: `PUT /scenes/{id}/director` as persist, `getDirector`/`putDirector` product clients, `directorTimeline` as Timeline SoT | `Owner unlock: leftover-director-sot` |
+| Timeline Preview publish-bar visibility toggle (implementation + mount restore) | `reports/ADEPT_UI_TIMELINE_GENERATE_WRAPUP.md` | 2026-09-21 | `.live-preview-publish-bar` CSS geometry; eye persist `previewPublishBarVisible`; unmount-until-Final-Check gate | `Owner unlock: preview-publish-bar` |
+| Timeline `@` / `%` / `#` reference compile + H3 identity tokens | `reports/ADEPT_UI_TIMELINE_GENERATE_WRAPUP.md` | 2026-09-21 | `apply_bound_reference_tokens`; `_union_bound_crs_into_shot`; `_is_bound_visual_reference`; `_refuse_dropped_bound_visuals`; H3 `request.prompt` overwrite of `authoredPrompt` | `Owner unlock: timeline-reference-identity` |
+| MiniMax native AAC stitch preserve | `reports/ADEPT_UI_TIMELINE_GENERATE_WRAPUP.md` | 2026-09-21 | `stitch_needs_audio_remux`; `_audio_preserving_concat_args`; Preview mute helper staying false | `Owner unlock: minimax-native-aac` |
+| Omni sequential N+1 ready-only gate + no full-scene clone on windows 2+ | `reports/ADEPT_UI_TIMELINE_GENERATE_WRAPUP.md` | 2026-09-21 | `TemporalContinuityPacket.is_gate_ready`; window `order > 0` full-scene clone rewrite | `Owner unlock: omni-sequential-gate` |
+| Timeline Single Store Clean Slate | `reports/ADEPT_UI_TIMELINE_GENERATE_WRAPUP.md` | 2026-09-21 | Timeline is locked. Do not modify `studio-web/src/timelineMaster/**`, `studio-web/src/components/timeline-master/**`, Timeline Preview Monitor behavior in `studio-web/src/components/LivePreviewMonitor.tsx`, or `studio-api/app/director_timeline_w46/**`. Do not demote Queued batches that still have `pendingSnapshotId` in `clear_stale_queued_batches`. Do not remove Preview standby `Stand By... Generation Processing.`. Track mute controls stay real buttons labeled Mute or Unmute. Do not change the H3 bridge opening: `_open_on_prior_frame` (last frame is picture 1), the Picture 1 “Begin this shot on that exact picture” line in `attach_canonical_r2v`, the H3 `continuityBridgeId` branch in `_apply_i2v_start_identity` that keeps the last frame as the start, `compile_temporal_continuation` Watched/Exit lines, or `DEFAULT_QUESTION`. Read-only inspection is allowed. Schnick Coffee Social Video testing is not an unlock. | `Owner unlock: timeline` |
+| Timeline H3 multi-window handoff | `reports/TIMELINE_H3_WINDOW_CONVERGENCE_FINAL.md` | 2026-09-22 | One handoff owner in `window_handoff.run_completion_reviews`. One generator `/free` per handoff, then at most three owned memory probes. Unknown memory does not admit the next model. Tail frames come from the rendering take's own clip. A previous take's frame cannot feed the current take. Later windows keep their own WINDOW SCOPE. The final window does not run continuation-only temporal review. Do not add a second handoff module, a second continuity store, or Chunk Feed Forward / SLA on the H3 graph without a new measured promotion. | `Owner unlock: Timeline — H3 multi-window generation, inter-window continuity, memory handoff, tail-frame context, and existing MiniMax workflow optimization only` |
+| Timeline API multi-window pipeline | `docs/release-gate/timeline/SEEDANCE_API_MULTI_WINDOW_PIPELINE_PROMPT.md` | 2026-09-23 | `assign_later_window_scripts` is the only writer of per-window story text. Case A stays unchanged. Case B stores one slice on an empty later window and does not write it again. No `[CONTINUATION window …]` line and no `WINDOW SCOPE` note. `request_builder` and `seedance_api.py` stay read-only. `submit_next_queued_batch` is the only next-window submit. An API window advances when its clip is deposited and does not wait on local memory, the continuity bridge, Omni, or Dialogue QC. Dialogue QC does not halt the next API window and does not mark the take ready. `ensure_deposited_scene_join` is the only join. It runs when every planned window on that take has a deposited asset, including a take already closed as incomplete, and it does not mark the take ready. GET `/master` does not submit. A previous session does not call fal. | `Owner unlock: API multi-window pipeline` |
+
+Unlock expires at the end of the authorizing chat unless the Owner says otherwise.
+
+## Owner re-lock
+
+2026-09-21 — Owner closed the chat unlock for **Timeline Single Store Clean Slate**. The earlier `Owner unlock: timeline` in that session is closed. Timeline source stays locked. A later edit requires a new `Owner unlock: timeline`.
+
+2026-09-22 — H3 multi-window handoff convergence is GO. The scoped unlock in that mission is closed. Further edits to the handoff surface require a new Owner unlock.
+
+2026-09-23 — Owner declared `GO — API MULTI-WINDOW PIPELINE` and Timeline 100% complete. This chat is closed. Timeline source stays locked, including `studio-web/src/timelineMaster/**`, `studio-web/src/components/timeline-master/**`, Timeline Preview Monitor behavior in `studio-web/src/components/LivePreviewMonitor.tsx`, and `studio-api/app/director_timeline_w46/**`. A later edit requires a new `Owner unlock: timeline`. The API multi-window row also requires `Owner unlock: API multi-window pipeline`.

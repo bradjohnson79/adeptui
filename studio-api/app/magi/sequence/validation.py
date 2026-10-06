@@ -84,6 +84,7 @@ class MagiTrackModel(BaseModel):
     order: int = Field(ge=0)
     locked: Optional[bool] = None
     muted: Optional[bool] = None
+    hidden: Optional[bool] = None
     solo: Optional[bool] = None
     objectsSlot: Optional[int] = None
 
@@ -118,6 +119,8 @@ class MagiClipModel(BaseModel):
     freeze: Optional[bool] = None
     transitionInId: Optional[str] = None
     transitionOutId: Optional[str] = None
+    transitionDurationFrames: Optional[int] = Field(default=None, ge=1)
+    transitionInDurationFrames: Optional[int] = Field(default=None, ge=1)
     # Lineage (m2): optional provenance of how this clip entered MAGI.
     batchBlockId: Optional[str] = None
     generationId: Optional[str] = None

@@ -40,6 +40,7 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportsTextToVideo=False,
         supportsImageToVideo=True,
         supportsStartFrame=True,
+        continuationMode="hard",
         supportsEndFrame=True,
         supportsMultipleImageReferences=False,
         supportsReferenceToVideo=True,
@@ -82,7 +83,7 @@ class LtxLocalAdapter:
 
     def validate(self, request: TimelineGenerationRequest) -> ValidationResult:
         result = validate_against_capabilities(self.capabilities, request)
-        if request.generationMode == "text_to_video":
+        if request.generationMode == "text_to_video" and not str(self.id).startswith("ltx-2.5"):
             return ValidationResult(
                 ok=False,
                 errors=list(result.errors) + ["Timeline LTX is Reference-to-Video only."],
@@ -131,6 +132,7 @@ class LtxLocalAdapter:
             "executionSnapshotId": request.executionSnapshotId,
             "sceneTakeId": str(request.providerOptions.get("sceneTakeId") or ""),
             "generationMode": request.generationMode,
+            "ltxMode": request.providerOptions.get("ltxMode") or "",
             "timelineGeneration": True,
             "fallbackAllowed": bool(request.fallbackAllowed),
             "continuityBridgeId": request.continuityBridgeId,

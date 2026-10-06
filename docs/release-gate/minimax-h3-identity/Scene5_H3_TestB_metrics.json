@@ -1,0 +1,98 @@
+{
+  "prompt_id": "cc9dd295-b8eb-4e5e-9e2a-59383d144803",
+  "elapsed_seconds": 80.2,
+  "peak_vram_used_bytes": 16291717684,
+  "peak_vram_used_gb": 16.29,
+  "history_status": {
+    "status_str": "success",
+    "completed": true,
+    "messages": [
+      [
+        "execution_start",
+        {
+          "prompt_id": "cc9dd295-b8eb-4e5e-9e2a-59383d144803",
+          "timestamp": 1788928569958
+        }
+      ],
+      [
+        "execution_cached",
+        {
+          "nodes": [],
+          "prompt_id": "cc9dd295-b8eb-4e5e-9e2a-59383d144803",
+          "timestamp": 1788928569971
+        }
+      ],
+      [
+        "execution_success",
+        {
+          "prompt_id": "cc9dd295-b8eb-4e5e-9e2a-59383d144803",
+          "timestamp": 1788928803578
+        }
+      ]
+    ]
+  },
+  "outputs": {
+    "14": {
+      "images": [
+        {
+          "filename": "h3_subject_binding_00001_.mp4",
+          "subfolder": "identity_test",
+          "type": "output"
+        }
+      ],
+      "animated": [
+        true
+      ]
+    }
+  },
+  "samples": [
+    {
+      "elapsed": 10.0,
+      "vram_used": 12342327704,
+      "running": true,
+      "in_history": false
+    },
+    {
+      "elapsed": 20.1,
+      "vram_used": 11771902360,
+      "running": true,
+      "in_history": false
+    },
+    {
+      "elapsed": 30.1,
+      "vram_used": 10952195537,
+      "running": true,
+      "in_history": false
+    },
+    {
+      "elapsed": 40.1,
+      "vram_used": 11771902360,
+      "running": true,
+      "in_history": false
+    },
+    {
+      "elapsed": 50.1,
+      "vram_used": 10952195537,
+      "running": true,
+      "in_history": false
+    },
+    {
+      "elapsed": 60.2,
+      "vram_used": 10952195537,
+      "running": true,
+      "in_history": false
+    },
+    {
+      "elapsed": 70.2,
+      "vram_used": 16291717684,
+      "running": true,
+      "in_history": false
+    },
+    {
+      "elapsed": 80.2,
+      "vram_used": 15795203128,
+      "running": false,
+      "in_history": true
+    }
+  ]
+}

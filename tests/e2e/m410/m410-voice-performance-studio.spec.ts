@@ -115,8 +115,11 @@ function assertM410RuntimeAndCapabilities(runtime: RuntimeStatus, capabilities: 
   expect(capabilities.ok, "capabilities should be reachable").toBeTruthy();
   expect(runtime.mock, "runtime status must not be mock").not.toBe(true);
   expect(capabilities.mock, "capabilities must not be mock").not.toBe(true);
-  expect(runtime.providerId).toBe("index-tts2-local");
-  expect(capabilities.providerId).toBe("index-tts2-local");
+  // The canonical Local provider is the shared warm Qwen3-TTS worker when it is
+  // ready; IndexTTS2 remains the fallback engine. Either is the honest local
+  // authority — mock is what must never appear.
+  expect(["index-tts2-local", "qwen3-tts"]).toContain(runtime.providerId);
+  expect(["index-tts2-local", "qwen3-tts"]).toContain(capabilities.providerId);
   expect(capabilities.directionModes || []).toEqual(expect.arrayContaining(["codirector", "manual"]));
   expect(capabilities.supportedEmotionVectors || []).toEqual(
     expect.arrayContaining(["joy", "sadness", "anger", "fear", "surprise", "disgust", "contempt"]),
@@ -199,13 +202,30 @@ async function expectStudioIaVisible(page: Page): Promise<void> {
   await expect(page.getByTestId("voice-studio-ia")).toBeVisible();
   await expect(page.getByTestId("voice-identity-tab")).toBeVisible();
   await expect(page.getByTestId("voice-performance-tab")).toBeVisible();
-  await expect(page.getByTestId("voice-scene-dialogue-tab")).toBeVisible();
   await expect(page.getByTestId("voice-takes-tab")).toBeVisible();
+  await expect(page.getByTestId("voice-environment-tab")).toBeVisible();
 }
 
 async function openVoicePerformanceStudio(page: Page): Promise<void> {
   await page.getByTestId("voice-performance-tab").click();
   await expect(page.getByTestId("voice-performance-studio")).toBeVisible({ timeout: 30_000 });
+}
+
+async function openVoiceTakes(page: Page): Promise<void> {
+  await page.getByTestId("voice-takes-tab").click();
+  await expect(page.getByTestId("voice-performance-studio")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("vp-takes-dialogue")).toBeVisible();
+}
+
+async function expectTakesWorkflowControls(page: Page): Promise<void> {
+  // Takes is the dialogue workspace: dialogue box, take cards, and the
+  // download / library / environment actions. Send to Timeline is retired.
+  await expect(page.getByTestId("vp-takes-dialogue")).toBeVisible();
+  await expect(page.getByTestId("vp-take-card").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("vp-download-take").first()).toBeVisible();
+  await expect(page.getByTestId("vp-save-library").first()).toBeVisible();
+  await expect(page.getByTestId("vp-open-environment").first()).toBeVisible();
+  await expect(page.getByTestId("vp-send-timeline")).toHaveCount(0);
 }
 
 async function waitForStableTakeList(
@@ -235,50 +255,6 @@ async function waitForStableTakeList(
       last?.takes?.map((take) => ({ id: take.id, status: take.status, errorMessage: take.errorMessage })),
     )}`,
   );
-}
-
-async function postTimelineWithConfirm(
-  request: APIRequestContext,
-  recordId: string,
-): Promise<Record<string, unknown>> {
-  const first = await request.post(`/api/voice-performance/m410/records/${recordId}/timeline`, {
-    data: { trackId: "dialogue-main", startMs: 0, confirmReplace: false },
-  });
-  if (first.ok()) return (await first.json()) as Record<string, unknown>;
-
-  const detail = await first.json().catch(async () => ({ message: await first.text() }));
-  const code = String((detail as any)?.detail?.code || (detail as any)?.code || "");
-  if (code.toLowerCase().includes("confirm")) {
-    const confirmed = await request.post(`/api/voice-performance/m410/records/${recordId}/timeline`, {
-      data: { trackId: "dialogue-main", startMs: 0, confirmReplace: true },
-    });
-    expect(confirmed.ok(), `confirmed timeline placement failed: ${confirmed.status()} ${await confirmed.text()}`).toBeTruthy();
-    return (await confirmed.json()) as Record<string, unknown>;
-  }
-
-  throw new Error(`timeline placement failed: ${JSON.stringify(detail)}`);
-}
-
-async function postLipsyncWithConfirm(
-  request: APIRequestContext,
-  recordId: string,
-): Promise<Record<string, unknown>> {
-  const first = await request.post(`/api/voice-performance/m410/records/${recordId}/lipsync`, {
-    data: { confirm: false, setSceneAudioAsset: true },
-  });
-  if (first.ok()) return (await first.json()) as Record<string, unknown>;
-
-  const detail = await first.json().catch(async () => ({ message: await first.text() }));
-  const code = String((detail as any)?.detail?.code || (detail as any)?.code || "");
-  if (code.toLowerCase().includes("confirm")) {
-    const confirmed = await request.post(`/api/voice-performance/m410/records/${recordId}/lipsync`, {
-      data: { confirm: true, setSceneAudioAsset: true },
-    });
-    expect(confirmed.ok(), `confirmed lipsync prepare failed: ${confirmed.status()} ${await confirmed.text()}`).toBeTruthy();
-    return (await confirmed.json()) as Record<string, unknown>;
-  }
-
-  throw new Error(`lipsync prepare failed: ${JSON.stringify(detail)}`);
 }
 
 async function pageWait(ms: number): Promise<void> {
@@ -454,34 +430,52 @@ test.describe("M4.10 Voice Performance Studio", () => {
     expect(approved.body.mock).not.toBe(true);
     expect(approved.body.approvedTakeId).toBe(completedTake!.id);
 
-    const timeline = await postTimelineWithConfirm(request, created.id);
-    expect(timeline.ok).toBe(true);
-    expect(timeline.recordId).toBe(created.id);
+    // Takes destinations are Download, Project Library, and Voice Environment.
+    // Voice Studio no longer sends dialogue to the Timeline.
+    const download = await request.get(
+      `/api/voice-performance/m410/records/${created.id}/takes/${completedTake!.id}/download`,
+    );
+    expect(download.ok(), `take download failed: ${download.status()}`).toBeTruthy();
+    const disposition = download.headers()["content-disposition"] || "";
+    expect(disposition).toContain("attachment");
+    expect(disposition).toMatch(/Korri_Take_\d+\.(wav|mp3)/);
+    const downloadBody = await download.body();
+    expect(downloadBody.byteLength, "download must carry real audio bytes").toBeGreaterThan(1000);
 
-    const lipsync = await postLipsyncWithConfirm(request, created.id);
-    expect(lipsync.ok).toBe(true);
-    expect(lipsync.recordId).toBe(created.id);
+    const savedToLibrary = await postJson<{ ok?: boolean; assetId?: string; mock?: boolean }>(
+      request,
+      `/api/voice-performance/m410/records/${created.id}/takes/${completedTake!.id}/library`,
+      {},
+    );
+    expect(savedToLibrary.body.ok).toBeTruthy();
+    expect(savedToLibrary.body.assetId).toBeTruthy();
+
+    const library = await getJson<{ items?: Array<{ id?: string; kind?: string; tag?: string }> }>(
+      request,
+      `/api/projects/${projectId}/library`,
+    );
+    const libraryAsset = (library.items || []).find((item) => item.id === savedToLibrary.body.assetId);
+    expect(libraryAsset, "saved take must appear in the project Library").toBeTruthy();
+    expect(libraryAsset?.kind).toBe("audio");
+
+    // Voice Environment dry-source contract: the Library asset streams back.
+    const drySource = await request.get(
+      `/api/projects/${projectId}/assets/${savedToLibrary.body.assetId}/file`,
+    );
+    expect(drySource.ok(), "environment dry source must load").toBeTruthy();
 
     const persisted = await getJson<VoicePerformanceRecord>(request, `/api/voice-performance/m410/records/${created.id}`);
     expect(persisted.approvedTakeId).toBe(completedTake!.id);
-    expect(String(persisted.timelineLinkage?.approvedTakeId || "")).toBe(completedTake!.id);
-    expect(String(persisted.lipsyncLinkage?.takeId || "")).toBe(completedTake!.id);
 
     await openVoiceStudio(page, projectId);
     await expectStudioIaVisible(page);
-    await openVoicePerformanceStudio(page);
-    await expect(page.getByTestId("vp-dialogue")).toBeVisible();
-    await expect(page.getByTestId("vp-send-timeline")).toBeEnabled();
-    await expect(page.getByTestId("vp-prepare-lipsync")).toBeEnabled();
-    await expect(page.getByTestId("vp-take-card").first()).toBeVisible({ timeout: 30_000 });
+    await openVoiceTakes(page);
+    await expectTakesWorkflowControls(page);
 
     await page.reload();
     await openVoiceStudio(page, projectId);
     await expectStudioIaVisible(page);
-    await openVoicePerformanceStudio(page);
-    await expect(page.getByTestId("vp-dialogue")).toBeVisible();
-    await expect(page.getByTestId("vp-send-timeline")).toBeEnabled();
-    await expect(page.getByTestId("vp-prepare-lipsync")).toBeEnabled();
-    await expect(page.getByTestId("vp-take-card").first()).toBeVisible({ timeout: 30_000 });
+    await openVoiceTakes(page);
+    await expectTakesWorkflowControls(page);
   });
 });

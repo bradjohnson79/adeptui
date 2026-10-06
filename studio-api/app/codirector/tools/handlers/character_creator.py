@@ -42,7 +42,10 @@ def _require_character(ctx: ToolContext, args: dict[str, Any]) -> str:
         row = ci.resolve_character_by_name(ctx.db, ctx.project_id, name)
         if row is not None:
             return row.id
-    raise ValueError("characterId is required")
+        raise ValueError(
+            "I couldn't find that character in the current project or global character list."
+        )
+    raise ValueError("Tell me the character's name.")
 
 
 def _profile_or_raise(ctx: ToolContext, character_id: str):
@@ -98,6 +101,10 @@ async def build_reference_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         "planType": "reference",
         "requiredSteps": steps,
         "optionalRoles": optional,
+        "sheetStart": (
+            "The front reference can be created from this profile. "
+            "Missing side and back views do not block that start."
+        ),
         "korriNote": "Korri cert: visuals from written brief + image gen only; no external character sheets.",
     }
 
@@ -296,6 +303,10 @@ def apply_create_from_brief(ctx: ToolContext, args: dict[str, Any]) -> dict[str,
         raise ValueError("name is required")
     reused = _reuse_character(ctx, name)
     if reused:
+        if args.get("requireNew"):
+            raise ValueError(
+                f"A character named {name} already exists. I did not modify that character."
+            )
         return reused
     brief = str(args.get("brief") or "").strip()
     role = str(args.get("role") or "").strip()
@@ -513,10 +524,21 @@ async def get_visual_sheet_status(ctx: ToolContext, args: dict[str, Any]) -> dic
 
 
 def _crs_generator_sources(args: dict | None = None, pack: dict | None = None) -> dict:
-    """CD propose sources: explicit args, else saved Character Creator prefs, else AUTO."""
+    """Match the Character Creator Generate button. Unset AUTO uses Qwen Image 2512."""
     from ....character_identity.visual_sheet import resolve_character_creator_generator_sources
 
-    return resolve_character_creator_generator_sources(args=args, pack=pack)
+    sources = resolve_character_creator_generator_sources(args=args, pack=pack)
+    local = sources.get("local") if isinstance(sources.get("local"), list) else []
+    family = ""
+    if local and isinstance(local[0], dict):
+        family = str(local[0].get("family") or "").strip().lower()
+    if family in {"", "auto"} and not sources.get("api"):
+        return {
+            "local": [{"family": "qwen2512", "enabled": True, "batchCount": 1}],
+            "api": None,
+            "stage2Enabled": False,
+        }
+    return sources
 
 
 def preview_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
@@ -533,14 +555,10 @@ def preview_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> Tool
     else:
         count = 1
     return ToolPreview(
-        summary=f"Generate visual character sheet for “{profile.name}” via AUTO (Co-Director chooses among available CRS providers).",
+        summary=f"Create the front reference for “{profile.name}”.",
         lines=[
-            f"Hero candidates: {count} (defaults to 4 when 'candidates'/'options' requested without a number).",
-            "Enqueues real image jobs (hero → turnaround/facial → detail samples → performance).",
-            "Provider AUTO: extras OFF (includeDetails=false, includePerformance=false). Chooses among available CRS providers.",
-            "Attaches outputs as Character Identity reference roles (not mock).",
-            "Does NOT owner-approve gates — owner must approve after READY_FOR_OWNER.",
-            "Preserves locked Korri identity when slug=korri (no blonde/aqua/Anadriya drift).",
+            "One front view. Extras stay off.",
+            "Uses an existing front image when one is already approved.",
             "Requires a usable description (>= 20 chars) — asks for one honestly if missing.",
         ],
         resourceKind="project",
@@ -590,19 +608,27 @@ def apply_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         }
 
     hero = str(args.get("heroAssetId") or args.get("hero_asset_id") or "").strip() or None
-    pack = start_visual_sheet_generation(
-        ctx.db,
-        ctx.project_id,
-        character_id,
-        include_details=False,
-        include_performance=False,
-        hero_asset_id=hero,
-        candidate_count=1,
-        visual_style=getattr(profile, "visual_style", "") or "",
-        generator_sources=_crs_generator_sources(args, pack=_load_pack_raw(ctx.db, character_id)),
-        required_views=["front_full"],
-        layout="single_view",
-    )
+    if not hero:
+        hero = ci.resolve_approved_reference(ctx.db, character_id, "hero_identity") or None
+    try:
+        pack = start_visual_sheet_generation(
+            ctx.db,
+            ctx.project_id,
+            character_id,
+            include_details=False,
+            include_performance=False,
+            hero_asset_id=hero,
+            candidate_count=1,
+            visual_style=getattr(profile, "visual_style", "") or "",
+            generator_sources=_crs_generator_sources(args, pack=_load_pack_raw(ctx.db, character_id)),
+            required_views=["front_full"],
+            layout="single_view",
+            task_type="CRS_GENERATION",
+        )
+    except Exception as exc:
+        if hero:
+            raise
+        raise ValueError("The starting image was not created.") from exc
     # Advance once in case hero was provided (sheet can enqueue immediately)
     pack = advance_visual_sheet_pack(ctx.db, ctx.project_id, character_id)
     return {
@@ -815,7 +841,7 @@ def _default_voice_message(character_name: str, active: dict[str, Any] | None, *
         if profile_name:
             return f"{name}'s current default voice is {profile_name}{suffix}."
         return f"{name} has an approved default voice{suffix}."
-    return f"{name} doesn't have an approved default voice yet."
+    return f"{name} has no Character Voice currently approved."
 
 
 async def get_voice_status(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:

@@ -11,6 +11,7 @@ from typing import Any
 from ..config import settings
 from ..script_storyboard import PanelOut, StoryboardPanelRow, ensure_script_tables
 from ..db import SessionLocal
+from .aspect import normalize_storyboard_aspect
 from .contracts import StoryboardDocument, StoryboardPage, StoryboardPageSize
 from .script_sync import map_legacy_panel_sync, unify_status
 
@@ -121,6 +122,17 @@ def ensure_document(project_id: str, *, page_size: StoryboardPageSize = 9) -> St
         updatedAt=now,
     )
     return save_document(doc)
+
+
+def set_aspect_ratio(project_id: str, document_id: str, aspect_ratio: str) -> StoryboardDocument | None:
+    """Change the board frame only. Panels, captions, and assets stay."""
+    doc = get_document(project_id, document_id)
+    if not doc:
+        return None
+    data = doc.model_dump()
+    data["aspectRatio"] = normalize_storyboard_aspect(aspect_ratio)
+    data["updatedAt"] = _now()
+    return save_document(StoryboardDocument.model_validate(data))
 
 
 def set_page_size(project_id: str, document_id: str, page_size: StoryboardPageSize) -> StoryboardDocument | None:

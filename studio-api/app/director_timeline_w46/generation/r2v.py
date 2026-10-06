@@ -90,6 +90,7 @@ class R2VSlot(BaseModel):
     identityId: str | None = None
     pictureIndex: int | None = None
     audioIndex: int | None = None
+    videoIndex: int | None = None
     appearance: str = ""
     aliases: list[str] = Field(default_factory=list)
 
@@ -605,6 +606,12 @@ def _assign_picture_indices(
             continue
         slot.audioIndex = audio_index
         audio_index += 1
+    video_index = 1
+    for slot in ranked:
+        if slot.role != "video":
+            continue
+        slot.videoIndex = video_index
+        video_index += 1
     return ranked
 
 
@@ -844,12 +851,14 @@ def map_canonical_r2v(
         prompt, disclosures = compile_h3_prompt(
             authored_prompt, ranked, style_key=style_key
         )
-        tensor_count = len([s for s in ranked if s.pictureIndex])
+        tensor_count = len([s for s in ranked if s.pictureIndex]) + len(
+            [s for s in ranked if s.role == "video" and s.videoIndex]
+        )
         prompt_only = len(
             [s for s in ranked if s.role == "prior_frame" and s.pictureIndex is None]
         )
         notes = list(disclosures) or [
-            "MiniMax H3 uses MiniMaxH3ReferenceToVideo with LoadImage ref_images and "
+            "MiniMax H3 uses MiniMaxH3ReferenceToVideo with LoadImage ref_images, LoadVideo ref_videos, and "
             "lowercase <subject n> is Name. bindings. This is not first-frame I2V."
         ]
         if skip_prior and prompt_only:
@@ -1020,9 +1029,11 @@ def attach_canonical_r2v(
     # Timeline request still has no startImageAssetId (e.g. only role=start_image
     # or entity refs after maxReferenceImages=0 clear), promote the first visual
     # slot so mappedStartAssetId is not left null with prompt-only leftovers.
-    if not mapped and mechanism_for_generator(product) in {
-        LTX25_MECHANISM,
-    }:
+    if (
+        not mapped
+        and request.generationMode != "text_to_video"
+        and mechanism_for_generator(product) in {LTX25_MECHANISM}
+    ):
         for slot in _rank_visual_slots(slots):
             if slot.role in {"video", "audio"}:
                 continue

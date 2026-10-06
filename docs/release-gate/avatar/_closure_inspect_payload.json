@@ -1,0 +1,12 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "What have I set up in Avatar Studio now?"
+    }
+  ],
+  "project_id": "2347bf46-3762-4763-86c5-4a6032522278",
+  "mode": "chat",
+  "workspace_tab": "avatar",
+  "workspaceTab": "avatar"
+}

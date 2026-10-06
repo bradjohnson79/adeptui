@@ -403,6 +403,24 @@ def upscale_capabilities() -> dict[str, Any]:
     return capabilities()
 
 
+@router.post("/projects/{project_id}/upscale/analyze")
+def analyze_upscale_sound(
+    project_id: str,
+    body: dict[str, Any],
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Lightweight soundtrack read used to recommend an Upscale sound profile."""
+    from .upscaling import analyze_upscale_sound as _analyze
+
+    asset_id = body.get("asset_id") or body.get("assetId")
+    if not asset_id:
+        raise magi_error("ASSET_REQUIRED", "Sound analysis requires an asset_id.", fields={"body": body})
+    try:
+        return _analyze(db, project_id, str(asset_id))
+    except ValueError as exc:
+        raise magi_error("ASSET_REQUIRED", str(exc), fields={"assetId": asset_id}) from exc
+
+
 @router.post("/projects/{project_id}/upscale/preview")
 def preview_upscale(
     project_id: str,
@@ -416,6 +434,7 @@ def preview_upscale(
     engine = body.get("engine") or "ffmpeg-scale"
     model = body.get("model") or "lanczos"
     target_resolution = body.get("target_resolution") or body.get("targetResolution") or ""
+    sound_profile = body.get("sound_profile") or body.get("soundProfile") or "preserve_original"
     if not asset_id:
         raise magi_error(
             "ASSET_REQUIRED",
@@ -423,12 +442,14 @@ def preview_upscale(
             fields={"body": body},
         )
     try:
-        return _preview_upscale(db, project_id, asset_id, engine, model, target_resolution)
+        return _preview_upscale(db, project_id, asset_id, engine, model, target_resolution, sound_profile)
     except Exception as exc:
         from .upscale_targets import UpscaleTargetError
 
         if isinstance(exc, UpscaleTargetError):
             raise magi_error(exc.code, str(exc), fields={"engine": engine, "model": model}) from exc
+        if isinstance(exc, ValueError):
+            raise magi_error("ASSET_REQUIRED", str(exc), fields={"engine": engine, "model": model}) from exc
         if isinstance(exc, RuntimeError):
             code = "GPU_UPSCALE_UNAVAILABLE" if "unavailable" in str(exc).lower() else "RENDER_FAILED"
             raise magi_error(code, str(exc), fields={"engine": engine, "model": model}) from exc
@@ -448,6 +469,7 @@ def apply_upscale(
     engine = body.get("engine") or "ffmpeg-scale"
     model = body.get("model") or "lanczos"
     target_resolution = body.get("target_resolution") or body.get("targetResolution") or ""
+    sound_profile = body.get("sound_profile") or body.get("soundProfile") or "preserve_original"
     if not asset_id:
         raise magi_error(
             "ASSET_REQUIRED",
@@ -455,7 +477,15 @@ def apply_upscale(
             fields={"body": body},
         )
     try:
-        result = _apply_upscale(db, project_id, asset_id, engine, model, target_resolution)
+        result = _apply_upscale(
+            db,
+            project_id,
+            asset_id,
+            engine,
+            model,
+            target_resolution,
+            sound_profile=sound_profile,
+        )
         out_id = str((result or {}).get("output_asset_id") or (result or {}).get("assetId") or "").strip()
         if out_id:
             from .finishing import merge_finishing
@@ -512,6 +542,10 @@ def create_render(
 
     try:
         return enqueue_final_render(db, project_id, body or {})
+    except ValueError as exc:
+        text = str(exc).strip() or "Enter a final video name."
+        status = 409 if "already exists" in text.lower() else 400
+        raise magi_error("RENDER_FAILED", text, status_code=status) from exc
     except Exception as exc:
         raise magi_error(
             "RENDER_FAILED",

@@ -10,6 +10,7 @@ EngineName = Literal[
     "auto",
     "minimax-h3",
     "ltx-2.5",
+    "hunyuan-video-1.5-distilled",
     "seedance-2.0",
     "seedance-2.5",
     "fal_seedance",

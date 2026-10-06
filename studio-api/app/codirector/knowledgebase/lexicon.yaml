@@ -1,0 +1,252 @@
+schema: adept-codirector-lexicon/v1
+version: "2026.09.14"
+# Alias -> knowledge id. Same spelling may appear twice when domains differ.
+# domain: generation | networking | image | video | audio | voice | system | platform | workflow
+entries:
+  - alias: first last frame
+    id: timeline
+    domain: generation
+  - alias: first/last frame
+    id: timeline
+    domain: generation
+  - alias: wan
+    id: adept-terminology
+    domain: platform
+    spoken: WAN is retired in Adept UI v1.1. Timeline uses MiniMax H3 and LTX 2.5 for Reference-to-Video. Do not restore WAN.
+  - alias: wan
+    id: adept-terminology
+    domain: networking
+    note: Only if the creator is explicitly discussing computer networking. Production WAN is retired in v1.1.
+  - alias: wide area network
+    id: adept-terminology
+    domain: networking
+  - alias: ltx
+    id: ltx-2.5
+    domain: generation
+    note: LTX 2.5 is the current local LTX family. LTX 2.3 is retired.
+  - alias: ltx 2.5
+    id: ltx-2.5
+    domain: generation
+  - alias: ltx25
+    id: ltx-2.5
+    domain: generation
+  - alias: h3
+    id: minimax-h3
+    domain: generation
+  - alias: minimax
+    id: minimax-h3
+    domain: generation
+  - alias: minimax h3
+    id: minimax-h3
+    domain: generation
+  - alias: hailuo
+    id: minimax-h3
+    domain: generation
+  - alias: route a
+    id: video-generation
+    domain: generation
+    note: On Demand MiniMax text-to-video / image-to-video. Not Timeline H3.
+  - alias: on demand
+    id: adept-readiness
+    domain: platform
+  - alias: qwen
+    id: qwen-2512
+    domain: image
+    note: Stills default. Edit jobs may mean qwen-edit-2509. Never ERS.
+  - alias: qwen 2512
+    id: qwen-2512
+    domain: image
+  - alias: qwen image
+    id: qwen-2512
+    domain: image
+  - alias: qwen edit
+    id: qwen-edit-2509
+    domain: image
+  - alias: qwen 2509
+    id: qwen-edit-2509
+    domain: image
+  - alias: qwen tts
+    id: qwen-tts
+    domain: voice
+  - alias: qwen voice
+    id: qwen-tts
+    domain: voice
+  - alias: flux
+    id: flux
+    domain: image
+  - alias: flux kontext
+    id: flux-kontext
+    domain: image
+  - alias: kontext
+    id: flux-kontext
+    domain: image
+  - alias: krea
+    id: krea2
+    domain: image
+  - alias: krea2
+    id: krea2
+    domain: image
+  - alias: krea 2
+    id: krea2
+    domain: image
+  - alias: z-image
+    id: z-image
+    domain: image
+  - alias: zimage
+    id: z-image
+    domain: image
+  - alias: illustrious
+    id: illustrious
+    domain: image
+  - alias: illustrious xl
+    id: illustrious
+    domain: image
+  - alias: gpt image
+    id: gpt-image-2
+    domain: image
+  - alias: gpt image 2
+    id: gpt-image-2
+    domain: image
+  - alias: seedream
+    id: seedream
+    domain: image
+  - alias: nano banana
+    id: nano-banana
+    domain: image
+  - alias: ers
+    id: ers-law
+    domain: workflow
+  - alias: environment reference sheet
+    id: ers-law
+    domain: workflow
+  - alias: environment sheet
+    id: ers-law
+    domain: workflow
+  - alias: crs
+    id: character-identity
+    domain: workflow
+  - alias: character sheet
+    id: character-creator
+    domain: system
+  - alias: character reference sheet
+    id: character-identity
+    domain: workflow
+  - alias: prs
+    id: prop-creator
+    domain: system
+  - alias: prop sheet
+    id: prop-creator
+    domain: system
+  - alias: posecraft
+    id: posecraft
+    domain: system
+  - alias: pose craft
+    id: posecraft
+    domain: system
+  - alias: spatial map
+    id: spatial-map
+    domain: system
+  - alias: atlas
+    id: spatial-map
+    domain: system
+  - alias: placement grid
+    id: spatial-map
+    domain: system
+  - alias: circles
+    id: spatial-map
+    domain: system
+    note: Placement-grid overlay. Circular viewport is retired.
+  - alias: scene creator
+    id: scene-creator
+    domain: system
+  - alias: scene creator mini
+    id: scene-creator
+    domain: system
+  - alias: timeline
+    id: timeline
+    domain: system
+  - alias: library
+    id: library
+    domain: system
+  - alias: wiki
+    id: wiki
+    domain: system
+  - alias: notes
+    id: notes
+    domain: system
+  - alias: story
+    id: story
+    domain: system
+  - alias: script
+    id: script-writer
+    domain: system
+  - alias: script writer
+    id: script-writer
+    domain: system
+  - alias: magi
+    id: magi
+    domain: system
+  - alias: ace-step
+    id: ace-step
+    domain: audio
+  - alias: ace step
+    id: ace-step
+    domain: audio
+  - alias: mmaudio
+    id: mmaudio
+    domain: audio
+  - alias: index tts
+    id: indextts2
+    domain: voice
+  - alias: indextts2
+    id: indextts2
+    domain: voice
+  - alias: voice engine
+    id: voice-creator
+    domain: voice
+  - alias: lip sync
+    id: voice-creator
+    domain: voice
+  - alias: lipsync
+    id: voice-creator
+    domain: voice
+  - alias: timeline lip sync
+    id: voice-creator
+    domain: voice
+  - alias: prompt names
+    id: prompt-names
+    domain: workflow
+  - alias: local video runtime
+    id: adept-platform
+    domain: platform
+  - alias: image runtime
+    id: adept-platform
+    domain: platform
+  - alias: kling
+    id: kling
+    domain: generation
+  - alias: seedance
+    id: seedance-2.0
+    domain: generation
+  - alias: veo
+    id: veo-3.1
+    domain: generation
+  - alias: readiness
+    id: adept-readiness
+    domain: platform
+  - alias: adept
+    id: adept-platform
+    domain: platform
+
+  - alias: color grade
+    id: magi-color
+  - alias: magi color
+    id: magi-color
+  - alias: magi edit
+    id: magi-edit
+  - alias: magi sfx
+    id: magi-sound
+  - alias: magi music
+    id: magi-music
+  - alias: finishing score
+    id: magi-music

@@ -1,0 +1,10 @@
+positiveAppend:
+  - "natural motion"
+  - "consistent lighting"
+negativeBase:
+  - "blurry"
+  - "jitter"
+  - "warped faces"
+  - "background music"
+  - "musical score"
+fallbacks: []

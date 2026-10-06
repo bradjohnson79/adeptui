@@ -261,3 +261,36 @@ def test_ltx_25_i2v_builder_requires_start_image():
     assert "LoadImage" in classes
     assert "LTXVImgToVideo" in classes
     assert "SaveVideo" in classes
+    guided = build_ltx_25_i2v(
+        settings=settings,
+        execution_id="e2",
+        prompt="she turns toward camera",
+        negative_prompt="",
+        start_image_path="start.png",
+        end_image_path="end.png",
+        width=1280,
+        height=704,
+        length_seconds=97 / 24,
+        fps=24,
+        seed=1,
+        generate_audio=True,
+    )
+    guided_nodes = list(guided.values())
+    guided_classes = {node["class_type"] for node in guided_nodes}
+    assert "LTXVAddGuide" in guided_classes
+    assert "LTXVCropGuides" in guided_classes
+    assert "LTXVPreprocess" in guided_classes
+    assert "LTXVImgToVideoInplace" not in guided_classes
+    assert "LTXVDualCFGGuider" in guided_classes
+    assert "STGGuiderNode" not in guided_classes
+    indexes = [
+        node["inputs"]["frame_idx"]
+        for node in guided_nodes
+        if node["class_type"] == "LTXVAddGuide"
+    ]
+    assert indexes == [0, -1]
+    reload_registry()
+    guided_check = validate_comfy_graph(guided, workflow_key="ltx_25.i2v")
+    assert guided_check.valid, guided_check.issues
+    start_only_check = validate_comfy_graph(wf, workflow_key="ltx_25.i2v")
+    assert start_only_check.valid, start_only_check.issues

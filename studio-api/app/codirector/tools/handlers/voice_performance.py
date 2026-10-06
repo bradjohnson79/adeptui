@@ -46,7 +46,17 @@ async def get_character_readiness(ctx: ToolContext, args: dict[str, Any]) -> dic
 
     character_id = _require_character(ctx, args)
     out = character_readiness(ctx.db, ctx.project_id, character_id, request=getattr(ctx, "request", None))
-    return {**out, "mock": False, "_evidence": {"source": "voice_performance.compiler.readiness"}}
+    from ....character_identity.service import active_voice_authority
+
+    authority = active_voice_authority(ctx.db, ctx.project_id, character_id)
+    authority.pop("activeVoice", None)
+    authority.pop("providerVoiceId", None)
+    return {
+        **out,
+        "voiceAuthority": authority,
+        "mock": False,
+        "_evidence": {"source": "voice_performance.compiler.readiness"},
+    }
 
 
 async def parse_markup(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -290,4 +300,142 @@ def apply_compare_takes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
         "persisted": False,
         "mock": False,
         "_evidence": {"source": "voice_performance.compare"},
+    }
+
+
+def preview_generate_takes(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    count = max(1, min(4, int(args.get("count") or 1)))
+    return ToolPreview(
+        summary="Generate up to four takes with the character's saved voice.",
+        lines=[
+            f"characterId: {args.get('characterId')}",
+            f"takes: {count}",
+            "Uses the saved Local or ElevenLabs voice. Does not invent a voice or switch providers.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_generate_takes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....character_identity.service import active_voice_authority
+    from ....voice_performance.m410_schemas import GenerateTakesBody, VoicePerformanceRecordCreate
+    from ....voice_performance.m410_service import create_record, create_takes
+
+    character_id = _require_character(ctx, args)
+    dialogue = str(args.get("dialogue") or args.get("text") or "").strip()
+    if not dialogue:
+        raise ValueError("dialogue is required")
+    count = max(1, min(4, int(args.get("count") or 1)))
+    authority = active_voice_authority(ctx.db, ctx.project_id, character_id)
+    if not authority.get("approved") or not authority.get("activeVoiceProfileId"):
+        raise ValueError("This character has no Character Voice currently approved.")
+    direction = str(args.get("direction") or "").strip()
+    spoken = dialogue
+    if authority.get("provider") == "elevenlabs" and direction and "[" not in dialogue:
+        spoken = f"[{direction}] {dialogue}"
+    record = create_record(
+        ctx.db,
+        VoicePerformanceRecordCreate(
+            projectId=ctx.project_id,
+            characterId=character_id,
+            voiceIdentityId=str(authority["activeVoiceProfileId"]),
+            dialogueText=spoken,
+            providerId="elevenlabs" if authority.get("provider") == "elevenlabs" else "index-tts2-local",
+        ),
+    )
+    generated = create_takes(
+        ctx.db,
+        record.id,
+        GenerateTakesBody(count=count, preferredProvider=str(authority.get("provider") or "local")),
+    )
+    takes = []
+    for take in generated.get("takes") or []:
+        if not isinstance(take, dict):
+            continue
+        takes.append({
+            "id": take.get("id"),
+            "takeNumber": take.get("takeNumber"),
+            "status": take.get("status"),
+            "audioAssetId": take.get("audioAssetId"),
+            "label": take.get("label"),
+        })
+    return {
+        "ok": True,
+        "recordId": record.id,
+        "provider": authority.get("provider"),
+        "voiceName": authority.get("voiceName") or "",
+        "takes": takes,
+        "persisted": True,
+        "mock": False,
+        "_evidence": {"source": "voice_performance.m410.generate_takes"},
+    }
+
+
+def preview_save_take_to_library(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(
+        summary="Save a finished take into the project Library.",
+        lines=[
+            f"recordId: {args.get('recordId')}",
+            f"takeNumber: {args.get('takeNumber') or ''}",
+            "The original take stays intact.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_save_take_to_library(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....voice_performance.m410_service import list_takes, save_take_to_library
+
+    record_id = str(args.get("recordId") or "").strip()
+    take_id = str(args.get("takeId") or "").strip()
+    if not record_id:
+        raise ValueError("recordId is required")
+    if not take_id:
+        number = int(args.get("takeNumber") or 0)
+        listed = list_takes(ctx.db, record_id)
+        match = next((item for item in (listed.get("takes") or []) if int(item.get("takeNumber") or 0) == number), None)
+        if not match:
+            raise ValueError("That take could not be found.")
+        take_id = str(match.get("id") or "")
+    saved = save_take_to_library(ctx.db, record_id, take_id)
+    return {**saved, "_evidence": {"source": "voice_performance.m410.save_take_to_library"}}
+
+
+def preview_send_take_to_environment(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    return ToolPreview(
+        summary="Send a finished take to Voice Environment.",
+        lines=[
+            f"recordId: {args.get('recordId')}",
+            f"takeNumber: {args.get('takeNumber') or ''}",
+            "The take is registered as a durable Library asset and returned as the Voice Environment dry source.",
+        ],
+        resourceKind="project",
+        resourceId=ctx.project_id,
+    )
+
+
+def apply_send_take_to_environment(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....voice_performance.m410_service import list_takes, save_take_to_library
+
+    record_id = str(args.get("recordId") or "").strip()
+    take_id = str(args.get("takeId") or "").strip()
+    if not record_id:
+        raise ValueError("recordId is required")
+    if not take_id:
+        number = int(args.get("takeNumber") or 0)
+        listed = list_takes(ctx.db, record_id)
+        match = next((item for item in (listed.get("takes") or []) if int(item.get("takeNumber") or 0) == number), None)
+        if not match:
+            raise ValueError("That take could not be found.")
+        take_id = str(match.get("id") or "")
+    saved = save_take_to_library(ctx.db, record_id, take_id)
+    asset_id = str(saved.get("assetId") or saved.get("asset", {}).get("id") or "")
+    return {
+        "ok": True,
+        "assetId": asset_id,
+        "environmentSource": {"libraryAssetId": asset_id},
+        "saved": saved,
+        "_evidence": {"source": "voice_performance.m410.send_take_to_environment"},
     }

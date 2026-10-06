@@ -1,0 +1,212 @@
+/* Shared Adept UI form controls — dark/navy + teal design language.
+ * Apply to: select, input, textarea, card, label, helper text.
+ * Import once in the global stylesheet or per-component as needed.
+ */
+
+/* ===== Custom Select (AdeptSelect) ===== */
+.adept-select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-glass, rgba(148, 220, 255, 0.18));
+  background: var(--surface-secondary, var(--panel, rgba(12, 20, 34, 0.62)));
+  color: var(--ink, #e0e0e0);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color var(--motion-fast, 0.15s) var(--ease-standard, ease);
+  /* Dark popup for select (where supported) */
+  color-scheme: dark;
+}
+
+.adept-select:hover {
+  border-color: var(--accent-primary, #2dd4bf);
+}
+
+.adept-select:focus-visible {
+  outline: 2px solid var(--accent-primary, #2dd4bf);
+  outline-offset: 2px;
+  border-color: var(--accent-primary, #2dd4bf);
+}
+
+.adept-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+select.adept-select,
+select.adept-select option {
+  background-color: var(--surface-secondary, #0c1422);
+  color: var(--ink, #e0e0e0);
+}
+
+select.adept-select option:hover,
+select.adept-select option:checked,
+select.adept-select option:focus {
+  background-color: var(--surface-secondary, #0c1422);
+  color: var(--ink, #e0e0e0);
+}
+
+/* Custom dropdown arrow — SVG via background */
+.adept-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394dcff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 0.9rem;
+}
+
+/* ===== Input ===== */
+.adept-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-glass, rgba(148, 220, 255, 0.18));
+  background: var(--surface-secondary, var(--panel, rgba(12, 20, 34, 0.62)));
+  color: var(--ink, #e0e0e0);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  transition: border-color var(--motion-fast, 0.15s) var(--ease-standard, ease);
+}
+
+.adept-input::placeholder {
+  color: var(--text-muted, rgba(255, 255, 255, 0.35));
+}
+
+.adept-input:hover {
+  border-color: var(--accent-primary, #2dd4bf);
+}
+
+.adept-input:focus-visible {
+  outline: 2px solid var(--accent-primary, #2dd4bf);
+  outline-offset: 2px;
+  border-color: var(--accent-primary, #2dd4bf);
+}
+
+.adept-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== Textarea ===== */
+.adept-textarea {
+  width: 100%;
+  min-height: 5rem;
+  padding: 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-glass, rgba(148, 220, 255, 0.18));
+  background: var(--surface-secondary, var(--panel, rgba(12, 20, 34, 0.62)));
+  color: var(--ink, #e0e0e0);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  resize: vertical;
+  transition: border-color var(--motion-fast, 0.15s) var(--ease-standard, ease);
+}
+
+.adept-textarea::placeholder {
+  color: var(--text-muted, rgba(255, 255, 255, 0.35));
+}
+
+.adept-textarea:focus-visible {
+  outline: 2px solid var(--accent-primary, #2dd4bf);
+  outline-offset: 2px;
+  border-color: var(--accent-primary, #2dd4bf);
+}
+
+/* ===== Card ===== */
+.adept-card {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-glass, rgba(148, 220, 255, 0.14));
+  background: var(--surface-secondary, var(--panel, rgba(12, 20, 34, 0.62)));
+  color: var(--ink, #e0e0e0);
+  transition: border-color var(--motion-fast, 0.15s) var(--ease-standard, ease),
+              box-shadow var(--motion-fast, 0.15s) var(--ease-standard, ease);
+}
+
+.adept-card:hover {
+  border-color: var(--accent-primary, #2dd4bf);
+}
+
+.adept-card:focus-visible {
+  outline: 2px solid var(--accent-primary, #2dd4bf);
+  outline-offset: 2px;
+}
+
+.adept-card.selected {
+  border-color: var(--accent-primary, #2dd4bf);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary, #2dd4bf) 40%, transparent);
+  background: color-mix(in srgb, var(--accent-primary, #2dd4bf) 8%, var(--surface-secondary, var(--panel, rgba(12, 20, 34, 0.62))));
+}
+
+/* ===== Labels ===== */
+.adept-label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--ink, #e0e0e0);
+}
+
+.adept-label__helper {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--text-muted, rgba(255, 255, 255, 0.45));
+}
+
+/* ===== Section Title ===== */
+.adept-section-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--ink, #e0e0e0);
+  margin: 0;
+}
+
+/* ===== Muted text ===== */
+.adept-muted {
+  font-size: 0.85rem;
+  color: var(--text-muted, rgba(255, 255, 255, 0.45));
+}
+
+/* ===== Error text ===== */
+.adept-error {
+  font-size: 0.85rem;
+  color: var(--error, #f87171);
+}
+
+/* ===== Status Badge ===== */
+.adept-status-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.adept-status-badge--approved {
+  background: color-mix(in srgb, var(--accent-primary, #2dd4bf) 20%, transparent);
+  color: var(--accent-primary, #2dd4bf);
+}
+
+.adept-status-badge--saved {
+  background: color-mix(in srgb, var(--text-muted, rgba(255,255,255,0.35)) 20%, transparent);
+  color: var(--text-muted, rgba(255,255,255,0.45));
+}
+
+/* ===== Button icon ===== */
+.adept-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+}

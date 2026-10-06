@@ -1,0 +1,201 @@
+{
+  "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+  "sessionId": "avs-a10ef709c2",
+  "sourceStillAssetId": "c2ce0cc0-659a-49c3-8aa4-04a6ec5eda59",
+  "korriVoice": {},
+  "anadriyaVoice": {},
+  "single": {
+    "ok": true,
+    "executed": false,
+    "runtimeGate": "InfiniteTalk needs repair \u2014 Open Runtime Setup",
+    "mode": "single",
+    "dialogue": "Welcome to Schnick Coffee.",
+    "generator": "infinitetalk-local",
+    "aspect": "16:9",
+    "character": "Anadriya",
+    "sourceStill": "c2ce0cc0-659a-49c3-8aa4-04a6ec5eda59"
+  },
+  "createJob": {
+    "ok": true,
+    "executed": false,
+    "runtimeGate": "InfiniteTalk needs repair \u2014 Open Runtime Setup",
+    "inventedAsset": false,
+    "keys": [
+      "assemblyState",
+      "assemblyVersion",
+      "audioAssetId",
+      "audioMix",
+      "avatarId",
+      "backgroundAssetId",
+      "completedDurationMs",
+      "createdAt",
+      "executed",
+      "id",
+      "identityProfileRef",
+      "ok",
+      "persisted",
+      "presentationPlan",
+      "progress",
+      "projectId",
+      "providerId",
+      "referenceStillAssetId",
+      "requestedDurationMs",
+      "retakeSummary",
+      "runtimeGate",
+      "scriptSource",
+      "scriptSourceId",
+      "sections",
+      "sessionId",
+      "sharedStyleProfileId",
+      "status",
+      "timelinePlacements",
+      "timelineProposal",
+      "transitionValidation",
+      "updatedAt",
+      "voiceAsset"
+    ]
+  },
+  "conversation": {
+    "mode": "conversation",
+    "order": "a_then_b",
+    "turns": [
+      {
+        "speakerId": "speaker-a",
+        "dialogue": "Welcome to Schnick Coffee."
+      },
+      {
+        "speakerId": "speaker-b",
+        "dialogue": "What can I get started for you?"
+      }
+    ],
+    "speakers": [
+      {
+        "id": "speaker-a",
+        "label": "Korri",
+        "characterId": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+        "voice": {
+          "audio_asset_id": null,
+          "approved_record_id": null,
+          "approved_take_id": null,
+          "profile_id": null
+        }
+      },
+      {
+        "id": "speaker-b",
+        "label": "Anadriya",
+        "characterId": "b7086f85-3ee3-44db-a395-ae1a94e37fe1",
+        "voice": {
+          "audio_asset_id": null,
+          "approved_record_id": null,
+          "approved_take_id": null,
+          "profile_id": null
+        }
+      }
+    ]
+  },
+  "followUp": {
+    "order": "b_then_a",
+    "turns": [
+      {
+        "speakerId": "speaker-a",
+        "dialogue": "Korri's follow-up line only."
+      },
+      {
+        "speakerId": "speaker-b",
+        "dialogue": "What can I get started for you?"
+      }
+    ]
+  },
+  "inspect": {
+    "ok": true,
+    "sessionId": "avs-a10ef709c2",
+    "mode": "conversation",
+    "dialogueA": "Korri's follow-up line only.",
+    "dialogueB": "What can I get started for you?",
+    "order": "b_then_a",
+    "aspect": "16:9",
+    "generator": "infinitetalk-local",
+    "certifiedReady": false,
+    "gateLine": "InfiniteTalk needs repair \u2014 Open Runtime Setup",
+    "speakerA": {
+      "id": "speaker-a",
+      "label": "Korri",
+      "characterId": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+      "hasBbox": false,
+      "voice": {
+        "binding": "none",
+        "audioAssetId": null,
+        "approvedRecordId": null,
+        "approvedTakeId": null
+      }
+    },
+    "speakerB": {
+      "id": "speaker-b",
+      "label": "Anadriya",
+      "characterId": "b7086f85-3ee3-44db-a395-ae1a94e37fe1",
+      "hasBbox": false,
+      "voice": {
+        "binding": "none",
+        "audioAssetId": null,
+        "approvedRecordId": null,
+        "approvedTakeId": null
+      }
+    },
+    "voiceA": {
+      "binding": "none",
+      "audioAssetId": null,
+      "approvedRecordId": null,
+      "approvedTakeId": null
+    },
+    "voiceB": {
+      "binding": "none",
+      "audioAssetId": null,
+      "approvedRecordId": null,
+      "approvedTakeId": null
+    }
+  },
+  "providerStatus": {
+    "certifiedReady": false,
+    "supportsLiveGeneration": false,
+    "runtimeGate": "InfiniteTalk needs repair \u2014 Open Runtime Setup",
+    "generators": [
+      {
+        "id": "longcat-video-avatar-1-5-local",
+        "displayName": "LongCat Avatar 1.5",
+        "certifiedReady": false
+      },
+      {
+        "id": "infinitetalk-local",
+        "displayName": "InfiniteTalk",
+        "certifiedReady": false
+      }
+    ]
+  },
+  "openStudio": {
+    "uiAction": "open_avatar_studio",
+    "workspaceUrl": "/project/2347bf46-3762-4763-86c5-4a6032522278?workspace=avatar",
+    "sessionId": "avs-a10ef709c2"
+  },
+  "snapshot": {
+    "present": true,
+    "sessionId": "avs-a10ef709c2",
+    "dialogueA": "Korri's follow-up line only.",
+    "dialogueB": "What can I get started for you?",
+    "certifiedReady": false
+  },
+  "snapshotBlock": "PROJECT PRODUCTION STATE\n- Scene: Scene 1 (index 0)\n- Spatial Map v176, saved v176\n- Cameras: 4 - C1 (1a8198ec), C2 (7089be6e), C3 (72a52f5c), C4 (06eba598)\n- ERS: Schnick Coffee \u2014 Environment Reference Sheet [views_pending] directions=0\n- Candidates: scene_creator_mini_20_C4_B(approved), scene_creator_mini_20_C4_A(approved), scene_creator_mini_20_C3_B(approved), scene_creator_mini_20_C3_A(approved), scene_creator_mini_20_C2_B(approved), scene_creator_mini_20_C2_A(approved), scene_creator_mini_20_C1_B(approved), scene_creator_mini_20_C1_A(approved), scene_creator_mini_19_C4_B(approved), scene_creator_mini_19_C4_A(approved), scene_creator_mini_19_C3_B(approved), scene_creator_mini_19_C3_A(approved)\n- Timeline revision 11, batches: Batch 1[Ready], Batch 2[CandidateReady]\n- Avatar: conversation infinitetalk-local 16:9 [not ready]\n- Avatar A (Korri): Korri's follow-up line only.\n- Avatar B (Anadriya): What can I get started for you?\n- Avatar gate: InfiniteTalk needs repair \u2014 Open Runtime Setup\n- camera.updated: Camera C4 updated\n- camera.updated: Camera C1 updated\n- camera.updated: Camera C1 updated\n- camera.updated: Camera C1 updated\n- camera.updated: Camera C1 updated",
+  "checks": {
+    "singleWroteWelcome": true,
+    "singleAspect169": true,
+    "singleInfiniteTalk": true,
+    "jobNotExecuted": true,
+    "jobNoInventedAsset": true,
+    "conversationMode": true,
+    "switchDidNotMixB": true,
+    "korriLinePatchedOnly": true,
+    "inspectHasPacket": true,
+    "certifiedReadyFalse": true,
+    "openStudioAction": true
+  },
+  "allPassed": true
+}

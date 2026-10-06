@@ -189,7 +189,7 @@ def attach(db: Session, project_id: str, body: dict[str, Any], *, actor: str = "
         asset_row = db.get(Asset, asset_id)
         asset_kind = getattr(asset_row, "kind", None) if asset_row else None
         classified = classify_asset(asset_row) if asset_row is not None else None
-        if classified and classified.kind in {"crs", "ers", "prs", "video"}:
+        if classified and classified.kind in {"crs", "ers", "prs", "video", "audio"}:
             # Prop Creator sends reference_type=prop. A prompt that says
             # "no environment scene" must not restamp that sheet as a place.
             keep_explicit_prop = (
@@ -209,7 +209,7 @@ def attach(db: Session, project_id: str, body: dict[str, Any], *, actor: str = "
         pass
 
     media_kind = body.get("media_kind") or media_kind_for(reference_type, asset_kind=asset_kind)
-    if media_kind not in ("entity", "image", "video"):
+    if media_kind not in ("entity", "image", "video", "audio"):
         raise HTTPException(status_code=400, detail={"code": "INVALID_MEDIA_KIND", "message": str(media_kind)})
 
     identity_id = str(body.get("identity_id") or "").strip()
@@ -371,7 +371,7 @@ def update(
     if "usage_modes" in patch and patch["usage_modes"] is not None:
         _validate_enums(row.scope_type, patch.get("reference_type") or row.reference_type, patch["usage_modes"])
     if "media_kind" in patch and patch["media_kind"] is not None:
-        if patch["media_kind"] not in ("entity", "image", "video"):
+        if patch["media_kind"] not in ("entity", "image", "video", "audio"):
             raise HTTPException(status_code=400, detail={"code": "INVALID_MEDIA_KIND", "message": str(patch["media_kind"])})
     alias_adjusted = False
     if "alias" in patch and patch["alias"] is not None:

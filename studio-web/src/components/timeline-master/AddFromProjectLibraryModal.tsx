@@ -28,18 +28,26 @@ export function AddFromProjectLibraryModal({
   onAdd,
   onClose,
   onAssetsChanged,
+  mediaKind = "all",
+  single = false,
+  confirmLabel,
 }: {
   project: Project;
   alreadyIds: string[];
   onAdd: (assetIds: string[]) => void;
   onClose: () => void;
   onAssetsChanged?: () => void;
+  mediaKind?: "all" | "video" | "audio";
+  single?: boolean;
+  confirmLabel?: string;
 }) {
   const { t } = useTranslation(["timeline", "library", "common"]);
   const [items, setItems] = useState<Asset[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "image" | "audio" | "video">("all");
+  const [filter, setFilter] = useState<"all" | "image" | "audio" | "video">(
+    mediaKind === "video" ? "video" : mediaKind === "audio" ? "audio" : "all",
+  );
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const addMediaRef = useRef<HTMLInputElement>(null);
@@ -81,6 +89,10 @@ export function AddFromProjectLibraryModal({
 
   const toggle = (id: string, additive: boolean) => {
     if (already.has(id)) return;
+    if (single) {
+      setSelected(new Set([id]));
+      return;
+    }
     setSelected((curr) => {
       const next = additive ? new Set(curr) : new Set(curr);
       if (!additive && !curr.has(id)) {
@@ -111,6 +123,14 @@ export function AddFromProjectLibraryModal({
     try {
       for (const file of Array.from(files)) {
         const kind = inferLibraryUploadKind(file);
+        if (mediaKind === "video" && kind !== "video") {
+          setUploadError("Choose a video.");
+          continue;
+        }
+        if (mediaKind === "audio" && kind !== "audio") {
+          setUploadError("Choose an audio file.");
+          continue;
+        }
         if (kind === "document") {
           setUploadError(t("library:addMediaTimelineOnly"));
           continue;
@@ -150,6 +170,7 @@ export function AddFromProjectLibraryModal({
         aria-modal="true"
         aria-labelledby="timeline-add-from-project-library-title"
         data-testid="timeline-add-from-project-library"
+        data-media-kind={mediaKind}
       >
         <header className="timeline-library-modal__header">
           <h2 id="timeline-add-from-project-library-title">{t("addFromProjectLibrary")}</h2>
@@ -161,7 +182,7 @@ export function AddFromProjectLibraryModal({
               disabled={selected.size === 0}
               onClick={commit}
             >
-              {t("libraryAdd")}
+              {confirmLabel || t("libraryAdd")}
             </button>
             <button
               type="button"
@@ -180,7 +201,9 @@ export function AddFromProjectLibraryModal({
             type="file"
             hidden
             multiple
-            accept="image/*,video/*,audio/*"
+            accept={
+              mediaKind === "video" ? "video/*" : mediaKind === "audio" ? "audio/*" : "image/*,video/*,audio/*"
+            }
             data-testid="timeline-library-add-media-input"
             onChange={(event) => void uploadFiles(event.target.files)}
           />
@@ -193,7 +216,9 @@ export function AddFromProjectLibraryModal({
           >
             {uploading ? t("addingMedia") : t("addMedia")}
           </button>
-          {(["all", "image", "audio", "video"] as const).map((kind) => (
+          {mediaKind === "video" || mediaKind === "audio"
+            ? null
+            : (["all", "image", "audio", "video"] as const).map((kind) => (
             <button
               key={kind}
               type="button"
@@ -220,6 +245,43 @@ export function AddFromProjectLibraryModal({
           {visible.map((item) => {
             const staged = already.has(item.id);
             const on = staged || selected.has(item.id);
+            if (item.kind === "audio") {
+              // Audio cards carry an inline preview player, so the card itself
+              // is a div with button semantics — a nested <audio> inside a
+              // <button> is invalid HTML and would toggle selection on play.
+              return (
+                <div
+                  key={item.id}
+                  role="button"
+                  tabIndex={staged ? -1 : 0}
+                  className={`library-card library-card--audio${on ? " selected is-library-selected" : ""} is-selectable`}
+                  data-testid={`library-card-${item.id}`}
+                  aria-pressed={on}
+                  aria-disabled={staged}
+                  onClick={(e) => {
+                    if (staged) return;
+                    toggle(item.id, e.metaKey || e.ctrlKey || true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (staged) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggle(item.id, true);
+                    }
+                  }}
+                >
+                  <span>{item.tag || item.filename}</span>
+                  <audio
+                    controls
+                    preload="metadata"
+                    src={api.assetUrl(item.id, null, project.id)}
+                    data-testid={`library-card-audio-${item.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  />
+                </div>
+              );
+            }
             return (
               <button
                 key={item.id}
@@ -251,7 +313,7 @@ export function AddFromProjectLibraryModal({
             disabled={selected.size === 0}
             onClick={commit}
           >
-            {t("libraryAdd")}
+            {confirmLabel || t("libraryAdd")}
           </button>
         </footer>
       </div>

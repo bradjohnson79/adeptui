@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 from uuid import uuid4
 
@@ -16,7 +17,7 @@ from ..contracts import (
 )
 
 GENERATOR_ID = "veo-api"
-ALIASES = frozenset({"veo-api", "veo-kie"})
+ALIASES = frozenset({"veo-api", "veo-kie", "veo-fal", "fal_veo"})
 
 # In-memory hosted job ledger for contract/regression tests and live submissions.
 _HOSTED_JOBS: dict[str, dict[str, Any]] = {}
@@ -30,6 +31,7 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportsTextToVideo=True,
         supportsImageToVideo=True,
         supportsStartFrame=True,
+        continuationMode="hard",
         supportsEndFrame=False,
         supportsMultipleImageReferences=False,
         supportsVideoReferences=False,
@@ -79,6 +81,22 @@ class VeoApiAdapter:
             record["progress"] = float(inject.get("progress", 1.0))
             record["outputAssetIds"] = list(inject.get("outputAssetIds") or [])
         _HOSTED_JOBS[internal] = record
+        from ....fal_catalog import run_timeline_fal_job, timeline_fal_engine
+        from ....film_timeline.render_status import note_api_render_progress
+
+        if not isinstance(inject, dict):
+            note_api_render_progress(record, message="preparing", elapsed_sec=0)
+
+        fal_engine = None if isinstance(inject, dict) else timeline_fal_engine(request.generatorId)
+        if fal_engine:
+            thread = threading.Thread(
+                target=run_timeline_fal_job,
+                args=(record, request),
+                kwargs={"engine": fal_engine, "dest_prefix": "veo"},
+                name=f"veo-fal-{internal[-8:]}",
+                daemon=True,
+            )
+            thread.start()
         return NormalizedJobSubmission(
             internalJobId=internal,
             providerJobId=provider_job_id,

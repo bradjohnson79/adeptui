@@ -329,6 +329,8 @@ def submit_batch_generation(
     precreated_snapshot_id: str | None = None,
     draft_mode: bool | None = None,
 ) -> dict[str, Any]:
+    _ = (db, project_id, scene_id, batch_id, continuity, guidance_priority, fallback_allowed, precreated_snapshot_id, draft_mode)
+    raise RuntimeError("FILM_TIMELINE_REQUIRED")
     payload = store.load_master(db, project_id, scene_id)
     if not payload.get("ok"):
         return payload
@@ -530,6 +532,8 @@ def submit_batch_generation(
             blocked = delivery_error(direct_refs)
             if blocked is not None:
                 return blocked
+            # A take does not rewrite the Timed Prompt. Continuity notes stay
+            # off the stored script; the request reads the creator's text.
             request = build_timeline_generation_request(
                 project_id=project_id,
                 scene_id=scene_id,
@@ -828,11 +832,14 @@ def complete_batch_candidate(
         return {"ok": False, "error": "SNAPSHOT_NOT_IMMUTABLE", "mock": False}
 
     from .generation.comfy_release import release_comfy_after_timeline_generation
-    from .generation.window_handoff import open_completion_handoff
+    from .generation.window_handoff import open_completion_handoff, uses_local_memory
 
-    opened_handoff = open_completion_handoff(master, batch)
-    if not opened_handoff.get("observe"):
-        release_comfy_after_timeline_generation(reason=f"timeline-batch-complete:{batch_id}")
+    if uses_local_memory(batch):
+        opened_handoff = open_completion_handoff(master, batch)
+        if not opened_handoff.get("observe"):
+            release_comfy_after_timeline_generation(reason=f"timeline-batch-complete:{batch_id}")
+    else:
+        opened_handoff = {"observe": False}
 
     from .continuity import active_bridge_for_target, compile_retake_memory
 
@@ -1105,22 +1112,16 @@ def complete_batch_candidate(
     # the next Queued batch after continuity gates (no Approve required).
     chain = submit_next_queued_batch(db, project_id, scene_id)
     try:
-        from .scene_takes import assemble_take_result, sync_rendering_take
+        from .scene_takes import ensure_deposited_scene_join, sync_rendering_take
 
         payload_take = store.load_master(db, project_id, scene_id)
         if payload_take.get("ok"):
             live_take = SceneTimelineMaster.model_validate(payload_take["master"])
-            if sync_rendering_take(live_take):
-                ready = next(
-                    (
-                        t
-                        for t in (live_take.sceneTakes or [])
-                        if t.status == "ready" and not t.resultAssetId and t.batches and all(m.assetId for m in t.batches)
-                    ),
-                    None,
-                )
-                if ready is not None:
-                    assemble_take_result(db, project_id, scene_id, ready)
+            # Join while the take still owns the deposited windows. Closing
+            # the take first clears the active pointer and used to skip the join.
+            joined = ensure_deposited_scene_join(db, project_id, scene_id, live_take)
+            synced = sync_rendering_take(live_take)
+            if joined or synced:
                 store.save_master(db, project_id, scene_id, live_take, touch_batches=False)
     except Exception:
         logger.exception("scene take sync failed after batch complete")
@@ -1403,12 +1404,39 @@ def touch_batch_config(
             else:
                 # Unknown token — clear rather than silent-clamp to a wrong tier.
                 batch.ltxQuality = None
+    if "seedanceResolution" in patch:
+        raw_res = patch["seedanceResolution"]
+        if raw_res is None:
+            batch.seedanceResolution = None
+        else:
+            token = str(raw_res).strip().lower()
+            if token in {"4k", "2160p"}:
+                token = "4k"
+            batch.seedanceResolution = token if token in {"480p", "720p", "1080p", "4k"} else None
     if "plannedDuration" in patch:
         batch.duration.plannedDuration = float(patch["plannedDuration"])
     if "promptSegments" in patch and isinstance(patch["promptSegments"], list):
         from .contracts import TimelinePromptSegment
+        from .same_track_no_overlap import (
+            SameTrackOverlapError,
+            assert_prompt_segments_no_overlap,
+        )
 
-        batch.promptSegments = [TimelinePromptSegment.model_validate(p) for p in patch["promptSegments"]]
+        next_prompts = [TimelinePromptSegment.model_validate(p) for p in patch["promptSegments"]]
+        other_prompts: list = []
+        for other in master.batchBlocks:
+            if other.id == batch.id:
+                continue
+            other_prompts.extend(list(getattr(other, "promptSegments", None) or []))
+        try:
+            assert_prompt_segments_no_overlap(
+                next_prompts,
+                other_segments=other_prompts,
+                track="prompt",
+            )
+        except SameTrackOverlapError as exc:
+            return {"ok": False, "error": "SAME_TRACK_OVERLAP", "message": str(exc), "mock": False}
+        batch.promptSegments = next_prompts
     if "sourceAnchors" in patch and isinstance(patch["sourceAnchors"], list):
         from .contracts import TimelineVisualAnchor
 
@@ -1437,6 +1465,9 @@ def touch_batch_config(
             except SameTrackOverlapError as exc:
                 return {"ok": False, "error": "SAME_TRACK_OVERLAP", "message": str(exc), "mock": False}
             setattr(batch, _field, next_clips)
+    if "dismissedVisualAssetId" in patch:
+        token = str(patch.get("dismissedVisualAssetId") or "").strip()
+        batch.dismissedVisualAssetId = token or None
 
     # WAVE5: ZERO Master→legacy prompt projection (FE must read Master / patch_batch).
 
@@ -2122,30 +2153,43 @@ def submit_next_queued_batch(
         packet_blocks_submit,
     )
 
-    from .generation.window_handoff import handoff_submit_block
+    from .generation.window_handoff import handoff_submit_block, uses_local_memory
 
-    memory_block = handoff_submit_block(master, nxt)
-    if memory_block:
-        return {
-            "ok": True,
-            "submitted": False,
-            "reason": memory_block,
-            "message": "Waiting to start the next part. Memory is not ready.",
-            "mock": False,
-        }
-    blocker = bridge_blocks_submit(master, nxt.id)
-    if blocker is not None:
-        if blocker.status == "Failed":
-            retries = int((blocker.continuityState or {}).get("retryCount") or 0)
-            if retries < 1:
-                state = dict(blocker.continuityState or {})
-                state["retryCount"] = retries + 1
-                blocker.continuityState = state
-                blocker.status = "Waiting"
-                analyze_bridge(db, project_id, master, blocker)
-                store.save_master(db, project_id, scene_id, master)
-                if blocker.status == "Ready":
-                    pass  # fall through to submit
+    # API windows follow the same planned batch count as a local scene.
+    # The next window submits when the previous one finishes. A local memory
+    # check or a local clip review must not hold that fal job.
+    if uses_local_memory(nxt):
+        memory_block = handoff_submit_block(master, nxt)
+        if memory_block:
+            return {
+                "ok": True,
+                "submitted": False,
+                "reason": memory_block,
+                "message": "Waiting to start the next part. Memory is not ready.",
+                "mock": False,
+            }
+        blocker = bridge_blocks_submit(master, nxt.id)
+        if blocker is not None:
+            if blocker.status == "Failed":
+                retries = int((blocker.continuityState or {}).get("retryCount") or 0)
+                if retries < 1:
+                    state = dict(blocker.continuityState or {})
+                    state["retryCount"] = retries + 1
+                    blocker.continuityState = state
+                    blocker.status = "Waiting"
+                    analyze_bridge(db, project_id, master, blocker)
+                    store.save_master(db, project_id, scene_id, master)
+                    if blocker.status == "Ready":
+                        pass  # fall through to submit
+                    else:
+                        return {
+                            "ok": True,
+                            "submitted": False,
+                            "reason": "continuity_failed",
+                            "bridgeId": blocker.bridgeId,
+                            "error": blocker.error,
+                            "mock": False,
+                        }
                 else:
                     return {
                         "ok": True,
@@ -2153,34 +2197,36 @@ def submit_next_queued_batch(
                         "reason": "continuity_failed",
                         "bridgeId": blocker.bridgeId,
                         "error": blocker.error,
+                        "message": "Continuity handoff failed. Retry, continue without continuity, or cancel.",
                         "mock": False,
                     }
             else:
                 return {
                     "ok": True,
                     "submitted": False,
-                    "reason": "continuity_failed",
+                    "reason": "continuity_pending",
                     "bridgeId": blocker.bridgeId,
-                    "error": blocker.error,
-                    "message": "Continuity handoff failed. Retry, continue without continuity, or cancel.",
+                    "status": blocker.status,
                     "mock": False,
                 }
-        else:
+        ensure_temporal_packet_before_submit(db, project_id, scene_id, master, nxt.id)
+        store.save_master(db, project_id, scene_id, master, touch_batches=False)
+        if packet_blocks_submit(master, nxt.id):
             return {
                 "ok": True,
                 "submitted": False,
-                "reason": "continuity_pending",
-                "bridgeId": blocker.bridgeId,
-                "status": blocker.status,
+                "reason": "temporal_review_pending",
                 "mock": False,
             }
-    ensure_temporal_packet_before_submit(db, project_id, scene_id, master, nxt.id)
-    store.save_master(db, project_id, scene_id, master, touch_batches=False)
-    if packet_blocks_submit(master, nxt.id):
+    from .generation.window_script import batch_prompt_ready
+
+    if not batch_prompt_ready(nxt):
         return {
-            "ok": True,
+            "ok": False,
             "submitted": False,
-            "reason": "temporal_review_pending",
+            "error": "BATCH_PROMPT_REQUIRED",
+            "batchBlockId": nxt.id,
+            "message": "This window has no story to generate.",
             "mock": False,
         }
     result = submit_batch_generation(
@@ -2238,7 +2284,7 @@ def generate_scene(
 
     gid = master.sceneGeneratorId or (master.batchBlocks[0].generatorId if master.batchBlocks else None)
     ensure_policy(master, gid)
-    from .generation.window_script import assign_later_window_scripts
+    from .generation.window_script import assign_later_window_scripts, batch_prompt_ready
 
     assign_later_window_scripts(master)
     store.save_master(db, project_id, scene_id, master, touch_batches=False)
@@ -2285,10 +2331,26 @@ def generate_scene(
     live_batches = live_scene_batch_ids(scene_id, db)
     # One window in the provider at a time. Later windows stay staged until
     # the live window finishes, including when continuity is off.
+    # A refused first window must not stage the rest: that queue is not a render.
+    refused_live = False
     for idx, batch in enumerate(eligible):
         if batch.id in live_batches:
             continue
+        if not batch_prompt_ready(batch):
+            errors.append(
+                {
+                    "batchBlockId": batch.id,
+                    "ok": False,
+                    "error": "BATCH_PROMPT_REQUIRED",
+                    "message": "This window has no story to generate.",
+                }
+            )
+            if idx == 0 and not any_generating and not live_batches:
+                refused_live = True
+            continue
         if idx > 0 or any_generating or bool(live_batches):
+            if refused_live:
+                continue
             result = stage_batch_snapshot(db, project_id, scene_id, batch.id)
             if result.get("ok"):
                 jobs.append(result)
@@ -2307,7 +2369,14 @@ def generate_scene(
             jobs.append(result)
         else:
             errors.append({"batchBlockId": batch.id, **result})
+            refused_live = True
 
+    if errors and jobs:
+        message = "Partial failure preserved successes."
+    elif errors:
+        message = str(errors[0].get("message") or "This window was not sent.")
+    else:
+        message = "Scene generation submitted."
     return {
         "ok": len(errors) == 0 or len(jobs) > 0,
         "partialFailure": bool(errors) and bool(jobs),
@@ -2315,7 +2384,7 @@ def generate_scene(
         "errors": errors,
         "findings": findings,
         "orchestratorMode": mode,
-        "message": "Partial failure preserved successes." if errors and jobs else "Scene generation submitted.",
+        "message": message,
         "mock": False,
     }
 

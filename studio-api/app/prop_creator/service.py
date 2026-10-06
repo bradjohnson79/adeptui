@@ -510,6 +510,11 @@ def use_as_prop_identity(
     prop.approved_asset_id = aid
     prop.library_asset_id = aid
     _set_asset_approval(db, owner_id, aid, approved=True)
+    from ..scene_references.reference_eligibility import stamp_aligned_role
+
+    identity_asset = db.get(Asset, aid)
+    if identity_asset is not None:
+        stamp_aligned_role(identity_asset, "prop")
     save_prop_entity(db, owner_id, prop)
     # ORDER 16: PRS is optional / button-driven via compose_prop_reference_sheet_for_prop — do not auto-compose on approve.
     return prop
@@ -637,6 +642,11 @@ def approve_candidate(db: Session, project_id: str, prop_id: str, candidate_id: 
     prop.approved_asset_id = candidate.asset_id
     prop.library_asset_id = candidate.asset_id
     _set_asset_approval(db, project_id, candidate.asset_id, approved=True)
+    from ..scene_references.reference_eligibility import stamp_aligned_role
+
+    candidate_asset = db.get(Asset, candidate.asset_id)
+    if candidate_asset is not None:
+        stamp_aligned_role(candidate_asset, "prop")
     save_prop_entity(db, project_id, prop)
     # ORDER 16: PRS is optional / button-driven via compose_prop_reference_sheet_for_prop — do not auto-compose on approve.
     return prop

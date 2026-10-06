@@ -842,6 +842,7 @@ def apply_create_preview(ctx: ToolContext, args: dict[str, Any]) -> dict[str, An
         performance_record_id=_text(args, "performanceRecordId"),
         performance_take_id=_text(args, "performanceTakeId"),
         environment_profile_id=_require_profile(args, "environmentProfileId"),
+        library_asset_id=_text(args, "libraryAssetId"),
         preview=True,
     )
     return {
@@ -875,6 +876,7 @@ def apply_render(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         performance_record_id=_text(args, "performanceRecordId"),
         performance_take_id=_text(args, "performanceTakeId"),
         environment_profile_id=_require_profile(args, "environmentProfileId"),
+        library_asset_id=_text(args, "libraryAssetId"),
         preview=False,
     )
     return {
@@ -1076,6 +1078,11 @@ def apply_request_repair(ctx: ToolContext, args: dict[str, Any]) -> dict[str, An
         performance_record_id=str(render.get("performanceRecordId") or ""),
         performance_take_id=str(render.get("performanceTakeId") or ""),
         environment_profile_id=str(render.get("environmentProfileId") or ""),
+        library_asset_id=(
+            str(render.get("performanceTakeId") or "")
+            if str(render.get("performanceRecordId") or "") == "library"
+            else ""
+        ),
         preview=_bool(args, "preview", False),
     )
     return {

@@ -1,0 +1,79 @@
+{
+  "purpose": "Field-for-field compare after Test E NO-GO. Sources: FSC J14/J15 live corridor evidence and this Test E graph.",
+  "anadriyaCorridorPass": {
+    "ownerResult": "PASS — Anadriya Adept-suit identity held",
+    "characterRefs": ["Korri Front.png", "Anadriya Front.png"],
+    "extraRefs": ["Venture-Corridor-scene.png place", "optional prior_frame last frame"],
+    "refCount": "3 or 4",
+    "refForm": "named single-subject Front stills, not multi-panel CRS",
+    "resolution": "768x448 on Quality takes that held identity (N/G/O); later dialogue batches 8s / 192 frames",
+    "checkpoint": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    "clip": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "node": "MiniMaxH3ReferenceToVideo",
+    "quality": "fast=false, cache none",
+    "ref_image_size": "not recorded as max in J14/J15; node default is match",
+    "promptStructure": "appearance-first + <Picture N> tags; place and continuity clauses",
+    "conditioning": "2 character Front stills + place (+ prior_frame on extend)"
+  },
+  "testE": {
+    "ownerResult": "NO-GO — substitutes",
+    "characterRefs": ["studio/test_e_addex_front.png 180x560", "studio/test_e_korri_front.png 135x500"],
+    "extraRefs": [],
+    "refCount": 2,
+    "refForm": "diagnostic FRONT crops from CRS Section 1",
+    "resolution": "1280x704 / 124 frames / 24 fps",
+    "checkpoint": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    "clip": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+    "node": "MiniMaxH3ReferenceToVideo",
+    "sampler": "res_multistep",
+    "scheduler": "simple",
+    "steps": 20,
+    "seed": 2248151181,
+    "quality": "fast=false, EasyCache absent",
+    "ref_image_size": "max",
+    "promptStructure": "existing compile_h3_prompt / render_h3 subject_definitions from Test B",
+    "conditioning": "2 character FRONT stills only; no place; no prior_frame"
+  },
+  "deltas": [
+    {
+      "field": "reference dimensions",
+      "anadriya": "named Front stills (files no longer in Comfy input; historically large single-person stills)",
+      "testE": "180x560 Addex, 135x500 Korri — very small/narrow crops"
+    },
+    {
+      "field": "framing",
+      "anadriya": "single-subject Front stills plus corridor place",
+      "testE": "single-subject Front only, no environment still"
+    },
+    {
+      "field": "number of refs",
+      "anadriya": "3–4",
+      "testE": "2"
+    },
+    {
+      "field": "prompt structure",
+      "anadriya": "appearance-first + Picture tags + place/continuity",
+      "testE": "Test B Subject↔Picture compiler block only"
+    },
+    {
+      "field": "resolution",
+      "anadriya": "768x448 on identity-holding Quality takes",
+      "testE": "1280x704"
+    },
+    {
+      "field": "node config / checkpoint / sampler / steps",
+      "anadriya": "same MiniMaxH3ReferenceToVideo + same UNET/CLIP family; Quality, no EasyCache",
+      "testE": "same node, same UNET/CLIP/VAEs, res_multistep/simple, 20 steps"
+    },
+    {
+      "field": "ref_image_size",
+      "anadriya": "not recorded as max; default match",
+      "testE": "max"
+    },
+    {
+      "field": "conditioning",
+      "anadriya": "characters + place (+ prior_frame)",
+      "testE": "characters only"
+    }
+  ]
+}

@@ -382,11 +382,6 @@ export function ProductionPipelinePanel({
                 {candidatesBusy ? "Working..." : "Prepare Candidates"}
               </button>
             </div>
-            <div className="field">
-              <button type="button" className="ghost" disabled title="Timeline handoff is not wired yet.">
-                Send to Timeline
-              </button>
-            </div>
           </div>
 
           {candidateGroup ? (

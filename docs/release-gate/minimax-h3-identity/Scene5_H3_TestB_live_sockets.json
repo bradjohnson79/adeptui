@@ -1,0 +1,25 @@
+{
+  "prompt_id": "cc9dd295-b8eb-4e5e-9e2a-59383d144803",
+  "status_bucket": "running",
+  "ref_image_0": "studio/91b82df6-6c5a-410a-bdb8-6cd3f79753c7.jpeg",
+  "ref_image_1": "studio/a42e77e0-dfe3-4ac9-85af-ab98dfc510e5.jpeg",
+  "ref_image_size": "max",
+  "length": 124,
+  "width": 1280,
+  "height": 704,
+  "seed": 2248151181,
+  "steps": 20,
+  "scheduler_model": [
+    "1",
+    0
+  ],
+  "guider_model": [
+    "1",
+    0
+  ],
+  "easyCache": false,
+  "prompt_has_subject_1": true,
+  "prompt_has_subject_2": true,
+  "prompt_has_picture_1": true,
+  "prompt_has_picture_2": true
+}

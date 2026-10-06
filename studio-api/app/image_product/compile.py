@@ -25,6 +25,33 @@ def _request_source(body: dict[str, Any] | None) -> str:
     ).strip().lower()
 
 
+def explicit_hosted_provider(body: dict[str, Any] | None) -> str:
+    """fal / kie / wavespeed when the request names one. Empty when it does not.
+
+    ``source=api`` and ``providerKind=cloud`` are not providers. A named
+    provider outranks a model id that happens to belong to someone else.
+    """
+    src = dict(body or {})
+    ctx = src.get("creativeContext") if isinstance(src.get("creativeContext"), dict) else {}
+    for raw in (
+        src.get("requested_provider"),
+        src.get("requestedProvider"),
+        src.get("provider"),
+        src.get("providerKind"),
+        src.get("provider_kind"),
+        ctx.get("requested_provider"),
+        ctx.get("requestedProvider"),
+        ctx.get("provider"),
+        ctx.get("providerKind"),
+    ):
+        token = str(raw or "").strip().lower()
+        if token.endswith(".ai"):
+            token = token[: -len(".ai")]
+        if token in {"fal", "kie", "wavespeed"}:
+            return token
+    return ""
+
+
 def _local_force_key(body: dict[str, Any] | None) -> str:
     key = str((body or {}).get("forceWorkflowKey") or "").strip()
     if not key:
@@ -105,18 +132,33 @@ def _fal_image_route(body: dict[str, Any] | None) -> dict[str, str] | None:
     if _local_force_key(src):
         return None
     try:
-        from ..fal_catalog import fal_image_model_id_for_dock
+        from ..fal_catalog import FAL_IMAGE_ENDPOINT_BY_DOCK, fal_image_model_id_for_dock
     except Exception:
         return None
+
+    def _resolve_official(token: str) -> str:
+        pin = str(token or "").strip()
+        if not pin:
+            return ""
+        # Already a fal endpoint path.
+        if pin.startswith(("fal-ai/", "openai/", "krea/")) or pin in set(FAL_IMAGE_ENDPOINT_BY_DOCK.values()):
+            return pin
+        mapped = fal_image_model_id_for_dock(pin)
+        return str(mapped or "").strip()
+
     pinned = str(src.get("falImageModelId") or src.get("fal_image_model_id") or "").strip()
     if pinned:
+        official = _resolve_official(pinned)
         dock = str(src.get("hostedModelId") or "").strip() or pinned
-        return {"dock": dock, "official": pinned}
+        if official:
+            return {"dock": dock, "official": official}
+        # Unresolvable pin is not a fake fal model.
+        return None
     for raw in (src.get("hostedModelId"), src.get("model"), src.get("modelId")):
         dock = str(raw or "").strip()
         if not dock:
             continue
-        official = fal_image_model_id_for_dock(dock)
+        official = _resolve_official(dock)
         if official:
             return {"dock": dock, "official": official}
     return None
@@ -128,21 +170,29 @@ def _hosted_execution_pin(body: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     if _local_force_key(src):
         return None
+    explicit_wavespeed = str(src.get("wavespeedImageModelId") or src.get("wavespeed_image_model_id") or "").strip()
     explicit_kie = str(src.get("kieImageModelId") or src.get("kie_image_model_id") or "").strip()
     explicit_fal = str(src.get("falImageModelId") or src.get("fal_image_model_id") or "").strip()
-    kie_route = _kie_image_route(src)
-    fal_route = _fal_image_route(src)
+    named = explicit_hosted_provider(src)
+    kie_route = None if named in {"fal", "wavespeed"} else _kie_image_route(src)
+    fal_route = None if named in {"kie", "wavespeed"} else _fal_image_route(src)
     route = None
     provider = ""
-    if explicit_kie and kie_route:
-        route, provider = kie_route, "kie"
-    elif explicit_fal and fal_route:
+    if named == "wavespeed" or (not named and explicit_wavespeed):
+        official_ws = explicit_wavespeed or str(src.get("hostedModelId") or src.get("model") or "").strip()
+        if official_ws:
+            route, provider = {"dock": str(src.get("hostedModelId") or official_ws), "official": official_ws}, "wavespeed"
+    elif named == "fal" or (not named and explicit_fal and fal_route):
+        if fal_route:
+            route, provider = fal_route, "fal"
+    elif named == "kie" or (not named and explicit_kie and kie_route):
+        if kie_route:
+            route, provider = kie_route, "kie"
+    elif not named and fal_route and not explicit_kie:
         route, provider = fal_route, "fal"
-    elif fal_route and not explicit_kie:
-        route, provider = fal_route, "fal"
-    elif kie_route:
+    elif not named and kie_route:
         route, provider = kie_route, "kie"
-    if not route or provider not in {"kie", "fal"}:
+    if not route or provider not in {"kie", "fal", "wavespeed"}:
         return None
     official = str(route.get("official") or "")
     dock = str(route.get("dock") or official)
@@ -163,6 +213,8 @@ def _hosted_execution_pin(body: dict[str, Any] | None) -> dict[str, Any] | None:
     }
     if provider == "kie":
         pin["kieImageModelId"] = official
+    elif provider == "wavespeed":
+        pin["wavespeedImageModelId"] = official
     else:
         pin["falImageModelId"] = official
     return pin
@@ -679,6 +731,8 @@ def compile_image_request(
         }
         if provider == "kie":
             out["kieImageModelId"] = official
+        elif provider == "wavespeed":
+            out["wavespeedImageModelId"] = official
         else:
             out["falImageModelId"] = official
         return out

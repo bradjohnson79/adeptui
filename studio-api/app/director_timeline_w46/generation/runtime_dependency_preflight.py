@@ -38,6 +38,107 @@ def _is_h3(request: TimelineGenerationRequest) -> bool:
     return gid.startswith("minimax-h3") or mech == H3_MECHANISM
 
 
+
+
+H3_REF_DURATION_MIN_SEC = 2.0
+H3_REF_DURATION_MAX_SEC = 15.0
+H3_REF_DURATION_TOTAL_MAX_SEC = 15.0
+
+
+def _asset_duration_sec(asset: Asset | None) -> float | None:
+    if asset is None:
+        return None
+    raw = getattr(asset, "duration_sec", None)
+    try:
+        value = float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+        value = 0.0
+    if value > 0:
+        return value
+    meta_raw = getattr(asset, "prompt_meta_json", None) or ""
+    if isinstance(meta_raw, str) and meta_raw.strip():
+        try:
+            import json
+
+            meta = json.loads(meta_raw)
+            if isinstance(meta, dict):
+                for key in ("duration_sec", "duration", "durationSec"):
+                    try:
+                        cand = float(meta.get(key) or 0)
+                    except (TypeError, ValueError):
+                        cand = 0.0
+                    if cand > 0:
+                        return cand
+        except Exception:
+            pass
+    return None
+
+
+def _validate_h3_av_duration_guards(
+    db: Session,
+    slots: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Refuse invalid MiniMax AV reference durations. Never silent-drop."""
+    video_total = 0.0
+    audio_total = 0.0
+    for slot in slots:
+        role = str(slot.get("role") or "").strip().lower()
+        if role not in {"video", "audio"}:
+            continue
+        asset_id = str(slot.get("assetId") or "").strip()
+        if not asset_id:
+            continue
+        if role == "video" and slot.get("videoIndex") is None:
+            continue
+        if role == "audio" and slot.get("audioIndex") is None:
+            continue
+        asset = db.get(Asset, asset_id)
+        label = _label(slot, "A reference")
+        duration = _asset_duration_sec(asset)
+        if duration is None:
+            return {
+                "ok": False,
+                "error": "H3_REF_DURATION_UNKNOWN",
+                "message": (
+                    f"{label} needs a known duration between "
+                    f"{H3_REF_DURATION_MIN_SEC:.0f}–{H3_REF_DURATION_MAX_SEC:.0f}s "
+                    "before MiniMax can use it as a reference."
+                ),
+            }
+        if duration < H3_REF_DURATION_MIN_SEC - 1e-6 or duration > H3_REF_DURATION_MAX_SEC + 1e-6:
+            return {
+                "ok": False,
+                "error": "H3_REF_DURATION_OUT_OF_RANGE",
+                "message": (
+                    f"{label} is {duration:.1f}s. MiniMax reference "
+                    f"{'videos' if role == 'video' else 'audios'} must be "
+                    f"{H3_REF_DURATION_MIN_SEC:.0f}–{H3_REF_DURATION_MAX_SEC:.0f}s each."
+                ),
+            }
+        if role == "video":
+            video_total += duration
+        else:
+            audio_total += duration
+    if video_total > H3_REF_DURATION_TOTAL_MAX_SEC + 1e-6:
+        return {
+            "ok": False,
+            "error": "H3_REF_VIDEO_DURATION_TOTAL",
+            "message": (
+                f"Video references total {video_total:.1f}s. MiniMax allows at most "
+                f"{H3_REF_DURATION_TOTAL_MAX_SEC:.0f}s of video reference media."
+            ),
+        }
+    if audio_total > H3_REF_DURATION_TOTAL_MAX_SEC + 1e-6:
+        return {
+            "ok": False,
+            "error": "H3_REF_AUDIO_DURATION_TOTAL",
+            "message": (
+                f"Audio references total {audio_total:.1f}s. MiniMax allows at most "
+                f"{H3_REF_DURATION_TOTAL_MAX_SEC:.0f}s of audio reference media."
+            ),
+        }
+    return None
+
 def preflight_generation_dependencies(
     db: Session,
     request: TimelineGenerationRequest,
@@ -110,19 +211,27 @@ def preflight_generation_dependencies(
             for name in missing_voices
         ]
 
+    duration_gate = _validate_h3_av_duration_guards(db, slots) if _is_h3(request) else None
+    if duration_gate is not None:
+        return {**duration_gate, "dependencies": report}
+
     staged_images: list[str] = []
     staged_audio: list[str] = []
+    staged_videos: list[str] = []
+    report.setdefault("videos", [])
     for slot in slots:
-        role = str(slot.get("role") or "")
+        role = str(slot.get("role") or "").strip().lower()
         asset_id = str(slot.get("assetId") or "").strip()
-        if not asset_id or role == "video":
+        if not asset_id:
             continue
         if role == "audio" and slot.get("audioIndex") is None:
             continue
-        if role != "audio" and slot.get("pictureIndex") is None:
+        if role == "video" and slot.get("videoIndex") is None:
+            continue
+        if role not in {"audio", "video"} and slot.get("pictureIndex") is None:
             continue
         label = _label(slot, "A required file")
-        kind = "voices" if role == "audio" else "pictures"
+        kind = "voices" if role == "audio" else ("videos" if role == "video" else "pictures")
         asset = db.get(Asset, asset_id)
         try:
             if asset is None:
@@ -130,14 +239,14 @@ def preflight_generation_dependencies(
             # Image-type guard: visual slots (character/place/prop/reference/style)
             # require IMAGE assets. A voice .wav or video in a visual slot is a
             # contract violation — BLOCK before staging so the job never runs.
-            if role != "audio" and role != "video":
+            if role not in {"audio", "video"}:
                 asset_kind = str(getattr(asset, "kind", "") or "").lower()
                 if asset_kind and asset_kind not in {"image", ""}:
                     raise ComfyAssetStagingFailed(
                         f"{label} is a {asset_kind} asset, but visual reference slots require an image. "
                         "A voice or video file cannot be used as a character/place/prop picture."
                     )
-            if role == "audio" or role == "video":
+            if role in {"audio", "video"}:
                 staged = stage_library_asset(asset)
             elif has_direct_reference_authority(request=request):
                 staged = stage_library_asset(asset)
@@ -159,6 +268,7 @@ def preflight_generation_dependencies(
                 "status": "READY",
                 "comfyName": staged.comfy_name,
                 "uploadedTensor": (staged.ledger or {}).get("uploaded") or "library_file",
+                "durationSec": _asset_duration_sec(asset),
             }
         )
         report["staged"].append(
@@ -167,10 +277,13 @@ def preflight_generation_dependencies(
                 "comfyName": staged.comfy_name,
                 "bytes": staged.bytes,
                 "reused": staged.reused,
+                "role": role,
             }
         )
         if role == "audio":
             staged_audio.append(staged.comfy_name)
+        elif role == "video":
+            staged_videos.append(staged.comfy_name)
         else:
             staged_images.append(staged.comfy_name)
         if getattr(asset, "comfy_name", None) != staged.comfy_name:
@@ -178,11 +291,32 @@ def preflight_generation_dependencies(
             db.add(asset)
 
     if _is_h3(request):
+        # Audio cannot be the sole Ref2VA input — must accompany image or video.
+        if staged_audio and not staged_images and not staged_videos:
+            return {
+                "ok": False,
+                "error": "H3_AUDIO_REQUIRES_VISUAL",
+                "message": (
+                    "MiniMax H3 audio references must accompany at least one image or video "
+                    "reference. Add a character/place picture or a video reference, then generate."
+                ),
+                "dependencies": {**report, "workflow": "MISSING"},
+            }
+        if not staged_images and not staged_videos:
+            return {
+                "ok": False,
+                "error": "DEPENDENCY_NOT_READY",
+                "message": "MiniMax needs at least one character/place picture or video reference from this project.",
+                "dependencies": {**report, "workflow": "MISSING"},
+            }
         if not staged_images:
             return {
                 "ok": False,
                 "error": "DEPENDENCY_NOT_READY",
-                "message": "MiniMax needs at least one character or place picture from this project.",
+                "message": (
+                    "MiniMax H3 Reference-to-Video still needs at least one reference picture "
+                    "alongside video/audio conditioning."
+                ),
                 "dependencies": {**report, "workflow": "MISSING"},
             }
         try:
@@ -202,19 +336,21 @@ def preflight_generation_dependencies(
                 ref_image_size=resolve_h3_ref_image_size(
                     po.get("refImageSize") or po.get("ref_image_size")
                 ),
-                ref_audio_comfy_names=staged_audio,
+                ref_audio_comfy_names=staged_audio or None,
+                ref_video_comfy_names=staged_videos or None,
             )
             assert_h3_ref2v_graph(
                 graph,
                 expected_names=staged_images,
-                expected_audio_names=staged_audio,
+                expected_audio_names=staged_audio or None,
+                expected_video_names=staged_videos or None,
                 expect_fast=bool(po.get("draftMode") or po.get("fast_generation")),
             )
         except ValueError as exc:
             return {
                 "ok": False,
                 "error": "DEPENDENCY_NOT_READY",
-                "message": "MiniMax could not be prepared with the current pictures and voices.",
+                "message": "MiniMax could not be prepared with the current pictures, videos, and voices.",
                 "detail": str(exc),
                 "dependencies": {**report, "workflow": "MISSING"},
             }

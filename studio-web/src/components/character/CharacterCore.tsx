@@ -25,7 +25,7 @@ import {
 } from "./characterGeneratorPlan";
 import { candidateAssetId, resolveActiveCrsCard } from "./activeCrsCard";
 import { approvedHistoricalRevisions, type CharacterCandidate, type GeneratorOption } from "./types";
-import { getHeroIdentity, getReferenceImage, useCharacterProfile } from "./useCharacterProfile";
+import { getHeroIdentity, getReferenceImage, isUnsavedCharacterId, useCharacterProfile } from "./useCharacterProfile";
 import { characterOwnedByProject } from "../../creatorScope";
 import type { GoTab } from "./characterSheetDestinations";
 import "./characterCore.css";
@@ -40,7 +40,7 @@ type Props = {
   onCreated?: (characterId: string) => void;
   /** When true, auto-focus the name field (new character). */
   autoFocusName?: boolean;
-  /** Express (Co-Director) hides Close-up and generator internals. */
+  /** Express and Standard share Close-up. In Express it is optional. */
   mode?: "express" | "standard";
   onGoTab?: GoTab;
 };
@@ -49,7 +49,31 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const { t } = useTranslation("characterCreator");
   const openCoDirector = useOpenCoDirector();
   const cp = useCharacterProfile(projectId, characterId);
+  const unsavedCharacter = isUnsavedCharacterId(characterId);
+  const [heldReference, setHeldReference] = useState<{
+    assetId: string;
+    sourceType: "upload" | "library";
+  } | null>(null);
+  useEffect(() => {
+    const id = characterId.trim();
+    if (!id || unsavedCharacter) return;
+    window.dispatchEvent(new CustomEvent("adept:selected-character", { detail: { characterId: id } }));
+  }, [characterId, unsavedCharacter]);
   const { profile, references } = cp;
+  const shownReferences = useMemo(() => {
+    if (!unsavedCharacter || !heldReference) return references;
+    return [
+      {
+        id: "pending-reference",
+        asset_id: heldReference.assetId,
+        reference_role: "reference_image",
+        source_type: heldReference.sourceType,
+        canonical: false,
+        approval_status: "draft",
+      },
+      ...references,
+    ];
+  }, [heldReference, references, unsavedCharacter]);
 
   const [plan, setPlan] = useState<CharacterGeneratorPlan>(DEFAULT_CHARACTER_GENERATOR_PLAN);
   const [localOptions, setLocalOptions] = useState<GeneratorOption[]>([]);
@@ -119,6 +143,12 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     prefsHydratedRef.current = false;
     packLoadedRef.current = false;
     rawPrefsRef.current = null;
+    if (unsavedCharacter) {
+      packLoadedRef.current = true;
+      prefsHydratedRef.current = true;
+      setPlan(DEFAULT_CHARACTER_GENERATOR_PLAN);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -142,9 +172,10 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     return () => {
       cancelled = true;
     };
-  }, [projectId, characterId, applyHydration]);
+  }, [projectId, characterId, applyHydration, unsavedCharacter]);
 
   useEffect(() => {
+    if (unsavedCharacter) return;
     let cancelled = false;
     setCrsApprovedAssetId("");
     void api
@@ -168,9 +199,10 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     return () => {
       cancelled = true;
     };
-  }, [projectId, characterId, profile?.approval_status, hero?.asset_id]);
+  }, [projectId, characterId, profile?.approval_status, hero?.asset_id, unsavedCharacter]);
 
   useEffect(() => {
+    if (unsavedCharacter) return;
     if (!prefsHydratedRef.current) return;
     if (prefsTimerRef.current) window.clearTimeout(prefsTimerRef.current);
     prefsTimerRef.current = window.setTimeout(() => {
@@ -182,7 +214,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     return () => {
       if (prefsTimerRef.current) window.clearTimeout(prefsTimerRef.current);
     };
-  }, [plan, projectId, characterId]);
+  }, [plan, projectId, characterId, unsavedCharacter]);
 
   const handleApprove = useCallback(
     async (candidate: CharacterCandidate) => {
@@ -336,13 +368,39 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       is_global: Boolean(profile?.isGlobal || profile?.is_global),
       isGlobal: Boolean(profile?.isGlobal || profile?.is_global),
     });
-    if (savedProfile) {
-      setProfileDirty(false);
-      setNotice("Character profile saved");
-    } else {
+    if (!savedProfile?.id) {
       setNotice("");
+      return;
     }
-  }, [cp, owned, profile]);
+    setProfileDirty(false);
+    const held = heldReference;
+    if (unsavedCharacter && held) {
+      try {
+        await api.attachCharacterReference(projectId, savedProfile.id, {
+          asset_id: held.assetId,
+          reference_role: "reference_image",
+          source_type: held.sourceType,
+          canonical: false,
+        });
+        await api.adoptCharacterFront(projectId, savedProfile.id, {
+          assetId: held.assetId,
+          sourceType: held.sourceType,
+        });
+      } catch (e) {
+        setHeldReference(null);
+        setNotice(
+          e instanceof Error
+            ? `${e.message} The character was saved.`
+            : "Character saved. The reference still needs to be attached.",
+        );
+        onCreated?.(savedProfile.id);
+        return;
+      }
+    }
+    setHeldReference(null);
+    setNotice("Character profile saved");
+    if (unsavedCharacter) onCreated?.(savedProfile.id);
+  }, [cp, heldReference, onCreated, owned, profile, projectId, unsavedCharacter]);
 
   const handleReset = useCallback(() => {
     if (!profileDirty) return;
@@ -489,11 +547,19 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         <h3 className="character-core__section-title">Character Reference</h3>
         <CharacterReferenceControl
           projectId={projectId}
-          characterId={characterId}
+          characterId={unsavedCharacter ? "" : characterId}
           characterName={profile?.name}
-          references={references}
+          references={shownReferences}
           onChanged={cp.refresh}
-          onUseAsIdentity={handleUseAsIdentity}
+          onHoldReference={
+            unsavedCharacter
+              ? async (assetId, sourceType) => {
+                  setHeldReference({ assetId, sourceType });
+                }
+              : undefined
+          }
+          onClearHeldReference={unsavedCharacter ? () => setHeldReference(null) : undefined}
+          onUseAsIdentity={unsavedCharacter ? undefined : handleUseAsIdentity}
           onAskCoDirector={(prompt, opts) => openCoDirector(prompt, { autoSend: opts?.autoSend ?? false })}
         />
       </div>

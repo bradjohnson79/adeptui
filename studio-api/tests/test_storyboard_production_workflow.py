@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -15,10 +16,16 @@ from app.storyboard_studio.add_from_image import (
     patch_panel,
 )
 from app.storyboard_studio.compose import CANVAS_H, CANVAS_W, compose_page_image, compose_storyboard_2k
-from app.storyboard_studio.documents import hydrate_panels, pad_empty_slots
-from app.storyboard_studio.export import export_adept_json
+from app.db import Scene
+from app.storyboard_studio.aspect import (
+    apply_storyboard_board,
+    generation_dimensions,
+    storyboard_board_intent,
+)
+from app.storyboard_studio.documents import ensure_document, get_document, hydrate_panels, list_documents, pad_empty_slots, set_aspect_ratio
+from app.storyboard_studio.export import export_adept_json, export_contact_sheet_html, export_pdf_bytes
 from app.storyboard_studio.generate_missing import SKIP_NEEDS_SHOT, generate_missing_panels
-from app.storyboard_studio.timeline_prep import prepare_timeline_from_storyboard
+from app.storyboard_studio.timeline_prep import confirm_timeline_proposal, prepare_timeline_from_storyboard
 
 
 @pytest.fixture()
@@ -182,3 +189,121 @@ def test_json_export_keeps_order_and_captions(project_id: str) -> None:
     labels = [p.get("label") for p in data["panels"] if p.get("assetId")]
     assert labels[:2] == ["First", "Second"]
     assert data["document"]["panelOrder"]
+    assert data["document"]["aspectRatio"] == "16:9"
+
+
+def test_legacy_board_defaults_to_landscape_and_switch_keeps_panels(project_id: str) -> None:
+    added = add_image_to_next_panel(project_id, asset_id="keep-me", prompt="wide street", label="Caption stays")
+    doc = ensure_document(project_id)
+    assert doc.aspectRatio == "16:9"
+    from app.storyboard_studio.documents import _docs_path
+
+    path = _docs_path(project_id)
+    raw = __import__("json").loads(path.read_text(encoding="utf-8"))
+    raw[0].pop("aspectRatio", None)
+    path.write_text(__import__("json").dumps(raw), encoding="utf-8")
+    loaded = list_documents(project_id)[0]
+    assert loaded.aspectRatio == "16:9"
+    switched = set_aspect_ratio(project_id, doc.id, "9:16")
+    assert switched is not None
+    assert switched.aspectRatio == "9:16"
+    assert switched.panelOrder == doc.panelOrder
+    workspace = hydrate_panels(project_id, doc.id)
+    match = next(p for p in workspace["panels"] if p["panelId"] == added["panelId"])
+    assert match["assetId"] == "keep-me"
+    assert match["label"] == "Caption stays"
+
+
+def test_portrait_generation_request_and_sheet(project_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.image_product.compile import _size
+
+    assert storyboard_board_intent("Create a vertical storyboard.") == ("9:16", None)
+    assert storyboard_board_intent("Make a 9-panel vertical storyboard.") == ("9:16", 9)
+    assert storyboard_board_intent("Create a landscape storyboard.") == ("16:9", None)
+    assert storyboard_board_intent("just a note") == (None, None)
+    assert generation_dimensions("16:9") == _size("16:9", "1080p")
+    portrait_w, portrait_h = generation_dimensions("9:16")
+    assert (portrait_w, portrait_h) == _size("9:16", "1080p")
+    assert portrait_h > portrait_w
+
+    apply_storyboard_board(project_id, "9:16", 9)
+    doc = get_document(project_id, list_documents(project_id)[0].id)
+    assert doc is not None
+    assert doc.aspectRatio == "9:16"
+    assert doc.pageSize == 9
+
+    added = add_image_to_next_panel(project_id, asset_id="pending", prompt="rainy alley at night", label="Alley")
+    clear_panel_asset(project_id, added["panelId"])
+    captured: dict = {}
+
+    def _fake_generate(_db, *, project_id: str, body: dict):
+        captured["body"] = body
+        return {"jobId": "job-portrait"}
+
+    monkeypatch.setattr("app.image_product.service.generate_images", _fake_generate)
+    result = generate_missing_panels(project_id, family="qwen2512")
+    assert result["queued"]
+    assert captured["body"]["aspectRatio"] == "9:16"
+    assert captured["body"]["height"] > captured["body"]["width"]
+    assert captured["body"]["width"] == portrait_w
+
+    from app.storyboard_studio.compose import compose_page_image
+
+    red = tmp_path / "wide.png"
+    _png(red, (180, 40, 40))
+    portrait_sheet = compose_page_image(
+        title="Storyboard",
+        project_name="Portrait",
+        page_index=0,
+        page_count=1,
+        page_size=6,
+        slots=[{"assetId": "wide", "label": "Caption stays"} for _ in range(6)],
+        asset_paths={"wide": red},
+        aspect="9:16",
+    )
+    assert portrait_sheet.size == (1440, 2560)
+    landscape_sheet = compose_page_image(
+        title="Storyboard",
+        project_name="Landscape",
+        page_index=0,
+        page_count=1,
+        page_size=6,
+        slots=[{"assetId": "wide", "label": "Caption stays"} for _ in range(6)],
+        asset_paths={"wide": red},
+        aspect="16:9",
+    )
+    assert landscape_sheet.size == (CANVAS_W, CANVAS_H)
+
+    pad_empty_slots(project_id)
+    workspace = hydrate_panels(project_id)
+    for i, panel in enumerate(workspace["panels"]):
+        if panel.get("assetId"):
+            continue
+        aid = _asset(project_id, tmp_path, f"fill{i}", (12, 24, 48))
+        assign_panel_asset(project_id, panel["panelId"], aid)
+    sheet = compose_storyboard_2k(project_id, page_index=0)
+    assert sheet["ok"] is True
+    assert sheet["aspectRatio"] == "9:16"
+    assert sheet["width"] == 1440
+    assert sheet["height"] == 2560
+
+    exported = export_adept_json(project_id)
+    assert exported["document"]["aspectRatio"] == "9:16"
+    html = export_contact_sheet_html(project_id)
+    assert "aspect-ratio:9 / 16" in html
+    pdf, _name = export_pdf_bytes(project_id)
+    assert pdf.startswith(b"%PDF")
+    assert b"9:16" in pdf
+    frames = re.findall(rb"([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) re f", pdf)
+    assert frames
+    frame_w, frame_h = float(frames[0][2]), float(frames[0][3])
+    assert abs((frame_w / frame_h) - (9 / 16)) < 0.02
+
+    proposal = prepare_timeline_from_storyboard(project_id, approved_only=False)
+    assert proposal.aspectRatio == "9:16"
+    applied = confirm_timeline_proposal(project_id, proposal.id)
+    assert applied["ok"] is True
+    with SessionLocal() as db:
+        scene = db.get(Scene, applied["createdSceneIds"][0])
+        assert scene is not None
+        assert scene.aspect_ratio == "9:16"

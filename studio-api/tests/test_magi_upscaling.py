@@ -12,42 +12,20 @@ from app.magi.upscaling import (
 
 
 class TestResolutionParsing:
-    """Verify resolution string parsing."""
+    """Class names need a source. They must not silently become a 16:9 canvas."""
 
-    def test_720p(self):
-        assert _parse_resolution("720p") == (1280, 720)
-        assert _parse_resolution("720P") == (1280, 720)
-
-    def test_1080p(self):
-        assert _parse_resolution("1080p") == (1920, 1080)
-        assert _parse_resolution("1080P") == (1920, 1080)
-
-    def test_1440p(self):
-        assert _parse_resolution("1440p") == (2560, 1440)
-
-    def test_4k(self):
-        assert _parse_resolution("4K") == (3840, 2160)
-        assert _parse_resolution("4k") == (3840, 2160)
-
-    def test_8k(self):
-        assert _parse_resolution("8K") == (7680, 4320)
-
-    def test_custom_resolution(self):
+    def test_explicit_pixels_pass_through_without_a_source(self):
         assert _parse_resolution("1920x1080") == (1920, 1080)
         assert _parse_resolution("1280x720") == (1280, 720)
         assert _parse_resolution("3840x2160") == (3840, 2160)
 
-    def test_invalid_resolution_defaults(self):
-        """Invalid resolution strings should return 1920x1080 default."""
-        assert _parse_resolution("") == (1920, 1080)
-        assert _parse_resolution("invalid") == (1920, 1080)
-        assert _parse_resolution("abcxdef") == (1920, 1080)
-
-    def test_malformed_custom(self):
-        """Malformed custom strings should default."""
-        assert _parse_resolution("x") == (1920, 1080)
-        assert _parse_resolution("1920x") == (1920, 1080)
-        assert _parse_resolution("x1080") == (1920, 1080)
+    def test_class_names_require_source_dimensions(self):
+        with pytest.raises(ValueError):
+            _parse_resolution("1440p")
+        with pytest.raises(ValueError):
+            _parse_resolution("invalid")
+        with pytest.raises(ValueError):
+            _parse_resolution("")
 
 
 class TestRealesrganBinary:

@@ -160,10 +160,11 @@ export type VoiceEnvironmentErrorCode =
 export type VoiceStudioWorkspaceTab =
   | "identity"
   | "performance"
+  | "takes"
   | "environment";
 
-/** @deprecated Top-level Scene Dialogue / Takes stages removed (ORDER 5). Map to performance. */
-export type VoiceStudioLegacyWorkspaceTab = VoiceStudioWorkspaceTab | "sceneDialogue" | "takes";
+/** Scene Dialogue stays inside Performance. Takes is its own stage. */
+export type VoiceStudioLegacyWorkspaceTab = VoiceStudioWorkspaceTab | "sceneDialogue";
 
 export const VOICE_STUDIO_STAGE_ORDER: readonly {
   id: VoiceStudioWorkspaceTab;
@@ -177,13 +178,18 @@ export const VOICE_STUDIO_STAGE_ORDER: readonly {
   },
   {
     id: "performance",
-    label: "Voice Performance",
+    label: "Performance",
     tip: "How the character performs the line.",
+  },
+  {
+    id: "takes",
+    label: "Takes",
+    tip: "Generate up to four versions, listen, and save the one you want.",
   },
   {
     id: "environment",
     label: "Voice Environment",
-    tip: "Where and how the voice is heard in the scene.",
+    tip: "Shape where a saved recording sounds like it exists.",
   },
 ] as const;
 
