@@ -467,7 +467,12 @@ async function main() {
   setGate("DEB APPLICATION LAUNCH", debHealth.status === 200 ? "PASS" : "FAIL");
   const removed = spawnSync("sudo", ["dpkg", "-r", packageName], { encoding: "utf8" });
   const stillInstalled = spawnSync("dpkg", ["-s", packageName], { encoding: "utf8" });
-  setGate("DEB UNINSTALL", removed.status === 0 && stillInstalled.status !== 0 ? "PASS" : "FAIL");
+  evidence.debRemoveLog = `${removed.stdout || ""}\n${removed.stderr || ""}`.slice(-2000);
+  const statusText = `${stillInstalled.stdout || ""}\n${stillInstalled.stderr || ""}`;
+  console.log(`DEB REMOVE STATUS = ${removed.status}`);
+  console.log(statusText.slice(0, 500));
+  const stillPresent = /Status:\s+install ok installed/.test(statusText) || (installedBin && fs.existsSync(installedBin));
+  setGate("DEB UNINSTALL", removed.status === 0 && !stillPresent ? "PASS" : "FAIL");
   setGate("DEFAULT UNINSTALL PRESERVES USER DATA", fs.existsSync(path.join(debProfile, "keep.txt")) ? "PASS" : "FAIL");
 
   evidence.appImage = hashFile(appImage);
