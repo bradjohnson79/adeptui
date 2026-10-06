@@ -30,13 +30,21 @@
     "audit:functional": "node scripts/functional-audit.mjs",
     "codirector:validate-prompts": "node scripts/run-codirector-cli.mjs validate-prompts",
     "codirector:list-specialists": "node scripts/run-codirector-cli.mjs list-specialists",
-    "codirector:evaluate": "node scripts/run-codirector-cli.mjs evaluate"
+    "codirector:evaluate": "node scripts/run-codirector-cli.mjs evaluate",
+    "desktop:dev": "node electron/scripts/compile-bootstrap.mjs && electron .",
+    "desktop:build:win": "node electron/scripts/build-windows.mjs",
+    "desktop:build:mac": "node electron/scripts/build-macos.mjs",
+    "desktop:build:linux": "node electron/scripts/build-linux.mjs",
+    "desktop:cert:win": "node electron/scripts/certify-windows.mjs"
   },
+  "main": "electron/main.cjs",
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
     "@playwright/test": "^1.54.2",
     "@types/node": "^24.13.2",
     "concurrently": "^9.2.1",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12",
     "typescript": "~5.9.2"
   }
 }

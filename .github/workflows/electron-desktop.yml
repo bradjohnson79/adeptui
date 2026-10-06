@@ -1,0 +1,115 @@
+# MACOS SIGNING: NOT CONFIGURED
+# NOTARIZATION: PENDING CREDENTIALS
+# WINDOWS CODE SIGNING: NOT CONFIGURED
+# Secret names only. Do not put certificate material in this file.
+# APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER, CSC_LINK, CSC_KEY_PASSWORD
+name: electron-desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Desktop job to run
+        type: choice
+        options:
+          - linux
+          - windows
+          - macos
+          - all
+        default: linux
+  push:
+    branches:
+      - feat/character-creator-final-closure
+    paths:
+      - .github/workflows/electron-desktop.yml
+      - electron/**
+      - package.json
+
+jobs:
+  windows-x64:
+    if: ${{ inputs.platform == 'windows' || inputs.platform == 'all' }}
+    runs-on: windows-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm --prefix studio-web install
+      - run: node electron/scripts/build-windows.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adept-ui-desktop-win-x64
+          path: |
+            electron/dist/*.exe
+            electron/dist/win-unpacked/**
+          if-no-files-found: error
+
+  macos-arm64:
+    if: ${{ inputs.platform == 'macos' || inputs.platform == 'all' }}
+    # macos-14 is Apple Silicon. macos-13 is Intel and must not build this package.
+    runs-on: macos-14
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require Apple Silicon
+        run: |
+          test "$(uname -m)" = "arm64"
+          echo "MACOS NATIVE RUNNER = PASS"
+      - run: npm install
+      - run: npm --prefix studio-web install
+      - name: Stage Python, install API dependencies, stage Studio API, build app
+        run: node electron/scripts/build-macos.mjs
+      - name: Launch packaged app and wait for Studio API
+        run: node electron/scripts/smoke-macos.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adept-ui-desktop-mac-arm64
+          path: |
+            electron/dist/*.dmg
+            electron/build/macos-smoke-result.json
+          if-no-files-found: error
+
+  linux-x64:
+    if: ${{ github.event_name == 'push' || inputs.platform == 'linux' || inputs.platform == 'all' || inputs.platform == '' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 libatspi2.0-0 \
+            libgbm1 libasound2 xvfb libfuse2 lsof ca-certificates fakeroot rpm
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          test "$(uname -m)" = "x86_64"
+          echo "LINUX NATIVE RUNNER = PASS"
+      - run: npm install
+      - run: npm --prefix studio-web install
+      - name: Stage Linux Python, install dependencies, build AppImage and deb
+        run: node electron/scripts/build-linux.mjs
+      - name: Launch packaged Adept UI under Xvfb and certify
+        run: xvfb-run -a --server-args="-screen 0 1440x900x24" node electron/scripts/smoke-linux.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adept-ui-desktop-linux-x64
+          path: |
+            electron/dist/*.AppImage
+            electron/dist/*.deb
+            electron/build/linux-smoke-result.json
+            electron/build/linux-evidence/**
+            electron/build/linux-python-ldd.txt
+          if-no-files-found: warn
