@@ -24,6 +24,8 @@ on:
       - .github/workflows/electron-desktop.yml
       - electron/**
       - package.json
+      - studio-web/**
+      - studio-api/**
 
 jobs:
   windows-x64:
