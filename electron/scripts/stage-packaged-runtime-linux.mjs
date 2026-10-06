@@ -111,7 +111,15 @@ function installDependencies() {
   fs.mkdirSync(build, { recursive: true });
   fs.writeFileSync(selectedFile, rendered);
   console.log("PYWIN32 INSTALL ATTEMPT ON LINUX = 0");
-  run(pythonBin(), ["-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location", "-r", selectedFile]);
+  // The pin file is the Windows site-packages freeze. Windows copies it; it is not a
+  // freshly solvable set (sse-starlette 3.4.11 and starlette 0.47.3 ship together).
+  run(pythonBin(), [
+    "-m", "pip", "install",
+    "--disable-pip-version-check",
+    "--no-warn-script-location",
+    "--no-deps",
+    "-r", selectedFile,
+  ]);
   const site = path.join(pyDir, "lib");
   for (const versionDir of fs.readdirSync(site)) {
     const sitePackages = path.join(site, versionDir, "site-packages");

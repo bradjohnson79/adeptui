@@ -40,6 +40,13 @@ test("the Mac package audit rejects Windows binaries and keeps pywin32-ctypes", 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("Linux staging installs the freeze without re-resolving conflicting pins", () => {
+  const source = fs.readFileSync(path.join(root, "electron", "scripts", "stage-packaged-runtime-linux.mjs"), "utf8");
+  assert.match(source, /--no-deps/);
+  assert.match(source, /cpython-3\.11\.14/);
+  assert.match(source, /x86_64-unknown-linux-gnu/);
+});
+
 test("Windows staging still copies the Windows runtime and does not pip-filter pywin32", () => {
   const source = fs.readFileSync(path.join(root, "electron", "scripts", "stage-packaged-runtime.mjs"), "utf8");
   assert.match(source, /python-3\.11\.9-embed-amd64\.zip/);
