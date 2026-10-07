@@ -115,7 +115,7 @@ jobs:
                 fi
                 ;;
               electron/builder.config.cjs)
-                if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -E 'linux:|deb:|appImage|win:|nsis' >/dev/null; then
+                if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -E 'linux:|deb:|rpm:|appImage|win:|nsis' >/dev/null; then
                   run=true
                 fi
                 ;;
@@ -153,19 +153,20 @@ jobs:
         if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
       - run: npm --prefix studio-web install
         if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
-      - name: Stage Linux Python, install dependencies, build AppImage and deb
+      - name: Stage Linux Python, install dependencies, build AppImage, deb, and rpm
         if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
         run: node electron/scripts/build-linux.mjs
       - name: Launch packaged Adept UI under Xvfb and certify
         if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
         run: xvfb-run -a --server-args="-screen 0 1440x900x24" node electron/scripts/smoke-linux.mjs
       - uses: actions/upload-artifact@v4
-        if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
+        if: always() && (github.event_name != 'push' || steps.linux_scope.outputs.run == 'true')
         with:
           name: adept-ui-desktop-linux-x64
           path: |
             electron/dist/*.AppImage
             electron/dist/*.deb
+            electron/dist/*.rpm
             electron/build/linux-smoke-result.json
             electron/build/linux-evidence/**
             electron/build/linux-python-ldd.txt

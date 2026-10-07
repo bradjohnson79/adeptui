@@ -85,14 +85,26 @@ const config = {
     target: [
       { target: "AppImage", arch: ["x64"] },
       { target: "deb", arch: ["x64"] },
+      { target: "rpm", arch: ["x64"] },
     ],
     icon: "electron/icons/png",
     category: "Video",
     artifactName: "${productName}-${version}-linux-x64.${ext}",
     maintainer: "Adept UI",
+    desktop: {
+      Name: "Adept UI",
+      Comment: "Desktop filmmaking studio",
+      Categories: "AudioVideo;Video;",
+      StartupWMClass: "Adept UI",
+      Terminal: "false",
+    },
   },
   deb: {
     artifactName: "${productName}-${version}-linux-x64.${ext}",
+    packageName: "adept-ui",
+  },
+  rpm: {
+    artifactName: "Adept.UI-${version}-linux-x64.${ext}",
     packageName: "adept-ui",
   },
   appImage: {

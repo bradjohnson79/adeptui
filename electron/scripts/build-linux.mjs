@@ -36,9 +36,15 @@ const version = JSON.parse(fs.readFileSync(path.join(root, "electron", "version.
 const unpacked = path.join(root, "electron", "dist", "linux-unpacked", "Adept UI");
 const appImage = path.join(root, "electron", "dist", `Adept UI-${version}-linux-x64.AppImage`);
 const deb = path.join(root, "electron", "dist", `Adept UI-${version}-linux-x64.deb`);
-if (!fs.existsSync(unpacked) || !fs.existsSync(appImage) || !fs.existsSync(deb)) {
+const rpm = path.join(root, "electron", "dist", `Adept.UI-${version}-linux-x64.rpm`);
+if (!fs.existsSync(unpacked) || !fs.existsSync(appImage) || !fs.existsSync(deb) || !fs.existsSync(rpm)) {
   console.error("LINUX X64 BUILD = FAIL");
-  console.error(JSON.stringify({ unpacked: fs.existsSync(unpacked), appImage: fs.existsSync(appImage), deb: fs.existsSync(deb) }));
+  console.error(JSON.stringify({
+    unpacked: fs.existsSync(unpacked),
+    appImage: fs.existsSync(appImage),
+    deb: fs.existsSync(deb),
+    rpm: fs.existsSync(rpm),
+  }));
   process.exit(1);
 }
 fs.chmodSync(appImage, 0o755);
@@ -46,5 +52,7 @@ fs.chmodSync(unpacked, 0o755);
 console.log("LINUX X64 BUILD = PASS");
 console.log("APPIMAGE BUILD = PASS");
 console.log("DEB BUILD = PASS");
+console.log("RPM BUILD = PASS");
 console.log(appImage);
 console.log(deb);
+console.log(rpm);
