@@ -3,7 +3,6 @@ import {
   legalCanvasSize,
   isMinimaxMegapixelEngine,
   minimaxMegapixelOptions,
-  type VideoTier,
 } from "../../video/legalCanvas";
 
 export function VideoResolutionSelect({

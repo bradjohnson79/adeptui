@@ -2,24 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { Scene } from "../../types";
-import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
+import type { SceneTimelineMaster } from "../../timelineMaster/contracts";
 import { rematerializeThenGenerateScene } from "../../timelineMaster/rematerializeThenGenerate";
-import { addTimelineBatch } from "../../timelineMaster/addTimelineBatch";
 import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
 import { anyTimelineGeneratorExecutable, resolveGeneratorOption } from "../../timelineMaster/draftCapabilities";
 import { loadTimelineVideoGenerators } from "../../timelineMaster/useTimelineVideoGenerators";
 import { useDirectorSelection } from "../DirectorSelectionContext";
 import { ActionWithHelp, HelpTip } from "../HelpTip";
-import {
-  type TimelineBoardView,
-  type PromptSegment,
-  type TimelineClip,
-} from "../DirectorTracks";
+import { type TimelineBoardView } from "../DirectorTracks";
 import { TimelineSettingsDrawer } from "./TimelineSettingsDrawer";
 import { registerTimelineCommand } from "../../timelineMaster/timelineHotkeys";
 import { stepTimelineZoom, sliderToZoom, zoomToSlider } from "../../timelineMaster/timelineZoom";
-import { TIMELINE_BATCHES_CREATOR_UI } from "../../timelineMaster/timelineBatchesCreatorUi";
-import { TIMELINE_LIPSYNC_CREATOR_UI } from "../../timelineMaster/timelineLipSyncCreatorUi";
 import { timelineActionError, timelineGenerateEmpty } from "../../timelineMaster/timelineErrors";
 import { findSameTrackIntersection } from "../../timelineMaster/sameTrackNoOverlap";
 import type { AudioClipModalKind } from "../../timelineMaster/audioClipModal";
@@ -33,18 +26,6 @@ function Help({ id }: { id: string }) {
   const help = getTimelineHelp(id);
   return <HelpTip label={help.title} content={help.body} text={help.title} />;
 }
-
-function batchHasContent(batch: BatchBlock) {
-  if (batch.approvedClip) return true;
-  if (batch.generationJobs?.length) return true;
-  if (batch.candidateVersions?.length) return true;
-  if (batch.repairRanges?.length) return true;
-  if (batch.sourceAnchors?.some((a) => a.assetId)) return true;
-  if (batch.promptSegments?.some((s) => (s.text || "").trim())) return true;
-  if (batch.status && batch.status !== "Draft") return true;
-  return false;
-}
-
 
 function PlusMinusGroup({
   label,
@@ -370,35 +351,6 @@ export function TimelineToolbar({
     master?.sceneGeneratorId,
     scene.engine,
   );
-
-  const addBatch = async () => {
-    if (!TIMELINE_BATCHES_CREATOR_UI) return;
-    await run(async () => {
-      await addTimelineBatch(projectId, scene.id, master);
-    });
-  };
-
-  const removeBatch = async () => {
-    if (!TIMELINE_BATCHES_CREATOR_UI) return;
-    const batches = master?.batchBlocks || [];
-    if (!batches.length) return;
-    const selectedId = selection.kind === "batch" ? selection.id : undefined;
-    const target = selectedId ? batches.find((b) => b.id === selectedId) : batches[batches.length - 1];
-    if (!target) return;
-    if (batchHasContent(target)) {
-      const ok = window.confirm(
-        `Remove "${target.label}"?\n\nThis Batch has content or job history. Source assets remain in Project Library.`,
-      );
-      if (!ok) return;
-    }
-    await run(async () => {
-      await api.directorTimelineDeleteBatch(projectId, scene.id, target.id);
-      if (selection.kind === "batch" && selection.id === target.id) {
-        setSelection({ kind: "scene", id: scene.id });
-      }
-    });
-  };
-
 
   const generateScene = async (_scope: "full" | "selected" = "full") => {
     if (!sceneCanGenerate) {

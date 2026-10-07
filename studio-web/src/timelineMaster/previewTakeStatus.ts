@@ -12,7 +12,7 @@ export type PreviewTakeStatusWord = SceneTimelineStatusWord | "Published" | "Ren
 export function sceneTimelineStatusWord(
   master: SceneTimelineMaster | null | undefined,
 ): SceneTimelineStatusWord {
-  const statuses = (master?.batchBlocks || []).map((batch) => batch.status);
+  const statuses = (master?.batchBlocks || []).map((batch) => String(batch.status));
   if (statuses.includes("Failed")) return "Needs Attention";
   if (statuses.includes("Generating") || statuses.includes("Waiting")) return "Working";
   if (statuses.includes("Queued") && isSceneRenderActive(master)) return "Working";

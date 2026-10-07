@@ -19,7 +19,7 @@ export function StageTreePanel({ scene }: { scene: PoseCraftScene }) {
           <li key={cam.id}>{cam.name}</li>
         ))}
         {shots.map((shot) => (
-          <li key={shot.shotId || shot.id}>{shot.name}</li>
+          <li key={shot.shotId}>{shot.name}</li>
         ))}
       </ul>
     </section>

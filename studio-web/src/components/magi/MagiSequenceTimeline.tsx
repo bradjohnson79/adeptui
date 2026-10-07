@@ -74,7 +74,7 @@ function formatClipDuration(frames: number, frameRate: number): string {
   return `${rounded}s`;
 }
 
-function mediaKindFor(clip: MagiClip, track: MagiTrack, media?: MagiTimelineMedia): "video" | "image" | "audio" {
+function mediaKindFor(_clip: MagiClip, track: MagiTrack, media?: MagiTimelineMedia): "video" | "image" | "audio" {
   if (track.kind === "audio" || track.kind === "music" || track.kind === "sfx" || track.kind === "fx") return "audio";
   if (media?.kind) return media.kind;
   if (track.kind === "image") return "image";

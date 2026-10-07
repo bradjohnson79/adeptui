@@ -130,7 +130,7 @@ function resolveClipKind(
   track: MagiTrack | undefined,
   musicAssetId?: string,
   sfxAssetId?: string,
-): MagiTrackKind | "keep" {
+): "video" | "audio" | "music" | "sfx" | "keep" {
   if (clip.assetId && musicAssetId && clip.assetId === musicAssetId) return "music";
   if (clip.assetId && sfxAssetId && clip.assetId === sfxAssetId) return "sfx";
   const kind = track?.kind;

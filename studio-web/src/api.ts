@@ -9,6 +9,9 @@ import type { CreatorDeletePreview } from "./components/creators/creatorProfileD
 import { resolveMiniMaxH3Territory } from "./core/minimaxH3Territory";
 import { getProjectUnlockToken, projectIdFromApiPath } from "./projectSecurity.ts";
 import type { Asset, EngineName, Health, Job, Project, Scene, SceneSetup, SpatialMap } from "./types";
+import type { EnvironmentCreatorSerializedPlan } from "./components/CoDirector/EnvironmentCreator/environmentCreatorPlanning";
+import type { ImageGeneratorSerializedPlan } from "./components/image-studio/imageGeneratorPlanning";
+import type { SpinCameraPlacement, SpinPackageManifest } from "./components/CoDirector/SpatialMap/types";
 import type {
   CertifiedRecipe,
   ComponentDiagnosticResult,
@@ -30,6 +33,9 @@ import type {
   SourceManagerOverview,
   SourceVerificationResult,
   StudioPreparationPlan,
+  EssentialAgreementDocument,
+  EssentialAgreementPayload,
+  EssentialReadinessBadges,
 } from "./setup/types";
 import type { InstallJob } from "./contracts/installJobs";
 import type {
@@ -1617,6 +1623,17 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  storyEntriesEnsure: (projectId: string, body: { title?: string }) =>
+    req<{
+      id: string; projectId: string; title: string; entryType: string;
+      logline: string; shortSummary: string; longSummary: string;
+      sortOrder: number; createdAt: string; updatedAt: string;
+    }>(`/api/projects/${encodeURIComponent(projectId)}/story-entries/ensure`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
   storyEntriesUpdate: (projectId: string, entryId: string, body: {
     title?: string; entryType?: string; logline?: string;
     shortSummary?: string; longSummary?: string; sortOrder?: number;
@@ -2278,8 +2295,48 @@ foundationStatus: (projectId: string) =>
       `/api/projects/${projectId}/scenes/${sceneId}/lipsync-tracks/bake`,
       { method: "POST" }
     ),
-  applyLipSyncTracks: (projectId: string, sceneId: string) =>
-    req<Job>(`/api/projects/${projectId}/scenes/${sceneId}/lipsync-tracks/apply`, { method: "POST" }),
+  applyLipSyncTracks: (
+    projectId: string,
+    sceneId: string,
+    body?: {
+      mode?: string;
+      retake?: {
+        window?: {
+          startSec?: number;
+          endSec?: number;
+          scope?: string;
+          boundarySource?: string;
+        };
+        beats?: Array<
+          | { kind: "silence"; startSec: number; endSec: number }
+          | {
+              kind: "dialogue";
+              startSec: number;
+              endSec: number;
+              characterId: string | null;
+              characterName: string | null;
+              line: string;
+              voiceAssetId: string;
+            }
+        >;
+        references?: {
+          sourceVideo?: boolean;
+          includeSourceAudio?: boolean;
+          characterSheets?: Array<{ characterId: string; assetId: string }>;
+        };
+      };
+    },
+  ) =>
+    req<Job>(
+      `/api/projects/${projectId}/scenes/${sceneId}/lipsync-tracks/apply`,
+      body
+        ? {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }
+        : { method: "POST" },
+    ),
   getTimelineReferences: (projectId: string, sceneId: string, itemId: string) =>
     req<any>(`/api/director-timeline/projects/${projectId}/scenes/${sceneId}/items/${itemId}/references`),
   addTimelineReference: (projectId: string, sceneId: string, itemId: string, body: Record<string, unknown>) =>
@@ -2583,6 +2640,8 @@ foundationStatus: (projectId: string) =>
       workspaceTab?: string;
       character_id?: string;
       characterId?: string;
+      active_document_id?: string;
+      scriptwriter_scene_id?: string;
     },
     opts?: { signal?: AbortSignal },
   ) =>
@@ -2620,6 +2679,10 @@ foundationStatus: (projectId: string) =>
       workspaceTab?: string;
       character_id?: string;
       characterId?: string;
+      active_document_id?: string;
+      scriptwriter_scene_id?: string;
+      environmentCreatorPlanning?: EnvironmentCreatorSerializedPlan | null;
+      imageGeneratorPlanning?: ImageGeneratorSerializedPlan | null;
     },
     opts: { signal?: AbortSignal; onEvent: (event: CoDirectorStreamEvent) => void },
   ): Promise<void> => {
@@ -3001,6 +3064,21 @@ foundationStatus: (projectId: string) =>
       target?: string;
       verified?: boolean;
     }>(`/api/operator/${encodeURIComponent(requestId)}`),
+  essentialAgreement: () => req<EssentialAgreementPayload>("/api/setup/essential-agreement"),
+  essentialAgreementDocument: () =>
+    req<EssentialAgreementDocument>("/api/setup/essential-agreement/document"),
+  essentialReadiness: (componentId: string) =>
+    req<EssentialReadinessBadges>(
+      `/api/setup/essential-agreement/readiness/${encodeURIComponent(componentId)}`,
+    ),
+  acceptEssentialAgreement: (body: { version: string; documentAvailableConfirmed: boolean }) =>
+    req<EssentialAgreementPayload>("/api/setup/essential-agreement/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  declineEssentialAgreement: () =>
+    req<EssentialAgreementPayload>("/api/setup/essential-agreement/decline", { method: "POST" }),
   setupDetect: () => req<SetupLegacyDetection>("/api/setup/detect"),
   setupState: () => req<SetupLegacyState>("/api/setup/state"),
   setupStatus: () => req<SetupStatusResponse>("/api/setup/status"),
@@ -4943,6 +5021,29 @@ foundationStatus: (projectId: string) =>
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  compileGeneratorPromptPreview: (body: {
+    generatorId: string;
+    userPrompt: string;
+    projectId?: string;
+    sceneId?: string;
+    mode?: string;
+    mediaType?: string;
+  }) =>
+    req<{
+      ok?: boolean;
+      status?: string;
+      message?: string | null;
+      generatorId?: string;
+      profileId?: string | null;
+      dialect?: string | null;
+      compiledPrompt?: string;
+      negativePrompt?: string;
+      warnings?: string[];
+    }>("/api/codirector/generator-knowledge/compile-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   promptIntelligence: {
     enhance: (body: Record<string, unknown>) =>
       req<{
@@ -5969,7 +6070,7 @@ foundationStatus: (projectId: string) =>
         },
       ),
     cinematographer: (projectId: string, sceneId: string) =>
-      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/types").SceneCinematographerPack }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer`,
         { cache: "no-store" },
       ),
@@ -5996,27 +6097,27 @@ foundationStatus: (projectId: string) =>
         };
       },
     ) =>
-      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/types").SceneCinematographerPack }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/command`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       ),
     cinematographerUndo: (projectId: string, sceneId: string, body: { camera_id: string; shot_id?: string }) =>
-      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/types").SceneCinematographerPack }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/undo`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       ),
     cinematographerReset: (projectId: string, sceneId: string, body: { camera_id: string; shot_id?: string }) =>
-      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/types").SceneCinematographerPack }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/reset`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       ),
     cinematographerLock: (projectId: string, sceneId: string, body: { camera_id: string; shot_id?: string }) =>
-      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/types").SceneCinematographerPack }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/lock`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       ),
     cinematographerDelta: (projectId: string, sceneId: string, body: { camera_id: string; delta: string }) =>
-      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/types").SceneCinematographerPack }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/prompt-delta`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       ),
@@ -6033,7 +6134,7 @@ foundationStatus: (projectId: string) =>
       },
     ) =>
       req<{
-        cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack;
+        cinematographer: import("./components/CoDirector/SceneCreator/types").SceneCinematographerPack;
         shot: import("./components/CoDirector/SceneCreator/types").SceneShot;
       }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/preview`,
@@ -6054,7 +6155,7 @@ foundationStatus: (projectId: string) =>
       },
     ) =>
       req<{
-        cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack;
+        cinematographer: import("./components/CoDirector/SceneCreator/types").SceneCinematographerPack;
         shot: import("./components/CoDirector/SceneCreator/types").SceneShot;
       }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/final`,
@@ -7594,6 +7695,161 @@ foundationStatus: (projectId: string) =>
         `/api/spatial-map/projects/${projectId}/maps/${documentId}/movement-arrows?${query.toString()}`,
       );
     },
+    getCorrectAreaState: (projectId: string, documentId: string) =>
+      req<{
+        engineStatus?: string;
+        executable?: boolean;
+        activeSession?: {
+          sessionId?: string;
+          outputAssetId?: string | null;
+          resultAssetId?: string | null;
+          status?: string;
+          previewUrl?: string | null;
+          acceptToken?: string | null;
+        } | null;
+      }>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/correct-area`),
+    getCorrectAreaEngine: (projectId: string) =>
+      req<Record<string, unknown>>(`/api/spatial-map/projects/${projectId}/correct-area/engine`),
+    startCorrectArea: (
+      projectId: string,
+      documentId: string,
+      body: {
+        prompt: string;
+        maskAssetId: string;
+        sourceAssetId?: string;
+        width?: number;
+        height?: number;
+        preserveStyle?: boolean;
+        preservePerspective?: boolean;
+        preserveLighting?: boolean;
+      },
+    ) =>
+      req<Record<string, unknown>>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/correct-area`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    acceptCorrectArea: (
+      projectId: string,
+      documentId: string,
+      body?: {
+        sessionId?: string;
+        outputAssetId?: string;
+        resultAssetId?: string;
+        acceptToken?: string;
+      },
+    ) =>
+      req<{ document?: Record<string, unknown> }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/correct-area/accept`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body || {}),
+        },
+      ),
+    undoCorrectArea: (projectId: string, documentId: string) =>
+      req<{ document?: Record<string, unknown> }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/correct-area/undo`,
+        { method: "POST" },
+      ),
+    getSpinCamera: (projectId: string, documentId: string) =>
+      req<{
+        placement?: SpinCameraPlacement | null;
+        centerStatus?: { centered: boolean; distanceMeters: number; toleranceMeters: number } | null;
+        exists?: boolean;
+      }>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/spin-camera`),
+    placeSpinCamera: (
+      projectId: string,
+      documentId: string,
+      body: { x: number; z: number; sceneId?: string | null },
+    ) =>
+      req<{
+        placement: SpinCameraPlacement;
+        centerStatus: { centered: boolean; distanceMeters: number; toleranceMeters: number };
+      }>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/spin-camera`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    removeSpinCamera: (projectId: string, documentId: string) =>
+      req<{ deleted?: boolean; mapId?: string }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/spin-camera`,
+        { method: "DELETE" },
+      ),
+    listSpinPackages: (projectId: string, documentId: string) =>
+      req<{ packages?: SpinPackageManifest[]; manifests?: SpinPackageManifest[] }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/spin-packages`,
+      ),
+    createSpinPackage: (
+      projectId: string,
+      documentId: string,
+      body: { provider: string; confirmPaidCloud?: boolean },
+    ) =>
+      req<SpinPackageManifest & { manifest?: SpinPackageManifest }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/spin-packages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    getSpinPackage: (projectId: string, documentId: string, packageId: string) =>
+      req<SpinPackageManifest & { manifest?: SpinPackageManifest }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/spin-packages/${packageId}`,
+      ),
+    regenerateSpinView: (
+      projectId: string,
+      documentId: string,
+      packageId: string,
+      direction: string,
+      body: { confirmPaidCloud?: boolean },
+    ) =>
+      req<SpinPackageManifest & { manifest?: SpinPackageManifest }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/spin-packages/${packageId}/views/${direction}/regenerate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    buildErsFromSpinPackage: (projectId: string, documentId: string, packageId: string) =>
+      req<{ ersAssetId?: string | null; ers_composite_asset_id?: string | null }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/spin-packages/${packageId}/build-ers`,
+        { method: "POST" },
+      ),
+    getSupplementaryViews: (projectId: string, documentId: string) =>
+      req<Record<string, unknown>>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/supplementary-views`,
+      ),
+    analyzeSupplementaryViews: (projectId: string, documentId: string) =>
+      req<Record<string, unknown>>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/supplementary-views/analyze`,
+        { method: "POST" },
+      ),
+    generateSupplementaryView: (projectId: string, documentId: string, body: { slot: string }) =>
+      req<Record<string, unknown>>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/supplementary-views/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    acceptSupplementaryView: (projectId: string, documentId: string, slot: string) =>
+      req<Record<string, unknown>>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/supplementary-views/${encodeURIComponent(slot)}/accept`,
+        { method: "POST" },
+      ),
+    rejectSupplementaryView: (projectId: string, documentId: string, slot: string) =>
+      req<Record<string, unknown>>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/supplementary-views/${encodeURIComponent(slot)}/reject`,
+        { method: "POST" },
+      ),
+    regenerateSupplementaryView: (projectId: string, documentId: string, slot: string) =>
+      req<Record<string, unknown>>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/supplementary-views/${encodeURIComponent(slot)}/regenerate`,
+        { method: "POST" },
+      ),
   },
   perception: {
     capability: () =>
@@ -8518,7 +8774,7 @@ foundationStatus: (projectId: string) =>
           liveComputed?: boolean;
           departments?: Array<{
             category: string;
-            status: "ready" | "not_required" | "blocked";
+            status: "ready" | "not_required" | "blocked" | "advisory";
             reason: string;
             resolved: number;
             required: number;

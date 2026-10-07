@@ -1,5 +1,10 @@
 export function pickCanonicalVoiceRecord<
-  T extends { characterId?: string; voiceIdentityId?: string; approvedTakeId?: string; updatedAt?: string },
+  T extends {
+    characterId?: string;
+    voiceIdentityId?: string;
+    approvedTakeId?: string | null;
+    updatedAt?: string;
+  },
 >(
   records: T[],
   characterId: string,

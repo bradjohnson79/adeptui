@@ -10,7 +10,7 @@ import {
 
 /** Detect the approved role stamped on an asset's labels by the backend. */
 function approvedKindFromAsset(asset: Asset): PreviewApproveAsKind | null {
-  const labels = String(asset?.labels_json || asset?.labels || "[]").toLowerCase();
+  const labels = String(asset.labels_json || "[]").toLowerCase();
   if (!labels || labels === "[]") return null;
   if (labels.includes("character_reference_sheet") || labels.includes("character_sheet") || labels.includes('"crs"')) {
     return "character";
@@ -50,7 +50,7 @@ export function PreviewApproveAsBar({
     setBusy(true);
     setError(null);
     try {
-      const result = await api.sceneReferences.approveAs(projectId, {
+      await api.sceneReferences.approveAs(projectId, {
         asset_id: asset.id,
         kind,
         scene_id: sceneId,

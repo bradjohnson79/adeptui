@@ -53,7 +53,7 @@ export function CompiledGeneratorPromptInspector({
           mediaType: "video",
         })
         .then((body) => {
-          if (!cancelled) setPreview(body as CompilePreview);
+          if (!cancelled) setPreview(body);
         })
         .catch(() => {
           if (!cancelled) {

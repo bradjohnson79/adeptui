@@ -167,7 +167,7 @@ type SessionValue = {
   kbDoc: string;
   audit: ReturnType<typeof loadAudit>;
   welcomeSuggestions: WelcomeSuggestion[];
-  setDraft: (value: string) => void;
+  setDraft: (value: string | ((prev: string) => string)) => void;
   setOpen: (open: boolean) => void;
   openSession: (opts?: { prompt?: string; mode?: CoDirectorDisplayMode; autoSend?: boolean }) => void;
   closeSession: () => void;
@@ -1233,7 +1233,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     if (projectId) persistMessages(messages, projectId);
   }, [messages, uiContext.projectId]);
 
-  const setDraft = useCallback((value: string) => setDraftState(value), []);
+  const setDraft = useCallback((value: string | ((prev: string) => string)) => setDraftState(value), []);
   const setOpen = useCallback((value: boolean) => setOpenState(value), []);
   const setDisplayMode = useCallback((mode: CoDirectorDisplayMode) => {
     setDisplayModeState(mode);

@@ -9,7 +9,6 @@ import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
 import { HelpTip } from "../HelpTip";
 import { MiniMaxH3PlanPanel } from "../minimax-h3/MiniMaxH3PlanPanel";
 import { TimelineRetakeDrawer } from "./TimelineRetakeDrawer";
-import { useDirectorSelection } from "../DirectorSelectionContext";
 import "../../styles/timeline-master/timeline-master.css";
 
 function statusHint(status: BatchStatus): string {
@@ -35,7 +34,6 @@ export function TimelineMasterPanel({
   const [findings, setFindings] = useState<Array<{ severity: string; message: string }>>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [retakeOpen, setRetakeOpen] = useState(false);
-  const { selection } = useDirectorSelection();
   const shotId = `scene-${sceneId}-shot-1`;
 
   const refresh = useCallback(async () => {

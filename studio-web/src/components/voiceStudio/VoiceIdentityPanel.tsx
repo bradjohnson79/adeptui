@@ -1,6 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import type { Project } from "../../types";
+
+function libraryModalProject(id: string, name: string): Project {
+  return {
+    id,
+    name,
+    engine_default: "auto",
+    global_prompt: "",
+    negative_prompt: "",
+    width: 0,
+    height: 0,
+    fps: 0,
+    seed: 0,
+    preset: "draft",
+    vram_gb: 0,
+    spatial_map_json: "",
+    created_at: "",
+    updated_at: "",
+    scenes: [],
+    assets: [],
+  };
+}
 import { Button } from "../ui";
 import { PanelHeading } from "../HelpTip";
 import { AddFromProjectLibraryModal } from "../timeline-master/AddFromProjectLibraryModal";
@@ -153,7 +174,6 @@ export function VoiceIdentityPanel({
 
   const [voiceId, setVoiceId] = useState("");
   const [boundCharacterId, setBoundCharacterId] = useState("");
-  const [selectedSampleId, setSelectedSampleId] = useState("");
   const selectedCharacterIdRef = useRef(selectedCharacterId);
   const selectedCharacterNameRef = useRef(selectedCharacterName);
   selectedCharacterIdRef.current = selectedCharacterId;
@@ -244,7 +264,6 @@ export function VoiceIdentityPanel({
           };
         });
         setSamples(next);
-        setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || "");
         setGenerationState("done");
       }
       if (live && (live.status === "queued" || live.status === "running")) {
@@ -269,7 +288,6 @@ export function VoiceIdentityPanel({
             };
           });
           setSamples(next);
-          setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || "");
           setGenerationState("done");
         }
         if (finished?.status === "failed") {
@@ -293,7 +311,6 @@ export function VoiceIdentityPanel({
       setVoiceId(restored.voiceId);
       setBoundCharacterId(cid);
       setSamples(next);
-      setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || "");
       setGenerationState("done");
       if (restored.sourceMode.toUpperCase() === "CLONE") setMethod("clone");
       else if (restored.sourceMode.toUpperCase() === "DESIGN") setMethod("create");
@@ -339,7 +356,6 @@ export function VoiceIdentityPanel({
     setApproveState("idle");
     setPortraitUrl("");
     setVoiceId("");
-    setSelectedSampleId("");
     setSamples([]);
     setPlayableSamples([]);
     setUnassignArmed(false);
@@ -480,7 +496,6 @@ export function VoiceIdentityPanel({
     setApproveState("idle");
     setErrors([]);
     setSamples([]);
-    setSelectedSampleId("");
     setVoiceJob({
       status: "queued",
       phase: "preparing",
@@ -538,7 +553,6 @@ export function VoiceIdentityPanel({
           setBoundCharacterId(cid);
           const next = mapCandidates(finished.candidates || []);
           setSamples(next);
-          setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || "");
           setGenerationState("done");
           setVoiceJob(finished);
           return;
@@ -554,7 +568,6 @@ export function VoiceIdentityPanel({
       setBoundCharacterId(cid);
       const next = mapCandidates(started?.candidates || started?.items || []);
       setSamples(next);
-      setSelectedSampleId(next.find((sample) => sample.audioUrl)?.id || next[0]?.id || "");
       setGenerationState("done");
       setVoiceJob({
         status: "complete",
@@ -1321,7 +1334,7 @@ export function VoiceIdentityPanel({
 
       {libraryPickerOpen ? (
         <AddFromProjectLibraryModal
-          project={{ id: projectId, name: selectedCharacterName, assets: [] } as Project}
+          project={libraryModalProject(projectId, selectedCharacterName)}
           alreadyIds={
             String(activeVoice?.approvedVoiceReferenceAssetId || "")
               ? [String(activeVoice.approvedVoiceReferenceAssetId)]

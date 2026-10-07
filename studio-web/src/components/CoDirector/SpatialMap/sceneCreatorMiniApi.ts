@@ -34,6 +34,16 @@ export type MiniResult = {
   requiredCharacters?: string[];
   validation?: MiniValidation;
   selected?: boolean;
+  revision?: number;
+  approved?: boolean;
+  revisionHistory?: unknown[];
+  distanceMeters?: number | null;
+  shotKind?: string;
+  orientation?: string | null;
+  lens?: string | number | null;
+  lightingMood?: string | null;
+  primarySubjectName?: string | null;
+  primarySubject?: string | null;
 };
 
 export type MiniTake = {

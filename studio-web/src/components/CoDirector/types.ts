@@ -301,6 +301,14 @@ export interface GenerationPlan {
   creatorAck?: string;
 }
 
+export interface CoDirectorGenerationJob {
+  status?: string;
+  stage?: string;
+  progressPercent?: number | null;
+  outputAsset?: string | null;
+  error?: string | null;
+}
+
 export interface CoDirectorMessageExecution {
   execution_id: string;
   capability?: string;
@@ -313,6 +321,8 @@ export interface CoDirectorMessageExecution {
   result_asset_ids?: string[];
   plan_data?: GenerationPlan | null;
   child_jobs?: CoDirectorMessageExecutionChild[];
+  error?: string | null;
+  generationJob?: CoDirectorGenerationJob | null;
 }
 
 export interface CoDirectorMessage {

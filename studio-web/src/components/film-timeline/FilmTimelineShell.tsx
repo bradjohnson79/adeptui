@@ -83,7 +83,14 @@ type Segment = {
     continuity?: { seam?: { warning?: string | null } };
     resolvedGeneration?: Record<string, unknown> | null;
     legalCanvas?: Record<string, unknown> | null;
-    renderStatus?: { progress?: number; progressGrounded?: boolean; phaseLabel?: string; elapsedSec?: number; status?: string };
+    renderStatus?: {
+      progress?: number;
+      progressGrounded?: boolean;
+      phaseLabel?: string;
+      elapsedSec?: number;
+      status?: string;
+      apiPhase?: string | null;
+    };
   };
 };
 type Shot = {

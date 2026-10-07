@@ -37,7 +37,6 @@ export type SceneGenerationProgress = {
   sceneFinishedWithAcceptedIssues?: boolean;
 };
 
-const ACTIVE_STATUSES = new Set(["Queued", "Generating", "Waiting"]);
 const COMPLETE_STATUSES = new Set([
   "CandidateReady",
   "Approved",

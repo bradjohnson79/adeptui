@@ -88,7 +88,6 @@ export function TimelineTrackLabel({
               aria-pressed={pressed}
               aria-label={controlLabel}
               title={controlLabel}
-              alt={controlLabel}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();

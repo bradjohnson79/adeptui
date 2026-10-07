@@ -89,7 +89,7 @@ export function executionStatusText(execution: CoDirectorMessageExecution): stri
   return `${label} — working…`;
 }
 
-function mappedChildren(live: WorkSurfaceState): CoDirectorMessageExecution["child_jobs"] {
+function mappedChildren(live: WorkSurfaceState): NonNullable<CoDirectorMessageExecution["child_jobs"]> {
   return (live.child_jobs || []).map((child) => ({
     job_id: child.job_id,
     child_index: child.child_index,
@@ -141,7 +141,7 @@ export function mergeLiveExecution(
   const completedFromAssets = live.result_asset_ids?.length || 0;
   const total = children.length || frozen.total || completedFromAssets || 0;
   const completed = Math.max(completedFromChildren, completedFromAssets, frozen.completed ?? 0);
-  const status = normalizeJobStatus(live.status) || normalizeJobStatus(frozen.status) || frozen.status;
+  const status = normalizeJobStatus(live.status) || normalizeJobStatus(frozen.status) || frozen.status || "";
   const resultIds = live.result_asset_ids?.length ? live.result_asset_ids : frozen.result_asset_ids;
   const progress = typeof live.progress === "number" ? live.progress : frozen.progress;
   const progressPercent =

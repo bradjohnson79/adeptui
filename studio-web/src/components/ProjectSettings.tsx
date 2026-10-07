@@ -11,7 +11,7 @@ import { PRIMARY_PROJECT_TYPES } from "../projectTypes";
 import { HostedProvidersPanel } from "./HostedProvidersPanel";
 import { EngineAuthoritySelect } from "./generation/EngineAuthoritySelect";
 import { VideoResolutionSelect } from "./generation/VideoResolutionSelect";
-import { inferVideoTier, legalCanvasSize, normalizeVideoTier, type VideoTier } from "../video/legalCanvas";
+import { inferVideoTier, legalCanvasSize, normalizeVideoTier } from "../video/legalCanvas";
 
 const TABS = [
   ["general", "general"],
@@ -285,7 +285,7 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
               value={normalizeVideoTier(
                 String(defaults.resolution || inferVideoTier(project.width, project.height)),
               )}
-              onChange={(tier: VideoTier, width, height) => {
+              onChange={(tier, width, height) => {
                 void saveDefaults({ ...defaults, resolution: tier });
                 void api.updateProject(project.id, { width, height }).then(onChange);
               }}

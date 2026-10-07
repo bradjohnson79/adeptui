@@ -144,18 +144,21 @@ export function collectPlayableVoiceSamples(
 export type PlayableVoiceSample = {
   id: string;
   status: string;
-  assetId: string;
-  voiceProfileId: string;
-  provider: string;
-  name: string;
+  assetId?: string;
+  voiceProfileId?: string;
+  provider?: string;
+  name?: string;
   modelId?: string;
   providerVoiceId?: string;
   createdAt?: string;
 };
 
-export function pickNewestGeneratedSample(samples: PlayableVoiceSample[]): PlayableVoiceSample | null {
+export function pickNewestGeneratedSample(
+  samples: PlayableVoiceSample[],
+): (PlayableVoiceSample & { assetId: string }) | null {
   const generated = samples.filter(
-    (sample) => sample.provider === "elevenlabs" && sample.assetId,
+    (sample): sample is PlayableVoiceSample & { assetId: string } =>
+      sample.provider === "elevenlabs" && Boolean(sample.assetId),
   );
   if (!generated.length) return null;
   return [...generated].sort((left, right) =>

@@ -60,7 +60,7 @@ function metadataFromManagedClip(clip: {
   return Object.keys(meta).length ? meta : undefined;
 }
 
-export function filterVideoClipsForSceneTake<T extends { asset_id?: string; metadata?: Record<string, unknown> }>(
+export function filterVideoClipsForSceneTake<T extends { asset_id?: string | null; metadata?: Record<string, unknown> }>(
   clips: T[] | null | undefined,
   take: SceneTake | null | undefined,
 ): T[] {

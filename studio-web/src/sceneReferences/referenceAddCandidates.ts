@@ -62,10 +62,12 @@ export type CreatorRegistryRow = {
   mediaKind?: "image" | "video" | "audio";
 };
 
-const PREFIX_FOR_SEMANTIC: Record<SemanticSheetType, SheetPrefix> = {
+const PREFIX_FOR_SEMANTIC: Record<SemanticSheetType | "video" | "audio", SheetPrefix> = {
   character: "@",
   prop: "%",
   environment: "#",
+  video: "*",
+  audio: "&",
 };
 
 const SEMANTIC_FROM_SHEET: Record<string, SemanticSheetType> = {
@@ -199,7 +201,7 @@ export function buildAddReferenceCandidates(opts: {
   for (const asset of opts.assets || []) {
     if (!asset?.id || seenAsset.has(asset.id)) continue;
     const mediaKind = mediaKindForAssetKind(asset.kind);
-    if (!mediaKind) continue;
+    if (mediaKind !== "image" && mediaKind !== "video" && mediaKind !== "audio") continue;
 
     const identity = opts.identityOf?.(asset) || { title: asset.tag || asset.filename };
     const inferred = inferSemanticReferenceType({

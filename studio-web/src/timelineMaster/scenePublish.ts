@@ -53,7 +53,6 @@ export function resolveChangesPending(master: SceneTimelineMaster | null | undef
   if (!pub?.publishedAssetId) return false;
   const stitch = master?.sceneStitch;
   if (!stitch?.assetId) return false;
-  const currentFp = contentFingerprint(master);
   if (pub.contentFingerprint) {
     // BE stores sha256 hex; compare via locked sourceSceneStitchAssetId + current stitch asset.
     // Also treat as dirty when BE fingerprint was set and stitch asset moved.

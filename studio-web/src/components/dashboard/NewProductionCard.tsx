@@ -6,7 +6,7 @@ import {
   resolveCreateType,
   type PrimaryProjectType,
 } from "../../projectTypes";
-import { legalCanvasSize, type VideoTier } from "../../video/legalCanvas";
+import { legalCanvasSize } from "../../video/legalCanvas";
 import { VideoResolutionSelect } from "../generation/VideoResolutionSelect";
 // Load video generators dynamically to avoid type issues with the large api module
 async function loadVideoGenerators(): Promise<Array<{ id: string; label: string; available: boolean }>> {
@@ -77,7 +77,7 @@ export function NewProductionCard({
   const [optionalOpen, setOptionalOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [aspect, setAspect] = useState("16:9");
-  const [resolution, setResolution] = useState<VideoTier>("1080p");
+  const [resolution, setResolution] = useState("1080p");
   const [fps, setFps] = useState<string>("auto");
   const [style, setStyle] = useState("pencil");
   const [videoGens, setVideoGens] = useState<VideoGeneratorOption[]>([]);

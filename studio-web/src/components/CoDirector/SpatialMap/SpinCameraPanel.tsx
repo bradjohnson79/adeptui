@@ -180,11 +180,11 @@ export function SpinCameraPanel({
           <div className="spatial-map__spin-progress" data-testid="spin-progress">
             {SPIN_VIEW_ORDER.map((direction) => {
               const view = activePackage.views?.[direction];
-              const status = view?.status || "pending";
-              const isPending = !view || status === "pending";
-              const isGenerating = spinViewIsPending(status);
+              const status = view?.status;
+              const isPending = !status;
+              const isGenerating = Boolean(status && spinViewIsPending(status));
               const isDone = status === "done";
-              const isFailed = spinViewIsFailed(status);
+              const isFailed = Boolean(status && spinViewIsFailed(status));
               return (
                 <div
                   key={direction}

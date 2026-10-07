@@ -41,7 +41,7 @@ type MenuProps = {
 
 function isActionItem(
   item: MenuItem,
-): item is Extract<MenuItem, { label: string; onSelect?: () => void }> {
+): item is Exclude<MenuItem, { type: string }> {
   return !("type" in item);
 }
 

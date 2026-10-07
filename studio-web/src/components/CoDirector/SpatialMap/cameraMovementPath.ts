@@ -242,7 +242,10 @@ export function computeCameraMovementArrows(
   segments: CameraSegmentSnapshot[] | null | undefined,
   cameras:
     | Array<
-        Pick<SpatialCamera, "id" | "visible" | "label" | "cameraSlot"> & {
+        Pick<
+          SpatialCamera,
+          "id" | "visible" | "label" | "cameraSlot" | "normalizedX" | "normalizedY" | "gridRow" | "gridColumn"
+        > & {
           attachMode?: string | null;
           shotSize?: string | null;
           shotType?: string | null;

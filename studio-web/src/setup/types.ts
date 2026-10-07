@@ -600,3 +600,32 @@ export interface InstallReceipt {
   warnings?: string[];
   verification?: { status?: string; validatedAt?: string };
 }
+
+export interface EssentialAgreementPayload {
+  accepted: boolean;
+  eligible: boolean;
+  documentAvailable: boolean;
+  currentVersion: string;
+  acceptedVersion?: string | null;
+  message?: string;
+  body?: string;
+  status?: string;
+  code?: string;
+}
+
+export interface EssentialAgreementDocument {
+  available: boolean;
+  version: string;
+  body: string;
+  message?: string;
+}
+
+export interface EssentialReadinessBadges {
+  agreementAccepted: boolean;
+  sourceInstalled: boolean;
+  runtimeReady: boolean;
+  commercialModelAccess: boolean;
+  modelReady: boolean;
+  gpuReady: boolean;
+  productionCertified: boolean;
+}

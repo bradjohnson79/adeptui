@@ -20,12 +20,11 @@ import { CharacterV2Studio } from "./CharacterV2Studio";
 import {
   DEFAULT_CHARACTER_GENERATOR_PLAN,
   buildGeneratorSourcesPayload,
-  hydratePlanFromPreferences,
   type CharacterGeneratorPlan,
 } from "./characterGeneratorPlan";
 import { candidateAssetId, resolveActiveCrsCard } from "./activeCrsCard";
-import { approvedHistoricalRevisions, type CharacterCandidate, type GeneratorOption } from "./types";
-import { getHeroIdentity, getReferenceImage, isUnsavedCharacterId, useCharacterProfile } from "./useCharacterProfile";
+import { approvedHistoricalRevisions, type CharacterCandidate } from "./types";
+import { getHeroIdentity, isUnsavedCharacterId, useCharacterProfile } from "./useCharacterProfile";
 import { characterOwnedByProject } from "../../creatorScope";
 import type { GoTab } from "./characterSheetDestinations";
 import "./characterCore.css";
@@ -76,8 +75,6 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   }, [heldReference, references, unsavedCharacter]);
 
   const [plan, setPlan] = useState<CharacterGeneratorPlan>(DEFAULT_CHARACTER_GENERATOR_PLAN);
-  const [localOptions, setLocalOptions] = useState<GeneratorOption[]>([]);
-  const [apiOptions, setApiOptions] = useState<GeneratorOption[]>([]);
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
   const [history, setHistory] = useState<CharacterCandidate[]>([]);
   const [profileDirty, setProfileDirty] = useState(false);
@@ -91,60 +88,19 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [crsActionBusy, setCrsActionBusy] = useState(false);
-  const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
   const prefsHydratedRef = useRef(false);
   const prefsTimerRef = useRef<number | null>(null);
-  const rawPrefsRef = useRef<unknown>(null);
-  const packLoadedRef = useRef(false);
-  const inventoryRef = useRef<{ localOptions: GeneratorOption[]; apiOptions: GeneratorOption[] } | null>(null);
 
   const hero = useMemo(() => getHeroIdentity(references), [references]);
-  const referenceImage = useMemo(() => getReferenceImage(references), [references]);
-  const hasReference = !!referenceImage?.asset_id;
   const productionReady = (profile?.approval_status || "").toLowerCase() === "approved";
 
   const saved = !!profile?.id;
   const owned = characterOwnedByProject(profile, projectId);
   const canSave = owned && !!profile?.name?.trim();
 
-  const applyHydration = useCallback(
-    (
-      prefs: unknown,
-      inv: { localOptions: GeneratorOption[]; apiOptions: GeneratorOption[] },
-    ) => {
-      const apiModels = inv.apiOptions.map((opt) => ({
-        providerId: opt.providerId || "",
-        modelId: opt.modelId || "",
-        model: opt.id.includes(":") ? opt.id.split(":").slice(1).join(":") : opt.id,
-        displayName: opt.label,
-        capabilities: opt.capabilities || [],
-        supportsReferences: !!opt.supportsReferences,
-        availability: opt.availability || "Connected",
-        executable: opt.executable,
-        credits: opt.credits,
-      }));
-      setPlan(hydratePlanFromPreferences(prefs, inv.localOptions, apiModels));
-    },
-    [],
-  );
-
-  const handleInventory = useCallback(
-    (inv: { localOptions: GeneratorOption[]; apiOptions: GeneratorOption[] }) => {
-      inventoryRef.current = inv;
-      setLocalOptions(inv.localOptions);
-      setApiOptions(inv.apiOptions);
-      if (packLoadedRef.current) applyHydration(rawPrefsRef.current, inv);
-      if (packLoadedRef.current) prefsHydratedRef.current = true;
-    },
-    [applyHydration],
-  );
-
   useEffect(() => {
     prefsHydratedRef.current = false;
-    packLoadedRef.current = false;
-    rawPrefsRef.current = null;
     if (unsavedCharacter) {
-      packLoadedRef.current = true;
       prefsHydratedRef.current = true;
       setPlan(DEFAULT_CHARACTER_GENERATOR_PLAN);
       return;
@@ -156,14 +112,10 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         const pack = (res as { pack?: Record<string, unknown> }).pack || (res as Record<string, unknown>);
         const prefs = pack?.generatorPreferences || pack?.generatorSources;
         if (cancelled) return;
-        rawPrefsRef.current = prefs || null;
-        packLoadedRef.current = true;
-        if (inventoryRef.current) applyHydration(prefs || null, inventoryRef.current);
-        else if (!prefs) setPlan(DEFAULT_CHARACTER_GENERATOR_PLAN);
+        if (!prefs) setPlan(DEFAULT_CHARACTER_GENERATOR_PLAN);
         prefsHydratedRef.current = true;
       } catch {
         if (!cancelled) {
-          packLoadedRef.current = true;
           prefsHydratedRef.current = true;
           setPlan(DEFAULT_CHARACTER_GENERATOR_PLAN);
         }
@@ -172,7 +124,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     return () => {
       cancelled = true;
     };
-  }, [projectId, characterId, applyHydration, unsavedCharacter]);
+  }, [projectId, characterId, unsavedCharacter]);
 
   useEffect(() => {
     if (unsavedCharacter) return;

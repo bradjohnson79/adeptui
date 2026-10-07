@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api";
-import type { Job } from "../../types";
 import { loadDismissedRenderJobIds, saveDismissedRenderJobIds } from "../../renderQueueDismiss";
 import { formatElapsedClock } from "../../timelineMaster/sceneRenderProgress";
 import { useProjectJobs } from "../../runtime/projectJobsStore";

@@ -16,6 +16,27 @@ import { GlobalScopeField } from "../../creator/GlobalScopeField";
 import { AddFromProjectLibraryModal } from "../../timeline-master/AddFromProjectLibraryModal";
 import { Button } from "../../ui";
 import type { Project } from "../../../types";
+
+function libraryModalProject(id: string, name: string): Project {
+  return {
+    id,
+    name,
+    engine_default: "auto",
+    global_prompt: "",
+    negative_prompt: "",
+    width: 0,
+    height: 0,
+    fps: 0,
+    seed: 0,
+    preset: "draft",
+    vram_gb: 0,
+    spatial_map_json: "",
+    created_at: "",
+    updated_at: "",
+    scenes: [],
+    assets: [],
+  };
+}
 import { pickCanonicalVoiceRecord } from "../canonicalVoiceRecord";
 import {
   DEVICE_PRESETS,
@@ -238,7 +259,6 @@ export function VoiceEnvironmentPanel({
   characterName,
   approvedVoiceIdentity,
   onMsg,
-  onSelectStage,
   initialLibraryAssetId,
 }: VoiceEnvironmentPanelProps) {
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
@@ -999,7 +1019,7 @@ export function VoiceEnvironmentPanel({
       </div>
       {libraryOpen ? (
         <AddFromProjectLibraryModal
-          project={{ id: projectId, name: characterName, assets: [] } as Project}
+          project={libraryModalProject(projectId, characterName)}
           alreadyIds={dryAssetId ? [dryAssetId] : []}
           mediaKind="audio"
           single

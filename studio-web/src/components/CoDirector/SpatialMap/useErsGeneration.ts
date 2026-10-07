@@ -32,23 +32,27 @@ import type { SpatialMapDocument } from "./types";
 export type ErsPlanningContext = {
   name?: string;
   isGlobal?: boolean;
-  environmentPrompt?: string;
+  environmentPrompt?: string | null;
   referenceImageAssetId?: string;
-  storyTheme?: string;
-  aspectRatio?: string;
-  generator?: string;
+  storyTheme?: string | null;
+  aspectRatio?: string | null;
+  generator?: string | null;
   /** Set only when Generate should continue the selected sheet. A new name omits it. */
   sheetId?: string;
   apiProvider?: string;
   apiModelId?: string;
   apiOfficialModelId?: string;
-  characters?: Array<{ characterId: string; crsAssetId?: string }>;
-  props?: Array<{
-    propId: string;
-    prsAssetId?: string;
-    assignment?: string;
-    characterId?: string;
-  }>;
+  apiModelLabel?: string | null;
+  characters?: Array<{ characterId: string; crsAssetId?: string }> | unknown[] | null;
+  props?:
+    | Array<{
+        propId: string;
+        prsAssetId?: string;
+        assignment?: string;
+        characterId?: string;
+      }>
+    | unknown[]
+    | null;
 };
 export type ErsPhase = "idle" | "queued" | "generating" | "complete" | "failed";
 

@@ -78,11 +78,6 @@ export function LibraryImagePickerModal({
     });
   }, [images, query]);
 
-  const selectedAsset = useMemo(
-    () => images.find((a) => a.id === selectedId) ?? null,
-    [images, selectedId],
-  );
-
   if (!open) return null;
 
   return createPortal(

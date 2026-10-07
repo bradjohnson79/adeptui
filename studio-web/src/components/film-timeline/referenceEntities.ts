@@ -216,7 +216,7 @@ export async function loadStoryboardOptions(projectId: string): Promise<Referenc
 export function groupReferenceOptions(
   entities: ReferenceOption[],
   libraryAssets: Asset[],
-  kind: EntityKind,
+  _kind: EntityKind,
 ): ReferenceOptionGroups {
   const entityAssetIds = new Set(
     entities.flatMap((option) => [option.assetId, ...(option.frames || []).map((frame) => frame.assetId)]),

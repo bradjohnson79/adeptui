@@ -87,7 +87,7 @@ export interface TimelinePromptSegment {
     bindingId?: string;
     prompt_name?: string;
     promptName?: string;
-    type?: "character" | "prop" | "environment";
+    type?: "character" | "prop" | "environment" | "video" | "audio";
     tag?: string;
   }>;
   userDirection?: string | null;
@@ -203,6 +203,7 @@ export interface BatchClip {
   fade_in: number;
   fade_out: number;
   motion_type?: string | null;
+  text?: string;
   rig?: string | null;
   legacyClipId?: string | null;
 }

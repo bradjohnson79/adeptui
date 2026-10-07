@@ -59,7 +59,9 @@ const STARTERS = [
 
 function patchIntent(
   intent: SfxDirectorIntent,
-  patch: Partial<SfxDirectorIntent> & { temporal?: Partial<SfxDirectorIntent["temporal"]> },
+  patch: Omit<Partial<SfxDirectorIntent>, "temporal"> & {
+    temporal?: Partial<SfxDirectorIntent["temporal"]>;
+  },
 ): SfxDirectorIntent {
   return {
     ...intent,

@@ -274,7 +274,7 @@ export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function
     };
   };
 
-  const screenBrushRadius = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const screenBrushRadius = () => {
     const canvas = displayCanvasRef.current;
     if (!canvas) return localBrush / 2;
     const rect = canvas.getBoundingClientRect();
@@ -388,7 +388,7 @@ export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function
     if (localTool === "rect") {
       rectStartRef.current = pt;
     } else {
-      paint(pt.x, pt.y, localTool === "erase", screenBrushRadius(e));
+      paint(pt.x, pt.y, localTool === "erase", screenBrushRadius());
     }
   };
 
@@ -418,7 +418,7 @@ export const ImageMaskEditor = forwardRef<ImageMaskEditorHandle, Props>(function
         ctx.fillRect(x, y, Math.abs(pt.x - rectStartRef.current.x), Math.abs(pt.y - rectStartRef.current.y));
       }
     } else if (localTool === "brush" || localTool === "erase") {
-      paint(pt.x, pt.y, localTool === "erase", screenBrushRadius(e));
+      paint(pt.x, pt.y, localTool === "erase", screenBrushRadius());
     }
   };
 

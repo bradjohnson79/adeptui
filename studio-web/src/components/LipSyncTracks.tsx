@@ -160,7 +160,23 @@ export function buildPerformanceRetakeBody(
   advanced: boolean,
   inSec: number,
   outSec: number,
-): { mode: "performance_retake"; retake: { window: Record<string, unknown>; beats: RetakeBeat[]; references: Record<string, unknown> } } {
+): {
+  mode: "performance_retake";
+  retake: {
+    window: {
+      startSec: number;
+      endSec: number;
+      scope: string;
+      boundarySource: string;
+    };
+    beats: RetakeBeat[];
+    references: {
+      sourceVideo: boolean;
+      includeSourceAudio: boolean;
+      characterSheets: CharacterSheetRef[];
+    };
+  };
+} {
   const duration = Number(scene.duration_sec || 0);
   const windowStart = advanced ? Math.max(0, Math.min(inSec, duration)) : 0;
   const windowEnd = advanced ? Math.max(windowStart, Math.min(outSec, duration)) : duration;
@@ -225,9 +241,10 @@ export function buildPerformanceRetakeBody(
     beats.push({ kind: "silence", startSec: cursor, endSec: windowEnd });
   }
 
-  const charIds = new Set(
-    beats.filter((b) => b.kind === "dialogue" && b.characterId).map((b) => b.characterId as string),
-  );
+  const charIds = new Set<string>();
+  for (const beat of beats) {
+    if (beat.kind === "dialogue" && beat.characterId) charIds.add(beat.characterId);
+  }
   const characterSheets: CharacterSheetRef[] = [];
   for (const cid of charIds) {
     const assetId = resolveCharacterSheetAssetId(cid, assets);
@@ -304,11 +321,10 @@ export function canApplyPerformanceRetake(
     }
   }
   const body = buildPerformanceRetakeBody(scene, tracks, assets, advanced, inSec, outSec);
-  const expectedSheets = new Set(
-    body.retake.beats
-      .filter((b) => b.kind === "dialogue" && b.characterId)
-      .map((b) => b.characterId as string),
-  );
+  const expectedSheets = new Set<string>();
+  for (const beat of body.retake.beats) {
+    if (beat.kind === "dialogue" && beat.characterId) expectedSheets.add(beat.characterId);
+  }
   const actualSheets = new Set(body.retake.references.characterSheets.map((c) => c.characterId));
   for (const cid of expectedSheets) {
     if (!actualSheets.has(cid)) {

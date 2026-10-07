@@ -370,7 +370,7 @@ export const spatialMapApi = {
 
   async listSpinPackages(projectId: string, documentId: string): Promise<SpinPackageManifest[]> {
     const res = await api.spatialMap.listSpinPackages(projectId, documentId);
-    return ((res as { manifests?: unknown[] }).manifests || []) as SpinPackageManifest[];
+    return res.packages ?? res.manifests ?? [];
   },
 
   async createSpinPackage(
@@ -379,12 +379,12 @@ export const spatialMapApi = {
     body: { provider: string; confirmPaidCloud?: boolean },
   ): Promise<SpinPackageManifest> {
     const res = await api.spatialMap.createSpinPackage(projectId, documentId, body);
-    return res.manifest as SpinPackageManifest;
+    return res.manifest ?? res;
   },
 
   async getSpinPackage(projectId: string, documentId: string, packageId: string): Promise<SpinPackageManifest> {
     const res = await api.spatialMap.getSpinPackage(projectId, documentId, packageId);
-    return res.manifest as SpinPackageManifest;
+    return res.manifest ?? res;
   },
 
   async regenerateSpinView(
@@ -395,7 +395,7 @@ export const spatialMapApi = {
     body: { confirmPaidCloud?: boolean } = {},
   ): Promise<SpinPackageManifest> {
     const res = await api.spatialMap.regenerateSpinView(projectId, documentId, packageId, direction, body);
-    return res.manifest as SpinPackageManifest;
+    return res.manifest ?? res;
   },
 
   async buildErsFromSpinPackage(
@@ -404,7 +404,7 @@ export const spatialMapApi = {
     packageId: string,
   ): Promise<{ ersAssetId: string | null }> {
     const res = await api.spatialMap.buildErsFromSpinPackage(projectId, documentId, packageId);
-    return { ersAssetId: (res as { ersAssetId?: string | null }).ersAssetId || null };
+    return { ersAssetId: res.ersAssetId || res.ers_composite_asset_id || null };
   },
 
 };

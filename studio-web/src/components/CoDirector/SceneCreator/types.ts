@@ -1,0 +1,402 @@
+/**
+ * Scene Creator frontend contracts.
+ *
+ * Mirrors the frozen backend types in studio-api/app/spatial_map/ers_contracts.py
+ * (ShotRequest, SceneGenerationBatch, SceneShot) and the Scene Creator REST router
+ * responses in studio-api/app/scene_creator/router.py.
+ *
+ * Law #16 (frozen contracts): field names must match the backend exactly.
+ * Law #11 (persistence): batches are reloaded from the API on mount.
+ * Amendment #3 (spatial authority): Scene Creator images never mutate spatial state.
+ * Amendment #5 (entity tags): @ uses real names, # uses normalized tags.
+ */
+import type { EnvironmentReferenceSheetSummary } from "../../../contracts/environmentReferenceSheet";
+
+/** One parsed shot request. Tags resolve to stable entity IDs on the backend. */
+export type ShotRequest = {
+  index: number;
+  raw_text: string;
+  characters: string[];
+  prop_entities: string[];
+  framing: string;
+  angle: string;
+  orientation: string;
+  additional_instructions: string;
+};
+
+/** A batch of generated scene images from one Scene Creator run. */
+export type SceneGenerationBatch = {
+  id: string;
+  project_id: string;
+  ers_package_id: string;
+  shot_requests: ShotRequest[];
+  output_count: number;
+  result_asset_ids: string[];
+  approved_asset_ids: string[];
+  collection_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** POST /scene-creator/projects/{pid}/parse-shots response. */
+export type ParseShotsResponse = {
+  shots: ShotRequest[];
+};
+
+/** POST /scene-creator/projects/{pid}/batches response. */
+export type CreateBatchResponse = {
+  batch: SceneGenerationBatch;
+  child_jobs: ChildJobSummary[];
+  job_ids: string[];
+  surface_type?: string;
+};
+
+/** GET /scene-creator/projects/{pid}/batches response. */
+export type ListBatchesResponse = {
+  batches: SceneGenerationBatch[];
+};
+
+/** GET /scene-creator/projects/{pid}/batches/{bid} response. */
+export type GetBatchResponse = {
+  batch: SceneGenerationBatch;
+};
+
+/** POST .../regenerate-shot response. */
+export type RegenerateShotResponse = {
+  batch: SceneGenerationBatch;
+  job_id: string;
+  status: string;
+  shot_index: number;
+};
+
+/** POST .../send-to-timeline response. */
+export type SendToTimelineResponse = {
+  batch: SceneGenerationBatch;
+  timeline: Record<string, unknown>;
+  clips_sent: number;
+};
+
+/** A lightweight view of a child job (mirrors AgentWorkSurface ChildJobView). */
+export type ChildJobSummary = {
+  job_id: string;
+  label?: string;
+  status?: string;
+  asset_id?: string | null;
+  error?: string | null;
+  progress?: number;
+  stage?: string;
+  child_index?: number;
+};
+
+/** A character resolved from the spatial map, available as @name. */
+export type ResolvedCharacter = {
+  character_id: string;
+  name: string;
+  position_label: string;
+  slot_index?: number | null;
+};
+
+/** A prop resolved from the spatial map, available as #tag. */
+export type ResolvedProp = {
+  prop_id?: string | null;
+  tag: string;
+  display_label: string;
+  position_label: string;
+  approved_asset_id?: string | null;
+  library_asset_id?: string | null;
+  description?: string;
+  slot_index?: number | null;
+  placementMode?: string;
+  attachedCharacterId?: string | null;
+  relationship?: string | null;
+};
+
+/** One shot suggestion from Co-Director. */
+export type ShotSuggestion = {
+  prompt: string;
+  rationale?: string;
+};
+
+export type CinematicShotControls = {
+  shot_size: string;
+  motion: string;
+  framing: string;
+};
+
+export type SceneCreatorCamera = {
+  camera_id: string;
+  camera_slot: number | null;
+  label: string;
+  orientation: string;
+  fov_preset: string;
+  yaw_degrees?: number | null;
+  lens_mm?: number | null;
+  cinematic: CinematicShotControls;
+};
+
+export type GeneratorSourceSelection = {
+  local_enabled: boolean;
+  api_enabled: boolean;
+  local_family: string;
+  api_provider: string;
+  api_model: string;
+};
+
+export type SceneShotTakeMemory = {
+  originalTakeIntent: Record<string, unknown>;
+  sceneErsState: Record<string, unknown>;
+  characterIdentity: Record<string, unknown>;
+  blocking: Record<string, unknown>;
+  camera: Record<string, unknown>;
+  takeState: Record<string, unknown>;
+  userCorrection: Record<string, unknown>;
+};
+
+export type SceneShotCandidate = {
+  id: string;
+  shot_id: string;
+  index: number;
+  job_id: string;
+  asset_id?: string | null;
+  status: "queued" | "generating" | "complete" | "failed";
+  source: "local" | "api";
+  family: string;
+  model: string;
+  seed?: number | null;
+  provenance_label: string;
+  take_label: string;
+  error?: string;
+  created_at?: string;
+  camera_state_version?: number | null;
+  camera_state_hash?: string;
+  source_camera_id?: string;
+  quality_profile?: string;
+  kind?: string;
+  parent_candidate_id?: string | null;
+  mask_id?: string | null;
+  edit_operation?: string | null;
+  final_strategy?: string;
+  source_preview_asset_id?: string | null;
+  approved_edited_preview_asset_id?: string | null;
+  final_model_id?: string;
+  final_workflow_key?: string;
+  region_edit_ids?: string[];
+  mask_asset_ids?: string[];
+  error_detail?: string;
+  superseded?: boolean;
+};
+
+export type SceneShot = {
+  id: string;
+  project_id: string;
+  scene_id: string;
+  sheet_id: string;
+  ers_package_id: string;
+  ers_runtime: boolean;
+  intent: string;
+  prompt: string;
+  character_ids: string[];
+  prop_entity_ids: string[];
+  camera: SceneCreatorCamera;
+  generator: GeneratorSourceSelection;
+  lora?: { loraId: string; name: string; strength: number } | null;
+  candidates: SceneShotCandidate[];
+  approved_candidate_id?: string | null;
+  take_memory: SceneShotTakeMemory;
+  generation_batch_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SceneCreatorCameraOption = {
+  id: string;
+  label: string;
+  cameraSlot: number;
+  orientation: string;
+  fovPreset: string;
+  yawDegrees?: number | null;
+  lensMm?: number | null;
+  hero?: boolean;
+  visible?: boolean;
+  gridColumn?: number;
+  gridRow?: number;
+};
+
+export type ProductionReadiness = {
+  ready?: boolean;
+  status?: "idle" | "pass" | "advisory" | "blocked" | "llm_unavailable";
+  sceneId?: string;
+  profileId?: string;
+  fingerprint?: string;
+  checks?: Record<string, string>;
+  issues?: { type?: string; code?: string; message?: string }[];
+  ticks?: {
+    character?: string;
+    prop?: string;
+    environment?: string;
+    spatial?: string;
+    camera?: string;
+  };
+  llm?: { status?: string; available?: boolean; summary?: string; issues?: { type?: string; message?: string }[] } | null;
+};
+
+export type SceneCreatorWorkspace = {
+  sheets: EnvironmentReferenceSheetSummary[];
+  selected_sheet_id: string;
+  sheet_name: string;
+  resolved_ers: {
+    sheet_id?: string;
+    package_id?: string;
+    runtime?: boolean;
+    directional_assets?: Record<string, string | null>;
+    error?: string;
+  } | null;
+  scenes: { id: string; name: string; index: number }[];
+  selected_scene_id: string;
+  shots: SceneShot[];
+  selected_shot: SceneShot | null;
+  cameras: SceneCreatorCameraOption[];
+  characters: ResolvedCharacter[];
+  props: ResolvedProp[];
+  api_generation_available: boolean;
+  api_models?: { id?: string; modelId?: string; label?: string; name?: string; providerId?: string }[];
+  local_families: {
+    id: string;
+    label: string;
+    executable?: boolean;
+    supportsReferences?: boolean;
+    supportsEditing?: boolean;
+    supportsInpaint?: boolean;
+    regionEditLabel?: string;
+  }[];
+  has_reference: boolean;
+  cinematographer?: SceneCinematographerPack | null;
+  preview_capabilities?: {
+    local?: { status?: string; label?: string };
+    api?: { status?: string; label?: string; discovered?: boolean; noneLabel?: string };
+  } | null;
+  production_aspect_ratio?: string;
+  spatial_profiles?: SpatialProfile[];
+  selected_spatial_profile_id?: string | null;
+  workspace_reset?: boolean;
+  production_context?: {
+    loaded?: boolean;
+    handoffId?: string;
+    revision?: number;
+    fingerprint?: string;
+    sceneId?: string;
+    spatialMapId?: string;
+    ersPackageId?: string;
+    ersLibraryAssetId?: string;
+    aspectRatio?: string;
+  } | null;
+  production_readiness?: ProductionReadiness | null;
+};
+
+export type SpatialProfile = {
+  handoffId: string;
+  name: string;
+  displayName?: string;
+  revision?: number;
+  sceneId?: string;
+  sheetId?: string;
+  spatialMapId?: string;
+  mapVersion?: string;
+  ersPackageId?: string;
+  ersLibraryAssetId?: string;
+  aspectRatio?: string;
+  characterIds?: string[];
+  propIds?: string[];
+  shotIds?: string[];
+};
+
+/** Cinematographer pack returned by the Scene Creator camera endpoints. */
+export type CameraLineage = {
+  cameraId: string;
+  cameraStateVersion: number;
+  cameraStateHash: string;
+  previewJobId?: string;
+  previewAssetId?: string;
+  previewStateVersion?: number;
+  previewStateHash?: string;
+  locked?: boolean;
+  lockedStateVersion?: number;
+  lockedStateHash?: string;
+  finalJobId?: string;
+  finalAssetId?: string;
+  finalStateVersion?: number;
+  previewStatus?: "none" | "stale" | "generating" | "ready" | "failed";
+  previewError?: string;
+};
+
+export type CameraPose = {
+  cameraId: string;
+  cameraSlot: number;
+  label: string;
+  enabled?: boolean;
+  gridColumn: number;
+  gridRow: number;
+  normalizedX: number;
+  normalizedY: number;
+  yawDegrees: number;
+  pitchDegrees: number;
+  rollDegrees?: number;
+  orientation3d?: {
+    enabled: boolean;
+    targetLock: boolean;
+    axisLocks?: { yaw?: boolean; pitch?: boolean; roll?: boolean; zoom?: boolean };
+    source?: "discrete" | "gizmo";
+    zoom?: number;
+  };
+  heightMeters: number;
+  orientation: string;
+  fovPreset: string;
+  lensMm: number;
+  opticalZoomStep: number;
+  physicalStepOffset: { forwardBack: number; leftRight: number; vertical: number };
+  anglePreset: "low" | "eye_level" | "high";
+  shotType: string;
+  targetEntityId: string;
+  targetEntityType?: "character" | "prop" | null;
+  inclusionPropId?: string;
+};
+
+export type SceneCameraRecord = {
+  cameraId: string;
+  cameraSlot: number;
+  label: string;
+  enabled: boolean;
+  baseline: CameraPose;
+  current: CameraPose;
+  history: unknown[];
+  cameraStateVersion: number;
+  cameraStateHash: string;
+  structuredCommand: Record<string, unknown>;
+  displayInstruction: string;
+  userCameraPromptDelta: string;
+  lineage: CameraLineage;
+};
+
+export type SceneCinematographerPack = {
+  scene_id: string;
+  project_id?: string;
+  density: number;
+  selected_camera_id: string;
+  cameras: SceneCameraRecord[];
+};
+
+export const DEFAULT_CINEMATIC: CinematicShotControls = {
+  shot_size: "medium_wide",
+  motion: "static",
+  framing: "two_shot",
+};
+
+export function candidateProgress(candidates: SceneShotCandidate[]): {
+  done: number;
+  total: number;
+  percent: number;
+} {
+  const total = candidates.length;
+  const done = candidates.filter((c) => c.status === "complete" || c.status === "failed").length;
+  return { done, total, percent: total ? Math.round((done / total) * 100) : 0 };
+}

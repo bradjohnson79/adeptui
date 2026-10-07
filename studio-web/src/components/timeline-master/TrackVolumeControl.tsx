@@ -233,7 +233,6 @@ export function TrackVolumeControl({
         aria-pressed={muted}
         aria-label={muteLabel}
         title={muteLabel}
-        alt={muteLabel}
         disabled={disabled}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => {

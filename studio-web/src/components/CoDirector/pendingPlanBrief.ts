@@ -61,7 +61,7 @@ export function isPendingBriefFresh(brief: PendingPlanBriefView | null | undefin
   ]);
   if (state && !freshStates.has(state)) return false;
   const expires = brief.expiresAt;
-  if (!expires) return brief.fresh !== false;
+  if (!expires) return true;
   const exp = Date.parse(expires);
   if (Number.isNaN(exp)) return false;
   return nowMs <= exp;

@@ -399,6 +399,7 @@ export function HostedProvidersSetupPanel({
               }
               onPreferred={() =>
                 void run(meta.id, async () => {
+                  if (meta.id === "elevenlabs") return;
                   await api.hostedProvidersSetPreferred(meta.id);
                   const discovery = await api.hostedProvidersDiscover(meta.id);
                   const summary = (discovery?.summary || discovery?.discovery?.summary) as

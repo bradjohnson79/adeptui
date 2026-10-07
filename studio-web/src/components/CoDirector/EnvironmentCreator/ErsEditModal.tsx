@@ -22,7 +22,6 @@ import {
 } from "./ErsDrawingLayer";
 import { ErsSheetLegend } from "./ErsSheetLegend";
 import {
-  ersLegendEditHasUnsavedChanges,
   ersLegendStateKey,
   loadErsLegendEditState,
   saveErsLegendEditState,
@@ -110,56 +109,6 @@ type Props = {
 };
 
 
-async function loadImage(src: string): Promise<HTMLImageElement> {
-  return await new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Failed to load mask image for upscale"));
-    img.src = src;
-  });
-}
-
-/**
- * Export mask at native ERS pixels.
- * Prefer native buffer (ImageMaskEditor nativeMask); fall back to nearest-neighbor upscale.
- */
-async function exportNaturalMask(
-  editor: ImageMaskEditorHandle,
-): Promise<{ pngBase64: string; width: number; height: number; upscaledFromDisplay: boolean; nativeBuffer: boolean }> {
-  const displayPng = await editor.exportPng();
-  if (!displayPng) throw new Error("Paint a mask region first (brush or rectangle).");
-  const natural = editor.getSourceNaturalSize();
-  const buffer =
-    typeof editor.getMaskBufferSize === "function"
-      ? editor.getMaskBufferSize()
-      : editor.getDisplaySize();
-  const width = natural.width || buffer.width;
-  const height = natural.height || buffer.height;
-  if (!width || !height) throw new Error("Could not resolve source image dimensions for mask.");
-
-  if (buffer.width === width && buffer.height === height) {
-    return { pngBase64: displayPng, width, height, upscaledFromDisplay: false, nativeBuffer: true };
-  }
-
-  const img = await loadImage(`data:image/png;base64,${displayPng}`);
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Mask canvas unavailable.");
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0, width, height);
-  const dataUrl = canvas.toDataURL("image/png");
-  return {
-    pngBase64: dataUrl.replace(/^data:image\/png;base64,/, ""),
-    width,
-    height,
-    upscaledFromDisplay: true,
-    nativeBuffer: false,
-  };
-}
-
 function formatJobError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 404) {
@@ -188,10 +137,8 @@ export function ErsEditModal({
   initialPrompt,
   apiProvider = "",
   apiModelId = "",
-  apiOfficialModelId = "",
   apiModelLabel = "",
   onClose,
-  onDerivativeReady,
   onViewportRefresh,
   onSubmitAccepted,
 }: Props) {
@@ -224,11 +171,10 @@ export function ErsEditModal({
   const [error, setError] = useState<string | null>(null);
   const [userError, setUserError] = useState<string | null>(null);
   const [techError, setTechError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [derivativeAssetId, setDerivativeAssetId] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [maskAssetId, setMaskAssetId] = useState<string | null>(null);
-  const [versionSheetId, setVersionSheetId] = useState<string | null>(null);
+  const [jobId] = useState<string | null>(null);
+  const [derivativeAssetId] = useState<string | null>(null);
+  const [maskAssetId] = useState<string | null>(null);
+  const [versionSheetId] = useState<string | null>(null);
   const [activeSheetId, setActiveSheetId] = useState(sheetId);
   const [activeSourceAssetId, setActiveSourceAssetId] = useState(sourceAssetId);
   const [editorKey, setEditorKey] = useState(0);
@@ -318,81 +264,6 @@ export function ErsEditModal({
     setZoom(1);
     maskRef.current?.fitToView?.();
   }, []);
-
-  const finishWithDerivative = useCallback(
-    async (der: string, jid: string | null, prompt: string) => {
-      setDerivativeAssetId(der);
-      setPreviewUrl(api.assetUrl(der));
-
-      // Locked: create draft vN (no auto-approve). Refresh modal to draft via versionSheetId.
-      let createdVersionId: string | null = null;
-      let draftComposite = der;
-      try {
-        setPhase("creating_version");
-        setStatusMessage("Creating draft ERS version (vN)…");
-        const created = await api.environmentReferenceSheet.createVersion(projectId, activeSheetId, {
-          derivativeAssetId: der,
-          editPrompt: prompt,
-        });
-        createdVersionId = String(created.versionSheetId || created.sheetId || "").trim() || null;
-        setVersionSheetId(createdVersionId);
-        if (createdVersionId) {
-          setActiveSheetId(createdVersionId);
-          try {
-            const loaded = await api.environmentReferenceSheet.getSheet(projectId, createdVersionId);
-            const summary = ((loaded as { summary?: Record<string, unknown> }).summary || {}) as Record<string, unknown>;
-            const sheet = ((loaded as { sheet?: Record<string, unknown> }).sheet || {}) as Record<string, unknown>;
-            const comp = String(
-              summary.composite ||
-                summary.ers_composite_asset_id ||
-                summary.derivativeAssetId ||
-                sheet.ers_composite_asset_id ||
-                der,
-            ).trim();
-            if (comp) draftComposite = comp;
-          } catch {
-            /* draft id still usable; composite falls back to derivative */
-          }
-        }
-        setStatusMessage(
-          createdVersionId
-            ? `Draft ready (${createdVersionId.slice(0, 8)}…) — not approved. Modal refreshed to draft.`
-            : "Derivative ready — draft create returned no id (not approved).",
-        );
-      } catch (verErr) {
-        setStatusMessage(
-          `Derivative ready. Draft vN create deferred: ${formatJobError(verErr)}. Use Version chrome.`,
-        );
-      }
-
-      onDerivativeReady?.({
-        derivativeAssetId: der,
-        jobId: jid,
-        editPrompt: prompt,
-        sourceAssetId: activeSourceAssetId,
-        sheetId: createdVersionId || activeSheetId,
-        versionSheetId: createdVersionId,
-      });
-
-      // Same-modal refresh to draft composite; clear mask+draw for next pass. NO Approve.
-      setActiveSourceAssetId(draftComposite);
-      setEditorKey((k) => k + 1);
-      setHasMask(false);
-      setHasDrawing(false);
-      drawRef.current?.clear();
-      setEditPrompt("");
-      frozenPromptRef.current = prompt;
-      dirtyRef.current = false;
-      setPhase("done");
-
-      onViewportRefresh?.({
-        sheetId: createdVersionId || activeSheetId,
-        sourceAssetId: draftComposite,
-        sheetName: sheetName,
-      });
-    },
-    [activeSheetId, activeSourceAssetId, onDerivativeReady, onViewportRefresh, projectId, sheetName],
-  );
 
   const handleSubmit = useCallback(async () => {
     if (submitInFlightRef.current || busy) return;

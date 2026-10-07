@@ -24,7 +24,8 @@ export type SurfaceType =
   | "script_operation"
   | "atlas_shot_generation"
   | "ers_generation"
-  | "scene_generation";
+  | "scene_generation"
+  | "timeline_production";
 
 export type ChildJobStatus =
   | "queued"

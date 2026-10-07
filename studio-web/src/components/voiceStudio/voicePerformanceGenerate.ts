@@ -1,7 +1,7 @@
 ﻿import type { VoicePerformanceCapabilities, VoicePerformanceTake } from "../../contracts/voicePerformanceM410";
 
 export type VoicePerformanceGenerationProgress = {
-  source: "take_level";
+  source: "take_level" | "fabricated";
   completed: number;
   total: number;
   percent: number;

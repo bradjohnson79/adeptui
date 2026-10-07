@@ -92,10 +92,7 @@ export function VoiceStudioWorkspace({
 
   const [voiceId, setVoiceId] = useState("");
   const [testingCandidateId, setTestingCandidateId] = useState("");
-  const [hasApprovedVoice, setHasApprovedVoice] = useState(false);
-  const [hasApprovedTake, setHasApprovedTake] = useState(false);
-  const [hasEnvironmentRender, setHasEnvironmentRender] = useState(false);
-  const [hasSceneDialogue, setHasSceneDialogue] = useState(false);
+  const [, setHasApprovedVoice] = useState(false);
 
   const [dialogue, setDialogue] = useState(DEFAULT_DIALOGUE);
   const [environmentAssetId, setEnvironmentAssetId] = useState("");
@@ -153,45 +150,6 @@ export function VoiceStudioWorkspace({
   useEffect(() => {
     void load().catch((e) => onMsg(e?.message || String(e)));
   }, [load, onMsg]);
-
-  useEffect(() => {
-    if (!projectId || !characterId) return;
-    const requestedId = characterId;
-    (async () => {
-      try {
-        const result = await api.characterVoiceApprovedStatus(projectId, requestedId);
-        if (!isCurrentCharacterRequest(requestedId, characterIdRef.current)) return;
-        setHasApprovedVoice(Boolean(result.hasApprovedVoice));
-      } catch { /* ignore */ }
-    })();
-  }, [projectId, characterId]);
-
-  useEffect(() => {
-    if (!projectId || !characterId) return;
-    const requestedId = characterId;
-    (async () => {
-      try {
-        const response = await api.voicePerformanceM410.listProjectRecords(projectId);
-        if (!isCurrentCharacterRequest(requestedId, characterIdRef.current)) return;
-        const records = (response.records || []).filter((r) => r.characterId === requestedId);
-        setHasApprovedTake(Boolean(records.some((r) => r.approvedTakeId)));
-      } catch { setHasApprovedTake(false); }
-    })();
-  }, [projectId, characterId]);
-
-  useEffect(() => {
-    if (!projectId || !characterId) return;
-    const requestedId = characterId;
-    (async () => {
-      try {
-        const profiles = await api.voiceEnvironment.listProfiles(projectId, requestedId).catch(() => []);
-        const renders = await api.voiceEnvironment.listRenders(projectId, requestedId).catch(() => []);
-        if (!isCurrentCharacterRequest(requestedId, characterIdRef.current)) return;
-        setHasEnvironmentRender(Boolean((renders || []).length));
-        setHasSceneDialogue(Boolean((profiles || []).length));
-      } catch { setHasEnvironmentRender(false); setHasSceneDialogue(false); }
-    })();
-  }, [projectId, characterId]);
 
   const approvedVoice = useMemo(
     () => chooseApprovedVoice(ws?.voices, ws?.activeVoiceProfileId || voiceId),

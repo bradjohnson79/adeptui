@@ -1,142 +1,6 @@
-﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useTranslation } from "react-i18next";
-import type { Asset, Project, Scene } from "../types";
-import { api } from "../api";
-import { ActionWithHelp, PanelHeading } from "./HelpTip";
-import { useDirectorSelectionOptional } from "./DirectorSelectionContext";
-import { VisualReferencesPanel } from "./VisualReferencesPanel";
-import { TimelineReferencesPanel } from "./TimelineReferencesPanel";
-import {
-  TIMELINE_LAYOUT_EVENT,
-  loadTimelineWorkspaceLayout,
-  saveTimelineWorkspaceLayout,
-  type TimelineWorkspaceLayout,
-} from "../timelineMaster/workspaceLayout";
-import { getTimelineHelp } from "../timelineMaster/helpCatalog";
-import {
-  TimelineSettingsDrawer,
-  formatTimelineTime,
-} from "./timeline-master/TimelineSettingsDrawer";
-import { TrackClipInteractive, type ClipDragMode, type ClipGeometry } from "./timeline-master/TrackClipInteractive";
-import { TimedPromptEditorModal } from "./timeline-master/TimedPromptEditorModal";
-import {
-  openTimedPromptAfterGesture,
-  shouldIgnoreTimedPromptDismiss,
-  timedPromptDismissGuardUntil,
-} from "./timedPromptOpen";
-/* Phase 0: CameraSettingsModal unmounted â€” Timed Prompt is sole camera authority */
-import { buildMagneticSnapTargets } from "../timelineMaster/magneticSnap";
-import { pixelsPerSecond, sliderToZoom, stepTimelineZoom, zoomToSlider } from "../timelineMaster/timelineZoom";
-import { TimelineTrackLabel } from "./timeline-master/TimelineTrackLabel";
-import { TrackVolumeControl } from "./timeline-master/TrackVolumeControl";
-import { laneTimeFromPointer } from "../timelineMaster/audioClipModal";
-import type { SceneTimelineMaster, TimelinePromptSegment as MasterTimelinePromptSegment } from "../timelineMaster/contracts";
-import {
-  flattenMasterPrompts,
-  patchMasterPrompt,
-  projectMasterPreviewClips,
-  removableVisualClipIds,
-  removeMasterPrompts,
-  syncMasterClips,
-} from "../timelineMaster/masterTimelineMutate";
-import {
-  displayedVisualVideoClips,
-  playableVisualClipsFromMaster,
-  removePlacedVisualClip,
-  resolveSceneTake,
-} from "../timelineMaster/playableVisualTakes";
-import {
-  findBatchOwnedAudioClip,
-  masterHasBatchOwnedAudio,
-  resolveDisplayAudioClips,
-  type DisplayBatchAudioClip,
-} from "../timelineMaster/batchOwnedAudioClips";
-import { findSameTrackIntersection, rangesIntersect, USER_FACING_TRACK_OCCUPIED } from "../timelineMaster/sameTrackNoOverlap";
-import { runTimelineCommand } from "../timelineMaster/timelineHotkeys";
-import {
-  applyShellPromptSnapshot,
-  getBoundShellTimeline,
-  getBoundShellTimelineMutate,
-  bindInspectingPrompt,
-  subscribeShellTimelineSnapshot,
-} from "./timeline-master/timelineMutateBridge";
-import { ReferenceTokenAutocomplete } from "./sceneReferences/ReferenceTokenAutocomplete";
-// TS6133 unblock: JSX usage removed by in-progress refactor; keep symbol for re-wire.
-void ReferenceTokenAutocomplete;
-import {
-  assetDurationSec,
-  displayToken,
-  normalizePromptTags,
-  tokenSummary,
-  type ReferenceBindingView,
-} from "../sceneReferences/referenceTokens";
-import { labelCharacterBindingFromIdentity } from "../timelineMaster/timedPromptNameBindings";
-import {
-  collectPromptBindingIds,
-  loadTimelineReferenceCatalog,
-} from "../timelineMaster/loadTimelineReferenceCatalog";
-import { resolveMediaClipLabels } from "../timelineMaster/mediaClipLabels";
-import { planLibraryImageDrop } from "./timeline-master/libraryImageToVisual";
-import {
-  decideTimedPromptRange,
-  liveSceneClockSec,
-} from "../timelineMaster/sceneDurationAuthority";
-import { persistCanonicalSceneDuration } from "../timelineMaster/persistSceneDuration";
-import { rematerializeSceneExecutionWindows } from "../timelineMaster/rematerializeThenGenerate";
-import {
-  nextTimelineScaleExtraSec,
-  timelineRulerTickStepSec,
-  timelineRulerTicks,
-  timelineScaleShouldGrow,
-  timelineSequenceSec,
-  timelineViewportSec,
-  timelineVisibleScaleSec,
-} from "../timelineMaster/timelineVisibleScale";
-
-
-function mediaClipFaceLabel(
-  kind: "audio" | "sfx" | "lipsync",
-  clip: {
-    title?: string | null;
-    description?: string | null;
-    label?: string | null;
-    line?: string | null;
-    character_name?: string | null;
-    audio_asset_id?: string | null;
-    asset_id?: string | null;
-    id?: string | null;
-  },
-  asset?: { tag?: string | null; filename?: string | null } | null,
-  promptTexts?: string[] | null,
-  clipStart?: number,
-  clipLength?: number,
-): { face: string; fullTitle: string | null; description: string | null } {
-  const resolved = resolveMediaClipLabels({
-    kind: kind === "lipsync" ? "lipsync" : kind,
-    clip: {
-      title: clip.title,
-      description: clip.description,
-      label: clip.label,
-      line: clip.line,
-      character_name: clip.character_name,
-      audio_asset_id: clip.audio_asset_id,
-      asset_id: clip.asset_id,
-      id: clip.id,
-    },
-    asset: asset || null,
-    promptContext: promptTexts?.length
-      ? { prompts: promptTexts, clipStart, clipLength }
-      : null,
-  });
-  const fallback = kind === "audio" ? "Audio" : kind === "sfx" ? "SFX" : "Lip Sync Clip";
-  const ownLabel = (clip.label || "").trim();
-  const genericFace = !ownLabel || /^(audio|sfx|music|sound effect)$/i.test(ownLabel);
-  return {
-    face: genericFace ? resolved.label || fallback : ownLabel,
-    fullTitle: resolved.title || ownLabel || null,
-    description: clip.description ?? resolved.description,
-  };
-}
+﻿import type { TimelineWorkspaceLayout } from "../timelineMaster/workspaceLayout";
+import type { TimelinePromptSegment as MasterTimelinePromptSegment } from "../timelineMaster/contracts";
+import { getBoundShellTimeline } from "./timeline-master/timelineMutateBridge";
 
 export type RegionBox = { x: number; y: number; w: number; h: number };
 export type TimelineClip = {
@@ -191,7 +55,7 @@ export type PromptSegment = {
   reference_name_bindings?: Array<{
     binding_id: string;
     prompt_name: string;
-    type: "character" | "prop" | "environment";
+    type: "character" | "prop" | "environment" | "video" | "audio";
     tag: string;
     asset_id?: string;
     identity_id?: string;
@@ -215,7 +79,7 @@ export function masterPromptSegmentToView(seg: MasterTimelinePromptSegment): Pro
   const nameBindings = (seg.referenceNameBindings || []).map((row) => ({
     binding_id: String(row.binding_id ?? row.bindingId ?? ""),
     prompt_name: String(row.prompt_name ?? row.promptName ?? ""),
-    type: (row.type || "character") as "character" | "prop" | "environment",
+    type: (row.type || "character") as "character" | "prop" | "environment" | "video" | "audio",
     tag: String(row.tag || ""),
   }));
   return {
@@ -422,29 +286,6 @@ export function promptIdsOf(timeline: TimelineBoardView | null | undefined): Set
   return new Set((timeline?.promptSegments || []).map((seg) => seg.id).filter(Boolean));
 }
 
-function pct(start: number, length: number, duration: number) {
-  const d = Math.max(0.1, duration);
-  return {
-    left: `${(start / d) * 100}%`,
-    width: `${(Math.max(0.15, length) / d) * 100}%`,
-  };
-}
-
-function snapTime(t: number, snap: boolean, step = 0.25) {
-  if (!snap) return Math.max(0, t);
-  return Math.max(0, Math.round(t / step) * step);
-}
-
-
-function dropTimeFromLane(e: React.DragEvent, boardDuration: number, snap: boolean, sceneFps: number): number {
-  const row = e.currentTarget as HTMLElement;
-  const content = (row.querySelector("[class*='track-content']") as HTMLElement | null) || row;
-  const rect = content.getBoundingClientRect();
-  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / Math.max(1, rect.width)));
-  return snapTime(ratio * boardDuration, snap, snap ? 1 / sceneFps : 0.01);
-}
-
-
 export function createLipSyncTrack(slot: number): LipSyncTrack {
   return {
     id: nid(),
@@ -528,100 +369,5 @@ export function lipSyncTrackHasContent(track: LipSyncTrack | null | undefined) {
       (track.track_path || []).length ||
       (track.clips || []).length,
   );
-}
-
-function trackRowClass(shellMode: boolean, extra = "") {
-  const base = shellMode ? "timeline-v2__track-row" : "track-row";
-  return extra ? `${base} ${extra}` : base;
-}
-
-function trackContentClass(shellMode: boolean, extra = "") {
-  const base = shellMode ? "timeline-v2__track-content" : "track-lane";
-  return extra ? `${base} ${extra}` : base;
-}
-
-function firstLaneMuted(
-  master: SceneTimelineMaster | null | undefined,
-  tl: TimelineBoardView | null,
-  kind: "audio" | "sfx",
-): boolean | undefined {
-  if (masterHasBatchOwnedAudio(master, kind) && master) {
-    for (const batch of master.batchBlocks || []) {
-      const clips = kind === "audio" ? batch.audioClips || [] : batch.sfxClips || [];
-      if (clips.length) return Boolean(clips[0]?.muted);
-    }
-  }
-  const clips = kind === "audio" ? tl?.audioClips || [] : tl?.sfxClips || [];
-  if (clips.length) return Boolean(clips[0]?.muted);
-  return undefined;
-}
-
-function TrackHeader({
-  label,
-  labelKey,
-  testId,
-  shellMode,
-  controls = ["eye", "lock"],
-  pressedControls,
-  headerExtra,
-  actionLabel,
-  onAction,
-  onControlToggle,
-}: {
-  label: string;
-  labelKey?: string;
-  testId?: string;
-  shellMode: boolean;
-  controls?: Array<"eye" | "lock" | "mute" | "solo">;
-  pressedControls?: Array<"eye" | "lock" | "mute" | "solo">;
-  headerExtra?: React.ReactNode;
-  actionLabel?: string;
-  onAction?: () => void;
-  onControlToggle?: (control: "eye" | "lock" | "mute" | "solo") => void;
-}) {
-  if (shellMode) {
-    return (
-      <TimelineTrackLabel
-        label={label}
-        labelKey={labelKey}
-        testId={testId}
-        controls={controls}
-        pressedControls={pressedControls}
-        headerExtra={headerExtra}
-        onAction={onAction}
-        onControlToggle={onControlToggle}
-      />
-    );
-  }
-  return (
-    <div className="track-label">
-      {label}
-      {onAction ? (
-        <button className="ghost" style={{ padding: "0.15rem 0.45rem", marginTop: 4 }} onClick={onAction}>
-          {actionLabel}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-/** Normalize legacy start/middle/end roles into free guide clips for Director Timeline Generation.
- * Preserves stable display_tag; never overwrites tags with index-based Image N.
- */
-function freeImageClips(tl: TimelineBoardView): TimelineClip[] {
-  const clips = tl.imageClips || [];
-  if (!clips.length) return [];
-  return clips.map((c, i) => {
-    const resolvedLabel = c.display_tag
-      ? c.display_tag
-      : c.label && !["Start", "Middle", "End"].includes(c.label)
-        ? c.label
-        : `Image ${i + 1}`;
-    return {
-      ...c,
-      role: "guide" as const,
-      label: resolvedLabel,
-    };
-  });
 }
 

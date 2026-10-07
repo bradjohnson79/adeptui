@@ -784,7 +784,8 @@ export function avatarGenerateBlockers(
   if (runtime.label === "Experimental" || runtime.certifiedReady === true) {
     return issues;
   }
-  if (runtime.certifiedReady !== true) {
+  // Remaining gate is not certified (false or unset).
+  if (runtime.certifiedReady === false || runtime.certifiedReady === undefined) {
     issues.push({
       level: "bad",
       text: `${runtimeName} needs repair — Open Runtime Setup`,

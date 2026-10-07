@@ -10,7 +10,7 @@ import {
   type ContinuityLock,
 } from "../directorSelection";
 import { isTimelineMediaAsset, normalizeTimelineMediaKind } from "../timelineMediaTypes";
-import { LibraryQuickPreviewModal } from "./library/LibraryQuickPreviewModal";
+import { LibraryQuickPreviewModal, type LibraryQuickPreviewAsset } from "./library/LibraryQuickPreviewModal";
 import { eventFromActionControl, isQuickPreviewKind } from "./library/libraryQuickPreview";
 import {
   assetMatchesLibrarySearch,
@@ -56,7 +56,7 @@ export function AssetTray({
   const [tag, setTag] = useState("");
   const [filter, setFilter] = useState<"all" | "image" | "audio" | "video">("all");
   const [search, setSearch] = useState("");
-  const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
+  const [previewAsset, setPreviewAsset] = useState<LibraryQuickPreviewAsset | null>(null);
   const [characterNames, setCharacterNames] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 

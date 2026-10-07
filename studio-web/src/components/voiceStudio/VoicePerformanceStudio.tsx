@@ -12,6 +12,7 @@ import type {
   VoicePerformanceRecord,
   VoicePerformanceRuntimeStatus,
   VoicePerformanceTake,
+  VoicePerformanceTakeList,
 } from "../../contracts/voicePerformanceM410";
 import { Button } from "../ui";
 import { HelpTip, PanelHeading } from "../HelpTip";
@@ -169,10 +170,6 @@ function topEmotionLabel(vector: VoicePerformanceEmotionVector) {
 
 function formatTakeStatus(status: VoicePerformanceTake["status"]) {
   return formatVoicePerformanceTakeStatus(status);
-}
-
-function takeSort(a: VoicePerformanceTake, b: VoicePerformanceTake) {
-  return a.takeNumber - b.takeNumber || String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
 }
 
 export function VoicePerformanceStudio({
@@ -349,7 +346,7 @@ export function VoicePerformanceStudio({
 
   const loadTakes = useCallback(async () => {
     if (!record?.id) return;
-    const next = await api.voicePerformanceM410.listTakes(record.id);
+    const next: VoicePerformanceTakeList = await api.voicePerformanceM410.listTakes(record.id);
     setTakes((current) => mergeVoicePerformanceTakes(current, next.takes || []));
     setApprovedTakeId(String(next.approvedTakeId || ""));
     if (next.generationProgress) {
@@ -641,7 +638,7 @@ export function VoicePerformanceStudio({
   );
 
   const generateTakeLabels = useCallback(
-    (count: number, startNumber: number) => {
+    (count: number) => {
       // Fresh Take 1..N labels for the new batch (canonical takeNumber still assigned by API).
       return Array.from({ length: count }, (_, index) => `Take ${index + 1}`);
     },
@@ -714,7 +711,7 @@ export function VoicePerformanceStudio({
       const provider = getVoiceStudioProvider();
       const generated = await api.voicePerformanceM410.generateTakes(usableRecord.id, {
         count: takeCount,
-        labels: generateTakeLabels(takeCount, startNumber),
+        labels: generateTakeLabels(takeCount),
         preferredProvider: provider,
       });
       setTakes((current) => mergeVoicePerformanceTakes(current, generated.takes || []));
