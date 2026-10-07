@@ -91,13 +91,6 @@ const config = {
     category: "Video",
     artifactName: "${productName}-${version}-linux-x64.${ext}",
     maintainer: "Adept UI",
-    desktop: {
-      Name: "Adept UI",
-      Comment: "Desktop filmmaking studio",
-      Categories: "AudioVideo;Video;",
-      StartupWMClass: "Adept UI",
-      Terminal: "false",
-    },
   },
   deb: {
     artifactName: "${productName}-${version}-linux-x64.${ext}",
