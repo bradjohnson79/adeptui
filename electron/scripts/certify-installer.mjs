@@ -101,7 +101,7 @@ const result = {
   uninstallStatus: uninstall.status,
   before,
   after,
-  liveDbUnchanged: before.liveDb.sha256 === after.liveDb.sha256,
+  liveDbUnchanged: Boolean(before.liveDb && after.liveDb && before.liveDb.sha256 === after.liveDb.sha256),
   liveDbPreservation: preservationVerdict(before.liveLogical, after.liveLogical),
   comfyUnchanged: before.comfyPid === after.comfyPid,
   apiUnchanged: before.apiPid === after.apiPid,
