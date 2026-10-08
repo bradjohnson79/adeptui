@@ -15,6 +15,7 @@ const marker = path.join(markerDir, "cert-disposable-project.txt");
 const liveDb = path.join(root, "data", "studio.db");
 
 function hashFile(file) {
+  if (!fs.existsSync(file)) return null;
   const data = fs.readFileSync(file);
   return { bytes: data.length, sha256: crypto.createHash("sha256").update(data).digest("hex") };
 }

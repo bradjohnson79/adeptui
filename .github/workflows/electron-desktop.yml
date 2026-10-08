@@ -46,6 +46,19 @@ jobs:
       - name: Install packaged API dependencies for the Windows runtime
         run: node electron/scripts/prepare-windows-venv.mjs
       - run: node electron/scripts/build-windows.mjs
+      - name: Certify packaged boot, install, reinstall, and uninstall
+        run: |
+          node electron/scripts/certify-windows.mjs
+          node electron/scripts/certify-installer.mjs
+          node electron/scripts/assert-windows-release-boot.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adept-ui-desktop-win-x64-cert
+          path: |
+            electron/build/cert-result.json
+            electron/build/installer-cert.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: adept-ui-desktop-win-x64
