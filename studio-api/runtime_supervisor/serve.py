@@ -326,32 +326,42 @@ def serve_forever(*, watch_interval: int = 15) -> int:
             (),
             {"ok": False, "message": f"Local AI Runtime start failed: {exc}", "pid": None, "ownership": "external"},
         )()
-    state.write_snapshot(
-        {
-            "action": "serve",
-            "servicePid": os.getpid(),
-            "studio_api": {
-                "ok": bool(api_started.ok) if api_started else False,
-                "message": api_started.message if api_started else "disabled",
-                "pid": api_started.pid if api_started else None,
-            },
-            "comfy": {"ok": comfy_started.ok, "message": comfy_started.message, "pid": comfy_started.pid},
-            "ollama": {
-                "ok": bool(ollama_started.ok),
-                "message": ollama_started.message,
-                "pid": ollama_started.pid,
-                "ownership": getattr(ollama_started, "ownership", "external"),
-                "logicalId": "runtime.local_llm",
-            },
-        }
-    )
+    try:
+        state.write_snapshot(
+            {
+                "action": "serve",
+                "servicePid": os.getpid(),
+                "studio_api": {
+                    "ok": bool(api_started.ok) if api_started else False,
+                    "message": api_started.message if api_started else "disabled",
+                    "pid": api_started.pid if api_started else None,
+                },
+                "comfy": {"ok": comfy_started.ok, "message": comfy_started.message, "pid": comfy_started.pid},
+                "ollama": {
+                    "ok": bool(ollama_started.ok),
+                    "message": ollama_started.message,
+                    "pid": ollama_started.pid,
+                    "ownership": getattr(ollama_started, "ownership", "external"),
+                    "logicalId": "runtime.local_llm",
+                },
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 — the control plane is already up
+        print(f"serve snapshot failed: {exc}", file=sys.stderr)
 
     watched = ("studio_api", "comfyui", "ollama") if api_enabled else ("comfyui", "ollama")
     busy = {name: 0 for name in watched}
     while not stop["flag"]:
-        notes = watch_once(state, paths, busy, services=watched)
+        try:
+            notes = watch_once(state, paths, busy, services=watched)
+        except Exception as exc:  # noqa: BLE001 — a service failure must not close the control plane
+            print(f"serve watch failed: {exc}", file=sys.stderr)
+            notes = []
         if notes:
-            state.write_snapshot({"action": "serve-watch", "notes": notes, "servicePid": os.getpid()})
+            try:
+                state.write_snapshot({"action": "serve-watch", "notes": notes, "servicePid": os.getpid()})
+            except Exception as exc:  # noqa: BLE001
+                print(f"serve watch snapshot failed: {exc}", file=sys.stderr)
         deadline = time.time() + max(3, int(watch_interval))
         while time.time() < deadline and not stop["flag"]:
             time.sleep(0.5)

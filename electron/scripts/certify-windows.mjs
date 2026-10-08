@@ -203,7 +203,7 @@ if (bootProbe?.body) {
   try {
     const parsed = JSON.parse(bootProbe.body);
     bootVerdict = parsed.verdict || null;
-    bootFailed = (parsed.checks || []).filter((row) => row.required && row.result !== "PASS").map((row) => row.id);
+    bootFailed = (parsed.checks || []).filter((row) => row.required && row.result !== "PASS").map((row) => `${row.id}: ${row.detail || row.result}`);
   } catch {
     bootVerdict = null;
   }
@@ -328,6 +328,9 @@ const result = {
   projectReopened,
   setupFirstRunComplete,
   backgroundServices: freshStatus?.backgroundServices || null,
+  supervisorLog: fs.existsSync(path.join(freshProfile, "logs", "background-services.log"))
+    ? fs.readFileSync(path.join(freshProfile, "logs", "background-services.log"), "utf8").slice(-2000)
+    : "",
   before,
   after,
   comfyRestarted: before.comfyPid !== after.comfyPid,

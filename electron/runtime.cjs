@@ -166,7 +166,7 @@ function readControlStatus(tokenFile, port) {
       },
     );
     req.on("error", () => resolve({ status: 0, body: "" }));
-    req.setTimeout(8000, () => {
+    req.setTimeout(20000, () => {
       req.destroy();
       resolve({ status: 0, body: "" });
     });
@@ -192,11 +192,6 @@ async function waitForBackgroundServices(tokenFile, port, child, timeoutMs = 900
     }
     last = await readControlStatus(tokenFile, port);
     if (last.status === 200 && /"ok"\s*:\s*true/.test(last.body)) return { healthy: true, ...last };
-    const listening = await listeningPids(port);
-    const childPid = child && child.pid ? Number(child.pid) : 0;
-    if (childPid && listening.includes(childPid) && child.exitCode === null) {
-      return { healthy: true, ownedListener: true, ...last };
-    }
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
   return { healthy: false, ...last };
