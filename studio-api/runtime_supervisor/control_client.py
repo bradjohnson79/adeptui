@@ -18,12 +18,45 @@ def control_base_url() -> str:
     return f"http://127.0.0.1:{port}"
 
 
-def control_plane_reachable(timeout: float = 15.0) -> bool:
+def _loopback_port_open(port: int, timeout: float = 1.0) -> bool:
+    """True when something is accepting connections on the control port."""
+    import socket
+
     try:
-        result = call_control("GET", "/status", timeout=timeout)
-    except Exception:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=timeout):
+            return True
+    except OSError:
         return False
-    return bool(result.get("ok") or result.get("serviceState") or result.get("comfyState"))
+
+
+def control_plane_reachable(timeout: float = 15.0) -> bool:
+    """The manager is reachable when /status answers, or the control port is open.
+
+    /status can sit behind a slow runtime view while the process is still
+    listening. A closed port is the unreachable case. A single refused
+    connection during a cold start is retried for the rest of the budget.
+    """
+    import time
+
+    budget = max(1.0, float(timeout))
+    try:
+        result = call_control("GET", "/status", timeout=min(budget, 12.0))
+    except Exception:
+        result = {}
+    if isinstance(result, dict) and (
+        result.get("ok") or result.get("serviceState") or result.get("comfyState")
+    ):
+        return True
+    if isinstance(result, dict) and result.get("httpStatus") in {401, 403}:
+        return True
+    cfg = try_load_runtime_config()
+    port = int(cfg.controlPort) if cfg else CONTROL_PORT
+    deadline = time.time() + budget
+    while time.time() < deadline:
+        if _loopback_port_open(port, timeout=2.0):
+            return True
+        time.sleep(0.3)
+    return False
 
 
 def call_control(method: str, path: str, *, timeout: float = 30.0) -> dict[str, Any]:

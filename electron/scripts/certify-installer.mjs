@@ -30,6 +30,24 @@ function listeningPid(port) {
   return null;
 }
 
+function commandLine(pid) {
+  if (!pid) return "";
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`],
+    { encoding: "utf8", windowsHide: true },
+  );
+  return (result.stdout || "").trim();
+}
+
+for (const port of [8760, 8759, 8779]) {
+  const pid = listeningPid(port);
+  const cmd = commandLine(pid).toLowerCase();
+  if (pid && (cmd.includes("adept-ui-isolated-win") || cmd.includes("adept-install-a"))) {
+    spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
+  }
+}
+
 const before = { liveDb: hashFile(liveDb), liveLogical: logicalSnapshot(liveDb), comfyPid: listeningPid(8188), apiPid: listeningPid(8758) };
 fs.rmSync(installDir, { recursive: true, force: true });
 const installA = spawnSync(setup, ["/S", `/D=${installDir}`], { windowsHide: true, timeout: 180000 });

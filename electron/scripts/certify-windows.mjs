@@ -116,6 +116,20 @@ function stopPid(pid) {
   spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
 }
 
+function stopPackagedTree(status, rootDir) {
+  const marker = String(rootDir || "").toLowerCase();
+  const pids = new Set();
+  if (status?.backgroundServices?.pid) pids.add(Number(status.backgroundServices.pid));
+  for (const port of [8760, 8759, 8779]) {
+    const pid = listeningPid(netstat(), port);
+    if (pid) pids.add(pid);
+  }
+  for (const pid of pids) {
+    const cmd = commandLine(pid).toLowerCase();
+    if (marker && cmd.includes(marker)) stopPid(pid);
+  }
+}
+
 function auditTree(dir) {
   const hits = { env: 0, db: 0, weights: 0, playwright: 0, backups: 0, secrets: 0 };
   const walk = (current) => {
@@ -227,6 +241,7 @@ const desktopPid = listeningPid(netstat(), 8760);
 const desktopCommand = commandLine(desktopPid);
 const statusAfterProbes = JSON.parse(fs.readFileSync(path.join(freshProfile, "desktop-status.json"), "utf8"));
 stopPid(fresh.pid);
+stopPackagedTree(statusAfterProbes, isolated);
 for (let i = 0; i < 20; i += 1) {
   if (!listeningPid(netstat(), 8760)) break;
   await sleep(500);
@@ -249,6 +264,7 @@ if (projectId) {
     }
   }
   stopPid(reopened.pid);
+  stopPackagedTree(null, isolated);
   for (let i = 0; i < 20; i += 1) {
     if (!listeningPid(netstat(), 8760)) break;
     await sleep(500);
@@ -275,6 +291,7 @@ const existing = launch(exe, existingProfile, { reset: false });
 const existingBeforeLaunchDb = hashFile(liveDb);
 const existingStatus = await waitStatus(existingProfile);
 stopPid(existing.pid);
+stopPackagedTree(existingStatus, isolated);
 await sleep(500);
 if (copyProof) {
   copyProof.profileDataDir = existingStatus?.paths?.dataDir || null;

@@ -93,7 +93,7 @@ def collect_facts(*, force: bool = False) -> tuple[BootFacts, dict[str, int]]:
 
         runtime_cfg = try_load_runtime_config()
         facts.supervisor_port = int(runtime_cfg.controlPort) if runtime_cfg else 8759
-        facts.supervisor_reachable = bool(control_plane_reachable(timeout=8.0))
+        facts.supervisor_reachable = bool(control_plane_reachable(timeout=20.0))
         facts.api_pids = listening_pids(facts.api_port)
         facts.api_commands = _commands(facts.api_pids)
         facts.api_health_status, _body = _http(f"{endpoint['studioApiBaseUrl']}/api/healthz")
