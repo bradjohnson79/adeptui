@@ -11,6 +11,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/fraunces": "^5.2.8",
+    "@fontsource/manrope": "^5.2.8",
     "@babylonjs/core": "^9.19.0",
     "@babylonjs/loaders": "^9.19.1",
     "@tiptap/core": "^3.29.2",
