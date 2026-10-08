@@ -10,6 +10,16 @@ const pngDir = path.join(outDir, "png");
 fs.mkdirSync(pngDir, { recursive: true });
 
 const python = path.join(root, "studio-api", ".venv", "Scripts", "python.exe");
+const existingIco = path.join(outDir, "icon.ico");
+const existingPng = path.join(outDir, "icon.png");
+if (!fs.existsSync(python)) {
+  if (fs.existsSync(existingIco) && fs.existsSync(existingPng)) {
+    console.log("icons-existing");
+    process.exit(0);
+  }
+  console.error("Icon generator Python is missing, and electron/icons is incomplete.");
+  process.exit(1);
+}
 const script = `
 from PIL import Image
 from pathlib import Path
