@@ -40,6 +40,11 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm --prefix studio-web install
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install packaged API dependencies for the Windows runtime
+        run: node electron/scripts/prepare-windows-venv.mjs
       - run: node electron/scripts/build-windows.mjs
       - uses: actions/upload-artifact@v4
         with:
