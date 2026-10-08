@@ -40,6 +40,9 @@ function commandLine(pid) {
   return (result.stdout || "").trim();
 }
 
+spawnSync("powershell.exe", ["-NoProfile", "-Command",
+  "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '*adept-ui-isolated-win*' -or $_.ExecutablePath -like '*adept-install-a*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+], { windowsHide: true });
 for (const port of [8760, 8759, 8779]) {
   const pid = listeningPid(port);
   const cmd = commandLine(pid).toLowerCase();
@@ -62,6 +65,11 @@ const userData = path.join(process.env.TEMP, "adept-ui-installed-profile");
 fs.rmSync(userData, { recursive: true, force: true });
 fs.mkdirSync(userData, { recursive: true });
 const child = spawn(exe, [`--user-data-dir=${userData}`], { cwd: installDir, windowsHide: false, stdio: "ignore" });
+const statusFile = path.join(userData, "desktop-status.json");
+const statusDeadline = Date.now() + 150000;
+while (Date.now() < statusDeadline && !fs.existsSync(statusFile)) {
+  await new Promise((r) => setTimeout(r, 500));
+}
 function get(url, timeoutMs = 20000) {
   return new Promise((resolve) => {
     const req = http.get(url, (res) => {
@@ -134,6 +142,7 @@ const result = {
   backgroundServicesHealthy: Boolean(installedStatus?.backgroundServices?.healthy),
   backgroundServicesPort: installedStatus?.backgroundServices?.port || null,
   backgroundServicesCollision: Boolean(installedStatus?.backgroundServices?.collision),
+  backgroundServicesReason: installedStatus?.backgroundServices?.reason || null,
 };
 fs.writeFileSync(path.join(root, "electron", "build", "installer-cert.json"), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));
