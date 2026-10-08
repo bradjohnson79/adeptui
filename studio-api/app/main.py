@@ -247,6 +247,22 @@ async def lifespan(_: FastAPI):
 
     await bridge_fal_key_at_startup()
     try:
+        from .hosted_providers.custom_llm import purge_leaked_test_providers
+        from .hosted_providers.preferences import restore_preference_lease
+
+        purged = purge_leaked_test_providers()
+        if purged.get("ownerRemoved") or purged.get("disposableRemoved"):
+            logger.warning(
+                "Removed leaked test OpenAI-compatible endpoints owner=%s disposable=%s",
+                purged.get("ownerRemoved"),
+                purged.get("disposableRemoved"),
+            )
+        lease = restore_preference_lease()
+        if lease.get("restored"):
+            logger.warning("Restored hosted provider preferences after an interrupted test lease")
+    except Exception:
+        logger.exception("OpenAI-compatible test-artifact purge failed")
+    try:
         from .source_manager.downloads.queue import get_queue_manager
 
         recovery = get_queue_manager().recover_interrupted()
@@ -382,6 +398,10 @@ if _extra_origins.strip():
     _default_cors_origins.extend(
         [o.strip() for o in _extra_origins.split(",") if o.strip()]
     )
+from .runtime_endpoint import resolve_studio_api_endpoint as _resolve_studio_api_endpoint
+
+_desktop_cors = _resolve_studio_api_endpoint()["runtimeMode"] == "electron-packaged"
+_desktop_origin_regex = r"http://(127\.0\.0\.1|localhost):\d+" if _desktop_cors else None
 
 try:
     from .project_security.middleware import ProjectPasswordLockMiddleware
@@ -393,6 +413,7 @@ except Exception:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_default_cors_origins,
+    allow_origin_regex=_desktop_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

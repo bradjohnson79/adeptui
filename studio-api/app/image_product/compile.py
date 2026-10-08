@@ -240,6 +240,7 @@ _ASPECT = {
     "9:16": (1080, 1920),
     "2:3": (1024, 1536),
     "3:2": (1536, 1024),
+    "3:4": (768, 1024),
     "21:9": (1920, 820),
     "4:3": (1440, 1080),
 }
@@ -247,10 +248,77 @@ _ASPECT = {
 _RES_SCALE = {"720p": 0.67, "1080p": 1.0, "2K": 1.25, "4K": 2.0}
 
 
+def _parse_ratio(aspect: str) -> tuple[float, float] | None:
+    """Read any W:H (or WxH) the creator named. Unknown text stays unset."""
+    text = str(aspect or "").strip().lower().replace(" ", "")
+    if "x" in text and ":" not in text:
+        text = text.replace("x", ":", 1)
+    if ":" not in text:
+        return None
+    left, right = text.split(":", 1)
+    try:
+        width = float(left)
+        height = float(right)
+    except ValueError:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
 def _size(aspect: str, resolution: str) -> tuple[int, int]:
-    w, h = _ASPECT.get(aspect, (1024, 1024))
+    """Pixels for a requested frame ratio.
+
+    Known ratios keep their existing canvases. Any other W:H is computed
+    (long edge 1024, snapped to 16) so Qwen, Z-Image, FLUX, Krea 2,
+    Illustrious, and checkpoint graphs all receive a canvas the output
+    gate will accept. A missing ratio stays square.
+    """
     scale = _RES_SCALE.get(resolution, 1.0)
-    return max(64, int(w * scale / 8) * 8), max(64, int(h * scale / 8) * 8)
+    key = str(aspect or "").strip()
+    mapped = _ASPECT.get(key)
+    if mapped is None:
+        parsed = _parse_ratio(key)
+        if parsed is None:
+            mapped = (1024, 1024)
+        else:
+            ratio_w, ratio_h = parsed
+            long_edge = 1024.0
+            if ratio_w >= ratio_h:
+                raw_w, raw_h = long_edge, long_edge * ratio_h / ratio_w
+            else:
+                raw_w, raw_h = long_edge * ratio_w / ratio_h, long_edge
+
+            def snap16(value: float) -> int:
+                return max(64, int(round((value * scale) / 16.0)) * 16)
+
+            return snap16(raw_w), snap16(raw_h)
+    width, height = mapped
+    return max(64, int(width * scale / 8) * 8), max(64, int(height * scale / 8) * 8)
+
+
+def resolve_image_canvas(
+    aspect: str,
+    resolution: str,
+    width: int | None,
+    height: int | None,
+    *,
+    named_aspect: bool,
+) -> tuple[int, int]:
+    """Use the named frame ratio whenever the supplied pixels disagree with it."""
+    if not width or not height or int(width) <= 0 or int(height) <= 0:
+        return _size(aspect or "1:1", resolution)
+    explicit = (int(width), int(height))
+    if not named_aspect:
+        return explicit
+    target_w, target_h = _size(aspect, resolution)
+    if target_h <= 0 or explicit[1] <= 0:
+        return target_w, target_h
+    got = explicit[0] / explicit[1]
+    want = target_w / target_h
+    if want <= 0 or abs(got - want) > 0.08 * want:
+        return target_w, target_h
+    return explicit
 
 
 def _digest(ctx: dict[str, Any] | None) -> str | None:
@@ -590,12 +658,18 @@ def compile_image_request(
                 "lockModelFamily": True,
             }
 
-    aspect = str(body.get("aspectRatio") or body.get("aspect") or "1:1")
+    named_aspect = str(body.get("aspectRatio") or body.get("aspect") or "").strip()
+    aspect = named_aspect or "1:1"
     resolution = str(body.get("resolution") or "1080p")
     width = int(body["width"]) if body.get("width") else None
     height = int(body["height"]) if body.get("height") else None
-    if width is None or height is None:
-        width, height = _size(aspect, resolution)
+    width, height = resolve_image_canvas(
+        aspect,
+        resolution,
+        width,
+        height,
+        named_aspect=bool(named_aspect),
+    )
 
     ref_ids = normalize_ui_refs(project_id, body.get("refs") or body.get("references"))
     if body.get("referenceIds"):

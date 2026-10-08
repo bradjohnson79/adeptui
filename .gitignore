@@ -13,6 +13,8 @@ data/
 config/beta-local.local.env
 studio-api/.venv/
 studio-web/dist/
+electron/build/
+electron/dist/
 *.log
 export_packs/
 artifacts/

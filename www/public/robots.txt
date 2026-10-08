@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# A Sitemap line is added at build time when VITE_SITE_URL is a public https origin.
+# Do not point this file at localhost.

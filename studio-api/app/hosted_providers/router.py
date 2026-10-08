@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from . import service
@@ -37,6 +37,9 @@ class OpenAICompatConnectBody(BaseModel):
     chatPath: str = "/v1/chat/completions"
     billingCurrency: str = "USD"
     endpointId: Optional[str] = None
+    # Automated tests set this so the endpoint is stored outside the owner registry.
+    # The reserved "Mock OpenAI Compat" fixture is forced disposable even without it.
+    disposable: bool = False
 
 
 @router.get("")
@@ -71,7 +74,25 @@ def get_prefs():
 
 
 @router.put("/preferences")
-def put_prefs(body: PreferencesBody):
+def put_prefs(
+    body: PreferencesBody,
+    x_adept_preference_lease: Optional[str] = Header(default=None, alias="X-Adept-Preference-Lease"),
+):
+    mode = (x_adept_preference_lease or "").strip().lower()
+    if mode == "begin":
+        from .preferences import begin_preference_lease
+
+        return begin_preference_lease(
+            preferred_provider=body.preferredProvider,
+            budget_preference=body.budgetPreference,
+        )
+    if mode == "restore":
+        from .preferences import restore_preference_lease
+
+        return restore_preference_lease(
+            fallback_preferred=body.preferredProvider,
+            fallback_budget=body.budgetPreference,
+        )
     return save_preferences(
         preferred_provider=body.preferredProvider,
         budget_preference=body.budgetPreference,
@@ -112,10 +133,13 @@ def get_discovered_models(modality: Optional[str] = None, scope: Optional[str] =
 
 
 @router.get("/openai-compatible")
-def list_openai_compatible():
-    from .custom_llm import list_endpoints
+def list_openai_compatible(includeDisposable: bool = False):
+    from .custom_llm import list_disposable_endpoints, list_endpoints
 
-    return {"ok": True, "endpoints": list_endpoints(), "mock": False}
+    payload = {"ok": True, "endpoints": list_endpoints(), "mock": False}
+    if includeDisposable:
+        payload["disposable"] = list_disposable_endpoints()
+    return payload
 
 
 @router.post("/openai-compatible")
@@ -130,6 +154,7 @@ async def connect_openai_compatible(body: OpenAICompatConnectBody):
         chat_path=body.chatPath,
         billing_currency=body.billingCurrency,
         endpoint_id=body.endpointId,
+        disposable=body.disposable,
     )
     if not result.get("ok"):
         raise HTTPException(400, result.get("message") or "Connect failed")
@@ -143,6 +168,17 @@ def delete_openai_compatible(endpoint_id: str):
     if not delete_endpoint(endpoint_id):
         raise HTTPException(404, "Endpoint not found")
     return {"ok": True, "mock": False}
+
+
+@router.post("/openai-compatible/purge-test-artifacts")
+def purge_openai_compatible_test_artifacts():
+    """Remove the reserved Playwright mock fixture from owner and disposable stores.
+
+    Legitimate OpenAI-compatible endpoints are left in place.
+    """
+    from .custom_llm import purge_leaked_test_providers
+
+    return {"ok": True, **purge_leaked_test_providers()}
 
 
 @router.post("/resolve")

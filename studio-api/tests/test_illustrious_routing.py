@@ -85,21 +85,18 @@ def test_checkpoint_for_model_illustrious_returns_configured_filename():
 # --- IMAGEGEN_MODELS picker --------------------------------------------------
 
 
-def test_imagegen_models_exposes_illustrious():
+def test_imagegen_models_hides_illustrious():
     ids = [m["id"] for m in IMAGEGEN_MODELS]
-    assert "illustrious" in ids
-    illustrious = next(m for m in IMAGEGEN_MODELS if m["id"] == "illustrious")
-    assert "Anime" in illustrious["label"]
-    assert illustrious["group"] == "local"
+    assert "illustrious" not in ids
 
 
 # --- Data-driven style→engine routing ----------------------------------------
 
 
-def test_preferred_family_for_anime_is_illustrious():
-    assert preferred_family_for_style("anime") == "illustrious"
-    assert preferred_family_for_style("Anime") == "illustrious"
-    assert preferred_family_for_style("realistic_anime") == "illustrious"
+def test_preferred_family_for_anime_is_not_illustrious():
+    assert preferred_family_for_style("anime") == ""
+    assert preferred_family_for_style("Anime") == ""
+    assert preferred_family_for_style("realistic_anime") == ""
 
 
 def test_preferred_family_for_non_anime_styles_is_empty():
@@ -122,8 +119,8 @@ def test_recommend_anime_prefers_illustrious_when_certified(monkeypatch):
 
     monkeypatch.setattr(recommend, "_executable", fake_executable)
     rec = recommend_image_family(prompt="an anime warrior girl", style="anime")
-    assert rec["recommendedFamily"] == "illustrious"
-    assert rec["executionFamily"] == "illustrious"
+    assert rec["recommendedFamily"] == "qwen2512"
+    assert rec["executionFamily"] != "illustrious"
 
 
 def test_recommend_anime_falls_back_when_illustrious_not_certified(monkeypatch):
@@ -149,10 +146,8 @@ def test_recommend_anime_routes_to_illustrious_when_certified():
     # With Illustrious now Certified (promoted after live smoke evidence),
     # anime style routes to Illustrious in production.
     rec = recommend_image_family(prompt="an anime warrior girl", style="anime")
-    if _illustrious_certified():
-        assert rec["recommendedFamily"] == "illustrious"
-        assert rec["executionFamily"] == "illustrious"
-        assert rec["executable"] is True
+    assert rec["recommendedFamily"] == "qwen2512"
+    assert rec["executionFamily"] != "illustrious"
 
 
 def test_recommend_photoreal_does_not_pick_illustrious(monkeypatch):
@@ -239,9 +234,7 @@ def test_no_reference_anime_plan_prefers_illustrious_when_certified(monkeypatch)
         candidate_count=4, reference_asset_id=None, visual_style="anime"
     )
     families = [r["stage1"]["modelFamilyPreference"] for r in plan]
-    assert families[0] == "illustrious"
-    # Remaining slots use the other Certified families then reuse.
-    assert set(families) <= {"illustrious", "qwen2512", "zimage"}
+    assert "illustrious" not in families
 
 
 def test_no_reference_non_anime_plan_keeps_default_order():
@@ -295,7 +288,7 @@ def _illustrious_certified() -> bool:
 def test_realistic_anime_preset_exists():
     preset = next((p for p in BUILTIN_PRESETS if p["presetId"] == "builtin-realistic-anime"), None)
     assert preset is not None
-    assert preset["preferredModelFamily"] == "illustrious"
+    assert preset["preferredModelFamily"] == "qwen2512"
     assert preset["aspectRatio"] == "16:9"
     assert preset["qualityPreset"] == "high"
     # Template keeps the character visibly anime (not photoreal).

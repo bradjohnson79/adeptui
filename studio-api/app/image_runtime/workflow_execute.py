@@ -306,31 +306,14 @@ def build_leaf_graph(
             workflow_variant=variant,
         )
 
-    if key in {
+    if key.startswith("sensenova.") or key in {
         "sensenova.txt2img",
         "sensenova.edit",
         "sensenova.reference",
         "sensenova.crs",
         "sensenova.ers",
     }:
-        from ..workflows.sensenova_u15 import build_sensenova_workflow
-
-        kind = key.split(".", 1)[1]
-        img = reference_image or source_image
-        if kind in {"edit", "reference", "ers"} and not img:
-            raise RuntimeError(f"{key} requires a source/reference image")
-        return build_sensenova_workflow(
-            kind,  # type: ignore[arg-type]
-            prompt=prompt,
-            negative=negative,
-            image_name=img or "",
-            width=width or 2720,
-            height=height or 1536,
-            seed=seed,
-            steps=steps if steps not in {0, 8, 20} else 50,
-            cfg=cfg if cfg not in {0.0, 1.0} else 4.0,
-            filename_prefix=filename_prefix or f"studio/{key.replace('.', '_')}",
-        )
+        raise RuntimeError("SenseNova U1.5 is not part of Adept UI 1.1.")
 
     if key in {"krea2.turbo_txt2img", "krea2.raw_txt2img"}:
         from ..workflows.krea2_image import (

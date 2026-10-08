@@ -109,7 +109,7 @@ BUILTIN_PRESETS: list[dict[str, Any]] = [
         "presetId": "builtin-realistic-anime",
         "name": "Realistic Anime",
         "builtin": True,
-        "preferredModelFamily": "illustrious",
+        "preferredModelFamily": "qwen2512",
         "aspectRatio": "16:9",
         "qualityPreset": "high",
         "resolution": "1080p",

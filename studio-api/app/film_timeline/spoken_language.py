@@ -61,18 +61,24 @@ def normalize(code: str | None, custom: str | None = None) -> SpokenLanguage:
 def clause(language: SpokenLanguage) -> str:
     name = language.label
     return (
-        f"All spoken dialogue in this scene is in {name}. "
-        "Do not introduce another spoken language unless the Timed Prompt explicitly asks for it. "
-        "Speech heard in a reference or an earlier batch does not change this language. "
-        "If nobody speaks, keep the scene silent."
+        f"Spoken language is {name} only. Every spoken word is in {name}. "
+        "Do not speak Chinese or any other language."
     )
 
 
+def silence_line() -> str:
+    return "This shot has no written dialogue, so nobody speaks."
+
+
 def apply_to_prompt(prompt: str, language: SpokenLanguage) -> str:
+    from .dialogue_authority import prompt_asks_to_speak
+
     line = clause(language)
     body = str(prompt or "").strip()
+    if not prompt_asks_to_speak(body):
+        line = f"{line} {silence_line()}"
     if line in body:
         return body
     if not body:
         return line
-    return f"{body}\n\n{line}"
+    return f"{line}\n\n{body}"

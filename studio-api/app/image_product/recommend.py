@@ -188,11 +188,13 @@ def recommend_image_family(
         try:
             from .certified_registry import certified_families_for_style
 
-            candidates = certified_families_for_style(style)
+            candidates = [item for item in certified_families_for_style(style) if item != "illustrious"]
             if candidates:
                 style_preferred = candidates[0]
         except Exception:
             pass
+    if style_preferred == "illustrious":
+        style_preferred = ""
 
     # Auto Select + reference: do not let a text-only style family beat the
     # reference-capable default. Explicit caller preference is kept.
@@ -216,7 +218,7 @@ def recommend_image_family(
     elif _EDIT.search(text) or operation in {"image.edit", "image.reference"}:
         primary = "imagen" if _executable("imagen") or _family_status("imagen") == "Draft" else "qwen2512"
     elif _ANIME.search(text):
-        primary = "illustrious" if _executable("illustrious") else "qwen2512"
+        primary = "qwen2512"
     elif _PHOTO.search(text) or purpose in {"marketing", "poster", "production_still", "concept_art"}:
         # Photoreal intents still recommend Qwen-2512 by default; FLUX remains the open-weight alternative.
         primary = "qwen2512"

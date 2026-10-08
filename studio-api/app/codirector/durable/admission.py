@@ -57,9 +57,13 @@ _EXPLICIT_MUTATE = (
     "create a prop",
     "generate a still",
     "create a still",
+    "timeline scene",
     "generate that shot",
     "generate this shot",
     "generate the shot",
+    "render that shot",
+    "render this shot",
+    "render the shot",
     "shot after",
     "opening shot",
     "comes before",
@@ -211,10 +215,15 @@ _SURFACES_TYPED = {
 
 
 def voice_identity_requested(text: str) -> bool:
-    """A character-voice question or request, not a bare mention of the studio."""
+    """A character-voice question or request, not a bare mention of the studio.
+
+    "Give" and "assign" only count when the sentence is also about a voice.
+    A request such as "give me a backstory" is not a voice command.
+    """
 
     folded = " ".join((text or "").lower().split())
-    if not any(
+    mentions_voice = "voice" in folded
+    explicit = any(
         phrase in folded
         for phrase in (
             "what voice",
@@ -222,15 +231,15 @@ def voice_identity_requested(text: str) -> bool:
             "voice is",
             "voice assigned",
             "assigned voice",
-            "give ",
-            "assign ",
             "a voice",
             " say ",
             "say,",
             "say '",
             'say "',
         )
-    ):
+    )
+    directed = mentions_voice and any(phrase in folded for phrase in ("give ", "assign "))
+    if not explicit and not directed:
         return False
     surface = named_surface(folded)
     return surface in {None, "voice"}
@@ -422,6 +431,8 @@ def resolve_admitted_tool(
         elif kind == "mutating" and decision.mode not in {"PROPOSE", "MUTATE"}:
             hinted = classify_turn_mode(user_text)
             decision = decision.model_copy(update={"mode": "PROPOSE" if hinted == "PROPOSE" else "MUTATE"})
+    if tool_id in _VOICE_IDENTITY_TOOLS and not voice_identity_requested(user_text):
+        tool_id = ""
     return decision.model_copy(update={"tool_id": tool_id or None})
 
 

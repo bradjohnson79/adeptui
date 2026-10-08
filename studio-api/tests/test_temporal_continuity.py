@@ -253,8 +253,11 @@ def test_review_without_video_emits_degraded_packet(monkeypatch):
     assert packet_blocks_submit(master, "bb_b") is True
 
 
-def test_setup_catalog_marks_videochat3_required():
-    assert BY_ID["videochat3_4b"].required is True
+def test_setup_catalog_does_not_require_videochat3():
+    from app.setup.catalog import public_components
+
+    assert BY_ID["videochat3_4b"].required is False
+    assert "videochat3_4b" not in {item.id for item in public_components()}
     assert BY_ID["internvideo3_8b"].required is False
     assert BY_ID["videochat3_4b"].category == "Video Understanding"
 

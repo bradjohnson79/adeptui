@@ -42,7 +42,6 @@ _VERIFIER_TO_DEP_TYPE: dict[str, str] = {
     "ltx_2_5_file": DEPENDENCY_TYPE_MODEL,
     "text_encoder_file": DEPENDENCY_TYPE_TEXT_ENCODER,
     "vae_file": DEPENDENCY_TYPE_VAE,
-    "latent_upscale_model_file": DEPENDENCY_TYPE_UPSCALE_MODEL,
     "zimage_files": DEPENDENCY_TYPE_MODEL,
     "qwen_image_2512_files": DEPENDENCY_TYPE_MODEL,
     "krea2_files": DEPENDENCY_TYPE_MODEL,
@@ -108,12 +107,6 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         "ltx_2_5_audio_vae", "LTX 2.5 Audio VAE",
         "LTX 2.5 audio VAE - required for synchronized audio generation", False,
         1000 * MB, 1000 * MB, ("comfyui", "ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"), "vae_file", "path_link",
-        category="Video Models",
-    ),
-    ComponentDefinition(
-        "ltx_2_5_spatial_upscaler", "LTX 2.5 Spatial Upscaler",
-        "LTX 2.5 spatial latent upscaler for 4K output - optional", False,
-        1000 * MB, 1000 * MB, ("comfyui", "ltx_2_5_checkpoint"), "latent_upscale_model_file", "path_link",
         category="Video Models",
     ),
     ComponentDefinition(
@@ -434,21 +427,23 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         "manual",
         category="Music Runtimes",
     ),
+    # Unpublished creative packs. Kept resolvable for the generic asset-pack
+    # installer tests, but excluded from public Setup (see public_components).
     ComponentDefinition(
         "pack_essential_photoreal", "Essential Photoreal Pack",
-        "Creative Assets pack for photoreal faces and lighting.", False,
+        "Unpublished creative pack. Not part of Adept UI 1.1.", False,
         400 * MB, 400 * MB, ("comfyui",), "asset_pack", "asset_pack",
         category="Creative Packs",
     ),
     ComponentDefinition(
         "pack_essential_anime", "Essential Anime Pack",
-        "Creative Assets pack for anime expressions.", False,
+        "Unpublished creative pack. Not part of Adept UI 1.1.", False,
         250 * MB, 250 * MB, ("comfyui",), "asset_pack", "asset_pack",
         category="Creative Packs",
     ),
     ComponentDefinition(
         "pack_essential_cinematic", "Essential Cinematic Pack",
-        "Creative Assets pack for cinematic lighting.", False,
+        "Unpublished creative pack. Not part of Adept UI 1.1.", False,
         200 * MB, 200 * MB, ("comfyui",), "asset_pack", "asset_pack",
         category="Creative Packs",
     ),
@@ -558,8 +553,8 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
     ComponentDefinition(
         "videochat3_4b",
         "VideoChat3 4B",
-        "Co-Director Timeline visual review. Required for temporal continuity.",
-        True,
+        "RETIRED — Not part of current Adept UI. Timeline and Co-Director generation do not use VideoChat3. Leftover callers may still resolve this id.",
+        False,
         8500 * MB,
         9000 * MB,
         ("python", "ffmpeg"),
@@ -701,6 +696,25 @@ RETIRED_OBSOLETE_SETUP_COMPONENT_IDS: frozenset[str] = frozenset(
     }
 )
 
+#: VideoChat3 reviewed an older continuity path. Timeline V2 and current
+#: Co-Director generation do not call it. Kept resolvable; not a Setup item.
+RETIRED_VIDEOCHAT_SETUP_COMPONENT_IDS: frozenset[str] = frozenset(
+    {
+        "videochat3_4b",
+    }
+)
+
+#: Removed from the Adept UI 1.1 product. Not optional, not repairable, and
+#: not resolvable. Persisted Setup state for these ids is discarded on load.
+REMOVED_UNUSED_SETUP_COMPONENT_IDS: frozenset[str] = frozenset(
+    {
+        "ltx_2_5_spatial_upscaler",
+        "pack_essential_photoreal",
+        "pack_essential_anime",
+        "pack_essential_cinematic",
+    }
+)
+
 
 def is_retired_video_setup_component(component_id: str) -> bool:
     return str(component_id or "") in RETIRED_VIDEO_SETUP_COMPONENT_IDS
@@ -727,6 +741,8 @@ def public_components() -> tuple[ComponentDefinition, ...]:
         if component.id not in RETIRED_VIDEO_SETUP_COMPONENT_IDS
         and component.id not in RETIRED_AVATAR_SETUP_COMPONENT_IDS
         and component.id not in RETIRED_OBSOLETE_SETUP_COMPONENT_IDS
+        and component.id not in RETIRED_VIDEOCHAT_SETUP_COMPONENT_IDS
+        and component.id not in REMOVED_UNUSED_SETUP_COMPONENT_IDS
     )
 
 

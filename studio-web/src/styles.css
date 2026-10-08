@@ -2420,6 +2420,49 @@ button.linkish {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
   gap: 0.9rem;
 }
+.model-license-card {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.75rem 0 0.2rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--border-glass);
+  border-radius: 14px;
+  background: rgba(8, 14, 24, 0.45);
+}
+.model-license-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.model-license-card p:first-child {
+  color: var(--ink);
+}
+.model-license-card .primary {
+  margin-top: 0.45rem;
+  justify-self: start;
+}
+.model-license-region,
+.model-license-check {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.85rem 0;
+  color: var(--ink);
+}
+.model-license-region select {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(8, 14, 24, 0.55);
+  color: var(--ink);
+}
+.model-license-check {
+  grid-template-columns: auto 1fr;
+  align-items: start;
+}
+.model-license-dialog .primary {
+  margin-top: 0.35rem;
+}
 .setup-component-card {
   display: flex;
   flex-direction: column;
@@ -2843,6 +2886,12 @@ button.linkish {
   background: var(--panel-elevated);
   color: var(--ink);
   box-shadow: var(--shadow-lift);
+}
+.setup-dialog.setup-installer {
+  width: min(640px, 100%);
+}
+.setup-dialog.lora-manager-dialog {
+  width: min(760px, 100%);
 }
 .setup-dialog-header {
   display: flex;
@@ -5449,11 +5498,28 @@ padding: 1rem;
   min-width: 0;
   max-width: 100%;
 }
-.codirector-msg { display: flex; flex-direction: column; max-width: 92%;
+.codirector-messages > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  max-width: 100%;
+  padding-left: 0.45rem;
+}
+.codirector-messages > div:has(> .codirector-msg.user) {
+  align-items: flex-end;
+  padding-left: 0;
+  padding-right: 0.45rem;
+}
+.codirector-msg {
+  display: flex;
+  flex-direction: column;
+  width: fit-content;
+  max-width: min(78%, 40rem);
   min-width: 0;
 }
 .codirector-msg.user { align-self: flex-end; align-items: flex-end; }
-.codirector-msg.assistant { align-self: flex-start; }
+.codirector-msg.assistant { align-self: flex-start; align-items: flex-start; }
 .codirector-msg-bubble {
   padding: 0.7rem 0.85rem;
   border-radius: 16px;
@@ -5464,6 +5530,69 @@ padding: 1rem;
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+.codirector-image-job {
+  margin: 0.35rem 0 0.7rem;
+  padding: 0.7rem;
+  border-radius: 16px;
+  background: rgba(15, 70, 78, 0.04);
+  max-width: 100%;
+}
+.codirector-image-job.is-failed {
+  background: rgba(127, 29, 29, 0.06);
+}
+.codirector-image-job-layout {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+.codirector-image-job .codirector-concept-thumb {
+  width: 120px;
+  margin: 0;
+}
+.codirector-image-job .codirector-concept-thumb img {
+  width: 120px;
+  height: 160px;
+}
+.codirector-job-thumb-pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 160px;
+  padding: 0.4rem;
+  text-align: center;
+  color: var(--text-muted, #64748b);
+  font-size: 0.75rem;
+  background: rgba(15, 70, 78, 0.06);
+  border-radius: 12px;
+}
+.codirector-image-job-title {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+}
+.codirector-concept-thumb {
+  display: block;
+  width: 168px;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  border: 1px solid rgba(160, 184, 208, 0.28);
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+}
+.codirector-concept-thumb img {
+  display: block;
+  width: 168px;
+  height: 168px;
+  object-fit: cover;
+}
+.codirector-image-job .codirector-job-thumb-pending {
+  display: flex;
+  width: 120px;
+  height: 160px;
+  cursor: default;
 }
 .codirector-msg-html {
   white-space: normal;
@@ -5517,13 +5646,20 @@ padding: 1rem;
   text-underline-offset: 2px;
 }
 .codirector-msg.user .codirector-msg-bubble {
-  background: linear-gradient(135deg, rgba(13,148,136,0.16), rgba(45,212,191,0.12));
+  background: #12315c;
+  color: #f3f6f8;
+  text-align: left;
+  border-radius: 16px 16px 6px 16px;
 }
 .codirector-msg.assistant .codirector-msg-bubble {
-  background: rgba(28, 35, 41, 1);
+  background: #3d1868;
+  color: #f3f6f8;
+  text-align: left;
+  border-radius: 16px 16px 16px 6px;
 }
 .codirector-shell:not(.cinematic) .codirector-msg.assistant .codirector-msg-bubble {
-  background: rgba(18, 38, 42, 0.05);
+  background: #3d1868;
+  color: #f3f6f8;
 }
 .codirector-msg-actions {
   opacity: 0;

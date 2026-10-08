@@ -12,14 +12,13 @@ from typing import Any
 from .crs_view_generation import (
     CRS_VIEW_FLUX_I2I,
     CRS_VIEW_FLUX_T2I,
-    CRS_VIEW_ILLUSTRIOUS_T2I,
     CRS_VIEW_QWEN_T2I,
     flux_img2img_is_identity_conditioning,
     normalize_crs_view_family,
 )
 
 AUTO_ID = "auto"
-AUTO_T2I_PRIORITY = ("flux", "qwen2512", "zimage", "illustrious", "gpt-image-2")
+AUTO_T2I_PRIORITY = ("flux", "qwen2512", "zimage", "gpt-image-2")
 AUTO_I2I_PRIORITY = ("flux", "qwen2512", "zimage", "gpt-image-2")
 AUTO_REF_PRIORITY = AUTO_I2I_PRIORITY
 
@@ -29,7 +28,6 @@ V2_FLUX_T2I = CRS_VIEW_FLUX_T2I
 V2_QWEN_T2I = CRS_VIEW_QWEN_T2I
 V2_ZIMAGE_REF = "zimage.ref_edit"
 V2_ZIMAGE_T2I = "zimage.txt2img"
-V2_ILLUSTRIOUS_T2I = CRS_VIEW_ILLUSTRIOUS_T2I
 
 LOCAL_ADAPTERS: tuple[dict[str, Any], ...] = (
     {
@@ -51,16 +49,6 @@ LOCAL_ADAPTERS: tuple[dict[str, Any], ...] = (
         "t2iKey": V2_QWEN_T2I,
         "refKey": V2_QWEN_REF,
         "identityRef": True,
-    },
-    {
-        "id": "illustrious",
-        "family": "illustrious",
-        "label": "Illustrious",
-        "origin": "local",
-        "provider": "comfyui",
-        "t2iKey": V2_ILLUSTRIOUS_T2I,
-        "refKey": None,
-        "identityRef": False,
     },
     {
         "id": "zimage",

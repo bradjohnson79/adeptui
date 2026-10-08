@@ -15,6 +15,30 @@ export function modelsForModality<T extends { modality?: string | null }>(
   return models.filter((model) => model.modality === modality);
 }
 
+/**
+ * Local rows the creator dock may show.
+ * Docker is not a product surface. Illustrious stays off image menus.
+ */
+export function creatorDockLocalModels<
+  T extends {
+    id?: string;
+    executionClass?: string | null;
+    modality?: string | null;
+    capabilityLabel?: string | null;
+  },
+>(models: readonly T[] | null | undefined, modality: Modality): T[] {
+  return modelsForModality(models, modality).filter((model) => {
+    const exec = model.executionClass || "native_local";
+    if (exec !== "native_local") return false;
+    const id = String(model.id || "");
+    if (id.startsWith("docker-runtime:")) return false;
+    if (modality === "image" && id.toLowerCase().includes("illustrious")) return false;
+    if (id.toLowerCase().includes("sensenova")) return false;
+    if (modality === "image" && String(model.capabilityLabel || "") === "Draft") return false;
+    return true;
+  });
+}
+
 export type ProductionControlModelsPayload = {
   models?: ModelDescriptor[];
   sections?: {

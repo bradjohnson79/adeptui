@@ -6,18 +6,18 @@ per-file special cases.
 
 VideoChat3 4B product contract (Closure 2)
 -----------------------------------------
-Setup catalog ``videochat3_4b.required = True`` stays true: the Temporal
-Continuity *review feature* requires VideoChat3. That is not the same as
-“Adept v1.1 core production is unavailable.”
+VideoChat3 is retired from current Adept UI. Timeline V2 and Co-Director
+generation do not use it. The catalog id stays resolvable for leftover
+callers and is not a Setup requirement.
 
 Governing Temporal Continuity law: unavailable perception must not deadlock
 generation; review-unavailable yields an explicit degraded packet.
 
 Therefore:
 
-* Keep the real ``MODEL_MISSING`` / blocked capability row when VideoChat3
-  itself is absent. InternVideo3 8B is optional deep-review and must not
-  degrade this capability or cap studio readiness at 94.
+* VideoChat3 is not a Setup requirement and is not listed in public Setup.
+* InternVideo3 8B stays optional deep-review and must not cap studio
+  readiness at 94.
 * Classify ``codirector.video_intelligence.ready`` as
   ``advisory_review_degraded`` / ``continuity_review``.
 * Do not score it as a production outage.
@@ -382,10 +382,10 @@ def videochat3_v11_decision() -> dict[str, str]:
         "capabilityId": VIDEOCHAT3_CAPABILITY_ID,
         "componentId": VIDEOCHAT3_COMPONENT_ID,
         "role": VIDEOCHAT3_V11_ROLE,
-        "catalogRequiredRemains": "true",
+        "catalogRequiredRemains": "false",
         "reason": (
-            "Required for Co-Director Temporal Continuity review, not for Adept v1.1 "
-            "core production (CREATE, Timeline generate, PoseCraft)."
+            "VideoChat3 is not part of current Adept UI. Timeline and Co-Director "
+            "generation do not require it."
         ),
         **assignment.as_public(),
     }

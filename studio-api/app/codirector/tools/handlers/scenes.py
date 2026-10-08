@@ -491,6 +491,55 @@ def preview_create_scene(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     )
 
 
+def _attach_kept_stills(ctx: ToolContext, scene_id: str, character_asset: str, environment_asset: str) -> None:
+    """Put the kept library stills on the Film Timeline shot H3 actually reads."""
+
+    if not character_asset and not environment_asset:
+        return
+    from ....film_timeline.orchestrator import FilmTimelineError, attach_reference
+    from ....film_timeline.store import load_film
+
+    loaded = load_film(ctx.db, ctx.project_id, scene_id)
+    film = loaded.get("film")
+    shots = list(getattr(film, "shots", None) or [])
+    if not shots:
+        raise CoDirectorError(
+            TOOL_EXECUTION_FAILED,
+            "The new scene has no shot to attach the stills to.",
+            details={"toolId": "create_scene", "sceneId": scene_id},
+            recoverable=True,
+            recommended_action="retry",
+        )
+    shot_id = str(shots[0].id)
+    pairs = (
+        (character_asset, "character", "Analyst"),
+        (environment_asset, "environment", "Records Room"),
+    )
+    for asset_id, ref_type, label in pairs:
+        if not asset_id:
+            continue
+        try:
+            attach_reference(
+                ctx.db,
+                ctx.project_id,
+                scene_id,
+                shot_id,
+                asset_id=asset_id,
+                ref_type=ref_type,
+                label=label,
+                tag=label,
+                scene_level=True,
+            )
+        except FilmTimelineError as exc:
+            raise CoDirectorError(
+                TOOL_EXECUTION_FAILED,
+                exc.message,
+                details={"toolId": "create_scene", "code": exc.code, "sceneId": scene_id},
+                recoverable=True,
+                recommended_action="retry",
+            ) from exc
+
+
 def apply_create_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     project = _require_project(ctx)
     scene = SceneService.create(
@@ -506,6 +555,12 @@ def apply_create_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]
             "duration_sec": (float(args["durationSec"]) if args.get("durationSec") is not None else None),
             "aspect_ratio": (str(args["aspectRatio"]) if args.get("aspectRatio") else None),
         },
+    )
+    _attach_kept_stills(
+        ctx,
+        str(scene.id),
+        str(args.get("characterAssetId") or "").strip(),
+        str(args.get("environmentAssetId") or "").strip(),
     )
     character_id = str(args.get("characterId") or "").strip()
     asset_id = str(args.get("assetId") or "").strip()

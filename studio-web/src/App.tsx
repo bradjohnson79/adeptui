@@ -10,11 +10,11 @@ const Version12DeferredPage = lazy(() => import("./components/Version12DeferredP
 const ProductionSuiteWorkspace = lazy(() => import("./components/ProductionSuiteWorkspace"));
 const VideoRuntimeDiagnostics = lazy(() => import("./pages/VideoRuntimeDiagnostics"));
 const DiagnosticsPage = lazy(() => import("./pages/DiagnosticsPage").then((mod) => ({ default: mod.DiagnosticsPage })));
-const RuntimeManager = lazy(() => import("./components/docker-runtime/RuntimeManager"));
 const LocalRuntimeSettings = lazy(() =>
   import("./components/Settings/LocalRuntime").then((mod) => ({ default: mod.LocalRuntimeSettings })),
 );
 const ComfyManagerPage = lazy(() => import("./pages/ComfyManagerPage"));
+const SetupPage = lazy(() => import("./pages/SetupPage"));
 
 function RouteFallback() {
   return (
@@ -103,7 +103,7 @@ export default function App() {
               <Route path="/production-suite" element={<ProductionSuiteWorkspace />} />
               <Route path="/diagnostics/video-runtime" element={<VideoRuntimeDiagnostics />} />
               <Route path="/diagnostics" element={<DiagnosticsPage />} />
-              <Route path="/runtime-manager" element={<RuntimeManager />} />
+              <Route path="/setup" element={<SetupPage />} />
               <Route path="/setup/comfy" element={<ComfyManagerPage />} />
               <Route path="/settings/local-runtime" element={<LocalRuntimeSettings />} />
               <Route path="*" element={<Navigate to="/" replace />} />

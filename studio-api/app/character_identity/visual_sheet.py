@@ -206,7 +206,7 @@ REFERENCE_FIDELITY_DENOISE = 0.68
 
 # Certified txt2img families available for no-reference / Profile Guided
 # candidate routing, in preference order. Each is used once before any reuse.
-NO_REFERENCE_TXT2IMG_FAMILIES = ("qwen2512", "zimage", "illustrious")
+NO_REFERENCE_TXT2IMG_FAMILIES = ("qwen2512", "zimage")
 
 # CRS AUTO (CRS_GENERATION / CRS_SINGLE_VIEW / law_views / crs_view).
 # CRS_VIEW_GENERATION is a separate explicit single-view task (not a five-view pack).
@@ -747,7 +747,7 @@ def _family_supports_references(family: str) -> bool:
     if fam in {QWEN_EDIT_2509_FAMILY, "qwen-edit-2509", "qwen-image-edit-2509"}:
         return True
     if fam in {"sensenova", "sensenova_u15", "sensenova-u15", "sensenova-u15-local"}:
-        return True
+        return False
     if fam in TEXT_ONLY_FAMILIES or _is_qwen_family(fam):
         return False
     try:
@@ -1207,7 +1207,7 @@ def _txt2img_workflow_key(family: str, hosted_model_id: str | None = None) -> st
     if fam in {QWEN_EDIT_2509_FAMILY, "qwen-edit-2509", "qwen-image-edit-2509"}:
         return QWEN_EDIT_2509_WORKFLOW_KEY
     if fam in {"sensenova", "sensenova_u15", "sensenova-u15", "sensenova-u15-local"}:
-        return "sensenova.crs"
+        raise ValueError("SenseNova U1.5 is not part of Adept UI 1.1.")
     if fam == "krea2" or "krea" in mid:
         if "raw" in mid:
             return "krea2.raw_txt2img"
@@ -1308,7 +1308,7 @@ def _reference_workflow_key(family: str) -> str | None:
     if family in {QWEN_EDIT_2509_FAMILY, "qwen-edit-2509", "qwen-image-edit-2509"}:
         return QWEN_EDIT_2509_CRS_KEY
     if family in {"sensenova", "sensenova_u15", "sensenova-u15", "sensenova-u15-local"}:
-        return "sensenova.crs"
+        raise ValueError("SenseNova U1.5 is not part of Adept UI 1.1.")
     if family == REFERENCE_LOCKED_FAMILY:
         return REFERENCE_LOCKED_WORKFLOW_KEY
     try:
@@ -1343,22 +1343,7 @@ def _build_stage1_route(
     """Build one candidate Stage 1 route. Selected family is authoritative."""
     fam = (family or "").strip().lower()
     if _is_sensenova_family(fam):
-        selected = selected_source or hosted_model_id or family
-        return {
-            "modelFamilyPreference": "sensenova",
-            "workflowKey": "sensenova.crs",
-            "referenceAssetId": reference_asset_id,
-            "referenceLocked": bool(reference_asset_id),
-            "referenceFidelityMode": REFERENCE_FIDELITY_MODE_FULL if reference_asset_id else None,
-            "source_asset_id": reference_asset_id,
-            "denoise": None,
-            "conditioningMode": (
-                CONDITIONING_REFERENCE_CONDITIONED if reference_asset_id else CONDITIONING_PROFILE_GUIDED
-            ),
-            "providerKind": provider_kind,
-            "hostedModelId": hosted_model_id,
-            "selectedSource": selected,
-        }
+        raise ValueError("SenseNova U1.5 is not part of Adept UI 1.1.")
     if _is_qwen_edit_2509_family(fam):
         if not reference_asset_id:
             raise ValueError(QWEN_EDIT_2509_NEEDS_CROP)
@@ -2690,7 +2675,8 @@ def _enqueue_sensenova_crs_job(
     identity_packet: CharacterIdentityPacket | None = None,
     has_character_reference: bool = False,
 ) -> list[dict[str, Any]]:
-    """Enqueue one native SenseNova production CRS. Never four Flux/Qwen tiles."""
+    """SenseNova CRS is not an Adept UI 1.1 generator."""
+    raise RuntimeError("SenseNova U1.5 is not part of Adept UI 1.1.")
     from ..image_prompting.sensenova import compile_sensenova_crs_prompt
 
     packet_dump = dump_identity_packet(identity_packet) if identity_packet is not None else None

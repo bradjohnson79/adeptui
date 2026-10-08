@@ -1,5 +1,7 @@
 """SenseNova U1.5 registry, builders, fingerprints, Setup catalog."""
 
+import pytest
+
 from app.image_runtime.fingerprints import canonicalize_graph, graph_hash
 from app.image_studio.providers import family_catalog
 from app.imagegen_workflows import _FAMILY_INSTALL_COMPONENTS, _FAMILY_LABELS, build_local_generator_models
@@ -45,23 +47,14 @@ def test_fingerprint_redacts_volatile_inputs() -> None:
 
 
 def test_setup_catalog_and_roster() -> None:
-    models = get_component("sensenova_u15_models")
-    nodes = get_component("comfyui_sensenova_nodes")
-    assert models.verifier == "sensenova_u15_files"
-    assert nodes.verifier == "comfy_extension_nodes"
-    assert _FAMILY_INSTALL_COMPONENTS["sensenova"] == ("sensenova_u15_models",)
-    assert _FAMILY_LABELS["sensenova"] == "SenseNova U1.5"
-    roster = build_local_generator_models(surface="character")
-    sn = next(row for row in roster if row["id"] == "sensenova")
-    assert "SenseNova U1.5" in sn["label"]
-    assert sn["executable"] in {True, False}
-    if sn["executable"]:
-        assert sn["label"] == "SenseNova U1.5"
-    else:
-        assert sn["label"] == "SenseNova U1.5 — Not Ready"
-        assert sn["readinessLabel"] == "Not Ready"
+    with pytest.raises(KeyError):
+        get_component("sensenova_u15_models")
+    assert "sensenova" not in _FAMILY_INSTALL_COMPONENTS
+    assert "sensenova" not in _FAMILY_LABELS
+    roster = build_local_generator_models()
+    assert all(row["id"] != "sensenova" for row in roster)
     fams = {row["family"] for row in family_catalog()}
-    assert "sensenova" in fams
+    assert "sensenova" not in fams
 
 
 def test_required_nodes_match_official_pack() -> None:

@@ -8,7 +8,7 @@ from app.source_manager.downloads.executors.huggingface_snapshot import HuggingF
 def test_essentials_ids_are_catalogued():
     for component_id in (*ESSENTIAL_IDS, *RECOMMENDED_IDS):
         assert component_id in BY_ID
-        assert get_component(component_id).required is False or component_id == "videochat3_4b"
+        assert get_component(component_id).required is False
 
 
 def test_pack_status_does_not_block_generation():
@@ -16,9 +16,9 @@ def test_pack_status_does_not_block_generation():
     assert status["id"] == "adept_ui_essentials"
     assert status["channel"] == "local_essentials"
     assert status["generationBlockedByPack"] is False
-    assert status["essentialTotal"] == 5
+    assert status["essentialTotal"] == 4
     names = {row["id"] for row in status["components"]}
-    assert "videochat3_4b" in names
+    assert "videochat3_4b" not in names
     assert "sam21_hiera_tiny" in names
     assert "moge2_geometry" in names
     assert "vggt_1b_commercial" in names

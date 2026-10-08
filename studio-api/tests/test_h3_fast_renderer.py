@@ -237,8 +237,9 @@ def test_prepend_prompt_names_the_opening_as_the_arrival():
         prepend=True,
         spoken_language="English",
     )
-    assert "Any words in this new shot are spoken in English only." in english
-    assert "Do not copy its language." in english
+    assert english.startswith("Spoken language is English only.")
+    assert "Every spoken word is in English." in english
+    assert "Do not speak Chinese or any other language." in english
 
 
 def test_refuses_empty_generation():

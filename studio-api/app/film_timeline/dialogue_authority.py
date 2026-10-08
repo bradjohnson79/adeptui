@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 NATIVE_MODEL = "native_model"
 CHARACTER_VOICE = "character_voice"
 
-_SILENT = "If nobody speaks, keep the scene silent."
+_SILENT = "This shot has no written dialogue, so nobody speaks."
 _AMBIENCE_INSTEAD = "If nobody speaks a character line, keep environmental ambience and room tone."
 _LOCK = (
     "Dialogue authority is Character Voice. "

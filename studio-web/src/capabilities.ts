@@ -179,7 +179,7 @@ export function capabilityStatusTone(status: CapabilityStatus): "ok" | "warn" | 
 }
 
 const ACTION_LABELS: Record<string, string> = {
-  open_source_manager: "Open Source Manager",
+  open_source_manager: "Open Setup",
   add_source_url: "Add Source URL",
   install_comfyui_extensions: "View required components",
   start_comfyui: "Start ComfyUI",

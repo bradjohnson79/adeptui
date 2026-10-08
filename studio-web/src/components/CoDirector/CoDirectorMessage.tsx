@@ -4,6 +4,7 @@ import { useCoDirectorSession } from "./CoDirectorSession";
 import type { CoDirectorMessage as Msg, CoDirectorMessageExecution } from "./types";
 import { renderAssistantMarkdown } from "./assistantMarkdown";
 import { projectCreatorReply } from "./creatorFacingReply";
+import { ImageJobProgressCard } from "./ProductionJobCard";
 import GenerationQueueCard from "./GenerationQueueCard";
 import SceneProductionCard from "./SceneProductionCard";
 import { CoDirectorMediaCardGrid, type MediaCardItem } from "./CoDirectorMediaCardGrid";
@@ -118,11 +119,30 @@ function ExecutionSummaryCard({
   );
 }
 
-function GenerationReadyActions({ message }: { message: Msg }) {
+export const STILL_LIBRARY_NOTICE =
+  "The image has been successfully completed. You can find it in the Library.";
+
+export function isRedundantStillAcceptance(content: string): boolean {
+  return content.trim().startsWith("The still image request was accepted");
+}
+
+export function stillFollowUpText(content: string): string {
+  if (content.trim() === "Here is the concept still.") return STILL_LIBRARY_NOTICE;
+  return content;
+}
+
+function libraryNoticeOnly(message: Msg): boolean {
+  const ready = message.generationReady;
+  if (!ready || ready.modality !== "image") return false;
+  const text = (message.content || "").trim();
+  return Boolean(ready.noticeOnly) || text === "Here is the concept still." || text === STILL_LIBRARY_NOTICE;
+}
+
+function GenerationReadyActions({ message, projectId }: { message: Msg; projectId: string }) {
   const ready = message.generationReady;
   const [preview, setPreview] = useState<LibraryQuickPreviewAsset | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  if (!ready) return null;
+  if (!ready || libraryNoticeOnly(message)) return null;
 
   const openAsset = () => {
     const assetId = String(ready.assetId || "").trim();
@@ -171,6 +191,17 @@ function GenerationReadyActions({ message }: { message: Msg }) {
 
   return (
     <div className="codirector-gen-ready" data-testid="codirector-gen-ready">
+      {ready.modality === "image" && ready.assetId && ready.outcome === "ready" ? (
+        <button
+          type="button"
+          className="codirector-concept-thumb"
+          data-testid="codirector-concept-image"
+          aria-label="Open the picture larger"
+          onClick={openAsset}
+        >
+          <img src={api.assetUrl(ready.assetId, null, projectId)} alt={ready.actionLabel || "Concept image"} />
+        </button>
+      ) : null}
       {ready.actionLabel ? (
         <button
           type="button"
@@ -181,7 +212,7 @@ function GenerationReadyActions({ message }: { message: Msg }) {
           {ready.actionLabel}
         </button>
       ) : null}
-      <LibraryQuickPreviewModal asset={preview} onClose={() => setPreview(null)} />
+      <LibraryQuickPreviewModal asset={preview} projectId={projectId} onClose={() => setPreview(null)} />
     </div>
   );
 }
@@ -211,8 +242,10 @@ export function CoDirectorMessage({
     }
     return MESSAGE_TYPE_LABELS[message.messageType] ?? null;
   })();
+  if (isRedundantStillAcceptance(message.content || "")) return null;
   const isAssistant = message.role === "assistant";
-  const projected = isAssistant ? projectCreatorReply(message.content || "") : null;
+  const spoken = stillFollowUpText(message.content || "");
+  const projected = isAssistant ? projectCreatorReply(spoken) : null;
   const html = projected ? renderAssistantMarkdown(projected.text) : "";
   const isExecutionStatus = message.messageType === "execution_status";
   const isCompletion = message.messageType === "completion";
@@ -271,7 +304,10 @@ export function CoDirectorMessage({
           <pre className="codirector-retrieval-json">{projected.technical}</pre>
         </details>
       ) : null}
-      {message.generationReady ? <GenerationReadyActions message={message} /> : null}
+      {message.imageJob?.jobId ? (
+        <ImageJobProgressCard job={message.imageJob} projectId={uiContext.projectId || ""} />
+      ) : null}
+      {message.generationReady ? <GenerationReadyActions message={message} projectId={uiContext.projectId || ""} /> : null}
       {isCompletion && hasExecutionPayload ? (
         <ExecutionSummaryCard
           execution={message.execution as CoDirectorMessageExecution}

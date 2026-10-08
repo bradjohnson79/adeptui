@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelsForModality, sectionsFromProductionControlModels } from "./filterByModality";
+import { creatorDockLocalModels, modelsForModality, sectionsFromProductionControlModels } from "./filterByModality";
 import type { ModelDescriptor } from "./contracts";
 
 function desc(partial: Partial<ModelDescriptor> & Pick<ModelDescriptor, "id" | "modality">): ModelDescriptor {
@@ -35,6 +35,20 @@ describe("modelsForModality", () => {
     const llmOnly = [desc({ id: "gemma", modality: "llm" })];
     expect(modelsForModality(llmOnly, "video")).toEqual([]);
     expect(modelsForModality(undefined, "audio")).toEqual([]);
+  });
+});
+
+describe("creatorDockLocalModels", () => {
+  it("keeps installed local image models and drops Docker and Illustrious", () => {
+    const rows = [
+      desc({ id: "qwen-image-2512-local", modality: "image", label: "Qwen Image 2512 (Local)", executionClass: "native_local" }),
+      desc({ id: "illustrious-local", modality: "image", label: "Illustrious XL (Local)", executionClass: "native_local" }),
+      desc({ id: "docker-runtime:custom", modality: "image", label: "Custom", executionClass: "docker_local" }),
+      desc({ id: "flux-kie", modality: "image", label: "FLUX", locality: "hosted", executionClass: "hosted_api" }),
+      desc({ id: "sensenova-u15-local", modality: "image", label: "SenseNova U1.5 (Local)", capabilityLabel: "Draft" }),
+      desc({ id: "qwen-image-edit-2509-local", modality: "image", label: "Qwen Image Edit 2509 (Local)", capabilityLabel: "Draft" }),
+    ];
+    expect(creatorDockLocalModels(rows, "image").map((m) => m.id)).toEqual(["qwen-image-2512-local"]);
   });
 });
 

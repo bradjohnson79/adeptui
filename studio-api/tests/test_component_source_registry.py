@@ -66,7 +66,7 @@ def test_fixture_http_still_validates_unpublished_pack(isolated_data: Path, monk
     assert manifest.has_valid_source()
 
 
-def test_status_marks_unpublished_as_source_pending(isolated_data: Path):
+def test_status_omits_removed_essential_packs(isolated_data: Path):
     from app.setup.status import build_status
 
     status = build_status()
@@ -76,15 +76,7 @@ def test_status_marks_unpublished_as_source_pending(isolated_data: Path):
         "pack_essential_anime",
         "pack_essential_cinematic",
     ):
-        item = by_id[pack_id]
-        assert item["status"] == "source_pending"
-        assert item["issue_code"] == "source_not_published"
-        assert item.get("install_disabled") is True
-        assert item["source_state"] == "source_not_published"
-        assert "ADEPT_PACK_GITHUB_OWNER" not in (item.get("issue_summary") or "")
-        labels = " ".join(a["label"] for a in (item.get("pack_actions") or []))
-        assert "Add Source URL" in labels
-        assert "Link Existing Folder" in labels
+        assert pack_id not in by_id
 
 
 def test_fal_key_primary_action_is_configure_api_key(isolated_data: Path):
@@ -104,14 +96,15 @@ def test_component_kind_mapping():
     from app.setup.catalog import get_component
     from app.setup.component_kinds import (
         KIND_CREDENTIAL,
-        KIND_DOWNLOADABLE_PACK,
         KIND_LINKED_RESOURCE,
         component_kind,
     )
 
     assert component_kind(get_component("fal_key")) == KIND_CREDENTIAL
-    assert component_kind(get_component("pack_essential_photoreal")) == KIND_DOWNLOADABLE_PACK
     assert component_kind(get_component("ltx_checkpoint")) == KIND_LINKED_RESOURCE
+    from app.setup.catalog import public_components
+
+    assert all(item.id != "pack_essential_photoreal" for item in public_components())
 
 
 def test_manual_override_makes_pack_installable(isolated_data: Path):
@@ -126,7 +119,4 @@ def test_manual_override_makes_pack_installable(isolated_data: Path):
     manifest = get_pack_manifest("pack_essential_photoreal")
     assert manifest.has_valid_source()
     status = build_status()
-    item = next(c for c in status["components"] if c["id"] == "pack_essential_photoreal")
-    # Override URL counts as available source even without a release cache
-    assert item["source_available"] is True
-    assert item["status"] in ("not_installed", "source_pending", "download_unavailable")
+    assert all(c["id"] != "pack_essential_photoreal" for c in status["components"])

@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { api } from "../../api";
 import type {
   ApiModelsSectionMeta,
   DiscoveredApiModel,
@@ -11,7 +10,7 @@ import { buildAiGuidedSetupPath } from "../../setup/navigation";
 import { StatusBadge } from "../ui";
 import { InstallStatusChip } from "../install/InstallStatusChip";
 import type { ProductionDockApi } from "./useProductionDock";
-import { modelsForModality } from "../../modelRegistry/filterByModality";
+import { creatorDockLocalModels, modelsForModality } from "../../modelRegistry/filterByModality";
 import { formatAudioMenuRowLabel } from "./dockLabels";
 
 function setupComponentIdForModel(modelId: string): string | null {
@@ -110,13 +109,11 @@ function LocalModelRow({
   model,
   activeId,
   onSelect,
-  onStartRuntime,
   projectId,
 }: {
   model: ModelDescriptor;
   activeId: string | null;
   onSelect: () => void;
-  onStartRuntime?: () => void;
   projectId?: string | null;
 }) {
   const active = activeId === model.id;
@@ -125,22 +122,18 @@ function LocalModelRow({
   const needsSetup =
     model.capabilityLabel === "Requires Setup" ||
     (model.id === "minimax-h3" && !h3PrivateReady);
-  const dockerStopped =
-    model.executionClass === "docker_local" && !model.executable && model.capabilityLabel !== "Unavailable";
   const hint = videoStatusHint(model);
   const setupComponentId = setupComponentIdForModel(model.id);
   return (
     <li>
       <button
         type="button"
-        className={`production-dock-model-item${active ? " is-active" : ""}${comingSoon || dockerStopped ? " is-disabled" : ""}`}
+        className={`production-dock-model-item${active ? " is-active" : ""}${comingSoon ? " is-disabled" : ""}`}
         data-execution-class={model.executionClass || (model.locality === "hosted" ? "hosted_api" : "native_local")}
-        data-testid={model.id === "minimax-h3" ? "production-dock-minimax-h3" : undefined}
+        data-testid={model.id === "minimax-h3" ? "production-dock-minimax-h3" : `production-dock-model-${model.id}`}
         aria-label={
           comingSoon
             ? `${model.label} — Unavailable`
-            : dockerStopped
-              ? `${model.label} — Container Stopped — Start Runtime`
             : needsSetup
               ? `${model.label} — requires Setup / license clearance`
               : h3PrivateReady
@@ -152,10 +145,6 @@ function LocalModelRow({
         disabled={comingSoon}
         onClick={() => {
           if (comingSoon) return;
-          if (dockerStopped) {
-            onStartRuntime?.();
-            return;
-          }
           if (needsSetup) {
             openSetupWizard(projectId, setupComponentId);
             return;
@@ -183,28 +172,12 @@ function LocalModelRow({
           </div>
         ) : null}
         <span className="production-dock-model-item__meta">
-          {model.executionClass === "docker_local" ? "Docker Local" : "Native Local"}
+          Local
           {hint ? ` · ${hint}` : ""}
           {model.estimatedVramGb != null ? ` · ~${model.estimatedVramGb} GB VRAM` : ""}
-          {dockerStopped ? " · Start Runtime" : ""}
           {needsSetup ? " · Open Setup to install" : ""}
         </span>
       </button>
-      {dockerStopped ? (
-        <div className="production-dock-api-empty__actions">
-          <button
-            type="button"
-            className="production-dock-secondary-btn"
-            data-testid={`start-runtime-${model.runtimeId || model.id}`}
-            onClick={() => onStartRuntime?.()}
-          >
-            Start Runtime
-          </button>
-          <a className="production-dock-secondary-btn" href="/runtime-manager">
-            Runtime Manager
-          </a>
-        </div>
-      ) : null}
     </li>
   );
 }
@@ -316,27 +289,15 @@ export function ModelMenuDrawer({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const sections = dock.sections[modality];
-  const localModels = modelsForModality(
+  const nativeModels = creatorDockLocalModels(
     sections?.local ?? (dock.models[modality] ?? []).filter((m) => m.locality === "local"),
     modality,
   );
-  const nativeModels = localModels.filter((m) => (m.executionClass || "native_local") === "native_local");
-  const dockerModels = localModels.filter((m) => m.executionClass === "docker_local");
   const apiModels = modelsForModality(sections?.api ?? [], modality);
   const apiMeta = sections?.apiMeta ?? dock.apiMeta[modality];
   const resolved = dock.resolved[modality] ?? dock.status?.modalities?.[modality] ?? null;
   const activeId = resolved?.activeModelId ?? null;
   const activeProvider = providerDisplayName(apiMeta?.activeProviderId);
-
-  async function startDockerRuntime(model: ModelDescriptor) {
-    const rid = model.runtimeId || model.id.replace(/^docker-runtime:/, "");
-    try {
-      await api.dockerRuntime.start(rid);
-      await dock.retryDiscovery();
-    } catch {
-      window.location.assign("/runtime-manager");
-    }
-  }
 
   useEffect(() => {
     if (!open) return;
@@ -354,7 +315,7 @@ export function ModelMenuDrawer({
 
   if (!open) return null;
 
-  const loading = dock.loading && localModels.length === 0 && apiModels.length === 0;
+  const loading = dock.loading && nativeModels.length === 0 && apiModels.length === 0;
 
   return (
     <div
@@ -381,10 +342,10 @@ export function ModelMenuDrawer({
         <p className="production-dock-muted">Loading models…</p>
       ) : (
         <>
-          <section className="production-dock-model-section" aria-label="Native Local Models" data-testid={`dock-native-${modality}`}>
-            <h4 className="production-dock-model-section__title">Native Local</h4>
+          <section className="production-dock-model-section" aria-label="Local Models" data-testid={`dock-native-${modality}`}>
+            <h4 className="production-dock-model-section__title">Local</h4>
             {nativeModels.length === 0 ? (
-              <p className="production-dock-muted">No native local models listed for this category yet.</p>
+              <p className="production-dock-muted">No local models listed for this category yet.</p>
             ) : (
               <ul className="production-dock-model-list">
                 {nativeModels.map((model) => (
@@ -394,38 +355,6 @@ export function ModelMenuDrawer({
                     activeId={activeId}
                     projectId={dock.projectId}
                     onSelect={() => {
-                      void dock.selectModel(modality, model.id).then(onClose);
-                    }}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="production-dock-model-section" aria-label="Docker Local Models" data-testid={`dock-docker-${modality}`}>
-            <h4 className="production-dock-model-section__title">Docker Local</h4>
-            {dockerModels.length === 0 ? (
-              <p className="production-dock-muted">
-                No Docker runtimes registered.{" "}
-                <a href="/runtime-manager">Open Runtime Manager</a>
-              </p>
-            ) : (
-              <ul className="production-dock-model-list">
-                {dockerModels.map((model) => (
-                  <LocalModelRow
-                    key={model.id}
-                    model={model}
-                    activeId={activeId}
-                    projectId={dock.projectId}
-                    onStartRuntime={() => {
-                      void startDockerRuntime(model);
-                    }}
-                    onSelect={() => {
-                      // No silent substitute — selection only when executable
-                      if (!model.executable) {
-                        void startDockerRuntime(model);
-                        return;
-                      }
                       void dock.selectModel(modality, model.id).then(onClose);
                     }}
                   />

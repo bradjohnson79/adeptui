@@ -13,9 +13,9 @@ import {
   type PendingProjectEntry,
 } from "../projectEntry";
 import { StudioChrome } from "../components/dashboard/StudioChrome";
-import { buildAiGuidedSetupPath } from "../setup/navigation";
+import { rememberedFirstRunComplete, rememberFirstRunComplete } from "../setup/firstRun";
+import { buildAiGuidedSetupPath, homeLaunchAction } from "../setup/navigation";
 import { SystemStatusStrip } from "../components/dashboard/StudioChrome";
-import { CapabilityReadinessPanel } from "../components/CapabilityPanel";
 import { ProjectCoverCard } from "../components/dashboard/ProjectCoverCard";
 import { WorkspaceFeatureCard } from "../components/dashboard/DashboardCards";
 import { focusProjectLibrary, PROJECT_LIBRARY_HASH } from "../navigation/projectLibrary";
@@ -50,6 +50,7 @@ import {
 import { clearProjectUnlockToken, getProjectUnlockToken } from "../projectSecurity";
 import { HomeCreateProjectModal } from "../components/generationStudio/HomeCreateProjectModal";
 import { useHomeLibraryBounds } from "../components/generationStudio/useHomeLibraryBounds";
+import { BetaNotice } from "../home/BetaNotice";
 
 type StatusFilter = "All" | "Active" | "Rendering" | "Complete";
 
@@ -61,6 +62,10 @@ export default function Home() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [createFormKey, setCreateFormKey] = useState(0);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const rememberedFlag = rememberedFirstRunComplete();
+  const [firstRun, setFirstRun] = useState<"unknown" | "complete" | "incomplete">(
+    rememberedFlag === true ? "complete" : rememberedFlag === false ? "incomplete" : "unknown",
+  );
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
@@ -216,41 +221,49 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    api.setupStatus()
+      .then((status) => {
+        if (cancelled) return;
+        const complete = status.firstRunSetupComplete === true;
+        rememberFirstRunComplete(complete);
+        setFirstRun(complete ? "complete" : "incomplete");
+      })
+      .catch(() => {
+        if (!cancelled) setFirstRun("complete");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const pendingEntry = createIntent.pendingEntry;
     const setupEntry = pendingEntry?.kind === "setup" ? pendingEntry : null;
-    const isAiGuided = setupEntry?.setupMode === "ai_guided";
-    if (setupEntry && !projectsLoaded) {
-      return;
-    }
-    if (!isAiGuided && !createIntent.forcedCreate) {
+    const launch = homeLaunchAction({
+      forcedCreate: createIntent.forcedCreate,
+      pendingKind: pendingEntry?.kind,
+      projectId: preferredProjectId,
+    });
+    if (!launch) {
       createIntentRef.current = null;
       return;
     }
+    if (launch.type === "open-setup" && !projectsLoaded) return;
     if (createIntentRef.current === location.search) return;
+    if (firstRun === "incomplete") return;
 
     let cancelled = false;
-
-    const redirectToSetup = async () => {
-      if (createIntent.forcedCreate) {
-        createIntentRef.current = location.search;
-        if (!cancelled) {
-          openCreateProject(pendingEntry);
-        }
-        return;
-      }
-      const id = preferredProjectId;
-      if (!id) {
-        createIntentRef.current = location.search;
-        if (!cancelled) {
-          openCreateProject(setupEntry);
-        }
-        return;
-      }
+    const redirect = () => {
       if (cancelled) return;
       createIntentRef.current = location.search;
+      if (launch.type === "create-project") {
+        openCreateProject(pendingEntry?.kind === "setup" ? null : pendingEntry);
+        return;
+      }
       navigate(
         buildAiGuidedSetupPath({
-          projectId: id,
+          projectId: launch.projectId,
           componentId: setupEntry?.setupComponent,
           source: setupEntry?.setupSource || "workspace_launch",
           setupSection: setupEntry?.setupSection,
@@ -259,12 +272,11 @@ export default function Home() {
         { replace: true },
       );
     };
-
-    void redirectToSetup();
+    redirect();
     return () => {
       cancelled = true;
     };
-  }, [createIntent, location.search, navigate, openCreateProject, preferredProjectId, projectsLoaded]);
+  }, [createIntent, firstRun, location.search, navigate, openCreateProject, preferredProjectId, projectsLoaded]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -375,6 +387,19 @@ export default function Home() {
 
   const exploreItems = getExploreWorkspaceCards();
 
+  if (firstRun === "incomplete") {
+    return (
+      <div className="app-shell atmosphere" data-testid="first-run-blocked">
+        <main className="studio-page">
+          <section className="panel" aria-labelledby="first-run-blocked-title">
+            <h1 id="first-run-blocked-title">Adept UI needs its essential components installed before the workspace is ready.</h1>
+            <button type="button" className="primary" onClick={() => navigate("/setup")}>Continue Setup</button>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell atmosphere aurora-landing" data-testid="generation-studio-home">
       <StudioChrome
@@ -384,19 +409,10 @@ export default function Home() {
         onOpenCoDirector={() =>
           navigate(preferredProjectId ? `/co-director?projectId=${encodeURIComponent(preferredProjectId)}` : "/co-director")
         }
-        onSetup={async () => {
-          const id = preferredProjectId;
-          if (!id) {
-            openCreateProject({
-              kind: "setup",
-              setupMode: "ai_guided",
-              setupSource: "workspace_launch",
-            });
-            return;
-          }
+        onSetup={() => {
           navigate(
             buildAiGuidedSetupPath({
-              projectId: id,
+              projectId: preferredProjectId,
               source: "workspace_launch",
             }),
           );
@@ -405,6 +421,7 @@ export default function Home() {
         breadcrumbs={[{ label: "Home" }]}
       />
       <main className="studio-page">
+        <BetaNotice />
         <GenerationStudioHero />
 
         <CoDirectorLaunchCard activeProjectName={preferredProject?.name} />
@@ -720,10 +737,6 @@ export default function Home() {
               navigate(preferredProjectId ? `/co-director?projectId=${encodeURIComponent(preferredProjectId)}` : "/co-director")
             }
           />
-        </div>
-
-        <div data-testid="capability-readiness-block">
-          <CapabilityReadinessPanel />
         </div>
       </main>
       <HomeCreateProjectModal

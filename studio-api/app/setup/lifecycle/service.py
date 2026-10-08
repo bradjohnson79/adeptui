@@ -512,7 +512,7 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
     "magi_gpu_upscale": {
         "group": "MAGI",
         "subgroup": "Finishing",
-        "surfaceGroups": ["MAGI", "Finishing"],
+        "surfaceGroups": ["MAGI"],
         "capabilityTags": ["upscale", "finishing", "delivery"],
         "badges": ["MAGI", "GPU"],
         "bestFor": ["final delivery", "mastering", "upscale"],
@@ -526,36 +526,6 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
         "capabilityTags": ["voice", "audio", "dialogue"],
         "badges": ["Voice"],
         "bestFor": ["Voice performance", "make a short film", "make a commercial", "create a talking presenter"],
-    },
-    "pack_essential_photoreal": {
-        "group": "Creative Packs",
-        "subgroup": "Essential Packs",
-        "surfaceGroups": ["Creative Packs"],
-        "capabilityTags": ["pack", "photoreal", "creative"],
-        "badges": ["Creative Pack", "Photoreal"],
-        "bestFor": ["Photoreal faces", "Lighting presets"],
-        "lifecycleActions": {"install": True, "repair": True, "calibrate": False, "certify": False},
-        "surfaceEntryPoints": {"dock": True, "coDirector": True},
-    },
-    "pack_essential_anime": {
-        "group": "Creative Packs",
-        "subgroup": "Essential Packs",
-        "surfaceGroups": ["Creative Packs"],
-        "capabilityTags": ["pack", "anime", "creative"],
-        "badges": ["Creative Pack", "Anime"],
-        "bestFor": ["Anime expressions", "Stylized reference packs", "anime poster", "make an anime episode"],
-        "lifecycleActions": {"install": True, "repair": True, "calibrate": False, "certify": False},
-        "surfaceEntryPoints": {"dock": True, "coDirector": True},
-    },
-    "pack_essential_cinematic": {
-        "group": "Creative Packs",
-        "subgroup": "Essential Packs",
-        "surfaceGroups": ["Creative Packs"],
-        "capabilityTags": ["pack", "cinematic", "creative", "storyboard"],
-        "badges": ["Creative Pack", "Cinematic"],
-        "bestFor": ["Lighting looks", "Cinematic scene setups", "storyboard", "make a storyboard", "make a short film"],
-        "lifecycleActions": {"install": True, "repair": True, "calibrate": False, "certify": False},
-        "surfaceEntryPoints": {"dock": True, "coDirector": True},
     },
 }
 
@@ -586,7 +556,7 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def component_metadata(component_id: str) -> dict[str, Any]:
+def component_metadata(component_id: str, *, live_badges: bool = True) -> dict[str, Any]:
     if component_id in _LOCAL_IMAGE_COMPONENTS:
         meta = dict(_LOCAL_IMAGE_COMPONENTS[component_id])
         if meta.get("group") == "Image Generation":
@@ -649,7 +619,7 @@ def component_metadata(component_id: str) -> dict[str, Any]:
         "surfaceEntryPoints": {"dock": False, "coDirector": False},
     }
     payload.update(override)
-    if component_id == "hunyuan_video_1_5_distilled":
+    if component_id == "hunyuan_video_1_5_distilled" and live_badges:
         try:
             gpu = query_gpu_stats()
             gpus = gpu.get("gpus") or []
@@ -749,6 +719,29 @@ def inspect_hardware() -> dict[str, Any]:
         except OSError:
             free_bytes = None
             total_bytes = None
+    system_ram_bytes = None
+    try:
+        import ctypes
+
+        class _MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        stat = _MemoryStatusEx()
+        stat.dwLength = ctypes.sizeof(_MemoryStatusEx)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+            system_ram_bytes = int(stat.ullTotalPhys)
+    except Exception:
+        system_ram_bytes = None
     return {
         "gpu": gpu,
         "dataDir": str(settings.data_dir),
@@ -756,6 +749,7 @@ def inspect_hardware() -> dict[str, Any]:
         "diskPath": scanned_path,
         "freeBytes": free_bytes,
         "totalBytes": total_bytes,
+        "systemRamBytes": system_ram_bytes,
     }
 
 
@@ -1014,7 +1008,7 @@ def recommendation_reason(component_id: str, intent: str) -> str:
         "echomimic-v2-local",
     } and any(word in text for word in ("talking", "presenter", "avatar")):
         return "Best fit for a talking presenter / avatar performance."
-    if component_id in {"flux1_dev_local", "pack_essential_cinematic", "ltx_2_5_checkpoint"} and any(
+    if component_id in {"flux1_dev_local", "ltx_2_5_checkpoint"} and any(
         word in text for word in ("storyboard", "previz", "previs")
     ):
         return "Best fit for storyboard frames and motion previs."
@@ -1115,6 +1109,9 @@ def create_install_job(component_id: str, *, confirm: bool, confirm_download_mod
 
 
 def install_component(component_id: str, *, confirm: bool, confirm_download_models: bool, destination_root: str | None = None) -> dict[str, Any]:
+    from ..model_license import assert_installation_allowed
+
+    assert_installation_allowed(component_id)
     return create_install_job(
         component_id,
         confirm=confirm,

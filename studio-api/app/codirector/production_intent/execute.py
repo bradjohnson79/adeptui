@@ -760,10 +760,12 @@ def _image_generate(db: Session, intent: ProductionIntent) -> dict[str, Any]:
             "aspectRatio": meta.get("aspectRatio") or intent.aspectRatio or meta.get("aspect"),
             "resolution": meta.get("resolution"),
             "quality": meta.get("quality") or intent.qualityProfile,
+            "lockModelFamily": bool(meta.get("lockModelFamily")),
             "seed": meta.get("seed"),
             "width": meta.get("width"),
             "height": meta.get("height"),
             "refs": meta.get("refs") or list(intent.references or []),
+            "codirectorConversation": bool(meta.get("codirectorConversation")),
         }
         if intent.sourceAssets and intent.operation != "image.edit":
             # The stored reference is the canonical asset. Do not copy it

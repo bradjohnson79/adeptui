@@ -1,0 +1,24 @@
+Adept UI website — image record
+
+Product interface images in /product/ are captures of the Adept UI application,
+made for this site and stored here so the page does not depend on Studio files at runtime.
+
+adept-ui-home.webp
+adept-ui-co-director.webp
+adept-ui-ai-storyboard-studio.webp
+adept-ui-ai-character-creator.webp
+adept-ui-ai-voice-studio.webp
+adept-ui-ai-filmmaking-timeline.webp
+adept-ui-magi.webp
+
+Cinematic stills in /film/ are original images generated for this website.
+They are not third-party stock and have no external license URL.
+
+film-color-suite.webp — director reviewing a grade in a dark color suite
+film-camera-on-set.webp — cinema camera and monitor on a dark set
+
+Social preview:
+
+brand/adept-ui-social.webp — 1200×630, composed from the Adept UI emblem and the timeline capture.
+
+Served format: WebP.

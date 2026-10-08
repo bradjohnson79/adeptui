@@ -437,6 +437,11 @@ def rollup_readiness(components: list[dict]) -> dict[str, Any]:
     return {"overall_status": overall, "overall_label": overall_label, "counts": counts}
 
 
+def invalidate_status_cache() -> None:
+    global _STATUS_CACHE
+    _STATUS_CACHE = None
+
+
 def build_status(*, persist: bool = True) -> dict[str, Any]:
     global _STATUS_CACHE
     if persist and _STATUS_CACHE is not None:
@@ -713,6 +718,27 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             "update_available",
         ):
             item["install_disabled"] = False
+        from .model_license import license_summary_for_component
+
+        license_summary = license_summary_for_component(definition.id)
+        if license_summary:
+            item["model_license"] = license_summary
+            if not license_summary.get("installationUnlocked"):
+                item["install_disabled"] = True
+        try:
+            from .lifecycle.service import component_metadata
+
+            meta = component_metadata(definition.id, live_badges=False)
+        except Exception:
+            meta = {}
+        if meta:
+            item["group"] = meta.get("group")
+            item["vramRecommendationGb"] = meta.get("vramRecommendationGb")
+            item["downloadSizeLabel"] = meta.get("downloadSizeLabel")
+            item["diskUsageLabel"] = meta.get("diskUsageLabel")
+            item["bestFor"] = list(meta.get("bestFor") or [])
+            item["badges"] = list(meta.get("badges") or [])
+            item["experimental"] = bool(meta.get("experimental"))
         if is_avatar_runtime_component(definition.id):
             env = dict(item.get("environment") or {})
             if verification.healthy and env.get("updateAvailable"):
@@ -760,6 +786,23 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             "machineSpecific": [],
             "machineSpecificCount": 0,
         }
+    from .first_run import apply_first_run_flag, assess_first_run
+
+    report = assess_first_run(components, fetch_nodes=True)
+    payload["firstRunScan"] = {
+        "alreadyReady": report["alreadyReady"],
+        "essentialNeeded": report["essentialNeeded"],
+        "essentialBlockerCount": report["essentialBlockerCount"],
+        "optionalAbsentCount": report["optionalAbsentCount"],
+        "baselineImageWorkflow": report["baselineImageWorkflow"],
+        "baselineVideoWorkflow": report["baselineVideoWorkflow"],
+        "estimatedDownloadBytes": report["estimatedDownloadBytes"],
+        "estimatedInstallBytes": report["estimatedInstallBytes"],
+        "freeBytes": report["freeBytes"],
+        "storageShortfall": report["storageShortfall"],
+        "nodeCatalogChecked": report["nodeCatalogChecked"],
+    }
+    payload["firstRunSetupComplete"] = apply_first_run_flag(report)
     has_active_work = bool(payload["active_operation"]) or any(
         item["status"] in ("installing", "checking") for item in components
     )

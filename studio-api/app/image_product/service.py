@@ -94,6 +94,7 @@ def generate_images(
             "input_urls": body.get("input_urls") or body.get("image_urls") or body.get("image_input") or [],
             "cloudPaid": intent.get("providerPreference") == "cloud",
             "tag": body.get("tag") or "imagegen",
+            "codirectorConversation": bool(b.get("codirectorConversation")),
             "hostedModelId": body.get("hostedModelId") or compiled.get("hostedModelId") or (pinned or {}).get("hostedModelId"),
             "officialModelId": (pinned or {}).get("officialModelId") or compiled.get("officialModelId"),
             "kieImageModelId": (
@@ -239,6 +240,27 @@ def generate_images(
             db.commit()
             raise RuntimeError(job.message) from exc
         jobs.append({"jobId": job.id, "workflowKey": pinned.get("workflowKey"), "kind": kind})
+        if params.get("codirectorConversation") and not params.get("cloudPaid"):
+            try:
+                from ..codirector.execution.generation_ready_notice import append_image_job_card
+
+                meta = intent.get("metadata") if isinstance(intent.get("metadata"), dict) else {}
+                append_image_job_card(
+                    db,
+                    project_id,
+                    job.id,
+                    family=str(intent.get("enginePreference") or params.get("model") or ""),
+                    aspect=str(meta.get("aspect") or params.get("aspect") or ""),
+                    width=int(intent.get("width") or params.get("width") or 0),
+                    height=int(intent.get("height") or params.get("height") or 0),
+                )
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Co-Director image job card was not posted",
+                    exc_info=True,
+                )
         append_history(
             project_id,
             {

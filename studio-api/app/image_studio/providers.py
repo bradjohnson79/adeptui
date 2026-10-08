@@ -28,7 +28,6 @@ _FAMILY_FALLBACK: dict[str, str] = {
     "hidream-local": "hidream",
     "flux-schnell-local": "flux",
     "flux-dev-local": "flux",
-    "sensenova-u15-local": "sensenova",
 }
 
 _HINTS: dict[str, dict[str, Any]] = {
@@ -148,13 +147,6 @@ _HINTS: dict[str, dict[str, Any]] = {
         "licenseNote": "FLUX Dev — non-commercial / license restricted",
         "costHint": "Local GPU",
     },
-    "sensenova-u15-local": {
-        "nativeResolutions": ["2K"],
-        "nativePixelSizes": ["2720x1536", "2048x2048"],
-        "upscaleSupported": False,
-        "licenseNote": "Apache-2.0 local (SenseNova U1.5-8B-MoT)",
-        "costHint": "Local GPU (24 GB-class VRAM)",
-    },
 }
 
 
@@ -217,7 +209,6 @@ _COMPONENT_GATE_BY_MODEL: dict[str, str] = {
     "omnigen-local": "omnigen_local",
     "janus-pro-local": "janus_pro_local",
     "hunyuan-image-local": "hunyuan_image_local",
-    "sensenova-u15-local": "sensenova_u15_models",
 }
 
 #: Dock model → certified-registry workflow whose capability flags the
@@ -514,9 +505,8 @@ def family_catalog() -> list[dict[str, Any]]:
         "imagen": "Imagen",
         "hidream": "HiDream",
         "krea2": "Krea 2",
-        "sensenova": "SenseNova U1.5",
     }
-    families = ("qwen2512", "zimage", "flux", "qwen", "imagen", "hidream", "krea2", "sensenova")
+    families = ("qwen2512", "zimage", "flux", "qwen", "imagen", "hidream", "krea2")
     out = []
     for fam in families:
         status = _family_status(fam)

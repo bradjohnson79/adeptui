@@ -12,9 +12,11 @@ def test_english_is_the_default():
     assert spoken.code == "en"
     assert spoken.label == "English"
     text = clause(spoken)
-    assert "All spoken dialogue in this scene is in English." in text
-    assert "If nobody speaks, keep the scene silent." in text
-    assert "does not change this language" in text
+    assert "Every spoken word is in English." in text
+    assert "Do not speak Chinese or any other language." in text
+    silent = apply_to_prompt("She looks at the folder.", spoken)
+    assert silent.startswith("Spoken language is English only.")
+    assert "nobody speaks" in silent
 
 
 def test_a_named_language_replaces_english():
@@ -53,8 +55,8 @@ def test_earlier_speech_does_not_outrank_the_stored_language():
         spoken_language="English",
     )
     assert "The person is speaking Japanese." in text
-    assert "Any words in this new shot are spoken in English only." in text
-    assert "Do not copy its language." in text
-    assert "All spoken dialogue in this scene is in English." in text
-    assert text.rfind("English") > text.rfind("Japanese")
-    assert text.rfind("She glances toward the window.") < text.rfind("in English")
+    assert text.startswith("Spoken language is English only.")
+    assert "Every spoken word is in English." in text
+    assert "Do not speak Chinese or any other language." in text
+    assert text.find("in English") < text.find("Japanese")
+    assert text.find("in English") < text.find("She glances toward the window.")

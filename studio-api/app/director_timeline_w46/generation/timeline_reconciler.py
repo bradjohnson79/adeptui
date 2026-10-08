@@ -145,7 +145,7 @@ def reconcile_batch_from_job(
                 jref.status = "failed"
         if batch.status not in _TERMINAL_BATCH:
             batch.status = "Failed"
-        store.save_master(db, project_id, scene_id, master)
+        store.save_master(db, project_id, scene_id, master, touch_batches=False)
         return {"ok": True, "batchStatus": batch.status, "mapped": "FAILED_GENERATION"}
 
     if status in _JOB_CANCEL:
@@ -155,7 +155,7 @@ def reconcile_batch_from_job(
         if batch.status not in _TERMINAL_BATCH:
             keep = bool(getattr(getattr(batch, "approvedClip", None), "assetId", None))
             batch.status = "Approved" if keep else "Cancelled"
-        store.save_master(db, project_id, scene_id, master)
+        store.save_master(db, project_id, scene_id, master, touch_batches=False)
         return {"ok": True, "batchStatus": batch.status, "mapped": "CANCELLED"}
 
     if status not in _JOB_DONE:
@@ -186,7 +186,7 @@ def reconcile_batch_from_job(
 
     # Do not invent CandidateReady — QC pending until Omni/retry.
     batch.status = "QC_Pending"
-    store.save_master(db, project_id, scene_id, master)
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
     return {
         "ok": True,
         "batchStatus": "QC_Pending",

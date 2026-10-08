@@ -169,10 +169,12 @@ function LoraAccordionSection({
   targets,
   loraSelection,
   setLoraSelection,
+  onAddTrigger,
 }: {
   targets: ImageProviderDescriptor[];
-  loraSelection: LoraSelection | null;
-  setLoraSelection: (selection: LoraSelection | null) => void;
+  loraSelection: LoraSelection[];
+  setLoraSelection: (selection: LoraSelection[]) => void;
+  onAddTrigger?: (text: string) => void;
 }) {
   const families = Array.from(
     new Set(targets.map((t) => t.family || t.modelId || "").filter(Boolean)),
@@ -186,8 +188,11 @@ function LoraAccordionSection({
       <LoRASelector
         modelFamily={families[0]}
         modality="image"
+        multiple
         value={loraSelection}
-        onChange={setLoraSelection}
+        onChange={() => undefined}
+        onStackChange={setLoraSelection}
+        onAddTrigger={onAddTrigger}
       />
     </div>
   );
@@ -229,7 +234,7 @@ export function CinematicImageStudio({
   const [hostedChoice, setHostedChoice] = useState<"local_only" | "allow_hosted">("local_only");
   const [hostedModelId, setHostedModelId] = useState(HOSTED_AUTO_ID);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [loraSelection, setLoraSelection] = useState<LoraSelection | null>(null);
+  const [loraSelection, setLoraSelection] = useState<LoraSelection[]>([]);
   const [seed, setSeed] = useState(project.seed ?? -1);
   const [guidance, setGuidance] = useState<number | "">("");
   const [steps, setSteps] = useState<number | "">("");
@@ -755,8 +760,9 @@ export function CinematicImageStudio({
           const uniqueFamilies = Array.from(
             new Set(targets.map((t) => t.family || t.modelId || "").filter(Boolean)),
           );
-          if (loraSelection && uniqueFamilies.length === 1) {
-            body.lora = { ...loraSelection };
+          if (loraSelection.length && uniqueFamilies.length === 1) {
+            body.loras = loraSelection.map((item) => ({ ...item }));
+            body.lora = { ...loraSelection[0] };
           }
           if (preview.continuitySessionId && !continuitySession) {
             try {
@@ -1473,6 +1479,9 @@ export function CinematicImageStudio({
             targets={generateTargets}
             loraSelection={loraSelection}
             setLoraSelection={setLoraSelection}
+            onAddTrigger={(text) =>
+              setPrompt((current) => (current.toLowerCase().includes(text.toLowerCase()) ? current : `${current.trim()}\n${text}`.trim()))
+            }
           />
         </details>
 

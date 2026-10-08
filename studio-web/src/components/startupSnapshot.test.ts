@@ -45,11 +45,11 @@ function makeStatus(opts: {
 }
 
 describe("buildSnapshot", () => {
-  it("warm — all required online → 100%, ALL SYSTEMS ONLINE", () => {
+  it("warm — all required online → 100%, ALL REQUIRED SYSTEMS ONLINE", () => {
     const snap = buildSnapshot(makeStatus({}), true);
     expect(snap.allRequiredOnline).toBe(true);
     expect(snap.overallPct).toBe(100);
-    expect(snap.message).toBe("ALL SYSTEMS ONLINE");
+    expect(snap.message).toBe("ALL REQUIRED SYSTEMS ONLINE");
     expect(snap.rows.find((r) => r.id === "creator_engine")?.state).toBe("online");
   });
 
@@ -57,7 +57,7 @@ describe("buildSnapshot", () => {
     const snap = buildSnapshot(null, false);
     expect(snap.allRequiredOnline).toBe(false);
     expect(snap.overallPct).toBe(0);
-    expect(snap.message).toBe("Bringing Creative Systems Online");
+    expect(snap.message).toBe("Bringing Adept UI Online");
     for (const r of snap.rows.filter((x) => x.required)) {
       expect(r.state).toBe("starting");
     }

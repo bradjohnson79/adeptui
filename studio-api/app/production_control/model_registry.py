@@ -20,6 +20,11 @@ CATALOG_ONLY_HIDDEN_FROM_PICKER = frozenset(
         "janus-local",
         "janus-pro-local",
         "hunyuan-image-local",
+        "illustrious-local",
+        # Image-edit workflow is registry Draft (not Certified). It stays
+        # available to internal allow_draft callers and is not a production
+        # selector row.
+        "qwen-image-edit-2509-local",
     }
 )
 
@@ -184,20 +189,6 @@ _CATALOG: list[ModelDescriptor] = [
         vram=24.0,
         gpu=True,
         executable=True,
-    ),
-    _desc(
-        id="sensenova-u15-local",
-        modality="image",
-        label="SenseNova U1.5 (Local)",
-        locality="local",
-        provider_id="comfy",
-        capability="Draft",
-        lifecycle="Installed",
-        supports=["text_to_image", "edit", "reference_conditioning", "native_reference_sheet"],
-        does_not_support=["inpaint", "outpaint"],
-        vram=24.0,
-        gpu=True,
-        executable=False,
     ),
     _desc(
         id="krea2-raw-local",
@@ -650,7 +641,6 @@ _SETUP_COMPONENT_BY_MODEL_ID = {
     "illustrious-local": "illustrious_local",
     "krea2-turbo-local": "krea2_models",
     "krea2-raw-local": "krea2_models",
-    "sensenova-u15-local": "sensenova_u15_models",
     "sana-15-local": "sana_15_local",
     "sdxl-local": "sdxl_local",
     "sd35-large-local": "sd35_large_local",
@@ -662,6 +652,7 @@ _SETUP_COMPONENT_BY_MODEL_ID = {
     "omnigen-local": "omnigen_local",
     "janus-pro-local": "janus_pro_local",
     "hunyuan-image-local": "hunyuan_image_local",
+    "hunyuan-video-1.5-distilled": "hunyuan_video_1_5_distilled",
 }
 
 
@@ -793,12 +784,25 @@ def _apply_setup_status(models: list[ModelDescriptor]) -> list[ModelDescriptor]:
             updated.append(model)
             continue
         status, certified = result
+        estimated_vram = model.estimatedVramGb
+        if model.id == "hunyuan-video-1.5-distilled" and estimated_vram is None:
+            try:
+                from ..setup.lifecycle.service import component_metadata
+
+                recommendation = component_metadata(
+                    "hunyuan_video_1_5_distilled",
+                    live_badges=False,
+                ).get("vramRecommendationGb")
+                if recommendation:
+                    estimated_vram = recommendation
+            except Exception:
+                estimated_vram = model.estimatedVramGb
         updated.append(
             model.model_copy(
                 update={
                     "capabilityLabel": _capability_from_setup_status(status, certified=certified),
                     "lifecycle": _lifecycle_from_setup_status(status),
-                    "estimatedVramGb": model.estimatedVramGb,
+                    "estimatedVramGb": estimated_vram,
                     "executable": status == "ready",
                 }
             )
@@ -976,7 +980,6 @@ _REGISTRY_WORKFLOW_BY_MODEL: dict[str, tuple[str, str]] = {
 
 _NEVER_DEFAULT_ELIGIBLE = frozenset(
     {
-        "sensenova-u15-local",
         "krea2-turbo-local",
         "krea2-raw-local",
         "krea2-turbo-fal",
@@ -1063,10 +1066,6 @@ def _stamp_default_eligible(models: list[ModelDescriptor]) -> list[ModelDescript
             and model.id not in _NEVER_DEFAULT_ELIGIBLE
             and not is_ordinary_picker_hidden(model.id)
         )
-        if model.id == "sensenova-u15-local":
-            eligible = False
-            if model.capabilityLabel == "Certified":
-                model = model.model_copy(update={"capabilityLabel": "Testing", "executable": False})
         out.append(model.model_copy(update={"defaultEligible": eligible}))
     return out
 
@@ -1157,6 +1156,13 @@ def filter_for_action(modality: Modality, action: str) -> list[dict[str, Any]]:
     from .generator_authority import apply_authority_to_models
 
     for model in list_models(modality):
+        # One product answer: hidden catalog rows and Draft lifecycle labels
+        # are not ordinary selector models. get_model() still returns them
+        # for internal callers. Draft is not renamed.
+        if is_ordinary_picker_hidden(model.id):
+            continue
+        if str(model.capabilityLabel or "") == "Draft":
+            continue
         action_match = not model.supports or bool(tags & set(model.supports))
         item = model.model_dump()
         item["actionMatch"] = action_match

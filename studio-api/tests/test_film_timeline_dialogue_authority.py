@@ -32,7 +32,7 @@ def test_character_voice_lock_keeps_english_and_drops_silence():
     spoken = apply_to_prompt("Renkoka looks up.", normalize("en"))
     locked = lock_prompt(spoken)
     assert "in English." in locked
-    assert "If nobody speaks, keep the scene silent." not in locked
+    assert "This shot has no written dialogue, so nobody speaks." not in locked
     assert "Keep environmental ambience, room tone, and other non-dialogue scene sound." in locked
     assert "Do not speak any character lines." in locked
     compiled = compile_provider_prompt(locked, [{"label": "Renkoka"}], [], [], spoken_language="English")

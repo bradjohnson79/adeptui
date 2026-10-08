@@ -843,6 +843,61 @@ def _bind_magi_audio(text: str, args: dict[str, Any]) -> tuple[dict[str, Any], s
     return args, None
 
 
+_ANIME_LOOK = re.compile(r"\b(?:classic\s+anime|anime)\b", re.I)
+
+
+def _apply_anime_still(args: dict[str, Any], text: str) -> None:
+    """Classic anime wording stays on the cinematic still model."""
+
+    if not _ANIME_LOOK.search(text or ""):
+        return
+    from ...style_intelligence.registry import get_profile
+
+    profile = get_profile("anime")
+    prompt = str(args.get("prompt") or text or "").strip()
+    clause = f"{profile.renderingLanguage} Classic anime. Not a photograph. Not live action."
+    if "not live action" not in prompt.lower():
+        prompt = f"{prompt} {clause}".strip()
+    args["prompt"] = prompt[:4000]
+    family = str(args.get("modelFamilyPreference") or "").strip().lower()
+    if family in {"", "illustrious"}:
+        args["modelFamilyPreference"] = "qwen2512"
+        args["lockModelFamily"] = True
+
+
+def kept_library_stills(db: Session, project_id: str) -> tuple[str, str]:
+    """Last concept still and last location still posted in this conversation."""
+
+    from ..conversation_events import fold_events
+
+    character = ""
+    location = ""
+    prior_user = ""
+    try:
+        messages = fold_events(db, project_id)
+    except Exception:
+        return "", ""
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = str(message.get("content") or "")
+        if message.get("role") == "user":
+            prior_user = content
+            continue
+        folded = prior_user.lower()
+        for attachment in message.get("attachments") or []:
+            if not isinstance(attachment, dict) or attachment.get("kind") != "generation_ready":
+                continue
+            asset_id = str(attachment.get("assetId") or "").strip()
+            if not asset_id:
+                continue
+            if any(marker in folded for marker in ("records room", "location still", "coat rack", "closed folder", "empty chairs")):
+                location = asset_id
+            elif any(marker in folded for marker in ("crisis analyst", "concept still", "civilian coat", "data pouch", "waist-length")):
+                character = asset_id
+    return character, location
+
+
 def bind_request_arguments(
     db: Session,
     *,
@@ -902,6 +957,16 @@ def bind_request_arguments(
             scene_name = requested_scene_name(text)
             if scene_name:
                 args["name"] = scene_name
+        folded_scene = text.lower()
+        character_asset, location_asset = kept_library_stills(db, project_id)
+        if any(phrase in folded_scene for phrase in ("concept still", "character reference")):
+            if not character_asset:
+                return args, "I could not find the kept concept still in this conversation."
+            args["characterAssetId"] = character_asset
+        if any(phrase in folded_scene for phrase in ("location still", "environment reference")):
+            if not location_asset:
+                return args, "I could not find the kept location still in this conversation."
+            args["environmentAssetId"] = location_asset
         named_engine = requested_engine(text)
         current_engine = str(args.get("engine") or "").strip()
         if named_engine:
@@ -919,12 +984,38 @@ def bind_request_arguments(
         ratio = requested_ratio(text)
         if ratio and not args.get("aspectRatio"):
             args["aspectRatio"] = ratio
+        if not str(args.get("aspectRatio") or "").strip():
+            args["aspectRatio"] = "3:4"
         if text.strip() and not str(args.get("prompt") or "").strip():
             args["prompt"] = text.strip()[:4000]
         if str(args.get("qualityProfile") or "") not in {"draft", "standard", "high"}:
             args.pop("qualityProfile", None)
-        if str(args.get("modelFamilyPreference") or "") not in {"zimage", "flux", "qwen", "imagen"}:
+        folded = text.lower()
+        named_family = ""
+        if "qwen" in folded:
+            named_family = "qwen2512"
+        elif "krea" in folded:
+            named_family = "krea2"
+        elif "illustrious" in folded:
+            return args, "Illustrious is not available for concept stills. Use Image Generator with Qwen."
+        elif "z-image" in folded or "zimage" in folded:
+            named_family = "zimage"
+        elif "flux" in folded:
+            named_family = "flux"
+        if named_family:
+            args["modelFamilyPreference"] = named_family
+            args["lockModelFamily"] = True
+        elif str(args.get("modelFamilyPreference") or "") not in {
+            "zimage",
+            "flux",
+            "qwen",
+            "qwen2512",
+            "krea2",
+            "sd15",
+            "imagen",
+        }:
             args.pop("modelFamilyPreference", None)
+        _apply_anime_still(args, text)
         reference_name = _reference_name(text)
         if reference_name and not args.get("referenceAssetId"):
             asset_id = _approved_reference_id(db, project_id, reference_name)

@@ -39,7 +39,8 @@ def project_creator_reply(reply: str) -> str:
     text = (reply or "").strip()
     if not text:
         return text
-    parsed = _json_object(text)
+    fenced = _strip_fence(text)
+    parsed = _json_object(fenced)
     if isinstance(parsed, dict):
         if str(parsed.get("mutation_status") or "") == "proposed":
             return "This is prepared and awaiting approval. Nothing has been placed or created yet."
@@ -58,6 +59,11 @@ def project_creator_reply(reply: str) -> str:
         if parsed.get("tool_id") or parsed.get("requested_action") or parsed.get("execution_status"):
             return "I looked that up. I'll keep going with what you asked."
         return "I'll keep going in plain language."
+    loose = _loose_reply(fenced)
+    if loose:
+        return loose
+    if _looks_like_envelope(fenced):
+        return "I'll keep going in plain language."
     failure = _studio_failure(text)
     if failure:
         return failure
@@ -73,6 +79,9 @@ def _creator_message(value: dict) -> str:
     result = read.get("result") if isinstance(read.get("result"), dict) else {}
     result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
     read_data = read.get("data") if isinstance(read.get("data"), dict) else {}
+    reply = str(value.get("reply") or "").strip()
+    if reply and not _looks_internal(reply):
+        return reply
     candidates = (
         value.get("message"),
         data.get("message"),
@@ -97,6 +106,49 @@ def _studio_failure(text: str) -> str | None:
     if any(marker in folded for marker in ("audio.generate_", "generate_ambience failed", "generate_sfx failed", "generate_music failed")):
         return "Audio Studio couldn't create that sound yet."
     return None
+
+
+def _strip_fence(text: str) -> str:
+    raw = text.strip()
+    if not raw.startswith("```"):
+        return raw
+    raw = raw.strip("`").strip()
+    if raw.lower().startswith("json"):
+        raw = raw[4:].strip()
+    return raw
+
+
+def _looks_like_envelope(text: str) -> bool:
+    trimmed = text.strip()
+    return trimmed.startswith("{") and any(
+        marker in trimmed for marker in ('"mode"', '"reply"', '"tool_id"', '"arguments"', '"requested_action"')
+    )
+
+
+def _loose_reply(text: str) -> str:
+    """The reply string when the model left quotes or line breaks inside it."""
+
+    import re
+
+    match = re.search(r'"reply"\s*:', text)
+    if match is None:
+        return ""
+    rest = text[match.end() :].lstrip()
+    if not rest.startswith('"'):
+        return ""
+    rest = rest[1:]
+    next_key = re.search(
+        r'"\s*,\s*"(?:tool_id|arguments|mode|surface|action|entities|constraints|confidence)"',
+        rest,
+    )
+    if next_key is not None:
+        rest = rest[: next_key.start()]
+    else:
+        rest = re.sub(r'"\s*\}[\s\S]*$', "", rest)
+    prose = rest.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\").strip()
+    if not prose or _looks_internal(prose) or _looks_like_envelope(prose):
+        return ""
+    return prose
 
 
 def _json_object(text: str) -> dict | None:

@@ -664,28 +664,12 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
         return _verify_krea2_files(location)
 
     if component.verifier == "sensenova_u15_files":
-        from ..workflows.sensenova_u15 import inspect_weights
-
-        root = location or str(getattr(settings, "sensenova_u15_root", "") or r"D:\01_Models\SenseNova\U1.5-8B-MoT")
-        weights = inspect_weights(Path(root) if root else None)
-        if weights.get("installed"):
-            return Verification(
-                True,
-                False,
-                None,
-                "SenseNova U1.5-8B-MoT weights are readable at the registered D: path.",
-                str(weights.get("root") or root),
-            )
-        missing = tuple(weights.get("missing") or ("root",))
         return Verification(
             False,
             True,
-            "required_models_missing",
-            "SenseNova U1.5 weights are not complete at the registered D: path.",
-            str(weights.get("root") or root),
-            details=tuple(f"Missing: {name}" for name in missing),
-            recommendation="correct_path" if root else "install",
-            requires_user_interaction=True,
+            "not_in_product",
+            "SenseNova U1.5 is not part of Adept UI 1.1.",
+            None,
         )
 
     if component.verifier == "sd15_files":
@@ -1216,13 +1200,11 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
         )
 
     # ── Generic single-file model verifiers keyed by component_id ──────────
-    # These cover LTX 2.5 text encoder / VAE / audio VAE / spatial upscaler,
-    # which the catalog declares with generic verifier names (text_encoder_file,
-    # vae_file, latent_upscale_model_file). Without these branches they fell
-    # through to `unsupported_verifier` and never reported the missing filename
-    # or expected path — surfacing only a vague "1 required model components
-    # are missing" count. Each branch maps component_id → config filename +
-    # expected subpath so the UI can show the exact missing dependency.
+    # These cover LTX 2.5 text encoder / video VAE / audio VAE, which the
+    # catalog declares with generic verifier names (text_encoder_file, vae_file).
+    # Without these branches they fell through to `unsupported_verifier` and
+    # never reported the missing filename or expected path. Each branch maps
+    # component_id → config filename + expected subpath.
 
     _TEXT_ENCODER_FILES = {
         "ltx_2_5_text_encoder": (settings.ltx_2_5_text_encoder, ("text_encoders",)),
@@ -1308,32 +1290,6 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             "Optional World Intelligence model files are not installed.",
             recommendation="install",
         )
-
-    _UPSCALE_FILES = {
-        "ltx_2_5_spatial_upscaler": (settings.ltx_2_5_spatial_upscaler, ("upscale_models",)),
-    }
-    if component.verifier == "latent_upscale_model_file":
-        spec = _UPSCALE_FILES.get(component_id)
-        if spec:
-            filename, extra_dirs = spec
-            path = _candidate_file(location, filename, extra_dirs)
-            if path:
-                if os.access(path, os.R_OK) and path.stat().st_size > 0:
-                    return Verification(
-                        True, False, None,
-                        f"The {component.name} is available and readable.", str(path),
-                    )
-                return Verification(
-                    False, False, "permission_denied", f"The {component.name} cannot be read.", str(path),
-                    recommendation="grant_permission", requires_user_interaction=True,
-                )
-            expected_subpath = "/".join(("models", *extra_dirs)) + "/"
-            return Verification(
-                False, True, "required_model_missing", f"The {component.name} was not found.",
-                location,
-                details=(f"Expected file: {filename}", f"Expected location: {expected_subpath}"),
-                recommendation="correct_path" if location else "install", requires_user_interaction=True,
-            )
 
     return Verification(False, False, "unsupported_verifier", "Verification is not supported.", recommendation="manual_help")
 

@@ -156,6 +156,7 @@ def build_local_generator_models() -> list[dict[str, Any]]:
         except ValueError:
             return (len(_FAMILY_ORDER), opt["label"])
 
+    ready = [opt for opt in ready if str(opt.get("id") or "") != "illustrious"]
     ready.sort(key=_sort)
     return [{"id": "auto", "label": "Auto Select", "group": "auto"}] + ready
 

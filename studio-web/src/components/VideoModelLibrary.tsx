@@ -12,6 +12,7 @@ const CANONICAL_LOCAL_VIDEO_IDS = new Set([
   "ltx-2.5-distilled",
   "ltx-2.5-full",
   "ltx-2.5-comfy",
+  "hunyuan-video-1.5-distilled",
 ]);
 
 function isCanonicalLocalVideoModel(model: ModelDescriptor): boolean {
@@ -63,8 +64,8 @@ export function VideoModelLibrary() {
     <section className="panel" data-testid="video-model-library" aria-label="Video Model Library">
       <h3>Video Models</h3>
       <p className="scene-meta">
-        Local video generation in Adept UI v1.1 uses MiniMax H3 and LTX 2.5.
-        Other local engines are retired and are not production choices.
+        Local video generation in Adept UI v1.1 uses MiniMax H3, LTX 2.5, and
+        HunyuanVideo 1.5 Distilled. Retired engines are not production choices.
       </p>
       {message ? (
         <p className="scene-meta" role="status" data-testid="video-model-library-message">
@@ -191,5 +192,6 @@ function generatorReadinessRows(comfy: ComfyHealth) {
   add("ltx_2_5", "LTX 2.5", "ltx_2_5_checkpoint");
   add("ltx_2_5", "LTX 2.5", "ltx_2_5_text_encoder");
   add("ltx_2_5", "LTX 2.5", "ltx_2_5_video_vae");
+  add("hunyuan-video-1.5-distilled", "HunyuanVideo 1.5 Distilled", "hunyuan_video_1_5_distilled");
   return byGen;
 }

@@ -3225,7 +3225,7 @@ class JobQueue:
 
         pair_audio = True if "pairAudio" not in mode else bool(mode.get("pairAudio"))
         spoken = params.get("spokenLanguage") if isinstance(params.get("spokenLanguage"), dict) else {}
-        spoken_name = str(spoken.get("label") or "").strip()
+        spoken_name = str(spoken.get("label") or "").strip() or "English"
         boundary = ""
         if mode.get("includeOmni"):
             boundary = str(continuity.get("boundary") or "").strip()
@@ -6110,42 +6110,61 @@ class JobQueue:
         lora_resolved = None
         lora_comfy_name: Optional[str] = None
         lora_strength = 0.8
-        lora_sel = params.get("lora")
-        if lora_sel is None and isinstance(params.get("loras"), list) and params.get("loras"):
-            lora_sel = params["loras"][0]
-        if lora_sel is not None:
+        lora_chain: list[dict[str, Any]] = []
+        lora_selections: list[Any] = []
+        if isinstance(params.get("loras"), list) and params.get("loras"):
+            lora_selections = [item for item in params.get("loras") or [] if item]
+        elif params.get("lora") is not None:
+            lora_selections = [params.get("lora")]
+        if lora_selections:
             from .lora_registry.registry import resolve_comfy_lora_name, resolve_lora_for_generation
 
             lora_family = str(
                 (pinned or {}).get("modelFamily") or intent.enginePreference or model or ""
             ).strip()
-            lora_resolved = resolve_lora_for_generation(lora_sel, lora_family, "image")
-            lora_comfy_name = resolve_comfy_lora_name(lora_resolved)
-            if isinstance(lora_sel, dict) and lora_sel.get("strength") is not None:
-                try:
-                    lora_strength = float(lora_sel["strength"])
-                except (TypeError, ValueError):
-                    lora_strength = float(lora_resolved.recommended_strength or 0.8)
-            else:
-                lora_strength = float(lora_resolved.recommended_strength or 0.8)
-            if lora_resolved.strength_min is not None and lora_strength < float(lora_resolved.strength_min):
-                lora_strength = float(lora_resolved.strength_min)
-            if lora_resolved.strength_max is not None and lora_strength > float(lora_resolved.strength_max):
-                lora_strength = float(lora_resolved.strength_max)
-            params["lora_provenance"] = {
-                "loraId": lora_resolved.id,
-                "name": lora_resolved.name,
-                "version": lora_resolved.version,
-                "modelFamily": lora_resolved.model_family,
-                "compatibleModelFamilies": list(lora_resolved.compatible_model_families),
-                "strength": lora_strength,
-                "baseGenerator": lora_family,
-                "sourceTool": params.get("sourceFeature") or "image-generator",
-                "filePath": lora_resolved.file_path,
-                "category": lora_resolved.category,
-                "modality": lora_resolved.modality,
-            }
-            job.message = f"ImageGen · {contract.workflow_key} · {ckpt} · LoRA {lora_resolved.name}"
+            provenance: list[dict[str, Any]] = []
+            for lora_sel in lora_selections[:8]:
+                resolved = resolve_lora_for_generation(lora_sel, lora_family, "image")
+                if resolved is None:
+                    continue
+                comfy_name = resolve_comfy_lora_name(resolved)
+                if isinstance(lora_sel, dict) and lora_sel.get("strength") is not None:
+                    try:
+                        strength = float(lora_sel["strength"])
+                    except (TypeError, ValueError):
+                        strength = float(resolved.recommended_strength) if resolved.recommended_strength is not None else 0.8
+                else:
+                    strength = float(resolved.recommended_strength) if resolved.recommended_strength is not None else 0.8
+                if resolved.strength_min is not None and strength < float(resolved.strength_min):
+                    strength = float(resolved.strength_min)
+                if resolved.strength_max is not None and strength > float(resolved.strength_max):
+                    strength = float(resolved.strength_max)
+                entry = {
+                    "loraId": resolved.id,
+                    "name": resolved.name,
+                    "version": resolved.version,
+                    "modelFamily": resolved.model_family,
+                    "compatibleModelFamilies": list(resolved.compatible_model_families),
+                    "strength": strength,
+                    "baseGenerator": lora_family,
+                    "sourceTool": params.get("sourceFeature") or "image-generator",
+                    "filePath": resolved.file_path,
+                    "category": resolved.category,
+                    "modality": resolved.modality,
+                    "resolvedName": comfy_name,
+                }
+                provenance.append(entry)
+                if lora_resolved is None:
+                    lora_resolved = resolved
+                    lora_comfy_name = comfy_name
+                    lora_strength = strength
+                else:
+                    lora_chain.append({"resolvedName": comfy_name, "strength": strength, "loraId": resolved.id})
+            if provenance:
+                params["lora_provenance"] = provenance[0]
+                params["lora_stack"] = provenance
+                names = ", ".join(item["name"] for item in provenance)
+                job.message = f"ImageGen · {contract.workflow_key} · {ckpt} · LoRA {names}"
         job.params_json = json.dumps(params)
         db.commit()
 
@@ -6313,6 +6332,7 @@ class JobQueue:
             grow_mask_by=grow_mask_by,
             lora_name=lora_comfy_name,
             lora_strength=lora_strength,
+            lora_chain=lora_chain or None,
             scene_image=scene_image,
             environment_references=[scene_image] if scene_image else None,
             character_references=[reference_image] if reference_image else None,
@@ -6360,7 +6380,12 @@ class JobQueue:
         db.commit()
         polled = await local_comfy_poll(
             submitted,
-            wait_fn=lambda pid: self._wait_comfy(job, pid, on_progress=on_progress),
+            wait_fn=lambda pid: self._wait_comfy(
+                job,
+                pid,
+                on_progress=on_progress,
+                preview_engine="image",
+            ),
         )
         files = list(polled.get("files") or [])
         if not files:
@@ -6600,6 +6625,18 @@ class JobQueue:
             )
             job.stage = ImageJobStage.COMPLETED.value
             db.commit()
+            stored = {}
+            try:
+                stored = json.loads(job.params_json or "{}")
+            except Exception:
+                stored = {}
+            if stored.get("codirectorConversation") and stored.get("output_asset_id"):
+                try:
+                    from .codirector.execution.generation_ready_notice import append_concept_still
+
+                    append_concept_still(db, project.id, str(stored.get("output_asset_id") or ""), str(job.id))
+                except Exception:
+                    logger.debug("concept still notice failed", exc_info=True)
         except Exception as reg_exc:
             # Validated output exists but registration/provenance failed — not completed
             params = {

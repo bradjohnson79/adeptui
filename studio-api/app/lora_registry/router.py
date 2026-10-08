@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from . import registry
 from .catalog import catalog_items, get_catalog_item
@@ -72,6 +74,86 @@ def detect(auto_enable: bool = True):
     """Register discovered files (idempotent; existing registrations kept)."""
     created = registry.register_detected_files(auto_enable=auto_enable)
     return {"registered": [r.public_dict() for r in created], "count": len(created)}
+
+
+@router.post("/resolve")
+def resolve_source(body: dict):
+    """Resolve a Hugging Face or Civitai page. Does not download."""
+    from .sources import resolve_lora_source
+
+    try:
+        resolved = resolve_lora_source(str(body.get("url") or ""))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return resolved.public_dict()
+
+
+@router.post("/install-url")
+def install_url(body: dict):
+    """Download one resolved LoRA into Adept-managed storage."""
+    if not body.get("confirm"):
+        raise HTTPException(400, "Confirm the install before Adept UI downloads this LoRA.")
+    try:
+        return registry.install_from_url(
+            str(body.get("url") or ""),
+            filename=str(body.get("filename") or ""),
+            allow_update=bool(body.get("update")),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/import")
+async def import_lora(
+    file: UploadFile = File(...),
+    modelFamily: str = Form(""),
+):
+    """Import one local .safetensors file. The upload is weights only."""
+    from .metadata import MAX_LORA_BYTES
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix != ".safetensors":
+        raise HTTPException(400, "Choose a .safetensors LoRA file.")
+    tmp = Path(tempfile.mkdtemp(prefix="adept-lora-")) / "upload.safetensors"
+    size = 0
+    try:
+        with open(tmp, "wb") as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_LORA_BYTES:
+                    raise HTTPException(400, "That file is larger than Adept UI will install as a LoRA.")
+                handle.write(chunk)
+        return registry.import_local_file(tmp, original_name=file.filename or "lora.safetensors", model_family=modelFamily)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+        try:
+            tmp.parent.rmdir()
+        except OSError:
+            pass
+
+
+@router.get("/token-status")
+def token_status():
+    from .sources import token_configured
+
+    return token_configured()
+
+
+@router.put("/token")
+def save_token(body: dict):
+    """Store a provider token outside the LoRA registry. The token is not returned."""
+    provider = str(body.get("provider") or "").strip().lower()
+    if provider not in {"huggingface", "civitai"}:
+        raise HTTPException(400, "Choose Hugging Face or Civitai.")
+    from ..secrets_store import set_secret
+
+    secret_name = "hf_token" if provider == "huggingface" else "civitai_api_token"
+    set_secret(secret_name, str(body.get("token") or ""))
+    return {"provider": provider, "configured": bool(str(body.get("token") or "").strip())}
 
 
 @router.post("/register")

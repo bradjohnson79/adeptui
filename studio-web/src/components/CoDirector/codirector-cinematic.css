@@ -206,12 +206,33 @@
   color: #f3f6f8;
 }
 
-.codirector-shell.mode-popup .codirector-msg.user {
-  max-width: 75%;
+.codirector-shell.cinematic .codirector-messages > div {
+  align-items: flex-start;
+  padding-left: 0.45rem;
+  padding-right: 0;
 }
 
-.codirector-shell.mode-popup .codirector-msg.assistant {
-  max-width: 92%;
+.codirector-shell.cinematic .codirector-messages > div:has(> .codirector-msg.user) {
+  align-items: flex-end;
+  padding-left: 0;
+  padding-right: 0.45rem;
+}
+
+.codirector-shell.cinematic .codirector-msg {
+  width: fit-content;
+  max-width: min(76%, 38rem);
+}
+
+.codirector-shell.mode-popup .codirector-msg.user,
+.codirector-shell.cinematic .codirector-msg.user {
+  max-width: min(76%, 38rem);
+  margin-left: auto;
+}
+
+.codirector-shell.mode-popup .codirector-msg.assistant,
+.codirector-shell.cinematic .codirector-msg.assistant {
+  max-width: min(76%, 38rem);
+  margin-right: auto;
 }
 
 .codirector-shell.mode-popup .codirector-msg-bubble,
@@ -224,22 +245,34 @@
 
 .codirector-shell.mode-popup .codirector-msg.user .codirector-msg-bubble,
 .codirector-shell.cinematic .codirector-msg.user .codirector-msg-bubble {
-  background: var(--codirector-accent-soft);
-  color: var(--codirector-text);
+  background: #12315c;
+  color: #f3f6f8;
   border: 1px solid transparent;
+  text-align: left;
+  border-radius: 16px 16px 6px 16px;
 }
 
 .codirector-shell.mode-popup.cinematic .codirector-msg.assistant .codirector-msg-bubble,
 .codirector-shell.mode-fullscreen.cinematic .codirector-msg.assistant .codirector-msg-bubble {
-  background: #1c2329 !important;
+  background: #3d1868 !important;
   border: 1px solid transparent;
   padding-inline: 0.55rem;
   color: #f3f6f8 !important;
+  text-align: left;
+  border-radius: 16px 16px 16px 6px;
 }
 
 .codirector-shell.mode-popup.cinematic .codirector-msg.assistant .codirector-msg-bubble p,
 .codirector-shell.mode-fullscreen.cinematic .codirector-msg.assistant .codirector-msg-bubble p {
   color: #f3f6f8 !important;
+}
+
+.codirector-shell.cinematic .codirector-msg.user .codirector-msg-bubble a {
+  color: #c5d8f5;
+}
+
+.codirector-shell.cinematic .codirector-msg.assistant .codirector-msg-bubble a {
+  color: #e4d4f7;
 }
 
 .codirector-shell.mode-popup .codirector-composer,

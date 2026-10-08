@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 PROVIDER_ID = "local"
 ADAPTER_ID = "comfy"
@@ -57,6 +57,7 @@ async def submit(
     outpaint_bottom: int = 256,
     lora_name: Optional[str] = None,
     lora_strength: Optional[float] = None,
+    lora_chain: list | None = None,
     scene_image: Any = None,
     character_references: Any = None,
     environment_references: Any = None,
@@ -107,6 +108,35 @@ async def submit(
             character_references=character_references,
             environment_references=environment_references,
         )
+        if lora_chain:
+            from .asset_refs import chain_lora_loaders
+
+            before = sum(
+                1
+                for node in wf.values()
+                if isinstance(node, dict)
+                and node.get("class_type") in {"LoraLoader", "LoraLoaderModelOnly"}
+                and isinstance(node.get("_meta"), dict)
+                and (node["_meta"].get("adeptLora") or node["_meta"].get("adeptLoraId"))
+            )
+            wf = chain_lora_loaders(wf, list(lora_chain))
+            after = sum(
+                1
+                for node in wf.values()
+                if isinstance(node, dict)
+                and node.get("class_type") in {"LoraLoader", "LoraLoaderModelOnly"}
+                and isinstance(node.get("_meta"), dict)
+                and (node["_meta"].get("adeptLora") or node["_meta"].get("adeptLoraId"))
+            )
+            if after < before + len(lora_chain):
+                return {
+                    "ok": False,
+                    "error": "LORA_CHAIN_UNSUPPORTED",
+                    "message": "This image workflow cannot apply every selected LoRA. Remove the extra LoRAs and try again.",
+                    "providerId": PROVIDER_ID,
+                    "adapter": ADAPTER_ID,
+                    "mock": False,
+                }
         wf = prepare_executable_graph(
             contract,
             wf,

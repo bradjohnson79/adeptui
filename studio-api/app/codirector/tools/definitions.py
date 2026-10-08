@@ -184,7 +184,9 @@ class ToolProposalRequest(BaseModel):
 _ENGINE_CHOICES = (
     "auto",
     "minimax-h3",
+    "minimax-h3-base-optimized",
     "ltx-2.5",
+    "hunyuan-video-1.5-distilled",
     "fal_seedance",
     "fal_kling",
     "fal_veo",
@@ -4333,6 +4335,8 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("environmentName", "string", max_length=200),
             ToolParameter("assetId", "string", max_length=64),
             ToolParameter("identityId", "string", max_length=36),
+            ToolParameter("characterAssetId", "string", max_length=64),
+            ToolParameter("environmentAssetId", "string", max_length=64),
         ),
     ),
     ToolDefinition(
@@ -5020,8 +5024,9 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter(
                 "modelFamilyPreference",
                 "string",
-                choices=("zimage", "flux", "qwen", "imagen"),
+                choices=("zimage", "flux", "qwen", "qwen2512", "krea2", "sd15", "imagen"),
             ),
+            ToolParameter("lockModelFamily", "boolean"),
             ToolParameter("presetId", "string", max_length=64),
             ToolParameter("acceptExpandedPrompt", "boolean"),
             ToolParameter("acceptedPrompt", "string", max_length=4000),
@@ -5046,8 +5051,9 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter(
                 "modelFamilyPreference",
                 "string",
-                choices=("zimage", "flux", "qwen", "imagen"),
+                choices=("zimage", "flux", "qwen", "qwen2512", "krea2", "sd15", "imagen"),
             ),
+            ToolParameter("lockModelFamily", "boolean"),
             ToolParameter("purpose", "string", max_length=64),
             ToolParameter("sceneId", "string", max_length=36),
         ),

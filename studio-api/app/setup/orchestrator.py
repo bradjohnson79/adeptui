@@ -22,7 +22,13 @@ _CONTEXTS: dict[str, dict[str, Any]] = {}
 _CONTEXT_LOCK = threading.RLock()
 
 
-def get_setup_status() -> dict[str, Any]:
+def get_setup_status(*, refresh: bool = False) -> dict[str, Any]:
+    if refresh:
+        from .diagnostics import invalidate_verify_cache
+        from .status import invalidate_status_cache
+
+        invalidate_status_cache()
+        invalidate_verify_cache()
     return build_status()
 
 
@@ -1252,6 +1258,11 @@ def _install_index_tts2(component_id: str, *, force: bool = False) -> dict[str, 
 
 def execute_recommended_action(component_id: str) -> dict[str, Any]:
     component = get_component(component_id)
+    from .model_license import assert_installation_allowed
+
+    diagnostic_preview = diagnose_component(component_id)
+    if diagnostic_preview.get("recommendation") in {"install", "repair", "reinstall", "update"}:
+        assert_installation_allowed(component_id)
     if is_retired_video_setup_component(component_id):
         operation = registry.create("component_action", [component_id])
         return registry.finish(
@@ -1267,7 +1278,7 @@ def execute_recommended_action(component_id: str) -> dict[str, Any]:
                 ),
             },
         )
-    diagnostic = diagnose_component(component_id)
+    diagnostic = diagnostic_preview
     action = diagnostic["recommendation"]
 
     if component.installer == "m210b_qwen_voice" and action in (
@@ -1417,6 +1428,9 @@ def execute_recommended_action(component_id: str) -> dict[str, Any]:
 
 def start_link_existing_pack(component_id: str) -> dict[str, Any]:
     get_component(component_id)
+    from .model_license import assert_installation_allowed
+
+    assert_installation_allowed(component_id)
     # Start the worker so it owns the pause/resume cycle. Using initial_checkpoint
     # would mark the pause as preflight and drop the path response on resume.
     return _start_context(
@@ -1433,6 +1447,9 @@ def start_link_existing_pack(component_id: str) -> dict[str, Any]:
 def start_choose_install_location(component_id: str) -> dict[str, Any]:
     """Prompt for a new install destination (empty folders accepted). Does not download alone."""
     get_component(component_id)
+    from .model_license import assert_installation_allowed
+
+    assert_installation_allowed(component_id)
     return _start_context(
         "component_action",
         [{

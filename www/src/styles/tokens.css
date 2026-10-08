@@ -1,0 +1,25 @@
+:root {
+  --bg0: #050914;
+  --bg1: #070b14;
+  --ink: #f3f7fb;
+  --muted: #9db0c3;
+  --quiet: #6b7c8f;
+  --gold: #d4af37;
+  --gold-bright: #f6e27a;
+  --teal: #2dd4bf;
+  --cyan: #22d3ee;
+  --violet: #a78bfa;
+  --line: rgba(148, 220, 255, 0.18);
+  --line-strong: rgba(45, 212, 191, 0.45);
+  --panel: rgba(12, 20, 34, 0.62);
+  --panel-strong: rgba(10, 16, 28, 0.86);
+  --radius: 22px;
+  --radius-control: 999px;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.38);
+  --font-display: "Fraunces", "Iowan Old Style", Palatino, Georgia, serif;
+  --font-body: "Manrope", "Segoe UI", "Helvetica Neue", sans-serif;
+  --measure: 68ch;
+  --nav-h: 4.25rem;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  color-scheme: dark;
+}

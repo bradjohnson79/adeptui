@@ -36,6 +36,7 @@ import type {
   EssentialAgreementDocument,
   EssentialAgreementPayload,
   EssentialReadinessBadges,
+  ModelLicenseDetail,
 } from "./setup/types";
 import type { InstallJob } from "./contracts/installJobs";
 import type {
@@ -3081,7 +3082,10 @@ foundationStatus: (projectId: string) =>
     req<EssentialAgreementPayload>("/api/setup/essential-agreement/decline", { method: "POST" }),
   setupDetect: () => req<SetupLegacyDetection>("/api/setup/detect"),
   setupState: () => req<SetupLegacyState>("/api/setup/state"),
-  setupStatus: () => req<SetupStatusResponse>("/api/setup/status"),
+  setupStatus: (refresh = false) =>
+    req<SetupStatusResponse>(`/api/setup/status${refresh ? "?refresh=1" : ""}`),
+  completeFirstRun: () =>
+    req<{ firstRunSetupComplete: boolean }>("/api/setup/first-run/complete", { method: "POST" }),
   setupLifecycleComponents: (query = "", group?: string) => {
     const params = new URLSearchParams();
     if (query.trim()) params.set("query", query.trim());
@@ -3226,6 +3230,14 @@ foundationStatus: (projectId: string) =>
   setupRecommendedAction: (componentId: string) =>
     req<SetupOperation>(`/api/setup/components/${encodeURIComponent(componentId)}/recommended-action`, {
       method: "POST",
+    }),
+  setupModelLicense: (modelId: string) =>
+    req<ModelLicenseDetail>(`/api/setup/model-licenses/${encodeURIComponent(modelId)}`),
+  setupAcknowledgeModelLicense: (modelId: string, body: { region: string; confirmed: boolean }) =>
+    req<ModelLicenseDetail>(`/api/setup/model-licenses/${encodeURIComponent(modelId)}/acknowledge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     }),
   setupRefreshSource: (componentId: string) =>
     req<{
@@ -7402,6 +7414,31 @@ foundationStatus: (projectId: string) =>
     download: (loraId: string, approved = false) =>
       req<any>(`/api/loras/${encodeURIComponent(loraId)}/download?approved=${approved}`, { method: "POST" }),
     refresh: () => req<{ ok: boolean; loras: any[] }>(`/api/loras/refresh`, { method: "POST" }),
+    resolve: (url: string) =>
+      req<any>(`/api/loras/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      }),
+    installUrl: (url: string, filename = "", update = false) =>
+      req<any>(`/api/loras/install-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, filename, confirm: true, update }),
+      }),
+    importFile: (file: File, modelFamily = "") => {
+      const body = new FormData();
+      body.append("file", file);
+      if (modelFamily) body.append("modelFamily", modelFamily);
+      return req<any>(`/api/loras/import`, { method: "POST", body });
+    },
+    tokenStatus: () => req<{ huggingface: boolean; civitai: boolean }>(`/api/loras/token-status`),
+    saveToken: (provider: "huggingface" | "civitai", token: string) =>
+      req<{ provider: string; configured: boolean }>(`/api/loras/token`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, token }),
+      }),
   },
   loraStack: (scope = "global") => req<{ scope: string; stack: any[] }>(`/api/lora/stack?scope=${encodeURIComponent(scope)}`),
   putLoraStack: (scope: string, stack: any[]) =>

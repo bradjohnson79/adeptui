@@ -308,6 +308,96 @@ def wire_lora_nodes(
     return [node_id, 0], None
 
 
+def _adept_lora_ids(graph: dict[str, Any]) -> list[str]:
+    found: list[str] = []
+    for node_id, node in graph.items():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") not in {"LoraLoader", "LoraLoaderModelOnly"}:
+            continue
+        meta = node.get("_meta") if isinstance(node.get("_meta"), dict) else {}
+        if meta.get("adeptLora") or meta.get("adeptLoraId"):
+            found.append(str(node_id))
+    return found
+
+
+def chain_lora_loaders(graph: dict[str, Any], loras: list[Any]) -> dict[str, Any]:
+    """Chain extra LoRA loaders behind the loader the workflow already inserted.
+
+    Workflows that never declared a user LoRA slot are left unchanged.
+    """
+    if not loras:
+        return graph
+    loaders = _adept_lora_ids(graph)
+    if not loaders:
+        return graph
+
+    def feeds_another(node_id: str) -> bool:
+        for other_id in loaders:
+            if other_id == node_id:
+                continue
+            model_in = (graph[other_id].get("inputs") or {}).get("model")
+            if model_in == [node_id, 0]:
+                return True
+        return False
+
+    tails = [node_id for node_id in loaders if not feeds_another(node_id)]
+    tail = tails[-1]
+    for spec in loras:
+        strength = float(getattr(spec, "strength", None) or (spec.get("strength") if isinstance(spec, dict) else None) or 0.8)
+        name = ""
+        if isinstance(spec, dict):
+            name = str(spec.get("resolvedName") or spec.get("name") or spec.get("loraId") or "").strip()
+        else:
+            name = str(getattr(spec, "resolvedName", None) or getattr(spec, "loraId", "") or "").strip()
+        if not name:
+            continue
+        new_id = f"lora_{len(graph) + 1}"
+        while new_id in graph:
+            new_id += "x"
+        previous = graph[tail]
+        uses_clip = previous.get("class_type") == "LoraLoader" and (previous.get("inputs") or {}).get("clip") is not None
+        if uses_clip:
+            graph[new_id] = {
+                "class_type": "LoraLoader",
+                "inputs": {
+                    "model": [tail, 0],
+                    "clip": [tail, 1],
+                    "lora_name": name,
+                    "strength_model": strength,
+                    "strength_clip": strength,
+                },
+                "_meta": {"title": f"LoRA — {name}", "adeptLora": True},
+            }
+        else:
+            graph[new_id] = {
+                "class_type": "LoraLoaderModelOnly",
+                "inputs": {
+                    "model": [tail, 0],
+                    "lora_name": name,
+                    "strength_model": strength,
+                },
+                "_meta": {"title": f"LoRA — {name}", "adeptLora": True},
+            }
+        for node_id, node in list(graph.items()):
+            if node_id == new_id or not isinstance(node, dict):
+                continue
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            for key, value in list(inputs.items()):
+                if value == [tail, 0]:
+                    inputs[key] = [new_id, 0]
+                elif uses_clip and value == [tail, 1]:
+                    inputs[key] = [new_id, 1]
+        graph[new_id]["inputs"]["model"] = [tail, 0]
+        if uses_clip:
+            graph[new_id]["inputs"]["clip"] = [tail, 1]
+        loaders.append(new_id)
+        tail = new_id
+    return graph
+
+
 def krea2_lora_search_roots(settings: Any) -> list[Path]:
     """LoRA search roots: configured Krea 2 / Adept model roots first."""
     roots: list[Path] = []

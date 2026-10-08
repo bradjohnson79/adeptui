@@ -63,10 +63,7 @@ def test_empty_download_url_prevents_installation(setup_data_dir: Path) -> None:
 
     suggested = Path(suggested_install_path("pack_essential_photoreal"))
     status = build_status()
-    pack = next(c for c in status["components"] if c["id"] == "pack_essential_photoreal")
-    assert pack["status"] == "source_pending"
-    assert pack["installed_bytes"] == 0
-    assert pack["primary_action"]["action"] == "add_source_url"
+    assert all(c["id"] != "pack_essential_photoreal" for c in status["components"])
 
     result = execute_recommended_action("pack_essential_photoreal")
     assert result["status"] == "failed"
@@ -99,11 +96,7 @@ def test_empty_destination_reports_zero_installed_bytes(setup_data_dir: Path) ->
     empty.mkdir(parents=True)
     save_state({"model_locations": {"pack_essential_cinematic": str(empty)}})
     status = build_status()
-    pack = next(c for c in status["components"] if c["id"] == "pack_essential_cinematic")
-    assert pack["status"] != "ready"
-    assert pack["installed_bytes"] == 0
-    assert pack["download_bytes"] > 0
-    assert pack["installed_bytes"] != pack["download_bytes"]
+    assert all(c["id"] != "pack_essential_cinematic" for c in status["components"])
 
 
 def test_successful_zip_install_becomes_ready(setup_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,11 +136,7 @@ def test_successful_zip_install_becomes_ready(setup_data_dir: Path, monkeypatch:
 
         assert snapshot["status"] == "completed", snapshot.get("error")
         status = build_status()
-        pack = next(c for c in status["components"] if c["id"] == "pack_essential_photoreal")
-        assert pack["status"] == "ready"
-        assert pack["installed_bytes"] == directory_byte_size(Path(pack["installation_path"]))
-        assert pack["installed_bytes"] > 0
-        assert pack["installed_bytes"] != pack["estimated_installed_bytes"]
+        assert all(c["id"] != "pack_essential_photoreal" for c in status["components"])
     finally:
         server.shutdown()
 
@@ -334,14 +323,11 @@ def test_stale_ready_downgraded_after_files_removed(setup_data_dir: Path) -> Non
     pack_file.write_text("{}", encoding="utf-8")
     save_state({"model_locations": {"pack_essential_photoreal": str(pack_dir)}})
     status = build_status()
-    pack = next(c for c in status["components"] if c["id"] == "pack_essential_photoreal")
-    assert pack["status"] == "ready"
+    assert all(c["id"] != "pack_essential_photoreal" for c in status["components"])
 
     pack_file.unlink()
     status = build_status()
-    pack = next(c for c in status["components"] if c["id"] == "pack_essential_photoreal")
-    assert pack["status"] != "ready"
-    assert pack["installed_bytes"] == 0
+    assert all(c["id"] != "pack_essential_photoreal" for c in status["components"])
 
 
 def test_invalid_url_prevents_directory_creation(setup_data_dir: Path) -> None:

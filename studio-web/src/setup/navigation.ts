@@ -36,5 +36,33 @@ export function buildAiGuidedSetupPath({
     params.set("workspace", "setup");
     return `/project/${encodeURIComponent(projectId)}?${params.toString()}${hash}`;
   }
-  return `/?${params.toString()}${hash}`;
+  return `/setup?${params.toString()}${hash}`;
+}
+
+/** Setup opens the existing wizard. It never attaches create=1. */
+export function buildSetupWizardPath(projectId?: string | null): string {
+  return buildAiGuidedSetupPath({
+    projectId,
+    source: "workspace_launch",
+  });
+}
+
+export type HomeLaunchAction =
+  | { type: "create-project" }
+  | { type: "open-setup"; projectId?: string | null };
+
+/**
+ * create=1 opens Create Project only for a real project pending entry.
+ * A setup deep link always opens the wizard.
+ */
+export function homeLaunchAction(args: {
+  forcedCreate: boolean;
+  pendingKind?: string | null;
+  projectId?: string | null;
+}): HomeLaunchAction | null {
+  if (args.pendingKind === "setup") {
+    return { type: "open-setup", projectId: args.projectId };
+  }
+  if (args.forcedCreate) return { type: "create-project" };
+  return null;
 }

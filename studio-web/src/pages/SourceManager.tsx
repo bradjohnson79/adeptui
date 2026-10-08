@@ -272,7 +272,7 @@ export default function SourceManagerPage({ embedded = false }: { embedded?: boo
           </p>
         )}
 
-        <section className="setup-component-section ds-surface" aria-labelledby="sm-capabilities-heading">
+        {!embedded && <section className="setup-component-section ds-surface" aria-labelledby="sm-capabilities-heading">
           <div className="setup-section-heading">
             <h2 id="sm-capabilities-heading">What is blocked right now</h2>
             <p>
@@ -287,7 +287,7 @@ export default function SourceManagerPage({ embedded = false }: { embedded?: boo
             subsystems={relevantSubsystems}
             limit={12}
           />
-        </section>
+        </section>}
 
         <section className="setup-component-section ds-surface" aria-labelledby="sm-providers-heading">
           <div className="setup-section-heading">

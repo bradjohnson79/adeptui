@@ -193,12 +193,16 @@ def compile_provider_prompt(
         else:
             label = (videos[0].get("label") or "the previous part").strip()
             lines.append(f"<Video 1> is {label}.")
-    spoken = " ".join(str(spoken_language or "").split())
-    if spoken:
-        lines.append(
-            f"Any words in this new shot are spoken in {spoken} only. "
-            "The reference sound is the room and the action. Do not copy its language."
-        )
+    spoken = " ".join(str(spoken_language or "").split()) or "English"
+    from .dialogue_authority import prompt_asks_to_speak
+
+    lock = (
+        f"Spoken language is {spoken} only. Every spoken word is in {spoken}. "
+        "Do not speak Chinese or any other language."
+    )
+    if not prompt_asks_to_speak(str(prompt or "")):
+        lock = f"{lock} This shot has no written dialogue, so nobody speaks."
+    lines.insert(0, lock)
     if last_picture:
         lines.append(
             f"<Picture {last_picture}> is the visual state this shot begins from. "

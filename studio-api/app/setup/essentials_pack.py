@@ -17,7 +17,6 @@ PACK_ID = "adept_ui_essentials"
 PACK_CHANNEL: PackChannel = "local_essentials"
 
 ESSENTIAL_IDS = (
-    "videochat3_4b",
     "sam21_hiera_tiny",
     "grounding_dino_tiny",
     "moge2_geometry",
@@ -34,7 +33,7 @@ CAPABILITY_GROUPS = (
     {
         "id": "video_intelligence",
         "label": "Video Intelligence",
-        "componentIds": ["videochat3_4b", "internvideo3_8b"],
+        "componentIds": ["internvideo3_8b"],
     },
     {
         "id": "world_intelligence",

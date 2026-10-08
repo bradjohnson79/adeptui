@@ -79,6 +79,21 @@ describe("requestCache", () => {
     expect(callCount).toBe(2);
   });
 
+  it("does not reuse a catalog response across modality query params", async () => {
+    let callCount = 0;
+    const fetcher = vi.fn().mockImplementation(async () => {
+      callCount += 1;
+      return { call: callCount };
+    });
+    const llm = await cachedFetch("GET", "/api/production-control/models?modality=llm", fetcher, 30_000);
+    const image = await cachedFetch("GET", "/api/production-control/models?modality=image", fetcher, 30_000);
+    const imageAgain = await cachedFetch("GET", "/api/production-control/models?modality=image", fetcher, 30_000);
+    expect(callCount).toBe(2);
+    expect(llm).toEqual({ call: 1 });
+    expect(image).toEqual({ call: 2 });
+    expect(imageAgain).toEqual(image);
+  });
+
   it("bypasses cache when TTL is 0", async () => {
     let callCount = 0;
     const fetcher = vi.fn().mockImplementation(async () => {

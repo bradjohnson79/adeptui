@@ -81,6 +81,8 @@ export type CoDirectorGenerationReady = {
   outcome: CoDirectorGenerationReadyOutcome;
   modality: string;
   actionLabel?: string | null;
+  /** Text-only completion. The progress card already shows the picture. */
+  noticeOnly?: boolean;
   assetId?: string | null;
   previewKind?: "image" | "video" | "audio" | string | null;
   technical?: string | null;
@@ -301,6 +303,15 @@ export interface GenerationPlan {
   creatorAck?: string;
 }
 
+export interface CoDirectorImageJob {
+  jobId: string;
+  modelLabel: string;
+  aspect: string;
+  width: number;
+  height: number;
+  provider: string;
+}
+
 export interface CoDirectorGenerationJob {
   status?: string;
   stage?: string;
@@ -340,6 +351,8 @@ export interface CoDirectorMessage {
   execution?: CoDirectorMessageExecution;
   /** Generation ready / fail / cancel notice (server-authored, exactly-once). */
   generationReady?: CoDirectorGenerationReady;
+  /** Live local still: job confirmation, percentage, and in-progress thumbnail. */
+  imageJob?: CoDirectorImageJob;
   /** Stable approval / proposal identity for chat event dedupe (not shown in UI). */
   approvalId?: string;
   proposalId?: string;
@@ -475,6 +488,17 @@ function sanitizeMessagesForCache(messages: CoDirectorMessage[]): CoDirectorMess
       status: m.status,
       messageType: m.messageType,
     };
+    const live = m.imageJob;
+    if (live && typeof live === "object" && typeof live.jobId === "string" && live.jobId.trim()) {
+      sanitized.imageJob = {
+        jobId: live.jobId.slice(0, 80),
+        modelLabel: typeof live.modelLabel === "string" ? live.modelLabel.slice(0, 80) : "Local image model",
+        aspect: typeof live.aspect === "string" ? live.aspect.slice(0, 16) : "",
+        width: typeof live.width === "number" ? live.width : 0,
+        height: typeof live.height === "number" ? live.height : 0,
+        provider: typeof live.provider === "string" ? live.provider.slice(0, 40) : "Local",
+      };
+    }
     const gr = m.generationReady;
     if (gr && typeof gr === "object" && typeof gr.messageId === "string") {
       sanitized.generationReady = {
@@ -483,6 +507,7 @@ function sanitizeMessagesForCache(messages: CoDirectorMessage[]): CoDirectorMess
         outcome: gr.outcome === "failed" || gr.outcome === "cancelled" ? gr.outcome : "ready",
         modality: typeof gr.modality === "string" ? gr.modality.slice(0, 32) : "image",
         actionLabel: typeof gr.actionLabel === "string" ? gr.actionLabel.slice(0, 64) : null,
+        noticeOnly: gr.noticeOnly === true,
         assetId: typeof gr.assetId === "string" ? gr.assetId.slice(0, 120) : null,
         previewKind: typeof gr.previewKind === "string" ? gr.previewKind.slice(0, 16) : null,
         technical: typeof gr.technical === "string" ? gr.technical.slice(0, 4000) : null,

@@ -757,6 +757,34 @@ def handle(
             admission_blocked.setdefault("creatorAck", "")
             return admission_blocked
 
+    # Installed LoRAs only. A name in the request can be applied. Unknown names are not invented.
+    lora_note = ""
+    if not hosted and model_family and "lora" in (compile_source or "").lower():
+        try:
+            from ....lora_registry.registry import compatible_loras, match_prompt_lora
+
+            available = compatible_loras(model_family, "image")
+            names = [rec.name for rec in available if rec.name]
+            if isinstance(body.get("creativeContext"), dict):
+                body["creativeContext"]["availableLoras"] = names
+            matched = match_prompt_lora(compile_source or "", model_family)
+            if matched is not None:
+                selection = {
+                    "id": matched.id,
+                    "loraId": matched.id,
+                    "name": matched.name,
+                    "strength": matched.recommended_strength if matched.recommended_strength is not None else 0.8,
+                }
+                body["lora"] = selection
+                body["loras"] = [selection]
+                lora_note = f" Using the installed LoRA {matched.name}."
+            elif names:
+                lora_note = " Installed LoRAs for this model: " + ", ".join(names) + ". None of those names were in the request, so none were applied."
+            else:
+                lora_note = " No LoRAs are installed for this image model."
+        except Exception:
+            logger.debug("installed LoRA lookup failed", exc_info=True)
+
     # Submit the real job.
     job = enqueue_imagegen_job(db, project_id, body, scene_id=scene_id or None)
 
@@ -790,7 +818,7 @@ def handle(
         "character_ids": resolved_ids,
         "reference_asset_id": reference_asset_id,
         "reference_asset_ids": resolved_refs,
-        "creatorAck": route_plan.disclose or profile.acknowledgement(),
+        "creatorAck": (route_plan.disclose or profile.acknowledgement() or "") + lora_note,
         "aspectRatio": out_aspect,
         "width": out_w,
         "height": out_h,

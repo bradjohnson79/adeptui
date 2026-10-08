@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 EngineName = Literal[
     "auto",
     "minimax-h3",
+    "minimax-h3-base-optimized",
     "ltx-2.5",
     "hunyuan-video-1.5-distilled",
     "seedance-2.0",

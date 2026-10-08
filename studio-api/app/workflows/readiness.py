@@ -49,11 +49,6 @@ WORKFLOW_MODEL_COMPONENTS: dict[str, tuple[str, ...]] = {
     "illustrious.txt2img": ("illustrious_local",),
     "sd15.txt2img": ("sd15_local",),
     "crs.sd15.control": ("sd15_local", "sd15_controlnet"),
-    "sensenova.txt2img": ("sensenova_u15_models",),
-    "sensenova.crs": ("sensenova_u15_models",),
-    "sensenova.edit": ("sensenova_u15_models",),
-    "sensenova.reference": ("sensenova_u15_models",),
-    "sensenova.ers": ("sensenova_u15_models",),
 }
 
 WORKFLOW_NOT_FOUND = "WORKFLOW_NOT_FOUND"

@@ -28,8 +28,8 @@ const GET_TTL_MS: Record<string, number> = {
 };
 
 function cacheKey(method: string, path: string): string {
-  const url = path.split("?")[0];
-  return `${method}:${url}`;
+  // Query is part of identity. /models?modality=image must not reuse the llm payload.
+  return `${method}:${path}`;
 }
 
 function getDefaultTtl(method: string, path: string): number {

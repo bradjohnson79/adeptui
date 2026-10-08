@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from ..model_license import ModelLicenseLocked
 from . import service
 
 router = APIRouter(prefix="/setup/lifecycle", tags=["setup-lifecycle"])
@@ -154,6 +155,8 @@ def lifecycle_install_component(component_id: str, body: InstallBody):
         )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except ModelLicenseLocked as exc:
+        raise HTTPException(409, exc.view.get("message") or "License setup required") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -168,6 +171,8 @@ def lifecycle_install_recipe(body: RecipeInstallBody):
         )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except ModelLicenseLocked as exc:
+        raise HTTPException(409, exc.view.get("message") or "License setup required") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

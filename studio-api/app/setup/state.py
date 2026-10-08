@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import settings
+from .catalog import REMOVED_UNUSED_SETUP_COMPONENT_IDS
 
 SCHEMA_VERSION = 3
 _LOCK = threading.RLock()
@@ -32,6 +33,7 @@ def empty_state() -> dict[str, Any]:
         "install_receipts": {},
         "download_queue": {},
         "source_manager": {},
+        "model_license_acknowledgements": {},
     }
 
 
@@ -56,10 +58,30 @@ def normalize_state(raw: Any) -> dict[str, Any]:
         "install_receipts",
         "download_queue",
         "source_manager",
+        "model_license_acknowledgements",
     ):
         if not isinstance(state.get(key), dict):
             state[key] = {}
+    _drop_removed_components(state)
+    # Missing means not yet migrated. Only an explicit true is complete.
+    if "first_run_setup_complete" in state:
+        state["first_run_setup_complete"] = state.get("first_run_setup_complete") is True
     return state
+
+
+def _drop_removed_components(state: dict[str, Any]) -> None:
+    """Drop Setup records for components Adept UI 1.1 no longer manages.
+
+    Leftover status rows otherwise keep showing Repair Recommended / Not Found
+    after the catalog entry is gone.
+    """
+    # Status rows are what Setup reloads into Repair Recommended / Not Found.
+    # Installer fixtures may still record a path while exercising the generic
+    # pack engine; those paths are not a public Setup component.
+    status = state.get("status")
+    if isinstance(status, dict):
+        for component_id in REMOVED_UNUSED_SETUP_COMPONENT_IDS:
+            status.pop(component_id, None)
 
 
 def load_state() -> dict[str, Any]:

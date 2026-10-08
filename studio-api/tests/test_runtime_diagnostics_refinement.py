@@ -102,21 +102,29 @@ def test_vae_file_present_reads_it(setup_data_dir: Path) -> None:
     assert result.healthy is True
 
 
-def test_upscale_file_missing_surfaces_filename_and_path(setup_data_dir: Path) -> None:
+def test_spatial_upscaler_is_not_a_managed_component(setup_data_dir: Path) -> None:
+    from app.setup.catalog import REMOVED_UNUSED_SETUP_COMPONENT_IDS, get_component, public_components
     from app.setup.diagnostics import verify_component
     from app.setup.state import save_state
 
-    model_dir = setup_data_dir / "models"
-    model_dir.mkdir()
-    save_state({"components": {}, "model_locations": {"ltx_2_5_spatial_upscaler": str(model_dir)}})
+    assert "ltx_2_5_spatial_upscaler" in REMOVED_UNUSED_SETUP_COMPONENT_IDS
+    assert all(item.id != "ltx_2_5_spatial_upscaler" for item in public_components())
+    save_state({"components": {}, "status": {"ltx_2_5_spatial_upscaler": {"status": "error"}}, "model_locations": {}})
+    from app.setup.state import load_state
 
-    result = verify_component("ltx_2_5_spatial_upscaler")
-    assert result.healthy is False
-    assert result.issue_code == "required_model_missing"
-    details_text = " ".join(result.details or ())
-    from app.config import settings
-    assert settings.ltx_2_5_spatial_upscaler in details_text
-    assert "models/upscale_models/" in details_text
+    assert "ltx_2_5_spatial_upscaler" not in load_state().get("status", {})
+    try:
+        get_component("ltx_2_5_spatial_upscaler")
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("spatial upscaler must not resolve as a setup component")
+    try:
+        verify_component("ltx_2_5_spatial_upscaler")
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("spatial upscaler must not be verified")
 
 
 # ── LTX 2.5 workflow readiness ───────────────────────────────────────────
@@ -143,15 +151,17 @@ def test_dependency_type_taxonomy_mapping() -> None:
         DEPENDENCY_TYPE_MODEL,
         DEPENDENCY_TYPE_TEXT_ENCODER,
         DEPENDENCY_TYPE_VAE,
-        DEPENDENCY_TYPE_UPSCALE_MODEL,
+        DEPENDENCY_TYPE_RUNTIME,
+        DEPENDENCY_TYPE_UNKNOWN,
         dependency_type_for,
     )
 
     assert dependency_type_for("ltx_2_5_checkpoint") == DEPENDENCY_TYPE_MODEL
     assert dependency_type_for("ltx_2_5_text_encoder") == DEPENDENCY_TYPE_TEXT_ENCODER
     assert dependency_type_for("ltx_2_5_video_vae") == DEPENDENCY_TYPE_VAE
-    assert dependency_type_for("ltx_2_5_spatial_upscaler") == DEPENDENCY_TYPE_UPSCALE_MODEL
-    assert dependency_type_for("ltx_checkpoint") == DEPENDENCY_TYPE_MODEL
+    assert dependency_type_for("ltx_2_5_spatial_upscaler") == DEPENDENCY_TYPE_UNKNOWN
+    assert dependency_type_for("magi_gpu_upscale") == DEPENDENCY_TYPE_RUNTIME
+    assert dependency_type_for("ltx_checkpoint") == DEPENDENCY_TYPE_UNKNOWN
 
 
 def test_dependency_type_unknown_for_missing_component() -> None:

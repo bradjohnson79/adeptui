@@ -5,7 +5,6 @@ import { LoRAManager } from "./LoRAManager";
 
 const CATS = [
   ["loras", "Creative Assets / LoRAs"],
-  ["packs", "Essential Packs"],
   ["models", "Models"],
   ["workflows", "Workflows"],
   ["nodes", "Nodes"],
@@ -46,7 +45,7 @@ export function MarketplacePanel({ project }: { project: Project }) {
   return (
     <div className="page marketplace-page">
       <h1>Adept Marketplace</h1>
-      <p className="muted">Curated shell — LoRAs and Essential Packs ship first. No silent downloads.</p>
+      <p className="muted">Curated shell — LoRAs ship first. No silent downloads.</p>
       {msg && <p className="pill warn">{msg}</p>}
 
       <div className="workspace-tabs" role="tablist">

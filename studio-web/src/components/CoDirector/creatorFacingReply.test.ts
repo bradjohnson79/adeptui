@@ -42,6 +42,29 @@ describe("creator facing replies", () => {
     expect(projected.technical).toContain("requested_action");
   });
 
+  it("shows the prose inside a conversation reply envelope", () => {
+    const projected = projectCreatorReply(JSON.stringify({
+      mode: "CONVERSATION",
+      projectId: "project-1",
+      reply: "She learned the trade as a civilian archivist, not as a soldier.",
+    }));
+    expect(projected.text).toContain("civilian archivist");
+    expect(projected.text).not.toContain("projectId");
+  });
+
+  it("shows the prose inside a broken conversation envelope", () => {
+    const broken = `{
+  "mode": "CONVERSATION",
+  "confidence": "high",
+  "reply": "He keeps a "closed" silhouette and a short coat."
+}`;
+    const projected = projectCreatorReply(broken);
+    expect(projected.text).toContain("short coat");
+    expect(projected.text).not.toContain('"mode"');
+    expect(projected.text.trim().startsWith("{")).toBe(false);
+    expect(projected.technical).toBeNull();
+  });
+
   it("leaves an ordinary sentence alone", () => {
     const projected = projectCreatorReply("I found Cade and I'm preparing the Timeline scene.");
     expect(projected.text).toBe("I found Cade and I'm preparing the Timeline scene.");

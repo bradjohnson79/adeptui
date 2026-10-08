@@ -21,11 +21,21 @@ def test_ltx_25_and_fal_are_not_silently_certified():
         assert by_id[mid].defaultEligible is False
 
 
-def test_illustrious_is_present_and_sensenova_not_default():
+def test_illustrious_is_present_and_sensenova_is_absent():
+    from app.production_control.model_registry import filter_for_action
+
     by_id = {m.id: m for m in list_models("image")}
     assert "illustrious-local" in by_id
-    assert by_id["sensenova-u15-local"].defaultEligible is False
-    assert by_id["sensenova-u15-local"].capabilityLabel != "Certified"
+    assert "sensenova-u15-local" not in by_id
+    dock = {row["id"] for row in filter_for_action("image", "generate")}
+    assert "sensenova-u15-local" not in dock
+    assert "qwen-image-edit-2509-local" not in dock
+    assert "qwen-image-2512-local" in dock
+    assert "flux-local" in dock
+    assert "zimage-local" in dock
+    assert "krea2-turbo-local" in dock
+    edit = by_id["qwen-image-edit-2509-local"]
+    assert edit.capabilityLabel == "Draft"
 
 
 def test_default_eligible_requires_certified_and_ready():

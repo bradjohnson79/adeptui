@@ -371,18 +371,9 @@ def test_status_does_not_auto_bind_asset_packs(setup_data_dir: Path) -> None:
     status = build_status()
     state = load_state()
     assert "pack_essential_photoreal" not in state.get("model_locations", {})
-    pack = next(
-        item for item in status["components"] if item["component_id"] == "pack_essential_photoreal"
+    assert all(
+        item["component_id"] != "pack_essential_photoreal" for item in status["components"]
     )
-    assert pack["status"] == "source_pending"
-    assert pack["issue_code"] in {
-        "download_source_missing",
-        "pack_provider_not_configured",
-        "pack_release_not_found",
-        "source_not_published",
-    }
-    assert pack["installed_bytes"] == 0
-    assert pack["install_disabled"] is True
 
 
 def test_status_refreshes_stale_path_not_configured_diagnostic(setup_data_dir: Path) -> None:
@@ -410,14 +401,13 @@ def test_status_refreshes_stale_path_not_configured_diagnostic(setup_data_dir: P
         }
     )
 
+    from app.setup.state import load_state
+
     status = build_status()
-    pack = next(
-        item for item in status["components"] if item["component_id"] == "pack_essential_photoreal"
+    assert all(
+        item["component_id"] != "pack_essential_photoreal" for item in status["components"]
     )
-    assert pack["installation_path"] == str(pack_path)
-    assert pack["issue_code"] == "required_files_missing"
-    assert pack["installed_bytes"] == 0
-    assert pack["estimated_installed_bytes"] > 0
+    assert "pack_essential_photoreal" not in load_state().get("status", {})
 
 
 def test_missing_asset_pack_path_is_not_recreated(setup_data_dir: Path) -> None:
@@ -482,11 +472,9 @@ def test_missing_source_install_fails_without_creating_directory(
     assert not suggested.exists()
 
     status = build_status()
-    pack = next(
-        item for item in status["components"] if item["component_id"] == "pack_essential_anime"
+    assert all(
+        item["component_id"] != "pack_essential_anime" for item in status["components"]
     )
-    assert pack["status"] == "source_pending"
-    assert pack["installed_bytes"] == 0
 
     snapshot = orchestrator.execute_recommended_action("pack_essential_anime")
     assert snapshot["status"] == "failed"
@@ -554,8 +542,9 @@ def test_status_exposes_install_kind_and_path_selector(setup_data_dir: Path) -> 
     by_id = {item["component_id"]: item for item in status["components"]}
     assert by_id["ltx_2_5_checkpoint"]["install_kind"] == "path_link"
     assert by_id["ltx_2_5_checkpoint"]["path_selector"] == "file"
-    assert by_id["pack_essential_photoreal"]["install_kind"] == "asset_pack"
-    assert by_id["pack_essential_photoreal"]["path_selector"] == "directory"
+    assert "pack_essential_photoreal" not in by_id
+    assert "pack_essential_anime" not in by_id
+    assert "pack_essential_cinematic" not in by_id
     assert by_id["ffmpeg"]["path_selector"] is None
 
 
@@ -565,11 +554,11 @@ def test_approve_install_creates_missing_directory(setup_data_dir: Path) -> None
 
     target = setup_data_dir / "models" / "creative_assets" / "legacy_link"
     assert not target.exists()
-    result = approve_install("pack_essential_anime", action="link", path=str(target))
+    with pytest.raises(KeyError):
+        approve_install("pack_essential_anime", action="link", path=str(target))
 
-    assert result["status"] == "installed"
-    assert target.exists()
-    assert load_state()["model_locations"]["pack_essential_anime"] == str(target)
+    assert not target.exists()
+    assert "pack_essential_anime" not in load_state().get("model_locations", {})
 
 
 def test_default_models_root_creates_comfy_shared_models(
@@ -638,10 +627,10 @@ def test_new_setup_endpoints(client, monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.post("/api/setup/prepare/plan").json()["required_actions"] == []
     assert client.post("/api/setup/components/ffmpeg/diagnostics").status_code == 200
     assert client.post("/api/setup/components/ffmpeg/update/later").json()["dismissed"] is True
-    suggested = client.get("/api/setup/components/pack_essential_photoreal/suggested-path")
+    suggested = client.get("/api/setup/components/ltx_2_5_checkpoint/suggested-path")
     assert suggested.status_code == 200
-    assert suggested.json()["path_selector"] == "directory"
-    assert client.post("/api/setup/browse-path", json={"component_id": "pack_essential_photoreal"}).json()["path"] == r"C:\Models"
+    assert suggested.json()["path_selector"] == "file"
+    assert client.post("/api/setup/browse-path", json={"component_id": "ltx_2_5_checkpoint"}).json()["path"] == r"C:\Models"
 
 
 def test_status_exposes_first_class_ai_guided_groups(setup_data_dir: Path) -> None:
@@ -653,13 +642,15 @@ def test_status_exposes_first_class_ai_guided_groups(setup_data_dir: Path) -> No
     assert by_id["ace_step_local"]["group"] == "Music"
     assert by_id["ace_step_local"]["surfaceGroups"] == ["Music"]
 
-    assert by_id["longcat-video-avatar-1-5-local"]["group"] == "Avatar"
-    assert by_id["longcat-video-avatar-1-5-local"]["surfaceGroups"] == ["Avatar", "Motion"]
+    assert "longcat-video-avatar-1-5-local" not in by_id
 
     assert by_id["fal_key"]["group"] == "API Providers"
     assert by_id["fal_key"]["subgroup"] == "Credentials"
     assert by_id["fal_key"]["surfaceGroups"] == ["API Providers"]
 
-    assert by_id["pack_essential_photoreal"]["group"] == "Creative Packs"
-    assert by_id["pack_essential_photoreal"]["subgroup"] == "Essential Packs"
-    assert by_id["pack_essential_photoreal"]["surfaceGroups"] == ["Creative Packs"]
+    assert "pack_essential_photoreal" not in by_id
+    assert "pack_essential_anime" not in by_id
+    assert "pack_essential_cinematic" not in by_id
+    assert by_id["magi_gpu_upscale"]["group"] == "MAGI"
+    assert by_id["magi_gpu_upscale"]["subgroup"] == "Finishing"
+    assert by_id["magi_gpu_upscale"]["surfaceGroups"] == ["MAGI"]

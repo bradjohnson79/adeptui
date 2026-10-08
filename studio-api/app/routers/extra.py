@@ -37,6 +37,7 @@ from ..setup import (
     start_link_existing_pack,
     start_prepare,
 )
+from ..setup.model_license import ModelLicenseLocked, acknowledge, public_view
 from ..setup.orchestrator import dismiss_update
 from ..setup.paths import suggested_install_path
 from ..setup_wizard import approve_install, detect_environment, load_setup_state, save_setup_state
@@ -58,8 +59,43 @@ def setup_state():
 
 
 @router.get("/setup/status")
-def setup_status():
-    return get_setup_status()
+def setup_status(refresh: bool = False):
+    return get_setup_status(refresh=refresh)
+
+
+@router.post("/setup/first-run/complete")
+def setup_first_run_complete():
+    """Save first-run completion only after required Python, FFmpeg, and ComfyUI are ready."""
+    from ..setup.first_run import FirstRunNotReady, complete_first_run
+
+    status = get_setup_status()
+    try:
+        complete_first_run(status.get("components") or [], fetch_nodes=True)
+    except FirstRunNotReady:
+        raise HTTPException(409, "Essential components are not ready.") from None
+    return {"firstRunSetupComplete": True}
+
+
+@router.get("/setup/model-licenses/{model_id}")
+def setup_model_license(model_id: str):
+    view = public_view(model_id)
+    if not view.get("licenseName") and model_id != "minimax-h3":
+        raise HTTPException(404, "No license definition for this model.")
+    return view
+
+
+@router.post("/setup/model-licenses/{model_id}/acknowledge")
+def setup_model_license_acknowledge(model_id: str, body: dict):
+    try:
+        return acknowledge(
+            model_id,
+            str((body or {}).get("region") or ""),
+            bool((body or {}).get("confirmed")),
+        )
+    except ModelLicenseLocked as exc:
+        raise HTTPException(409, exc.view.get("message") or "License setup required") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/setup/prepare/plan")
@@ -140,6 +176,8 @@ def setup_component_recommended_action(component_id: str):
         return execute_recommended_action(component_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except ModelLicenseLocked as exc:
+        raise HTTPException(409, exc.view.get("message") or "License setup required") from exc
 
 
 @router.post("/setup/components/{component_id}/refresh-source")
@@ -156,6 +194,8 @@ def setup_component_link_existing(component_id: str):
         return start_link_existing_pack(component_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except ModelLicenseLocked as exc:
+        raise HTTPException(409, exc.view.get("message") or "License setup required") from exc
 
 
 @router.post("/setup/components/{component_id}/choose-install-location")
@@ -164,6 +204,8 @@ def setup_component_choose_install_location(component_id: str):
         return start_choose_install_location(component_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except ModelLicenseLocked as exc:
+        raise HTTPException(409, exc.view.get("message") or "License setup required") from exc
 
 
 @router.get("/setup/download-sources")
@@ -304,6 +346,8 @@ def setup_component_action(
         raise HTTPException(400, "Installation/management requires explicit approval (approved=true).")
     try:
         return approve_install(component_id, action=action, path=path or None)
+    except ModelLicenseLocked as exc:
+        raise HTTPException(409, exc.view.get("message") or "License setup required") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except KeyError as exc:

@@ -17,6 +17,9 @@ const config = {
   directories: {
     output: path.join(__dirname, "dist"),
     buildResources: path.join(__dirname, "icons"),
+    // electron-builder treats a www/package.json as the app root. The website
+    // lives there. The desktop app root is this repository.
+    app: path.join(__dirname, ".."),
   },
   extraMetadata: {
     version: identity.version,

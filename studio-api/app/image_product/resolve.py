@@ -273,6 +273,15 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
             src.get("modelFamilyPreference") or src.get("model") or model or ""
         ).strip()
         force = _local_force_key(src)
+        if family.lower().startswith("sensenova") or force.lower().startswith("sensenova"):
+            return _refuse(
+                "SenseNova U1.5 is not part of Adept UI 1.1.",
+                provider="local",
+                adapter="comfy",
+                officialModelId=family or force,
+                workflowKey="",
+                intent=intent,
+            )
         purpose_local = str(intent.get("purpose") or src.get("purpose") or "").strip()
         has_pixels_local = bool(
             intent.get("references")

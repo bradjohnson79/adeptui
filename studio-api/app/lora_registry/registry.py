@@ -32,6 +32,68 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_FAMILY_LABELS = {
+    compat.LORA_FAMILY_SDXL: "SDXL / SD",
+    compat.LORA_FAMILY_FLUX: "FLUX",
+    compat.LORA_FAMILY_QWEN_IMAGE: "Qwen Image",
+    compat.LORA_FAMILY_ZIMAGE: "Z-Image",
+    compat.LORA_FAMILY_KREA2: "Krea 2",
+    compat.LORA_FAMILY_LTX: "LTX Video",
+    compat.LORA_FAMILY_WAN: "Wan",
+    compat.LORA_FAMILY_HUNYUAN: "Hunyuan",
+}
+
+
+def user_facing_status(record: LoraRecord) -> str:
+    file_missing = bool(record.file_path) and not Path(record.file_path).is_file()
+    if record.install_status == "failed" or file_missing:
+        return "DOWNLOAD FAILED"
+    if record.model_family in ("", compat.LORA_FAMILY_UNASSIGNED):
+        return "UNKNOWN COMPATIBILITY"
+    if record.install_status == "installed" or (record.file_path and Path(record.file_path).is_file()):
+        return "INSTALLED"
+    return "AVAILABLE"
+
+
+def _compatibility_known(record: LoraRecord) -> bool:
+    return record.model_family not in ("", compat.LORA_FAMILY_UNASSIGNED)
+
+
+def _record_families(record: LoraRecord) -> list[str]:
+    families = [compat.normalize_app_family(record.model_family)]
+    families.extend(compat.normalize_app_family(item) for item in record.compatible_model_families)
+    out: list[str] = []
+    for family in families:
+        if family and family != compat.LORA_FAMILY_UNASSIGNED and family not in out:
+            out.append(family)
+    return out
+
+
+def _family_labels(record: LoraRecord) -> list[str]:
+    return [_FAMILY_LABELS.get(family, family) for family in _record_families(record)]
+
+
+def _other_family_labels(record: LoraRecord) -> list[str]:
+    mine = set(_record_families(record))
+    return [
+        _FAMILY_LABELS[family]
+        for family in compat.CANONICAL_LORA_FAMILIES
+        if family != compat.LORA_FAMILY_UNASSIGNED and family not in mine and family in _FAMILY_LABELS
+    ]
+
+
+def _path_is_under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _owned_by_path(path: Path) -> str:
+    return "adept" if _path_is_under(path, lora_store_dir()) else "external"
+
+
 @dataclass
 class LoraRecord:
     """One registered LoRA — only metadata required for reliable use."""
@@ -48,7 +110,7 @@ class LoraRecord:
     modality: str = compat.MODALITY_ANY
     version: str = "1.0"
     enabled: bool = True
-    recommended_strength: float | None = 0.8
+    recommended_strength: float | None = None
     strength_min: float | None = None
     strength_max: float | None = None
     source_url: str = ""
@@ -61,6 +123,14 @@ class LoraRecord:
     catalog_id: str = ""
     installed_at: str = ""
     notes: str = ""
+    source_provider: str = ""
+    source_version: str = ""
+    source_model_id: str = ""
+    trigger_words: list[str] = field(default_factory=list)
+    author: str = ""
+    owned_by: str = "external"
+    compatibility: str = "unknown"
+    strength_from_source: bool = False
     # ComfyUI loras-dir-relative name (or absolute path fallback) used when
     # emitting the LoraLoader node. Computed lazily by resolve_comfy_lora_name.
     comfy_name: str = ""
@@ -68,6 +138,12 @@ class LoraRecord:
     def public_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["file_exists"] = bool(self.file_path) and Path(self.file_path).is_file()
+        d["user_status"] = user_facing_status(self)
+        known = _compatibility_known(self)
+        d["compatible_generators"] = _family_labels(self) if known else []
+        d["incompatible_generators"] = _other_family_labels(self) if known else []
+        d["display_name"] = self.name
+        d["filename"] = Path(self.file_path).name if self.file_path else ""
         return d
 
 
@@ -225,6 +301,33 @@ def scan_for_loras() -> list[dict[str, Any]]:
     return out
 
 
+def find_lora_by_checksum(checksum: str) -> LoraRecord | None:
+    target = str(checksum or "").strip().lower()
+    if not target:
+        return None
+    for rec in list_loras():
+        if str(rec.checksum_sha256 or "").strip().lower() == target:
+            return rec
+    return None
+
+
+def find_lora_by_source(provider: str, model_id: str, filename: str = "") -> LoraRecord | None:
+    provider_key = str(provider or "").strip().lower()
+    model_key = str(model_id or "").strip()
+    file_key = str(filename or "").strip().lower()
+    if not provider_key or not model_key:
+        return None
+    for rec in list_loras():
+        if str(rec.source_provider or "").lower() != provider_key:
+            continue
+        if str(rec.source_model_id or "") != model_key:
+            continue
+        if file_key and Path(rec.file_path).name.lower() != file_key and file_key not in str(rec.file_path).lower():
+            continue
+        return rec
+    return None
+
+
 def get_lora_for_path(path: str) -> LoraRecord | None:
     try:
         target = str(Path(path).resolve())
@@ -265,7 +368,7 @@ def register_lora(
     modality: str = compat.MODALITY_ANY,
     version: str = "1.0",
     enabled: bool = True,
-    recommended_strength: float | None = 0.8,
+    recommended_strength: float | None = None,
     strength_min: float | None = None,
     strength_max: float | None = None,
     source_url: str = "",
@@ -275,6 +378,14 @@ def register_lora(
     catalog_id: str = "",
     notes: str = "",
     detected: bool = False,
+    source_provider: str = "",
+    source_version: str = "",
+    source_model_id: str = "",
+    trigger_words: Iterable[str] | None = None,
+    author: str = "",
+    owned_by: str = "",
+    compatibility: str = "",
+    strength_from_source: bool = False,
 ) -> LoraRecord:
     """Register one LoRA. File validation is structural, not archival."""
     family = compat.normalize_app_family(model_family) or compat.LORA_FAMILY_UNASSIGNED
@@ -285,18 +396,50 @@ def register_lora(
         return existing
     install_status = "registered"
     last_validated = ""
-    if file_path:
-        ok, message = validate_safetensors(Path(file_path))
-        if not ok:
-            raise ValueError(f"Cannot register {Path(file_path).name}: {message}")
+    path_obj = Path(file_path) if file_path else None
+    if path_obj is not None:
+        from .metadata import classify_lora_file
+
+        inspected = classify_lora_file(path_obj)
+        if not inspected["ok"]:
+            raise ValueError(inspected["message"])
         install_status = "installed"
         last_validated = utcnow_iso()
         if not checksum_sha256:
-            checksum_sha256 = _checksum_sha256(Path(file_path), sample_bytes=1024 * 1024)
+            checksum_sha256 = _checksum_sha256(path_obj)
+        duplicate = find_lora_by_checksum(checksum_sha256)
+        if duplicate is not None:
+            return duplicate
+        if not family or family == compat.LORA_FAMILY_UNASSIGNED:
+            header_family = str(inspected.get("family") or "")
+            if header_family in compat.CANONICAL_LORA_FAMILIES:
+                family = header_family
+        if recommended_strength is None and inspected.get("recommended_strength") is not None:
+            recommended_strength = inspected["recommended_strength"]
+            strength_from_source = True
+        if not trigger_words:
+            trigger_words = inspected.get("trigger_words") or []
+        if not author:
+            author = str(inspected.get("author") or "")
+        if not license:
+            license = str(inspected.get("license") or "")
+        if not name.strip() and inspected.get("display_name"):
+            name = str(inspected["display_name"])
+    if checksum_sha256:
+        duplicate = find_lora_by_checksum(checksum_sha256)
+        if duplicate is not None:
+            return duplicate
+    known = family not in ("", compat.LORA_FAMILY_UNASSIGNED)
+    if modality == compat.MODALITY_ANY and family in (
+        compat.LORA_FAMILY_LTX,
+        compat.LORA_FAMILY_WAN,
+        compat.LORA_FAMILY_HUNYUAN,
+    ):
+        modality = compat.MODALITY_VIDEO
     record = LoraRecord(
         id=uuid.uuid4().hex[:12],
         name=str(name).strip() or Path(file_path or "lora").stem,
-        file_path=str(Path(file_path).resolve()) if file_path else "",
+        file_path=str(path_obj.resolve()) if path_obj is not None else "",
         model_family=family,
         compatible_model_families=sorted(
             {compat.normalize_app_family(f) for f in (compatible_model_families or ()) if compat.normalize_app_family(f)}
@@ -310,7 +453,7 @@ def register_lora(
         strength_max=strength_max,
         source_url=source_url,
         license=license,
-        download_size_bytes=download_size_bytes,
+        download_size_bytes=download_size_bytes or (path_obj.stat().st_size if path_obj is not None else None),
         checksum_sha256=checksum_sha256,
         install_status=install_status,
         last_validated_at=last_validated,
@@ -318,6 +461,14 @@ def register_lora(
         catalog_id=catalog_id,
         installed_at=utcnow_iso(),
         notes=notes,
+        source_provider=source_provider,
+        source_version=source_version,
+        source_model_id=source_model_id,
+        trigger_words=[str(word) for word in (trigger_words or []) if str(word).strip()],
+        author=author,
+        owned_by=owned_by or (_owned_by_path(path_obj) if path_obj is not None else "external"),
+        compatibility=compatibility or ("known" if known else "unknown"),
+        strength_from_source=bool(strength_from_source and recommended_strength is not None),
     )
     return _upsert(record)
 
@@ -347,17 +498,20 @@ def unregister_lora(lora_id: str, *, delete_file: bool = False) -> dict[str, Any
     deleted_path = None
     if delete_file and rec.file_path:
         path = Path(rec.file_path)
-        managed = any(
-            str(path.resolve()).startswith(str(root.resolve()))
-            for root in (lora_store_dir(), Path(settings.data_dir) / "models" / "loras")
-        )
-        if managed and path.is_file():
+        adept_owned = rec.owned_by == "adept" or _path_is_under(path, lora_store_dir())
+        if adept_owned and _path_is_under(path, lora_store_dir()) and path.is_file():
             try:
                 path.unlink()
                 deleted_path = str(path)
             except OSError:
                 pass
-    return {"id": lora_id, "removed": True, "file_deleted": deleted_path is not None, "deleted_path": deleted_path}
+    return {
+        "id": lora_id,
+        "removed": True,
+        "file_deleted": deleted_path is not None,
+        "deleted_path": deleted_path,
+        "owned_by": rec.owned_by,
+    }
 
 
 def _comfy_loras_dir() -> Path:
@@ -419,25 +573,24 @@ def refresh_installed_status() -> None:
 def register_detected_files(*, auto_enable: bool = True) -> list[LoraRecord]:
     """Discovery flow: register every found file that is not yet registered.
 
-    Family inference is filename-based (compat.infer_family_from_filename);
-    unassigned files are registered but excluded from selectors.
+    Files stay where they were found. A family is recorded only when the
+    weights header names a known base model. Otherwise the LoRA stays
+    unknown and is excluded from selectors.
     """
     refresh_installed_status()
     created: list[LoraRecord] = []
     for candidate in scan_for_loras():
         if candidate["registered"]:
             continue
-        family = candidate["inferred_family"]
-        modality = compat.MODALITY_VIDEO if family in (compat.LORA_FAMILY_LTX, compat.LORA_FAMILY_WAN, compat.LORA_FAMILY_HUNYUAN) else compat.MODALITY_ANY
         try:
             rec = register_lora(
                 name=Path(candidate["path"]).stem,
                 file_path=candidate["path"],
-                model_family=family,
-                modality=modality,
+                model_family=compat.LORA_FAMILY_UNASSIGNED,
+                modality=compat.MODALITY_ANY,
                 enabled=auto_enable,
                 detected=True,
-                notes="Discovered in shared model storage.",
+                notes="Discovered in configured LoRA storage. The original file was left in place.",
             )
             created.append(rec)
         except ValueError:
@@ -491,14 +644,8 @@ def resolve_lora_for_generation(
     if selection is None:
         return None
     lora_id = ""
-    strength: float | None = None
     if isinstance(selection, dict):
         lora_id = str(selection.get("id") or selection.get("loraId") or selection.get("lora_id") or "").strip()
-        raw = selection.get("strength")
-        try:
-            strength = float(raw) if raw is not None else None
-        except (TypeError, ValueError):
-            strength = None
     elif isinstance(selection, str):
         lora_id = selection.strip()
     if not lora_id:
@@ -519,8 +666,6 @@ def resolve_lora_for_generation(
         )
     if not compat.modality_matches(rec.modality, modality):
         raise ValueError(f"LoRA {rec.name} is not compatible with {modality or 'this surface'}")
-    if strength is not None:
-        rec.recommended_strength = strength
     return rec
 
 
@@ -534,6 +679,140 @@ def _sanitize_filename(name: str) -> str:
     if not cleaned.lower().endswith(".safetensors"):
         cleaned += ".safetensors"
     return cleaned[:200]
+
+
+def _result_for_record(status: str, message: str, record: LoraRecord) -> dict[str, Any]:
+    return {"status": status, "message": message, "lora": record.public_dict()}
+
+
+def install_from_url(url: str, *, filename: str = "", allow_update: bool = False) -> dict[str, Any]:
+    """Resolve a provider page and install the selected .safetensors file."""
+    from .metadata import classify_lora_file
+    from .sources import download_source_file, resolve_lora_source
+
+    resolved = resolve_lora_source(url)
+    if resolved.needs_token or (resolved.message and not resolved.files):
+        return {
+            "status": "needs_token" if resolved.needs_token else "failed",
+            "message": resolved.message,
+            "detail": resolved.detail,
+            "token_provider": resolved.token_provider,
+            "resolution": resolved.public_dict(),
+        }
+    selected = resolved.selected
+    if filename:
+        wanted = filename.replace("\\", "/").lower()
+        selected = next(
+            (
+                item
+                for item in resolved.files
+                if item.filename.replace("\\", "/").lower() == wanted or Path(item.filename).name.lower() == Path(filename).name.lower()
+            ),
+            None,
+        )
+    if selected is None:
+        return {
+            "status": "choose_file",
+            "message": resolved.message or "Choose which LoRA file to install.",
+            "resolution": resolved.public_dict(),
+        }
+    prior = find_lora_by_checksum(selected.sha256) if selected.sha256 else None
+    if prior is None:
+        prior = find_lora_by_source(resolved.provider, resolved.source_model_id, Path(selected.filename).name)
+    if prior is not None and prior.file_path and Path(prior.file_path).is_file():
+        newer = bool(resolved.source_version and prior.source_version and prior.source_version != resolved.source_version)
+        if newer and not allow_update:
+            return {
+                "status": "update_available",
+                "message": f"{prior.name} is already installed. A newer version is available.",
+                "lora": prior.public_dict(),
+            }
+        if not newer:
+            return _result_for_record("already_installed", f"{prior.name} is already installed.", prior)
+    dest = lora_store_dir() / _sanitize_filename(Path(selected.filename).name)
+    try:
+        download_source_file(selected, dest, provider=resolved.provider)
+    except ValueError as exc:
+        if dest.exists():
+            dest.unlink(missing_ok=True)
+        return {"status": "failed", "message": str(exc), "detail": ""}
+    inspected = classify_lora_file(dest)
+    if not inspected["ok"]:
+        dest.unlink(missing_ok=True)
+        return {"status": "failed", "message": inspected["message"]}
+    family = resolved.family or str(inspected.get("family") or "") or compat.LORA_FAMILY_UNASSIGNED
+    record = register_lora(
+        name=resolved.display_name or inspected.get("display_name") or Path(selected.filename).stem,
+        file_path=str(dest),
+        model_family=family,
+        source_url=resolved.source_url,
+        license=resolved.license or str(inspected.get("license") or ""),
+        checksum_sha256=selected.sha256 or _checksum_sha256(dest),
+        source_provider=resolved.provider,
+        source_version=resolved.source_version,
+        source_model_id=resolved.source_model_id,
+        trigger_words=resolved.trigger_words or inspected.get("trigger_words") or [],
+        author=resolved.author or str(inspected.get("author") or ""),
+        recommended_strength=resolved.recommended_strength if resolved.recommended_strength is not None else inspected.get("recommended_strength"),
+        strength_from_source=resolved.recommended_strength is not None or inspected.get("recommended_strength") is not None,
+        owned_by="adept",
+        download_size_bytes=dest.stat().st_size,
+    )
+    if Path(record.file_path).resolve() != dest.resolve() and dest.exists():
+        dest.unlink(missing_ok=True)
+        return _result_for_record("already_installed", f"{record.name} is already installed.", record)
+    return _result_for_record("installed", f"Installed {record.name}.", record)
+
+
+def import_local_file(source: Path, *, original_name: str = "", model_family: str = "") -> dict[str, Any]:
+    """Validate a local .safetensors file and register it without a second copy when it already lives in LoRA storage."""
+    from .metadata import classify_lora_file
+
+    source = Path(source)
+    inspected = classify_lora_file(source)
+    if not inspected["ok"]:
+        return {"status": "failed", "message": inspected["message"]}
+    checksum = _checksum_sha256(source)
+    prior = find_lora_by_checksum(checksum)
+    if prior is not None:
+        return _result_for_record("already_installed", f"{prior.name} is already installed.", prior)
+    in_place = any(_path_is_under(source, root) for root in search_roots())
+    if in_place:
+        target = source
+        owned = "external" if not _path_is_under(source, lora_store_dir()) else "adept"
+    else:
+        target = lora_store_dir() / _sanitize_filename(original_name or source.name)
+        if target.exists():
+            target = lora_store_dir() / _sanitize_filename(f"{uuid.uuid4().hex[:8]}_{original_name or source.name}")
+        shutil.copy2(source, target)
+        owned = "adept"
+    family = model_family or str(inspected.get("family") or "") or compat.LORA_FAMILY_UNASSIGNED
+    record = register_lora(
+        name=str(inspected.get("display_name") or Path(original_name or source.name).stem),
+        file_path=str(target),
+        model_family=family,
+        checksum_sha256=checksum,
+        trigger_words=inspected.get("trigger_words") or [],
+        author=str(inspected.get("author") or ""),
+        license=str(inspected.get("license") or ""),
+        recommended_strength=inspected.get("recommended_strength"),
+        strength_from_source=inspected.get("recommended_strength") is not None,
+        owned_by=owned,
+        source_provider="local",
+    )
+    return _result_for_record("installed", f"Installed {record.name}.", record)
+
+
+def match_prompt_lora(prompt: str, model_family: str | None) -> LoraRecord | None:
+    """Return one installed compatible LoRA only when its name is in the prompt."""
+    text = str(prompt or "").lower()
+    if not text:
+        return None
+    matches = [rec for rec in compatible_loras(model_family, "image") if rec.name and rec.name.lower() in text]
+    if not matches:
+        return None
+    matches.sort(key=lambda rec: len(rec.name), reverse=True)
+    return matches[0]
 
 
 def download_lora(catalog_id: str, *, approved: bool = False) -> dict[str, Any]:

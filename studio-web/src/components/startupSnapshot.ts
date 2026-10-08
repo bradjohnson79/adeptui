@@ -118,8 +118,8 @@ export function buildSnapshot(status: RuntimeManagerStatus | null, studioApiReac
   const allRequiredOnline = required.every((r) => r.state === "online");
   const anyRequiredFailed = required.some((r) => r.state === "failed");
 
-  let message = "Bringing Creative Systems Online";
-  if (allRequiredOnline) message = "ALL SYSTEMS ONLINE";
+  let message = "Bringing Adept UI Online";
+  if (allRequiredOnline) message = "ALL REQUIRED SYSTEMS ONLINE";
   else if (anyRequiredFailed) message = "STARTUP FAILED";
 
   return { rows, overallPct, allRequiredOnline, anyRequiredFailed, studioApiReachable, message };

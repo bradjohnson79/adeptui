@@ -9,6 +9,8 @@ export interface CompatibleLora {
   strength_max?: number | null;
   modality?: string;
   model_family?: string;
+  trigger_words?: string[];
+  user_status?: string;
 }
 
 // Single-flight per (family, modality) cache - selectors never hammer the

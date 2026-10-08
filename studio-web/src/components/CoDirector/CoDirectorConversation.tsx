@@ -3,7 +3,7 @@ import { Button } from "../ui";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import { CoDirectorActivityPanel } from "./CoDirectorActivityPanel";
 import { CoDirectorChangeReview } from "./CoDirectorChangeReview";
-import { CoDirectorMessage } from "./CoDirectorMessage";
+import { CoDirectorMessage, isRedundantStillAcceptance } from "./CoDirectorMessage";
 import { CoDirectorWelcome } from "./CoDirectorWelcome";
 import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
 import { CoDirectorRelationshipCard } from "./CoDirectorRelationshipCard";
@@ -110,6 +110,9 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
 
       <div className="codirector-messages">
         {messages.map((message, index) => {
+          if (message.role === "assistant" && isRedundantStillAcceptance(message.content || "")) {
+            return null;
+          }
           const isLatestAssistant =
             message.role === "assistant" &&
             index === messages.map((m) => m.role).lastIndexOf("assistant");

@@ -177,7 +177,7 @@ def execute_approval(payload: dict[str, Any]) -> dict[str, Any]:
         if tool_id == "propose_image_generate":
             return _image_contract_matches(raw, arguments)
         if tool_id == "create_scene":
-            return _scene_contract_matches(project_id, scene_id, arguments)
+            return _created_scene_matches(project_id, raw, arguments)
         if tool_id == "timeline.publish_scene":
             blob = json.dumps(raw, default=str)
             return "publishedAssetId" in blob
@@ -285,7 +285,8 @@ def execute_approval(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if verified:
         reply = _verified_wording(tool_id, arguments)
-        _project_approval_result(project_id, origin, approval_id, reply, outcome="verified")
+        if reply:
+            _project_approval_result(project_id, origin, approval_id, reply, outcome="verified")
     else:
         if tool_id == "prop_creator.generate_view" and not isinstance(outcome, FailureState):
             reply = "The prop image is generating. It is not in the Library yet."
@@ -405,6 +406,49 @@ def _apply_stored_scene(project_id: str, scene_id: str | None, arguments: dict[s
         SceneService.update(db, project_id, str(scene_id), fields)
 
 
+def _created_scene_matches(project_id: str, raw: dict[str, Any], arguments: dict[str, Any]) -> bool:
+    """The scene this approval just created, not whichever scene was already open."""
+
+    nested = raw.get("toolResult") if isinstance(raw.get("toolResult"), dict) else {}
+    summary = nested.get("scene") if isinstance(nested.get("scene"), dict) else {}
+    if not summary and isinstance(raw.get("scene"), dict):
+        summary = raw["scene"]
+    created_id = str(summary.get("sceneId") or "").strip()
+    if not created_id:
+        return False
+    from ...film_timeline.store import load_film
+    from ...services.scene_service import SceneService
+
+    with SessionLocal() as db:
+        try:
+            scene = SceneService.get(db, project_id, created_id)
+        except Exception:
+            return False
+        name = str(arguments.get("name") or "").strip()
+        if name and str(scene.name or "") != name:
+            return False
+        want_duration = arguments.get("durationSec")
+        if want_duration is not None and abs(float(scene.duration_sec or 0) - float(want_duration)) > 0.05:
+            return False
+        engine = str(arguments.get("engine") or "").strip()
+        if engine and str(scene.engine or "") != engine:
+            return False
+        want_ratio = str(arguments.get("aspectRatio") or "").strip()
+        if want_ratio and str(getattr(scene, "aspect_ratio", "") or "") != want_ratio:
+            return False
+        character_asset = str(arguments.get("characterAssetId") or "").strip()
+        environment_asset = str(arguments.get("environmentAssetId") or "").strip()
+        if character_asset or environment_asset:
+            loaded = load_film(db, project_id, created_id)
+            film = loaded.get("film")
+            attached = {str(getattr(ref, "assetId", "") or "") for ref in list(getattr(film, "references", None) or [])}
+            if character_asset and character_asset not in attached:
+                return False
+            if environment_asset and environment_asset not in attached:
+                return False
+    return True
+
+
 def _scene_contract_matches(project_id: str, scene_id: str | None, arguments: dict[str, Any]) -> bool:
     want_duration = arguments.get("sceneDurationSec")
     if want_duration is None:
@@ -469,7 +513,7 @@ def _sheet_contract_matches(raw: dict[str, Any], arguments: dict[str, Any]) -> b
 
 
 def _image_contract_matches(raw: dict[str, Any], arguments: dict[str, Any]) -> bool:
-    if not arguments.get("prompt") or not arguments.get("aspectRatio") or not arguments.get("referenceAssetId"):
+    if not str(arguments.get("prompt") or "").strip() or not str(arguments.get("aspectRatio") or "").strip():
         return False
     tool_result = raw.get("toolResult") if isinstance(raw.get("toolResult"), dict) else {}
     if raw.get("ok") is False or tool_result.get("ok") is False:
@@ -547,11 +591,8 @@ def _verified_wording(tool_id: str, arguments: dict[str, Any]) -> str:
             extra += "."
         return f"The timed prompt was added.{extra}"
     if tool_id == "propose_image_generate":
-        return (
-            "The still image request was accepted"
-            f" at {arguments.get('aspectRatio')} using the existing reference."
-            " The picture is not finished until it is in the Library."
-        )
+        # The progress card is the still. A second acceptance bubble is noise.
+        return ""
     if tool_id == "character_creator.create_from_brief":
         name = str(arguments.get("name") or "").strip() or "the new character"
         return (

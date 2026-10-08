@@ -285,6 +285,9 @@ def apply_propose_image_generate(ctx: ToolContext, args: dict[str, Any]) -> dict
         "recommendation": rec,
         "promptIntel": prompt_info,
         "refs": args.get("refs") or [],
+        "codirectorConversation": True,
+        "lockModelFamily": bool(args.get("lockModelFamily")),
+        "modelFamilyPreference": args.get("modelFamilyPreference") or family_pref or rec.get("recommendedFamily"),
     }
     get_intent_store().save(intent)
     try:

@@ -42,38 +42,86 @@ export type CoDirectorIdentityFields = {
   generationReady?: { messageId?: string | null; executionId?: string | null } | null;
 };
 
+const PLAIN_FALLBACK = "I'll keep going in plain language.";
+
 function looksInternal(text: string): boolean {
   const folded = text.toLowerCase();
   if (INTERNAL.some((marker) => folded.includes(marker))) return true;
   return folded.includes("character.search") && text.includes("->");
 }
 
-function layman(raw: string): string {
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("{")) {
-    try {
-      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      if (parsed.mutation_status === "proposed") {
-        return "This is prepared and awaiting approval. Nothing has been placed or created yet.";
-      }
-      const message = typeof parsed.message === "string" ? parsed.message.trim() : "";
-      if (message && !looksInternal(message)) return message;
-      const data = parsed.data as { matches?: Array<{ displayName?: string }> } | undefined;
-      const nested = (parsed.evidence as { read?: { result?: { data?: { matches?: Array<{ displayName?: string }> } } } } | undefined)
-        ?.read?.result?.data?.matches;
-      const matches = data?.matches || nested || [];
-      if (matches.length === 1 && matches[0]?.displayName) {
-        return `I found ${matches[0].displayName} and I'm using that saved character for the scene.`;
-      }
-    } catch {
-      /* not JSON */
-    }
+function stripFence(raw: string): string {
+  return raw.trim().replace(/^```(?:json|javascript)?\s*/i, "").replace(/\s*```$/, "").trim();
+}
+
+function looksLikeCode(text: string): boolean {
+  const trimmed = stripFence(text);
+  if (trimmed.startsWith("```")) return true;
+  return trimmed.startsWith("{") && /"(?:mode|reply|tool_id|arguments|requested_action|message)"/.test(trimmed);
+}
+
+function unescapeLoose(value: string): string {
+  return value.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"').replace(/\\\\/g, "\\").trim();
+}
+
+/** Pull a reply out of a model envelope even when the JSON itself is invalid. */
+function looseReply(source: string): string {
+  const match = /"reply"\s*:/.exec(source);
+  if (!match) return "";
+  let rest = source.slice(match.index + match[0].length).trim();
+  if (!rest.startsWith('"')) return "";
+  rest = rest.slice(1);
+  const nextKey = rest.search(/"\s*,\s*"(?:tool_id|arguments|mode|surface|action|entities|constraints|confidence)"/);
+  if (nextKey >= 0) rest = rest.slice(0, nextKey);
+  else rest = rest.replace(/"\s*\}[\s\S]*$/, "");
+  const prose = unescapeLoose(rest);
+  if (!prose || looksInternal(prose) || looksLikeCode(prose)) return "";
+  return prose;
+}
+
+function proseFromParsed(parsed: Record<string, unknown>): string {
+  if (parsed.mutation_status === "proposed") {
+    return "This is prepared and awaiting approval. Nothing has been placed or created yet.";
   }
-  return "I'll keep going in plain language.";
+  const reply = typeof parsed.reply === "string" ? parsed.reply.trim() : "";
+  if (reply && !looksInternal(reply)) return reply;
+  const message = typeof parsed.message === "string" ? parsed.message.trim() : "";
+  if (message && !looksInternal(message)) return message;
+  const data = parsed.data as { matches?: Array<{ displayName?: string }> } | undefined;
+  const nested = (parsed.evidence as { read?: { result?: { data?: { matches?: Array<{ displayName?: string }> } } } } | undefined)
+    ?.read?.result?.data?.matches;
+  const matches = data?.matches || nested || [];
+  if (matches.length === 1 && matches[0]?.displayName) {
+    return `I found ${matches[0].displayName} and I'm using that saved character for the scene.`;
+  }
+  return "";
+}
+
+function creatorProse(raw: string): string {
+  const trimmed = stripFence(raw);
+  if (!trimmed.startsWith("{")) return "";
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const prose = proseFromParsed(parsed);
+    if (prose) return prose;
+  } catch {
+    /* The model often leaves quotes or line breaks inside the reply string. */
+  }
+  return looseReply(trimmed);
+}
+
+function layman(raw: string): string {
+  return creatorProse(raw) || PLAIN_FALLBACK;
 }
 
 export function projectCreatorReply(content: string): CreatorReply {
   const raw = (content || "").trim();
+  const prose = creatorProse(raw);
+  if (prose) {
+    const receipt = /"(?:requested_action|execution_status|toolreceipt)"/i.test(raw);
+    return { text: prose, technical: receipt ? raw : null };
+  }
+  if (looksLikeCode(raw)) return { text: PLAIN_FALLBACK, technical: null };
   if (!raw || !looksInternal(raw)) return { text: raw, technical: null };
   return { text: layman(raw), technical: raw };
 }

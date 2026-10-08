@@ -10,9 +10,8 @@ function readinessLabel(provider: ImageProviderDescriptor): string {
   return provider.readiness.replace(/_/g, " ");
 }
 
-function sourceBadge(provider: ImageProviderDescriptor): "Local" | "API" | "Docker" {
+function sourceBadge(provider: ImageProviderDescriptor): "Local" | "API" {
   if (provider.source === "hosted") return "API";
-  if (provider.source === "docker") return "Docker";
   return "Local";
 }
 
@@ -28,8 +27,9 @@ export function ImageProviderBrowser({
   onChange: (ids: string[]) => void;
 }) {
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const local = providers.filter((p) => p.source === "local" || p.source === "docker");
-  const api = providers.filter((p) => p.source === "hosted");
+  const visible = providers.filter((p) => p.source !== "docker");
+  const local = visible.filter((p) => p.source === "local");
+  const api = visible.filter((p) => p.source === "hosted");
 
   const setAll = (list: ImageProviderDescriptor[]) => onChange(list.map((p) => p.id));
   const toggle = (id: string) => {
@@ -99,7 +99,7 @@ export function ImageProviderBrowser({
   return (
     <div className="cis-provider-browser" data-testid="cis-provider-browser">
       <div className="cis-provider-browser__actions">
-        <button type="button" onClick={() => setAll(providers.filter((p) => p.readiness === "ready"))}>
+        <button type="button" onClick={() => setAll(visible.filter((p) => p.readiness === "ready"))}>
           Select All Ready
         </button>
         <button type="button" onClick={() => onChange([])}>
@@ -121,7 +121,7 @@ export function ImageProviderBrowser({
       </div>
       {renderGroup("Local", local)}
       {renderGroup("API", api)}
-      {!providers.length ? <p className="muted">No image providers discovered yet.</p> : null}
+      {!visible.length ? <p className="muted">No image providers discovered yet.</p> : null}
     </div>
   );
 }

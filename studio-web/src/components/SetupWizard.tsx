@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { api, ApiError } from "../api";
 import {
   componentStateLabel,
@@ -15,6 +15,11 @@ import {
   RECOMMENDATION_LABELS,
   summarizeComponents,
 } from "../setup/helpers";
+import { scanAllowsCompletion, setupWizardRequired } from "../setup/firstRun";
+import { FirstRunSetupModal } from "../setup/FirstRunSetupModal";
+import { OptionalToolsWizard } from "../setup/OptionalToolsWizard";
+import { CapabilityReadinessPanel } from "./CapabilityPanel";
+import { ModelLicenseDialog, modelLicenseStatusLabel } from "../setup/ModelLicenseDialog";
 import type {
   ComponentDiagnosticResult,
   SetupCheckpoint,
@@ -30,7 +35,6 @@ import type { InstallJob } from "../contracts/installJobs";
 import { useInstallJobsPoll } from "../hooks/useInstallJobsPoll";
 import { requiredBlockers, useCapabilities } from "./CapabilityPanel";
 import { VideoModelLibrary } from "./VideoModelLibrary";
-import { AddCustomCapability } from "./docker-runtime/AddCustomCapability";
 import { PromptIntelligenceBenchmarkDashboard } from "./CoDirector/PromptIntelligenceBenchmarkDashboard";
 import { DownloadSourcesPanel } from "./DownloadSourcesPanel";
 import { HostedProvidersSetupPanel } from "./HostedProvidersSetupPanel";
@@ -47,7 +51,18 @@ import { AdeptSetupDiagnostics, AdeptSetupRecommend, AdeptSetupUpdates } from ".
 import SourceManagerPage from "../pages/SourceManager";
 
 const TERMINAL_OPERATION_STATES = new Set(["completed", "failed", "cancelled", "interrupted"]);
-type SetupMode = "guided" | "ai_guided" | "manual";
+type SetupSectionId = "overview" | "ai" | "updates" | "components" | "models" | "sources" | "storage" | "diagnostics" | "manual" | "comfy";
+
+function sectionFromSearch(params: URLSearchParams): SetupSectionId {
+  const requested = params.get("setupSection");
+  const known: SetupSectionId[] = ["overview", "ai", "updates", "components", "models", "sources", "storage", "diagnostics", "manual", "comfy"];
+  if (requested && known.includes(requested as SetupSectionId)) return requested as SetupSectionId;
+  const mode = params.get("setupMode");
+  if (mode === "manual") return "manual";
+  if (mode === "guided") return "components";
+  if (mode === "ai_guided") return "ai";
+  return "overview";
+}
 
 function installActionLabel(component: SetupComponentStatus, job?: InstallJob | null): string {
   if (job && !["ready", "completed", "failed", "repair_required", "cancelled"].includes(job.state)) {
@@ -147,6 +162,7 @@ function SetupComponentCard({
   onInstallJobRetry,
   onInstallJobRepair,
   onInstallJobAction,
+  onReviewLicense,
 }: {
   component: SetupComponentStatus;
   operation?: SetupOperation;
@@ -162,6 +178,7 @@ function SetupComponentCard({
   onInstallJobRetry?: (job: InstallJob) => void;
   onInstallJobRepair?: (job: InstallJob) => void;
   onInstallJobAction?: (job: InstallJob, action: string) => void;
+  onReviewLicense?: (component: SetupComponentStatus) => void;
 }) {
   const errorActionKind: SetupPrimaryActionKind =
     component.diagnostic?.recommendation === "install"
@@ -196,6 +213,17 @@ function SetupComponentCard({
         && (action?.action === "install" || action?.kind === "install")
       )
     );
+  const licenseLocked = Boolean(component.model_license && !component.model_license.installationUnlocked);
+  const licenseGatedActions = new Set([
+    "install",
+    "repair",
+    "reinstall",
+    "update",
+    "link",
+    "link_existing",
+    "choose_install_location",
+  ]);
+  const installBlocked = licenseLocked && licenseGatedActions.has(String(action?.action || action?.kind || ""));
   const showIssue = Boolean(component.issue_summary);
   const showDiagnostic = Boolean(component.diagnostic)
     && !(
@@ -235,6 +263,26 @@ function SetupComponentCard({
         </span>
       </header>
       <p className="setup-component-description">{component.description}</p>
+      {component.model_license && (
+        <div className="model-license-card" data-testid={`model-license-${component.id}`}>
+          <p><strong>{component.model_license.displayName}</strong></p>
+          <p>{component.model_license.role}</p>
+          <p>Provider: {component.model_license.provider}</p>
+          <p>License: {component.model_license.licenseName || "Unverified"}</p>
+          <p>Status: {modelLicenseStatusLabel(component.model_license.status)}</p>
+          {component.model_license.licenseUrl && (
+            <p><a href={component.model_license.licenseUrl} target="_blank" rel="noreferrer">View License</a></p>
+          )}
+          {!component.model_license.installationUnlocked && (
+            <button type="button" className="primary" disabled={busy} onClick={() => onReviewLicense?.(component)}>
+              Review License &amp; Enable
+            </button>
+          )}
+          {component.model_license.installationUnlocked && component.model_license.message && (
+            <p>{component.model_license.message}</p>
+          )}
+        </div>
+      )}
       <div className="setup-card-meta">
         {(component.installed_version || component.pack_version) && (
           <span>Version {component.installed_version ?? component.pack_version}</span>
@@ -309,7 +357,7 @@ function SetupComponentCard({
         </details>
       )}
 
-      {!isActive && (component.installer === "asset_pack" || component.verifier === "asset_pack") && onPackAction ? (
+      {!isActive && (component.installer === "asset_pack" || component.verifier === "asset_pack") && onPackAction && !licenseLocked ? (
         <div className="setup-card-actions">
           {!component.source_available || component.source_valid === false ? (
             <>
@@ -383,18 +431,18 @@ function SetupComponentCard({
             </button>
           )}
         </div>
-      ) : !isActive && action ? (
+      ) : !isActive && action && !installBlocked ? (
         <div className="setup-card-actions">
           <button
             type="button"
             className="primary"
-            disabled={busy || action.disabled || (action.action === "install" && installDisabled)}
+            disabled={busy || action.disabled || installBlocked || (action.action === "install" && installDisabled)}
             data-testid={isCredential ? `configure-credential-${component.id}` : undefined}
             onClick={() => onPrimaryAction({ ...component, primary_action: action })}
           >
             {action.label}
           </button>
-          {component.secondary_action && onSecondaryAction && (
+          {component.secondary_action && onSecondaryAction && !(licenseLocked && licenseGatedActions.has(String(component.secondary_action.action || ""))) && (
             <button
               type="button"
               className="linkish"
@@ -412,35 +460,6 @@ function SetupComponentCard({
         </div>
       ) : null}
     </article>
-  );
-}
-
-function VideoIntelligenceStatus() {
-  const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
-  useEffect(() => {
-    void api.setupVideoIntelligenceProfile().then((row) => setProfile(row)).catch(() => setProfile(null));
-  }, []);
-  const caps = (profile?.capabilities || {}) as Record<string, boolean>;
-  const ready = Boolean(caps.timelineVisualReview);
-  return (
-    <div
-      className={ready ? "setup-capability-status" : "setup-capability-blockers"}
-      data-testid="setup-video-intelligence"
-      data-state={ready ? "ready" : "blocked"}
-    >
-      <p className={ready ? "setup-capability-ok" : "setup-issue"}>Co-Director Video Intelligence</p>
-      <ul>
-        <li data-testid="setup-vi-adept">{ready ? "✓ Ready" : "○ VideoChat3 required"} — Adept UI</li>
-        <li data-testid="setup-vi-continuity">{ready ? "✓" : "○"} Co-Director Temporal Continuity{ready ? " Ready" : " — VideoChat3 required"}</li>
-        <li>{ready ? "✓" : "○"} Automatic Review</li>
-        <li>{ready ? "✓" : "○"} 3-second Review</li>
-        <li>{ready ? "✓" : "○"} 5-second Review</li>
-        <li className={caps.deepSequenceReasoning ? undefined : "setup-capability-advisory"}>
-          {caps.deepSequenceReasoning ? "✓" : "○"} Deep sequence reasoning
-          {caps.deepSequenceReasoning ? "" : " — Enhanced capability unavailable / additional GPU memory recommended"}
-        </li>
-      </ul>
-    </div>
   );
 }
 
@@ -469,7 +488,7 @@ function SetupSummary({
   const needsPreparation = overall !== "ready" && overall !== "preparing";
 
   return (
-    <section className="panel setup-summary" aria-labelledby="setup-system-status">
+    <section className="panel setup-summary" aria-labelledby="setup-system-status" data-project-id={projectId || ""}>
       <div className="setup-summary-main">
         <div>
           <div className="section-label">System Status</div>
@@ -510,12 +529,11 @@ function SetupSummary({
               </li>
             ))}
           </ul>
-          <Link to={`/source-manager${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`} data-testid="setup-blockers-open-source-manager">
-            Open Source Manager
-          </Link>
+          <a href="#adept-setup-sections" data-testid="setup-blockers-open-source-manager">
+            View components
+          </a>
         </div>
       )}
-      <VideoIntelligenceStatus />
       {needsPreparation && (
         <button type="button" className="primary setup-prepare-button" disabled={preparing} onClick={onPrepare}>
           {preparing ? "Preparing Studio…" : "Prepare My Studio"}
@@ -1175,6 +1193,7 @@ function PreparationPlanDialog({
 
 export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   const location = useLocation();
+  const firstRunSaveRef = useRef(false);
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const forcedSetupMode = searchParams.get("setupMode");
   const focusedSetupComponentId = searchParams.get("setupComponent") || searchParams.get("componentId") || undefined;
@@ -1189,68 +1208,59 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   const [pathDrafts, setPathDrafts] = useState<Record<string, string>>({});
   const [addSourceFor, setAddSourceFor] = useState<SetupComponentStatus | null>(null);
   const [preflightFor, setPreflightFor] = useState<SetupComponentStatus | null>(null);
+  const [licenseFor, setLicenseFor] = useState<SetupComponentStatus | null>(null);
   const [preflightBusy, setPreflightBusy] = useState(false);
-  const [setupMode, setSetupMode] = useState<SetupMode>(() => {
-    if (typeof window === "undefined") return "ai_guided";
-    const params = new URLSearchParams(window.location.search);
-    const forced = params.get("setupMode");
-    if (forced === "guided" || forced === "ai_guided" || forced === "manual") return forced;
-    const saved = window.localStorage.getItem("adept.setup.mode");
-    return saved === "guided" || saved === "ai_guided" || saved === "manual" ? saved : "ai_guided";
+  const [setupSection, setSetupSection] = useState<SetupSectionId>(() => {
+    if (typeof window === "undefined") return "overview";
+    return sectionFromSearch(new URLSearchParams(window.location.search));
   });
-  const setupSections = ["overview", "ai", "updates", "components", "models", "sources", "storage", "diagnostics", "manual", "comfy"] as const;
-  type SetupSection = (typeof setupSections)[number];
-  const sectionForMode = (mode: SetupMode): SetupSection =>
-    mode === "ai_guided" ? "ai" : mode === "manual" ? "manual" : "components";
-  const [setupSection, setSetupSection] = useState<SetupSection>(() => {
-    if (typeof window === "undefined") return "ai";
-    const params = new URLSearchParams(window.location.search);
-    const requested = params.get("setupSection");
-    if (requested && (setupSections as readonly string[]).includes(requested)) return requested as SetupSection;
-    const forced = params.get("setupMode");
-    if (forced === "guided" || forced === "manual" || forced === "ai_guided") return sectionForMode(forced);
-    const saved = window.localStorage.getItem("adept.setup.mode");
-    if (saved === "guided" || saved === "manual" || saved === "ai_guided") return sectionForMode(saved);
-    return "ai";
-  });
+  const [scanning, setScanning] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [optionalOpen, setOptionalOpen] = useState(false);
   const { jobs: installJobs, refresh: refreshInstallJobs } = useInstallJobsPoll(true, 1000, { activeOnly: false });
 
   useEffect(() => {
-    window.localStorage.setItem("adept.setup.mode", setupMode);
-  }, [setupMode]);
-
-  useEffect(() => {
-    if (forcedSetupMode === "guided" || forcedSetupMode === "ai_guided" || forcedSetupMode === "manual") {
-      setSetupMode(forcedSetupMode);
-    }
-    const requested = searchParams.get("setupSection");
-    if (requested && (setupSections as readonly string[]).includes(requested)) {
-      setSetupSection(requested as SetupSection);
-      return;
-    }
-    if (forcedSetupMode === "guided" || forcedSetupMode === "ai_guided" || forcedSetupMode === "manual") {
-      setSetupSection(sectionForMode(forcedSetupMode));
-    }
+    setSetupSection(sectionFromSearch(searchParams));
   }, [forcedSetupMode, searchParams]);
 
-  const refresh = useCallback(async () => {
-    const next = await api.setupStatus();
-    setStatus(next);
-    const ids = [
-      next.active_operation?.operation_id,
-      ...next.components.map((component) => component.operation_id),
-    ].filter((id): id is string => Boolean(id));
-    if (ids.length) {
-      setTrackedOperationIds((current) => Array.from(new Set([...current, ...ids])));
-    }
-    if (next.active_operation) {
-      setOperations((current) => ({ ...current, [next.active_operation!.operation_id]: next.active_operation! }));
+  const refresh = useCallback(async (force = false) => {
+    if (force) setScanning(true);
+    try {
+      const next = await api.setupStatus(force);
+      setStatus(next);
+      const ids = [
+        next.active_operation?.operation_id,
+        ...next.components.map((component) => component.operation_id),
+      ].filter((id): id is string => Boolean(id));
+      if (ids.length) {
+        setTrackedOperationIds((current) => Array.from(new Set([...current, ...ids])));
+      }
+      if (next.active_operation) {
+        setOperations((current) => ({ ...current, [next.active_operation!.operation_id]: next.active_operation! }));
+      }
+      return next;
+    } finally {
+      if (force) setScanning(false);
     }
   }, []);
 
   useEffect(() => {
     refresh().catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)));
   }, [refresh]);
+
+  useEffect(() => {
+    if (!status || status.firstRunSetupComplete || firstRunSaveRef.current) return;
+    if (!scanAllowsCompletion(status.firstRunScan)) return;
+    firstRunSaveRef.current = true;
+    api.completeFirstRun()
+      .then(() => {
+        setStatus((current) => (current ? { ...current, firstRunSetupComplete: true } : current));
+      })
+      .catch((error: unknown) => {
+        firstRunSaveRef.current = false;
+        setMessage(error instanceof Error ? error.message : String(error));
+      });
+  }, [status]);
 
   useEffect(() => {
     if (!trackedOperationIds.length) return;
@@ -1655,7 +1665,7 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
       <div className="page setup-wizard-page">
         <div className="panel">
           <PanelHeading title="Adept Setup" tip="Checks the components required for your studio." />
-          <p className="empty" role="status">{message ?? "Checking studio status…"}</p>
+          <p className="empty" role="status">{message ?? "Scanning your system…"}</p>
           {message && <button type="button" onClick={() => void refresh()}>Try Again</button>}
         </div>
       </div>
@@ -1672,8 +1682,18 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   const optional = visibleComponents.filter((component) => !component.required);
   const comfyuiReady = status.components.some((component) => component.id === "comfyui" && component.status === "ready");
   const preparing = trackedOperationIds.length > 0 || status.overall_status === "preparing";
-  const openLifecyclePreflight = (component: SetupComponentStatus) => setPreflightFor(component);
+  const openLifecyclePreflight = (component: SetupComponentStatus) => {
+    if (component.model_license && !component.model_license.installationUnlocked) {
+      setLicenseFor(component);
+      return;
+    }
+    setPreflightFor(component);
+  };
   const repairLifecycleComponent = (component: SetupComponentStatus) => {
+    if (component.model_license && !component.model_license.installationUnlocked) {
+      setLicenseFor(component);
+      return;
+    }
     const existing = installJobsByComponent[component.id];
     if (existing) {
       void runInstallJobAction(existing, "repair");
@@ -1687,62 +1707,78 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
       .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)));
   };
 
+  const scan = status.firstRunScan;
+  if (setupWizardRequired(status) && !wizardOpen) {
+    setWizardOpen(true);
+  }
+  const readyIds = new Set((scan?.alreadyReady ?? []).map((item) => item.id));
+
   return (
-    <div className="page setup-wizard-page">
+    <>
+    {wizardOpen && (
+      <FirstRunSetupModal
+        status={status}
+        scanning={scanning}
+        installing={busyId === "prepare" || preparing}
+        onRescan={() => refresh(true)}
+        onBegin={startPreparation}
+        onFinish={() => setWizardOpen(false)}
+      />
+    )}
+    <div className="page setup-wizard-page" hidden={wizardOpen}>
       <PanelHeading title="Adept Setup" tip="Checks readiness and prepares required studio components." />
-      <section className="panel" aria-label="Setup mode">
-        <div className="setup-section-heading">
-          <div>
-            <h2>Setup Mode</h2>
-            <p>Choose the setup experience that fits how you want to work right now.</p>
+      {scan && (
+        <section className="panel" aria-label="System scan" data-testid="setup-system-scan">
+          <h2>{scanning ? "Scanning your computer…" : "System status"}</h2>
+          <ul>
+            <li>{readyIds.has("python") && readyIds.has("ffmpeg") ? "✓" : "○"} Runtime dependencies</li>
+            <li>{readyIds.has("comfyui") ? "✓" : "○"} ComfyUI</li>
+            <li>{scan.baselineImageWorkflow === "ready" ? "✓" : "○"} Image generation</li>
+            <li>{scan.baselineVideoWorkflow === "ready" ? "✓" : "○"} Video generation</li>
+            <li>{scan.nodeCatalogChecked ? "✓" : "○"} ComfyUI node catalogue</li>
+          </ul>
+          <div className="row-actions">
+            <button type="button" data-testid="setup-rescan" disabled={scanning} onClick={() => void refresh(true)}>
+              {scanning ? "Scanning…" : "Re-scan system"}
+            </button>
           </div>
-        </div>
-        <div className="row-actions">
-          <button type="button" className={setupMode === "guided" ? "primary" : "ghost"} onClick={() => { setSetupMode("guided"); setSetupSection("components"); }}>
-            Guided
-          </button>
-          <button type="button" className={setupMode === "ai_guided" ? "primary" : "ghost"} onClick={() => { setSetupMode("ai_guided"); setSetupSection("ai"); }}>
-            AI-Guided
-          </button>
-          <button type="button" className={setupMode === "manual" ? "primary" : "ghost"} onClick={() => { setSetupMode("manual"); setSetupSection("manual"); }}>
-            Manual
-          </button>
-        </div>
-        <p className="muted">
-          {setupMode === "guided" ? "Guided keeps the existing Prepare My Studio flow front and center."
-            : setupMode === "ai_guided" ? "AI-Guided recommends certified providers, compares options, and walks you through install, calibration, and certification."
-            : "Manual keeps the full setup catalog, advanced actions, and Source Manager tools visible."}
-        </p>
-      </section>
+        </section>
+      )}
       <SetupSummary status={status} preparing={preparing} projectId={projectId} onPrepare={() => void preparePlan()} />
 
       <LoRASetupSection onMessage={setMessage} />
 
+      <div className="row-actions">
+        <button
+          type="button"
+          className="primary"
+          data-testid="open-optional-tools"
+          onClick={() => setOptionalOpen(true)}
+        >
+          Optional Tools & Models
+        </button>
+      </div>
+
       {message && <div className="setup-message" role="status">{message}</div>}
 
-      <nav className="row-actions" aria-label="Adept Setup sections" data-testid="adept-setup-sections">
+      <nav id="adept-setup-sections" className="row-actions" aria-label="Adept Setup sections" data-testid="adept-setup-sections">
         {([
           ["overview", "Overview"],
-          ["ai", "AI Setup"],
+          ["ai", "Recommendations"],
           ["updates", "Updates"],
           ["components", "Components"],
           ["models", "Models"],
           ["sources", "Sources"],
           ["storage", "Storage"],
           ["diagnostics", "Diagnostics"],
-          ["manual", "Manual Setup"],
+          ["manual", "Advanced"],
           ["comfy", "Comfy Manager"],
         ] as const).map(([id, label]) => (
           <button
             key={id}
             type="button"
             className={setupSection === id ? "primary" : "ghost"}
-            onClick={() => {
-              setSetupSection(id);
-              if (id === "ai") setSetupMode("ai_guided");
-              if (id === "manual") setSetupMode("manual");
-              if (id === "components") setSetupMode("guided");
-            }}
+            onClick={() => setSetupSection(id)}
           >
             {label}
           </button>
@@ -1780,9 +1816,9 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
         <>
           <DownloadSourcesPanel onMessage={setMessage} />
           <p className="setup-nav-strip">
-            <Link to={`/source-manager${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`} data-testid="open-source-manager">
-              Open Source Manager
-            </Link>{" "}
+            <button type="button" className="linkish" data-testid="open-source-manager" onClick={() => setSetupSection("sources")}>
+              Open sources
+            </button>{" "}
             for provider priority, saved sources, and download queue tools.
           </p>
 
@@ -1790,23 +1826,8 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
 
           <HostedProvidersSetupPanel onMessage={setMessage} />
 
-          <p className="setup-nav-strip">
-            <Link to="/runtime-manager" data-testid="open-runtime-manager">
-              Open Runtime Manager
-            </Link>{" "}
-            for Docker Local runtimes, repair, and safe uninstall.
-          </p>
-
-          <AddCustomCapability onRegistered={() => void refresh()} />
-
           <VideoModelLibrary />
           <PromptIntelligenceBenchmarkDashboard />
-
-          {setupMode === "manual" && (
-            <div className="panel">
-              <p>Manual mode keeps the full component list, advanced actions, and Source Manager workflow visible.</p>
-            </div>
-          )}
 
           <section className="setup-component-section" aria-labelledby="required-components-heading">
         <div className="setup-section-heading">
@@ -1825,6 +1846,7 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
               installJob={installJobsByComponent[component.id]}
               busy={busyId != null}
               onPrimaryAction={(item) => void runPrimaryAction(item)}
+              onReviewLicense={setLicenseFor}
               onPackAction={(item, action) => void runPackAction(item, action)}
               onLater={(id) => void deferUpdate(id)}
               onInstallJobPause={(job) => void runInstallJobAction(job, "pause")}
@@ -1855,6 +1877,7 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
               installJob={installJobsByComponent[component.id]}
               busy={busyId != null}
               onPrimaryAction={(item) => void runPrimaryAction(item)}
+              onReviewLicense={setLicenseFor}
               onSecondaryAction={(item) => void runSecondaryAction(item)}
               onPackAction={(item, action) => void runPackAction(item, action)}
               onLater={(id) => void deferUpdate(id)}
@@ -1890,6 +1913,27 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
 
       <BackgroundServicesSection comfyuiReady={Boolean(comfyuiReady)} />
 
+      <CapabilityReadinessPanel projectId={projectId} />
+    </div>
+
+      <OptionalToolsWizard
+        open={optionalOpen}
+        components={status.components}
+        onClose={() => setOptionalOpen(false)}
+        onRefresh={refresh}
+        onNeedLicense={setLicenseFor}
+      />
+
+      {licenseFor?.model_license?.modelId && (
+        <ModelLicenseDialog
+          modelId={licenseFor.model_license.modelId}
+          onClose={() => setLicenseFor(null)}
+          onConfirmed={() => {
+            setLicenseFor(null);
+            void refresh();
+          }}
+        />
+      )}
       {plan && (
         <PreparationPlanDialog
           plan={plan}
@@ -1932,6 +1976,6 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
           onClose={closeCheckpoint}
         />
       )}
-    </div>
+    </>
   );
 }

@@ -14,8 +14,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type RuntimeManagerStatus } from "../api";
+import { bootHandoffTarget, rememberFirstRunComplete } from "../setup/firstRun";
 import { buildAiGuidedSetupPath } from "../setup/navigation";
-import { buildSnapshot, type StartupSnapshot, type SystemState } from "./startupSnapshot";
+import { buildSnapshot, type StartupSnapshot } from "./startupSnapshot";
+import { badgeClass, buildStartupBoard, describeFinalStatus, isCloud12 } from "./startupDisplay";
 import "./StartupSystemsGauge.css";
 
 const REQUIRED_TIMEOUT_MS = 120_000;
@@ -34,6 +36,7 @@ type BootCheck = {
 type BootCert = {
   verdict?: "GO" | "NO-GO";
   headline?: string;
+  studioApi?: { host: string; port: number; baseUrl: string; runtimeMode: string };
   progressPct?: number;
   checks?: BootCheck[];
   failed?: Array<{ system: string; check: string; detail: string; result: string }>;
@@ -62,18 +65,10 @@ function resolveTimeoutMs(): number {
   return REQUIRED_TIMEOUT_MS;
 }
 
-const STATE_LABEL: Record<SystemState, string> = {
-  online: "ONLINE",
-  starting: "STARTING",
-  failed: "FAILED",
-  degraded: "DEGRADED",
-  on_demand: "ON DEMAND",
-  checking: "CHECKING",
-};
-
 export function StartupSystemsGauge() {
   const [snapshot, setSnapshot] = useState<StartupSnapshot | null>(null);
   const [visible, setVisible] = useState(false);
+  const [handoffCover, setHandoffCover] = useState(true);
   const [failed, setFailed] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -83,7 +78,6 @@ export function StartupSystemsGauge() {
   const inFlightRef = useRef(false);
   const handoffCheckedRef = useRef(false);
   const navigate = useNavigate();
-  const [missingEssentials, setMissingEssentials] = useState<Array<{ id: string; name: string }>>([]);
   const [bootCert, setBootCert] = useState<BootCert | null>(null);
   const [certFailed, setCertFailed] = useState(false);
   const [bootReportOpen, setBootReportOpen] = useState(false);
@@ -95,21 +89,24 @@ export function StartupSystemsGauge() {
     if (handoffCheckedRef.current) return;
     handoffCheckedRef.current = true;
     void api.setupLifecycleUpdates().catch(() => undefined);
+    let target: "/setup" | "/" = "/";
     try {
       const status = await api.setupStatus();
-      const missing = (status.components || []).filter((component) => component.required && component.status !== "ready");
-      if (missing.length) {
-        setMissingEssentials(missing.map((component) => ({ id: component.id, name: component.name })));
-        setVisible(true);
-        closedRef.current = true;
-        return;
-      }
+      rememberFirstRunComplete(status.firstRunSetupComplete);
+      target = bootHandoffTarget(status.firstRunSetupComplete, false);
     } catch {
-      // A failed setup read must not block launch.
+      // A failed flag read must not turn an already-complete record into a new first run.
+      target = bootHandoffTarget(undefined, true);
+    }
+    if (target === "/setup") {
+      navigate("/setup", { replace: true });
     }
     closedRef.current = true;
-    setTimeout(() => setVisible(false), READY_HOLD_MS);
-  }, []);
+    window.setTimeout(() => {
+      setHandoffCover(false);
+      setVisible(false);
+    }, target === "/setup" ? 0 : READY_HOLD_MS);
+  }, [navigate]);
 
   const probeStudioApi = useCallback(async (): Promise<boolean> => {
     try {
@@ -280,15 +277,19 @@ export function StartupSystemsGauge() {
     }
   }, []);
 
+  if (!visible && handoffCover) {
+    return <div className="startup-gauge-backdrop" data-testid="first-run-handoff" aria-hidden="true" />;
+  }
+
   if (!visible) {
     if (bootCert?.verdict !== "GO") return null;
     return (
       <div className="boot-ready" data-testid="boot-ready">
         <span>ADEPT UI READY — GO</span>
-        {(bootCert.optional ?? []).some((row) => row.system !== "Cloud 1.2") && (
+        {(bootCert.optional ?? []).some((row) => !isCloud12(row.system)) && (
           <span data-testid="boot-optional">
             {(bootCert.optional ?? [])
-              .filter((row) => row.system !== "Cloud 1.2")
+              .filter((row) => !isCloud12(row.system))
               .map((row) => `${row.system}: ${row.detail}`)
               .join(" · ")}
           </span>
@@ -301,64 +302,63 @@ export function StartupSystemsGauge() {
   const allOnline = snap?.allRequiredOnline ?? false;
   const runtimeFailed = failed && !allOnline;
   const attention = runtimeFailed || certFailed;
+  const sections = buildStartupBoard(snap?.rows ?? [], bootCert?.checks ?? []);
+  const runtimeGap = (snap?.rows ?? []).find((row) => row.required && row.state !== "online");
+  const status = describeFinalStatus({
+    verdict: certFailed || runtimeFailed ? "NO-GO" : bootCert?.verdict,
+    progressPct: pct,
+    failed: certFailed
+      ? bootCert?.failed ?? []
+      : runtimeFailed
+        ? [{ system: runtimeGap?.label || "Adept Core", detail: "could not be brought online", result: "FAIL" }]
+        : [],
+    setupOptional: [],
+    allRequiredOnline: allOnline && !attention,
+  });
+  const phaseTitle = attention ? (certFailed ? status.phaseTitle : "Startup Failed") : status.phaseTitle;
 
   return (
     <div className="startup-gauge-backdrop" role="dialog" aria-modal="true" aria-labelledby="startup-gauge-title" data-testid="startup-systems-gauge">
       <div className="startup-gauge">
         <p className="startup-gauge__brand">ADEPT UI</p>
         <h2 id="startup-gauge-title" className="startup-gauge__title">
-          {certFailed ? "Startup Requires Attention" : runtimeFailed ? "Startup Failed" : "Initializing Creative Runtime"}
+          {phaseTitle}
         </h2>
         <div className="startup-gauge__bar">
           <div className={`startup-gauge__bar-fill${attention ? " startup-gauge__bar-fill--failed" : ""}`} style={{ width: `${attention ? 100 : pct}%` }} />
         </div>
         <div className="startup-gauge__pct">
-          <span>{attention ? "A required check needs attention" : `${pct}% — Bringing Creative Systems Online`}</span>
-          <span data-testid="startup-gauge-message">{snap?.message ?? "Checking…"}</span>
+          <span>{pct}%</span>
+          <span data-testid="startup-progress-label">{attention ? "A required check needs attention" : status.progressLabel}</span>
         </div>
-        <div className="startup-gauge__rows" data-testid="startup-gauge-rows">
-          {(snap?.rows ?? []).map((r) => (
-            <div className="startup-gauge__row" key={r.id} data-testid={`startup-system-${r.id}`}>
-              <span className="startup-gauge__row-label">{r.label}</span>
-              <span className={`startup-gauge__row-state sg-state--${r.state}`}>{STATE_LABEL[r.state]}</span>
+        {sections.map((section) => (
+          <section className="startup-gauge__section" key={section.id} data-testid={`startup-section-${section.id}`}>
+            <h3 className="startup-gauge__section-title">{section.title}</h3>
+            <div className="startup-gauge__rows">
+              {section.rows.map((row) => (
+                <div className="startup-gauge__row" key={row.id} data-testid={`startup-system-${row.id}`}>
+                  <span className="startup-gauge__row-label">{row.label}</span>
+                  <span className={`startup-gauge__row-state sg-state--${badgeClass(row.badge)}`}>{row.badge}</span>
+                </div>
+              ))}
             </div>
-          ))}
-          {(bootCert?.checks ?? []).map((check) => (
-            <div className="startup-gauge__row" key={check.id} data-testid={`boot-check-${check.id}`}>
-              <span className="startup-gauge__row-label">{check.system}</span>
-              <span className={`startup-gauge__row-state sg-state--${check.result === "PASS" ? "online" : check.result === "OPTIONAL" ? "on_demand" : "failed"}`}>
-                {check.result}
-              </span>
-            </div>
-          ))}
-        </div>
-        {bootCert?.headline && <div className="startup-gauge__all-online" data-testid="boot-verdict">{bootCert.headline}</div>}
-        {allOnline && <div className="startup-gauge__all-online">ALL SYSTEMS ONLINE</div>}
-        {missingEssentials.length > 0 && (
-          <div className="startup-gauge__failed-block" data-testid="startup-open-ai-setup">
-            <p className="startup-gauge__failed-title">A few essentials are still missing.</p>
-            <p className="startup-gauge__failed-msg">
-              {missingEssentials.map((item) => item.name).join(", ")}. Open AI Setup to review them. Nothing installs from this window.
-            </p>
-            <div className="startup-gauge__actions">
-              <button
-                type="button"
-                className="primary"
-                data-testid="startup-open-ai-setup-button"
-                onClick={() => {
-                  setVisible(false);
-                  navigate(buildAiGuidedSetupPath({
-                    source: "workspace_launch",
-                    setupSection: "ai",
-                    missingComponentIds: missingEssentials.map((item) => item.id),
-                  }));
-                }}
-              >
-                Open AI Setup
-              </button>
-              <button type="button" onClick={() => setVisible(false)}>Continue</button>
-            </div>
+          </section>
+        ))}
+        {status.headline && (
+          <div className={`startup-gauge__final startup-gauge__final--${status.itemKind === "required" ? "attention" : "go"}`} data-testid="startup-final-status">
+            <p className="startup-gauge__final-headline" data-testid="boot-verdict">{status.headline}</p>
+            {status.body && <p className="startup-gauge__final-body">{status.body}</p>}
+            {status.message && <p className="startup-gauge__final-message" data-testid="startup-gauge-message">{status.message}</p>}
+            {status.optionalNote && <p className="startup-gauge__final-note">{status.optionalNote}</p>}
+            {status.itemKind === "required" && status.items.length > 0 && (
+              <ul className="startup-gauge__final-list" data-testid="startup-required-missing">
+                {status.items.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            )}
           </div>
+        )}
+        {!status.headline && (
+          <p className="startup-gauge__progress-message" data-testid="startup-gauge-message">{snap?.message ?? "Checking…"}</p>
         )}
         {certFailed && (
           <div className="startup-gauge__failed-block" data-testid="boot-attention">
@@ -377,6 +377,7 @@ export function StartupSystemsGauge() {
                 type="button"
                 data-testid="boot-setup"
                 onClick={() => {
+                  setHandoffCover(false);
                   setVisible(false);
                   navigate(buildAiGuidedSetupPath({ source: "workspace_launch", setupSection: "ai" }));
                 }}
@@ -386,7 +387,10 @@ export function StartupSystemsGauge() {
             </div>
             {bootReportOpen && (
               <pre className="startup-gauge__details" data-testid="boot-report">
-                {(bootCert?.checks ?? []).map((check) => `${check.system} | ${check.check} | ${check.detail} | ${check.durationMs ?? 0}ms | ${check.result}`).join("\n")}
+                {(bootCert?.checks ?? [])
+                  .filter((check) => !isCloud12(check.id) && !isCloud12(check.system))
+                  .map((check) => `${check.system} | ${check.check} | ${check.detail} | ${check.durationMs ?? 0}ms | ${check.result}`)
+                  .join("\n")}
               </pre>
             )}
           </div>
@@ -407,7 +411,7 @@ export function StartupSystemsGauge() {
                 {showDetails ? "Hide Details" : "Open Runtime Details"}
               </button>
               {!certFailed && (
-                <button type="button" data-testid="startup-gauge-exit" onClick={() => setVisible(false)}>
+                <button type="button" data-testid="startup-gauge-exit" onClick={() => { setHandoffCover(false); setVisible(false); }}>
                   Continue in Degraded Mode
                 </button>
               )}
@@ -425,6 +429,9 @@ export function StartupSystemsGauge() {
               ? "Finalizing system checks..."
               : "Adept is bringing its creative runtime online. No action needed."}
           </p>
+        )}
+        {bootCert?.studioApi?.baseUrl && (
+          <p className="startup-gauge__endpoint" data-testid="boot-studio-api">{bootCert.studioApi.baseUrl}</p>
         )}
       </div>
     </div>

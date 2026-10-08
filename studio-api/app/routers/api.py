@@ -300,7 +300,7 @@ async def healthz() -> dict:
 async def health():
     """Fast liveness. Same intent as /healthz.
 
-    The UI and the :8760 proxy poll this route. The previous handler awaited
+    The UI and the local renderer proxy poll this route. The previous handler awaited
     comfy_health (Comfy HTTP + object_info + on-disk model verifiers),
     capability_service.get_capabilities, and codirector_service.get_health
     (provider/Ollama). Those probes blocked the uvicorn worker and produced

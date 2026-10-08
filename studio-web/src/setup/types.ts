@@ -151,6 +151,30 @@ export interface ComponentDiagnosticResult {
   checked_at: string;
 }
 
+export interface ModelLicenseSummary {
+  modelId: string;
+  displayName: string;
+  role: string;
+  provider: string;
+  licenseName: string;
+  licenseUrl: string;
+  officialSource: string;
+  requiresAcknowledgement: boolean;
+  attributionRequired: boolean;
+  status: string;
+  installationUnlocked: boolean;
+  verified: boolean;
+  message: string;
+}
+
+export interface ModelLicenseDetail extends ModelLicenseSummary {
+  licenseVersion: string;
+  authorizationUrl: string;
+  route: string;
+  region: string;
+  regions: Array<{ code: string; name: string; route: "standard" | "separate_authorization" | string }>;
+}
+
 export interface SetupComponentStatus {
   id: string;
   name: string;
@@ -210,6 +234,7 @@ export interface SetupComponentStatus {
   recommended_vram_gb?: number | null;
   source_repo?: string | null;
   license?: string | null;
+  model_license?: ModelLicenseSummary | null;
   dependencies?: string[];
   logs?: string[];
   executable_path?: string | null;
@@ -356,6 +381,20 @@ export type SetupOverallStatus =
   | "needs_attention";
 
 export interface SetupStatusResponse {
+  firstRunSetupComplete?: boolean;
+  firstRunScan?: {
+    alreadyReady?: { id: string; name: string }[];
+    essentialNeeded?: { id: string; name: string; status?: string }[];
+    essentialBlockerCount?: number;
+    optionalAbsentCount?: number;
+    baselineImageWorkflow?: "ready" | "blocked";
+    baselineVideoWorkflow?: "ready" | "blocked";
+    estimatedDownloadBytes?: number;
+    estimatedInstallBytes?: number;
+    freeBytes?: number | null;
+    storageShortfall?: boolean;
+    nodeCatalogChecked?: boolean;
+  };
   overall_status?: SetupOverallStatus;
   overall_label?: string;
   counts?: SetupSummaryCounts;

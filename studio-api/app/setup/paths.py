@@ -112,11 +112,6 @@ def ensure_suggested_path(component_id: str) -> Path:
         vae.mkdir(parents=True, exist_ok=True)
         return vae
 
-    if component.id == "ltx_2_5_spatial_upscaler":
-        latent = models / "latent_upscale_models"
-        latent.mkdir(parents=True, exist_ok=True)
-        return latent
-
     if component.installer == "asset_pack" or component.id.startswith("pack_"):
         # Never mkdir empty Essential pack destinations here.
         return recommended_pack_path(component_id)
@@ -181,11 +176,13 @@ def ensure_configured_paths(state: dict[str, Any]) -> dict[str, str]:
     locations = state.setdefault("model_locations", {})
     created: dict[str, str] = {}
 
-    from .catalog import is_retired_video_setup_component
+    from .catalog import REMOVED_UNUSED_SETUP_COMPONENT_IDS, is_retired_video_setup_component
 
     for component in COMPONENTS:
         component_id = component.id
         if is_retired_video_setup_component(component_id):
+            continue
+        if component_id in REMOVED_UNUSED_SETUP_COMPONENT_IDS:
             continue
         current = str(locations.get(component_id) or "").strip()
 

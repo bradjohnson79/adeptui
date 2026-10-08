@@ -30,7 +30,7 @@ def _write_fake_safetensors(path: Path) -> None:
         header[key] = {"dtype": "F32", "shape": list(shape), "data_offsets": [offset, offset + len(data)]}
         offset += len(data)
         body += data
-    payload = json.dumps({"__metadata__": {"format": "pt"}, **header}).encode("utf-8")
+    payload = json.dumps({"__metadata__": {"format": "pt", "modelspec.title": path.stem}, **header}).encode("utf-8")
     path.write_bytes(struct.pack("<Q", len(payload)) + payload + body)
 
 
@@ -43,6 +43,8 @@ def lora_env(monkeypatch):
     tmp = Path(__file__).resolve().parents[1] / ".adept-tmp" / f"lora-tests-{uuid.uuid4().hex[:10]}"
     tmp.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(settings, "data_dir", tmp)
+    monkeypatch.setattr(settings, "comfy_models_dir", str(tmp / "comfy_models"), raising=False)
+    monkeypatch.setattr(settings, "krea2_model_root", str(tmp / "krea"), raising=False)
     (tmp / "lora_store").mkdir(parents=True, exist_ok=True)
     (tmp / "models" / "loras").mkdir(parents=True, exist_ok=True)
     sdxl = tmp / "models" / "loras" / "sdxl_test.safetensors"
@@ -182,8 +184,10 @@ def test_detection_registers_shared_files(lora_env):
     created = registry.register_detected_files()
     by_name = {r.name: r for r in created}
     assert "ltx_motion_test" in by_name
-    assert by_name["ltx_motion_test"].model_family == "ltx"
-    assert by_name["ltx_motion_test"].modality == "video"
+    # Filename alone is not proof of a base model.
+    assert by_name["ltx_motion_test"].model_family == "unassigned"
+    assert by_name["ltx_motion_test"].compatibility == "unknown"
+    assert by_name["ltx_motion_test"].file_path == str(lora_env["ltx"].resolve())
 
 
 def test_validation_rejects_non_safetensors(lora_env):
@@ -226,7 +230,6 @@ def test_baseline_generation_graph_unchanged_without_lora():
 def test_lora_graph_emits_loader_node_and_rewires():
     from app.image_runtime.asset_refs import LoraSpec
     from app.imagegen_workflows import build_txt2img_workflow
-    from app.workflows.ltx_builder import build_ltx_simple_i2v
 
     spec = LoraSpec(loraId="cinematic_xl.safetensors", strength=0.7, resolvedName="cinematic_xl.safetensors")
     graph = build_txt2img_workflow(
@@ -243,36 +246,6 @@ def test_lora_graph_emits_loader_node_and_rewires():
     assert graph["20"]["inputs"]["strength_model"] == 0.7
     assert graph["5"]["inputs"]["model"] == ["20", 0]
     assert graph["2"]["inputs"]["clip"] == ["20", 1]
-
-    ltx = build_ltx_simple_i2v(
-        checkpoint="ltx-2.3-22b-distilled-fp8.safetensors",
-        positive="test",
-        negative="",
-        width=512,
-        height=512,
-        length=25,
-        fps=24,
-        seed=1,
-        start_image="frame.png",
-        lora_name="ltx_motion.safetensors",
-        lora_strength=0.6,
-    )
-    assert ltx["1L"]["class_type"] == "LoraLoaderModelOnly"
-    assert ltx["8"]["inputs"]["model"] == ["1L", 0]
-    assert ltx["9"]["inputs"]["model"] == ["1L", 0]
-    # no-lora ltx graph has no 1L node
-    base_ltx = build_ltx_simple_i2v(
-        checkpoint="ltx-2.3-22b-distilled-fp8.safetensors",
-        positive="test",
-        negative="",
-        width=512,
-        height=512,
-        length=25,
-        fps=24,
-        seed=1,
-        start_image="frame.png",
-    )
-    assert "1L" not in base_ltx
 
 
 def test_catalog_loads_and_download_requires_approval():

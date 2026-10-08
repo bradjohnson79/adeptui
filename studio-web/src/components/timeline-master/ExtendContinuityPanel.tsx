@@ -125,10 +125,6 @@ export function SceneContinuityPolicy({
         {cdAdvancedOpen ? (
           <div data-testid="timeline-cd-advanced">
             <label className="field">
-              <span>Fast Vision</span>
-              <input value={cdPolicy?.fastVisionModel || "VideoChat3"} readOnly />
-            </label>
-            <label className="field">
               <span>Deep Review</span>
               <select
                 data-testid="timeline-cd-deep-review"

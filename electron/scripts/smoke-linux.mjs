@@ -14,6 +14,7 @@ const unpackedDir = path.join(dist, "linux-unpacked");
 const unpackedBin = path.join(unpackedDir, "Adept UI");
 const appImage = path.join(dist, `Adept UI-${version}-linux-x64.AppImage`);
 const deb = path.join(dist, `Adept UI-${version}-linux-x64.deb`);
+const rpm = path.join(dist, `Adept.UI-${version}-linux-x64.rpm`);
 const evidenceDir = path.join(root, "electron", "build", "linux-evidence");
 const resultPath = path.join(root, "electron", "build", "linux-smoke-result.json");
 const work = path.join(os.tmpdir(), "adept-ui-linux-smoke");
@@ -532,13 +533,23 @@ async function main() {
   setGate("DEB UNINSTALL", removed.status === 0 && !stillPresent ? "PASS" : "FAIL");
   setGate("DEFAULT UNINSTALL PRESERVES USER DATA", fs.existsSync(path.join(debProfile, "keep.txt")) ? "PASS" : "FAIL");
 
+  const rpmQuery = spawnSync("rpm", ["-qpl", rpm], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const rpmInfo = spawnSync("rpm", ["-qip", rpm], { encoding: "utf8" });
+  const rpmListing = rpmQuery.stdout || "";
+  evidence.rpmInfo = `${rpmInfo.stdout || ""}\n${rpmInfo.stderr || ""}`.slice(0, 2000);
+  evidence.rpmDesktop = rpmListing.split("\n").map((line) => line.trim()).filter((line) => line.endsWith(".desktop"));
+  evidence.rpmIcons = rpmListing.split("\n").map((line) => line.trim()).filter((line) => /\/icons\/hicolor\/.*\.png$/.test(line));
+  const rpmDesktopOk = evidence.rpmDesktop.length > 0 && evidence.rpmIcons.length > 0 && /^Name\s*:\s*adept-ui$/m.test(rpmInfo.stdout || "");
+  setGate("RPM PACKAGE METADATA", rpmQuery.status === 0 && rpmDesktopOk ? "PASS" : "FAIL");
+
   evidence.appImage = hashFile(appImage);
   evidence.deb = hashFile(deb);
+  evidence.rpm = fs.existsSync(rpm) ? hashFile(rpm) : null;
   evidence.gates = gates;
   console.log(JSON.stringify({ appImage: evidence.appImage, deb: evidence.deb, bootVerdict: evidence.bootVerdict, surfaces: surfacePass }, null, 2));
 
   const numericFails = ["PYWIN32 BUNDLED", "VITE :5173 DEPENDENCY", "DEV VENV DEPENDENCY", "DEV REPO DEPENDENCY", "SYSTEM PYTHON DEPENDENCY", "FALSE CUDA READY STATES", "FALSE HEALTHY STATES", "WINDOWS BINARIES BUNDLED", "MACOS BINARIES BUNDLED", "USER PROJECTS BUNDLED", "USER LIBRARY ASSETS BUNDLED", "MODEL WEIGHTS BUNDLED", "BACKUPS BUNDLED", "PLAYWRIGHT ARTIFACTS BUNDLED", "SECRETS BUNDLED", "WINDOWS COMFY FILES BUNDLED", "DEV VENV", "DEV .ENV", "ADEPT PROJECTS BEFORE LAUNCH", "WINDOWS PROJECT DATA", "DUPLICATE MANAGERS", "FAILED REQUIRED CHECKS", "WINDOWS-ONLY PROCESS TOOLING"];
-  const passFails = ["ELECTRON PROCESS STARTED", "PACKAGED RENDERER LOADED", "STUDIO API :8760", "BACKGROUND SERVICES PROCESS STARTED", "FRESH PROFILE", "FIRST PROJECT PERSISTENCE", "MAJOR PRODUCT SURFACE SMOKE", "APPIMAGE EXECUTION", "DEB INSTALL", "DEB APPLICATION LAUNCH", "DEB UNINSTALL", "DEFAULT UNINSTALL PRESERVES USER DATA", "CLEAN SHUTDOWN", "8760 COLLISION HANDLING", "8759 COLLISION HANDLING", "PACKAGED API LOSS DETECTION", "COMFY TRUTHFUL", "DESKTOP ENTRY", "CO-DIRECTOR STREAM WIRING"];
+  const passFails = ["ELECTRON PROCESS STARTED", "PACKAGED RENDERER LOADED", "STUDIO API :8760", "BACKGROUND SERVICES PROCESS STARTED", "FRESH PROFILE", "FIRST PROJECT PERSISTENCE", "MAJOR PRODUCT SURFACE SMOKE", "APPIMAGE EXECUTION", "DEB INSTALL", "DEB APPLICATION LAUNCH", "DEB UNINSTALL", "DEFAULT UNINSTALL PRESERVES USER DATA", "CLEAN SHUTDOWN", "8760 COLLISION HANDLING", "8759 COLLISION HANDLING", "PACKAGED API LOSS DETECTION", "COMFY TRUTHFUL", "DESKTOP ENTRY", "RPM PACKAGE METADATA", "CO-DIRECTOR STREAM WIRING"];
   const bad = numericFails.some((name) => gates[name] !== 0)
     || passFails.some((name) => gates[name] !== "PASS")
     || gates["UNOWNED PROCESS KILLED"] === "YES"

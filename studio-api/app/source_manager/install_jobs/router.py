@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from ...setup.model_license import ModelLicenseLocked
 from . import events as install_events
 from .requirements import resolve_requirements
 from .service import (
@@ -163,6 +164,8 @@ def setup_install_jobs_create(body: dict):
             or body.get("install_path"),
         )
         return {"job": job, "created": True}
+    except ModelLicenseLocked as exc:
+        raise HTTPException(409, exc.view.get("message") or "License setup required") from exc
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -181,6 +184,8 @@ def setup_component_install(component_id: str, body: InstallBody | None = None):
             install_path=payload.install_path,
         )
         return {"job": job, "created": True}
+    except ModelLicenseLocked as exc:
+        raise HTTPException(409, exc.view.get("message") or "License setup required") from exc
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001

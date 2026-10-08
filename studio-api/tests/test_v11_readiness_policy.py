@@ -22,12 +22,15 @@ def test_policy_version_and_score_semantics() -> None:
     assert SCORE_SEMANTICS == "Adept Platform Production Readiness"
 
 
-def test_videochat3_remains_catalog_required_but_continuity_review_only() -> None:
-    assert BY_ID["videochat3_4b"].required is True
+def test_videochat3_is_not_a_current_setup_requirement() -> None:
+    from app.setup.catalog import public_components
+
+    assert BY_ID["videochat3_4b"].required is False
+    assert "videochat3_4b" not in {item.id for item in public_components()}
     decision = videochat3_v11_decision()
     assert decision["capabilityId"] == VIDEOCHAT3_CAPABILITY_ID
     assert decision["role"] == "continuity_review_only"
-    assert decision["catalogRequiredRemains"] == "true"
+    assert decision["catalogRequiredRemains"] == "false"
     assignment = classify_capability(VIDEOCHAT3_CAPABILITY_ID)
     assert assignment.readiness_class == ReadinessClass.ADVISORY_REVIEW_DEGRADED
     assert assignment.v11_requirement == V11Requirement.CONTINUITY_REVIEW

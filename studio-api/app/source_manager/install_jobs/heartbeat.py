@@ -12,7 +12,6 @@ StallStatus = Literal["none", "possible_stall", "interrupted", "waiting_for_sour
 _DEFAULT_STALL_SECONDS = 120
 _COMPONENT_STALL_SECONDS: dict[str, int] = {
     "index_tts2": 600,
-    "pack_essential_photoreal": 300,
     "qwen3_tts": 300,
     "qwen_voice": 300,
 }

@@ -26,10 +26,10 @@ def _tcp_check(host: str, port: int, timeout: float = 3.0) -> dict[str, Any]:
         s = socket.create_connection((host, port), timeout=timeout)
         s.close()
         elapsed = round((time.monotonic() - start) * 1000)
-        return {"listening": True, "elapsedMs": elapsed}
+        return {"listening": True, "elapsedMs": elapsed, "port": port}
     except (socket.timeout, ConnectionRefusedError, OSError) as e:
         elapsed = round((time.monotonic() - start) * 1000)
-        return {"listening": False, "elapsedMs": elapsed, "error": type(e).__name__}
+        return {"listening": False, "elapsedMs": elapsed, "error": type(e).__name__, "port": port}
 
 
 def _http_get(url: str, timeout: float = 5.0) -> dict[str, Any]:
@@ -90,29 +90,43 @@ def diagnostics_run() -> dict[str, Any]:
     start_all = time.monotonic()
     result: dict[str, Any] = {"timestamp": _utc_now(), "layers": {}}
 
-    # Layer 1: Port / process state
-    ports = [_port_owner(p) for p in [8758, 8760, 8188, 8765]]
+    from ...runtime_endpoint import resolve_studio_api_endpoint
+
+    endpoint = resolve_studio_api_endpoint()
+    api_port = int(endpoint["studioApiPort"])
+    # Layer 1: Port / process state. 8188 is Comfy. 8759 is not probed here.
+    ports = [_port_owner(p) for p in [api_port, 8188]]
     result["layers"]["ports"] = ports
 
-    # Layer 2: Direct API health
-    api_tcp = _tcp_check("127.0.0.1", 8758)
-    api_healthz = _http_get("http://127.0.0.1:8758/api/healthz", timeout=5.0)
-    api_health = _http_get("http://127.0.0.1:8758/api/health", timeout=15.0)
+    # Layer 2: This process's Studio API.
+    api_base = str(endpoint["studioApiBaseUrl"])
+    api_tcp = _tcp_check("127.0.0.1", api_port)
+    api_healthz = _http_get(f"{api_base}/api/healthz", timeout=5.0)
+    api_health = _http_get(f"{api_base}/api/health", timeout=15.0)
     result["layers"]["apiDirect"] = {
         "tcp": api_tcp,
         "healthz": api_healthz,
         "health": api_health,
     }
 
-    # Layer 3: Proxy (via 8760)
-    proxy_healthz = _http_get("http://127.0.0.1:8760/api/healthz", timeout=5.0)
-    proxy_health = {"status": None, "elapsedMs": None, "error": "SKIPPED"}
-    if proxy_healthz.get("status") == 200:
-        proxy_health = _http_get("http://127.0.0.1:8760/api/health", timeout=10.0)
-    result["layers"]["proxy"] = {
-        "healthz": proxy_healthz,
-        "health": proxy_health,
-    }
+    # Layer 3: the retired web proxy is not the desktop API.
+    if endpoint["runtimeMode"] == "electron-packaged":
+        result["layers"]["proxy"] = {
+            "healthz": {"status": None, "elapsedMs": None, "error": "PACKAGED_RENDERER_PROXY"},
+            "health": {"status": None, "elapsedMs": None, "error": "SKIPPED"},
+        }
+    else:
+        from runtime_supervisor.constants import RETIRED_WEB_PORT
+
+        retired = f"http://127.0.0.1:{RETIRED_WEB_PORT}"
+        proxy_healthz = _http_get(f"{retired}/api/healthz", timeout=5.0)
+        proxy_health = {"status": None, "elapsedMs": None, "error": "SKIPPED"}
+        if proxy_healthz.get("status") == 200:
+            proxy_health = _http_get(f"{retired}/api/health", timeout=10.0)
+        result["layers"]["proxy"] = {
+            "healthz": proxy_healthz,
+            "health": proxy_health,
+        }
 
     # Layer 4: Providers
     result["layers"]["providers"] = {
@@ -122,7 +136,7 @@ def diagnostics_run() -> dict[str, Any]:
     # Layer 5: Production Control (fast check — skip if API still initializing)
     pc = {"available": False, "responseMs": None, "error": "SKIPPED"}
     if api_healthz.get("status") == 200:
-        pc = _http_get("http://127.0.0.1:8758/api/production-control/resolved?projectId=_global", timeout=5.0)
+        pc = _http_get(f"{api_base}/api/production-control/resolved?projectId=_global", timeout=5.0)
     result["layers"]["productionControl"] = {"available": pc.get("status") == 200, "responseMs": pc.get("elapsedMs")}
 
     # Layer 6: Classification
@@ -130,13 +144,14 @@ def diagnostics_run() -> dict[str, Any]:
     result["totalMs"] = total_ms
 
     # Determine primary fault
+    proxy_healthz = result["layers"]["proxy"]["healthz"]
     if not api_tcp.get("listening"):
-        result["classification"] = {"faultDomain": "SERVICE_NOT_LISTENING", "confidence": "CONFIRMED", "evidence": "Port 8758 has no listener"}
+        result["classification"] = {"faultDomain": "SERVICE_NOT_LISTENING", "confidence": "CONFIRMED", "evidence": f"Port {api_port} has no listener"}
     elif api_healthz.get("status") != 200:
         result["classification"] = {"faultDomain": "BACKEND_UNRESPONSIVE", "confidence": "HIGH", "evidence": "TCP open but /healthz did not respond"}
     elif api_health.get("status") != 200:
         result["classification"] = {"faultDomain": "BACKEND_DEGRADED", "confidence": "HIGH", "evidence": "/healthz OK but /api/health failed"}
-    elif proxy_healthz.get("status") != 200 and api_healthz.get("status") == 200:
+    elif endpoint["runtimeMode"] != "electron-packaged" and proxy_healthz.get("status") != 200 and api_healthz.get("status") == 200:
         result["classification"] = {"faultDomain": "PROXY_TIMEOUT", "confidence": "HIGH", "evidence": "Direct API alive but proxy returns errors"}
     else:
         result["classification"] = {"faultDomain": "HEALTHY", "confidence": "CONFIRMED", "evidence": "All checks passed"}

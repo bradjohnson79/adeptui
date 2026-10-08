@@ -691,9 +691,9 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         display_name="Co-Director Temporal Continuity",
         subsystem="codirector",
         baseline_status=S.PARTIALLY_WIRED,
-        summary="VideoChat3 reviews generated Timeline batches. InternVideo3 8B is optional deep-review.",
+        summary="Retired VideoChat3 review. Not used by Timeline V2 or current Co-Director generation.",
         component_ids=("videochat3_4b",),
-        baseline_reason="Required Setup essential for Co-Director Continuity; InternVideo3 is optional and does not gate this row.",
+        baseline_reason="VideoChat3 is not a current Adept UI setup requirement.",
     ),
     _d(
         id="codirector.media_intelligence.qwen_omni.ready",

@@ -155,7 +155,7 @@ def e2e_seed_stale_operation(body: dict[str, Any] | None = None) -> dict[str, An
     if not e2e_enabled():
         raise HTTPException(404, "E2E controls disabled")
     payload = body or {}
-    component_id = str(payload.get("component_id") or "pack_essential_photoreal")
+    component_id = str(payload.get("component_id") or "ffmpeg")
     phase = str(payload.get("phase") or "configuring")
     from ..setup.operations import registry
 

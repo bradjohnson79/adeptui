@@ -992,6 +992,9 @@ def create_or_resume_install(
     source_url: str | None = None,
     install_path: str | None = None,
 ) -> dict[str, Any]:
+    from ...setup.model_license import assert_installation_allowed
+
+    assert_installation_allowed(component_id)
     component = get_component(component_id)
     for job in jobs_for_component(component_id):
         if job.get("active"):

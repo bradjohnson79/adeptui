@@ -24,8 +24,10 @@ describe("SetupWizard start and catalog timeout", () => {
     expect(src).not.toContain('setActiveStatus("Ready")');
   });
 
-  it("keeps Try Again and Open Runtime Manager", () => {
+  it("keeps Try Again and does not offer Docker runtimes", () => {
     expect(src).toContain("Try Again");
-    expect(src).toContain("Open Runtime Manager");
+    expect(src).not.toContain("Open Runtime Manager");
+    expect(src).not.toContain("Docker");
+    expect(src).not.toContain("AddCustomCapability");
   });
 });

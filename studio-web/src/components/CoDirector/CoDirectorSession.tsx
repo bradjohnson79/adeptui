@@ -524,10 +524,28 @@ function normalizeServerMessage(m: ServerConversationMessage): CoDirectorMessage
         outcome,
         modality: String(raw.modality || raw.mediaKind || "image"),
         actionLabel: typeof raw.actionLabel === "string" ? raw.actionLabel : null,
+        noticeOnly: raw.noticeOnly === true || raw.notice_only === true,
         assetId: typeof raw.assetId === "string" ? raw.assetId : typeof raw.asset_id === "string" ? raw.asset_id : null,
         previewKind: typeof raw.previewKind === "string" ? raw.previewKind : null,
         technical: typeof raw.technical === "string" ? raw.technical : null,
         content: typeof m.content === "string" ? m.content : undefined,
+      };
+      break;
+    }
+  }
+  let imageJob: CoDirectorMessage["imageJob"] | undefined;
+  if (Array.isArray(m.attachments)) {
+    for (const raw of m.attachments as Array<Record<string, unknown>>) {
+      if (!raw || raw.kind !== "image_job") continue;
+      const jobId = String(raw.jobId || raw.job_id || "").trim();
+      if (!jobId) continue;
+      imageJob = {
+        jobId,
+        modelLabel: String(raw.modelLabel || raw.model_label || "Local image model"),
+        aspect: String(raw.aspect || ""),
+        width: Number(raw.width || 0) || 0,
+        height: Number(raw.height || 0) || 0,
+        provider: String(raw.provider || "Local"),
       };
       break;
     }
@@ -542,6 +560,7 @@ function normalizeServerMessage(m: ServerConversationMessage): CoDirectorMessage
     ...(messageType ? { messageType } : {}),
     ...(execution ? { execution } : {}),
     ...(generationReady ? { generationReady } : {}),
+    ...(imageJob ? { imageJob } : {}),
   };
 }
 
@@ -2814,7 +2833,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       }
 
       const wantsPlan =
-        /build|create|prepare|plan|dialogue|storyboard|lip.?sync|master sheet|coverage|generate|workflow|assemble|editor|director sequence/i.test(
+        /\b(?:build|create|prepare|plan|dialogue|storyboard|lip.?sync|master sheet|coverage|generate|workflow|assemble|editor|director sequence)\b/i.test(
           trimmed,
         ) && mode !== "setup";
 

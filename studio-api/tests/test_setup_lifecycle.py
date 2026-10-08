@@ -246,11 +246,12 @@ def test_search_talking_presenter_omits_retired_video(isolated_lifecycle: Path) 
 def test_search_storyboard_uses_current_previs_ids(isolated_lifecycle: Path) -> None:
     ids = _search_ids("Make a storyboard")
     reasons = _search_reasons("Make a storyboard")
-    assert {"flux1_dev_local", "pack_essential_cinematic", "ltx_2_5_checkpoint"} & ids
+    assert {"flux1_dev_local", "ltx_2_5_checkpoint"} & ids
+    assert "pack_essential_cinematic" not in ids
     assert "ltx_checkpoint" not in ids
     storyboard_hit = next(
         component_id
-        for component_id in ("flux1_dev_local", "pack_essential_cinematic", "ltx_2_5_checkpoint")
+        for component_id in ("flux1_dev_local", "ltx_2_5_checkpoint")
         if component_id in reasons
     )
     assert "storyboard" in reasons[storyboard_hit].lower()

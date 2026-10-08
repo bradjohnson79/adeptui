@@ -134,7 +134,7 @@ function BlockerRow({ blocker, projectId }: { blocker: CapabilityBlocker; projec
 
 /**
  * Full readiness card: status counts, blockers with actions, and an explicit re-probe.
- * Used on Home (system status) and on the Source Manager page.
+ * Mounted on Setup. Source Manager can show a filtered blocker subset.
  */
 export function CapabilityReadinessPanel({
   projectId,

@@ -114,7 +114,7 @@ STYLE_REGISTRY: dict[str, VisualStyleProfile] = {
             "Explicitly say 'same character, anime rendering only' or equivalent to prevent style drift.",
             "Mention preserved silhouette anchors before anime flourishes such as linework, cel shading, or speed-line energy.",
         ),
-        preferredFamily="illustrious",
+        preferredFamily="",
         styleTags=("anime", "animation", "animated", "stylized_anime"),
     ),
     "realistic_anime": VisualStyleProfile(
@@ -140,7 +140,7 @@ STYLE_REGISTRY: dict[str, VisualStyleProfile] = {
             "Describe the prompt as anime-rooted identity with realistic shading, not as a new person photographed in costume.",
             "Call out preserved face geometry and canonical palette locks before adding realistic skin or material detail.",
         ),
-        preferredFamily="illustrious",
+        preferredFamily="",
         styleTags=("realistic_anime", "cinematic_anime", "photorealistic_anime_hybrid"),
     ),
     "live_action": VisualStyleProfile(

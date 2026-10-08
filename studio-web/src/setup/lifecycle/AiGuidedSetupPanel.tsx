@@ -45,7 +45,7 @@ function creatorRecommendation(component: SetupComponentStatus, brief: string): 
     return "Best match for photoreal character work with reference-following edits.";
   }
   if (
-    ["sana_15_local", "qwen_image_2512_models", "zimage_models", "pack_essential_anime"].includes(component.id)
+    ["sana_15_local", "qwen_image_2512_models", "zimage_models"].includes(component.id)
     && text.includes("anime")
   ) {
     return "Strong fit for anime and stylized illustration work.";
@@ -74,7 +74,7 @@ function creatorRecommendation(component: SetupComponentStatus, brief: string): 
     return "Best fit for a talking presenter / avatar performance.";
   }
   if (
-    ["flux1_dev_local", "pack_essential_cinematic", "ltx_2_5_checkpoint"].includes(component.id)
+    ["flux1_dev_local", "ltx_2_5_checkpoint"].includes(component.id)
     && (text.includes("storyboard") || text.includes("previz") || text.includes("previs"))
   ) {
     return "Best fit for storyboard frames and motion previs.";
@@ -168,8 +168,7 @@ export function AiGuidedSetupPanel({
           }
           if (text.includes("storyboard") || text.includes("previz") || text.includes("previs")) {
             if (id === "flux1_dev_local") return 0;
-            if (id === "pack_essential_cinematic") return 1;
-            if (id === "ltx_2_5_checkpoint") return 2;
+            if (id === "ltx_2_5_checkpoint") return 1;
             return 9;
           }
           if (text.includes("commercial") || text.includes("branded") || (text.includes("product") && text.includes("video"))) {
@@ -238,7 +237,7 @@ export function AiGuidedSetupPanel({
     >
       <div className="setup-section-heading">
         <div>
-          <h2 id="ai-guided-setup-heading">AI-Guided Setup</h2>
+          <h2 id="ai-guided-setup-heading">Recommendations</h2>
           <p>Tell Adept UI what you want to create. We'll recommend the tools, models, and production setup you need.</p>
         </div>
       </div>
@@ -296,12 +295,18 @@ export function AiGuidedSetupPanel({
                   type="button"
                   className="primary"
                   onClick={() => (
-                    component.status === "error" || (component.lifecycle_status_label || "").toLowerCase().includes("repair")
+                    component.model_license && !component.model_license.installationUnlocked
+                      ? onInstall(component)
+                      : component.status === "error" || (component.lifecycle_status_label || "").toLowerCase().includes("repair")
                       ? onRepair(component)
                       : onInstall(component)
                   )}
                 >
-                  {component.status === "error" || (component.lifecycle_status_label || "").toLowerCase().includes("repair") ? "Repair" : "Install"}
+                  {component.model_license && !component.model_license.installationUnlocked
+                    ? "Review License & Enable"
+                    : component.status === "error" || (component.lifecycle_status_label || "").toLowerCase().includes("repair")
+                      ? "Repair"
+                      : "Install"}
                 </button>
                 <button type="button" className="linkish" onClick={() => void openPlan(component.id, component.status === "error" ? "repair" : "install")}>
                   Review Plan

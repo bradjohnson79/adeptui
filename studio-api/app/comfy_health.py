@@ -160,7 +160,6 @@ def _component_filename_and_path(component_id: str, definition: Any) -> dict[str
         "ltx_2_5_text_encoder": (settings.ltx_2_5_text_encoder, ("text_encoders",)),
         "ltx_2_5_video_vae": (settings.ltx_2_5_video_vae, ("vae",)),
         "ltx_2_5_audio_vae": (settings.ltx_2_5_audio_vae, ("vae",)),
-        "ltx_2_5_spatial_upscaler": (settings.ltx_2_5_spatial_upscaler, ("upscale_models",)),
     }
     spec = mapping.get(component_id)
     if not spec:

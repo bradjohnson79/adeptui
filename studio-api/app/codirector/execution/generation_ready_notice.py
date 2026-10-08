@@ -1,4 +1,4 @@
-﻿"""Co-Director generation ready notices — conversational completion append.
+"""Co-Director generation ready notices — conversational completion append.
 
 When a CD-linked execution reaches a genuine terminal state with a verified
 Library asset (or fails/cancels), append exactly one user-facing assistant
@@ -422,3 +422,113 @@ def emit_after_terminal(
         db, project_id, plan, previous_status=previous_status
     )
     return result
+
+
+def image_model_label(family: str) -> str:
+    """Creator name for a local image family. Unknown families stay generic."""
+    key = str(family or "").strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+    labels = {
+        "qwen2512": "Qwen Image",
+        "qwenimage2512": "Qwen Image",
+        "qwenimage": "Qwen Image",
+        "qwen": "Qwen Image",
+        "zimage": "Z-Image",
+        "flux": "FLUX",
+        "flux1": "FLUX",
+        "krea2": "Krea 2",
+        "krea": "Krea 2",
+        "illustrious": "Illustrious",
+        "illustriousxl": "Illustrious",
+        "sd15": "Stable Diffusion",
+        "sdxl": "Stable Diffusion",
+        "checkpoint": "Local checkpoint",
+    }
+    return labels.get(key) or "Local image model"
+
+
+def append_image_job_card(
+    db: Session,
+    project_id: str,
+    job_id: str,
+    *,
+    family: str = "",
+    aspect: str = "",
+    width: int = 0,
+    height: int = 0,
+) -> None:
+    """Tell the conversation a local still has started, with the job to watch."""
+    from ..conversation_events import EventInput, append_events
+
+    project = str(project_id or "").strip()
+    job = str(job_id or "").strip()
+    if not project or not job:
+        return
+    label = image_model_label(family)
+    frame = str(aspect or "").strip()
+    if frame:
+        content = f"{label} is making this still at {frame}."
+    else:
+        content = f"{label} is making this still."
+    message_id = f"imgjob:{job}"[:64]
+    append_events(
+        db,
+        project,
+        [
+            EventInput(
+                role="assistant",
+                content=content,
+                message_id=message_id,
+                client_request_id=message_id,
+                actor="assistant",
+                attachments=[
+                    {
+                        "kind": "image_job",
+                        "jobId": job,
+                        "modelLabel": label,
+                        "aspect": frame,
+                        "width": int(width or 0),
+                        "height": int(height or 0),
+                        "provider": "Local",
+                    }
+                ],
+            )
+        ],
+    )
+
+
+def append_concept_still(db: Session, project_id: str, asset_id: str, job_id: str) -> None:
+    """Put one finished Image Generator still into the same Co-Director conversation."""
+
+    from ..conversation_events import EventInput, append_events
+
+    asset = str(asset_id or "").strip()
+    project = str(project_id or "").strip()
+    job = str(job_id or "").strip()
+    if not asset or not project or not job:
+        return
+    message_id = f"concept:{job}"[:64]
+    append_events(
+        db,
+        project,
+        [
+            EventInput(
+                role="assistant",
+                content="The image has been successfully completed. You can find it in the Library.",
+                message_id=message_id,
+                client_request_id=message_id,
+                actor="assistant",
+                attachments=[
+                    {
+                        "kind": "generation_ready",
+                        "outcome": "ready",
+                        "modality": "image",
+                        "mediaKind": "image",
+                        "previewKind": "image",
+                        "noticeOnly": True,
+                        "assetId": asset,
+                        "executionId": job,
+                    }
+                ],
+            )
+        ],
+    )

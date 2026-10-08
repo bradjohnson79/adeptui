@@ -108,10 +108,7 @@ def test_missing_provider_configuration(setup_data_dir: Path) -> None:
     result = refresh_pack_source("pack_essential_photoreal")
     assert result["error"]["code"] == "pack_provider_not_configured"
     status = build_status()
-    pack = next(c for c in status["components"] if c["id"] == "pack_essential_photoreal")
-    # Honest unavailable states: source still pending configuration, or download unavailable.
-    assert pack["status"] in {"download_unavailable", "source_pending"}
-    assert pack["install_disabled"] is True
+    assert all(c["id"] != "pack_essential_photoreal" for c in status["components"])
 
 
 def test_stable_ignores_prereleases(setup_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -277,9 +274,7 @@ def test_public_release_lookup_and_install(setup_data_dir: Path, monkeypatch: py
             snapshot = local_registry.snapshot(operation_id)
         assert snapshot["status"] == "completed", snapshot.get("error")
         status = build_status()
-        pack = next(c for c in status["components"] if c["id"] == "pack_essential_anime")
-        assert pack["status"] == "ready"
-        assert pack["installed_bytes"] > 0
+        assert all(c["id"] != "pack_essential_anime" for c in status["components"])
     finally:
         server.shutdown()
 

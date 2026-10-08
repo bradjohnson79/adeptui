@@ -494,8 +494,7 @@
   letter-spacing: 0.04em;
 }
 
-.cis-pill--local,
-.cis-pill--docker {
+.cis-pill--local {
   border-color: color-mix(in srgb, #4a8f6a 55%, transparent);
 }
 

@@ -5,6 +5,7 @@ import { WORKSPACES, workspacesForMenu, type EditorTab } from "../../core/worksp
 import { resolveProductionAvailability } from "../../core/productionAvailability";
 import { browseAllProjects, goHome } from "../../navigation/projectLibrary";
 import { buildHomeCreateProjectPath } from "../../projectEntry";
+import { buildSetupWizardPath } from "../../setup/navigation";
 import { loadRecentProjects } from "../../workspacePrefs";
 import { Menu, MenuBarShell, type MenuItem } from "../ui/Menu";
 import { CommandPalette, useCommandPaletteShortcut, type CommandItem } from "../ui/CommandPalette";
@@ -91,6 +92,14 @@ export function AppChrome({
   const goWorkspace = useCallback(
     (tab: EditorTab) => {
       setOpenMenu(null);
+      if (tab === "setup") {
+        if (onNavigateWorkspace && projectId) {
+          onNavigateWorkspace(tab);
+          return;
+        }
+        navigate(buildSetupWizardPath(projectId));
+        return;
+      }
       if (onNavigateWorkspace && projectId) {
         onNavigateWorkspace(tab);
         return;

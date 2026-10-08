@@ -142,51 +142,6 @@ CATALOG: list[SetupComponent] = [
         license="Service ToS",
         install_kind="detect_only",
     ),
-    SetupComponent(
-        id="pack_essential_photoreal",
-        name="Essential Photoreal Pack",
-        description="Creative Assets pack — LoRAs for photoreal faces/lighting (approve install).",
-        purpose="ImageGen Character Profiles and stills.",
-        required=False,
-        download_size_mb=400,
-        installed_size_mb=400,
-        min_vram_gb=8,
-        recommended_vram_gb=16,
-        modes=["ImageGen", "Marketplace"],
-        source_repo="adept://marketplace/pack_essential_photoreal",
-        license="Curated / check sources",
-        install_kind="asset_pack",
-    ),
-    SetupComponent(
-        id="pack_essential_anime",
-        name="Essential Anime Pack",
-        description="Creative Assets pack — anime expression LoRAs (approve install).",
-        purpose="ImageGen anime productions.",
-        required=False,
-        download_size_mb=250,
-        installed_size_mb=250,
-        min_vram_gb=8,
-        recommended_vram_gb=16,
-        modes=["ImageGen", "Marketplace"],
-        source_repo="adept://marketplace/pack_essential_anime",
-        license="Curated / check sources",
-        install_kind="asset_pack",
-    ),
-    SetupComponent(
-        id="pack_essential_cinematic",
-        name="Essential Cinematic Pack",
-        description="Creative Assets pack — cinematic lighting starters (approve install).",
-        purpose="ImageGen / Director still continuity.",
-        required=False,
-        download_size_mb=200,
-        installed_size_mb=200,
-        min_vram_gb=8,
-        recommended_vram_gb=16,
-        modes=["ImageGen", "Marketplace"],
-        source_repo="adept://marketplace/pack_essential_cinematic",
-        license="Curated / check sources",
-        install_kind="asset_pack",
-    ),
 ]
 
 
@@ -293,6 +248,10 @@ def approve_install(component_id: str, *, action: str, path: str | None = None) 
     Record an approved install/link action. Does not silently download multi-GB weights.
     For path_link / detect_only: verify path exists and mark installed.
     """
+    if action in {"install", "link", "link_existing", "repair", "update", "reinstall"}:
+        from .setup.model_license import assert_installation_allowed
+
+        assert_installation_allowed(component_id)
     if component_id in {
         "wan_models",
         "hunyuan_video_15",

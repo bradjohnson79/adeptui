@@ -107,7 +107,7 @@ export function DiagnosticsPage() {
             <h3>Studio API</h3>
             <div className="diagnostics-grid">
               <div className={`diagnostics-card ${result.layers.apiDirect.tcp.listening ? "state-ok" : "state-error"}`}>
-                <strong>TCP :8758</strong>
+                <strong>TCP :{result.layers.apiDirect.tcp.port}</strong>
                 <span>{result.layers.apiDirect.tcp.listening ? "Listening" : "Not listening"}</span>
                 <span className="muted">{result.layers.apiDirect.healthz.elapsedMs}ms</span>
               </div>

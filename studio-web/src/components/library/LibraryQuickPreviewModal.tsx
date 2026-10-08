@@ -12,6 +12,8 @@ export type LibraryQuickPreviewAsset = {
   tag?: string;
   name?: string;
   model?: string;
+  /** Direct picture URL for an in-progress frame that is not a Library asset yet. */
+  previewSrc?: string;
 };
 
 function kindLabel(kind: QuickPreviewKind, t: (key: string) => string) {
@@ -23,9 +25,11 @@ function kindLabel(kind: QuickPreviewKind, t: (key: string) => string) {
 export function LibraryQuickPreviewModal({
   asset,
   onClose,
+  projectId,
 }: {
   asset: LibraryQuickPreviewAsset | null;
   onClose: () => void;
+  projectId?: string | null;
 }) {
   const { t } = useTranslation("library");
   const [meta, setMeta] = useState({ width: 0, height: 0, duration: 0 });
@@ -49,7 +53,7 @@ export function LibraryQuickPreviewModal({
   if (!asset || !kind) return null;
 
   const title = asset.name || asset.tag || asset.filename || t("quickPreview");
-  const src = api.assetUrl(asset.id);
+  const src = String(asset.previewSrc || "").trim() || api.assetUrl(asset.id, null, projectId);
 
   return createPortal(
     <div className="library-quick-preview" role="dialog" aria-modal="true" aria-label={t("quickPreview")} data-testid="library-quick-preview">
