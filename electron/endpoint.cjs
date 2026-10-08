@@ -5,7 +5,9 @@
  * Web development and Electron development stay on 8758 because Electron
  * development loads Vite, and Vite already proxies to the dev API.
  * Electron packaged mode is the only mode that binds 8760.
- * Comfy stays 8188. Background Services stay 8759.
+ * Comfy stays 8188. Background Services prefer 8759.
+ * When 8759 is held by a process this package does not own, the packaged
+ * manager binds 8779 and leaves the other process running.
  * This port is runtime configuration. It is not written into project data.
  */
 
@@ -13,6 +15,7 @@ const HOST = "127.0.0.1";
 const DEV_STUDIO_API_PORT = 8758;
 const DESKTOP_STUDIO_API_PORT = 8760;
 const CONTROL_PORT = 8759;
+const CONTROL_PORT_FALLBACK = 8779;
 const COMFY_PORT = 8188;
 const VITE_PORT = 5173;
 
@@ -42,6 +45,7 @@ module.exports = {
   DEV_STUDIO_API_PORT,
   DESKTOP_STUDIO_API_PORT,
   CONTROL_PORT,
+  CONTROL_PORT_FALLBACK,
   COMFY_PORT,
   VITE_PORT,
   resolveStudioApiEndpoint,

@@ -439,12 +439,13 @@ async function main() {
   prepareProfile(controlProfile);
   const controlCollided = await launchElectron(unpackedBin, controlProfile);
   let controlCollisionStatus = null;
-  for (let i = 0; i < 40; i += 1) {
+  for (let i = 0; i < 180; i += 1) {
     controlCollisionStatus = readStatus(controlProfile);
     if (controlCollisionStatus?.backgroundServices) break;
     await sleep(500);
   }
-  setGate("8759 COLLISION HANDLING", controlCollisionStatus?.backgroundServices?.collision === true && alive(foreignManager.pid) ? "PASS" : "FAIL");
+  const isolatedControl = controlCollisionStatus?.backgroundServices || {};
+  setGate("8759 COLLISION HANDLING", isolatedControl.collision !== true && isolatedControl.port !== 8759 && isolatedControl.healthy === true && alive(foreignManager.pid) ? "PASS" : "FAIL");
   await closeApp(controlCollided);
   evidence.foreignManagerAliveAfterQuit = alive(foreignManager.pid);
   if (foreignManager.pid) foreignManager.kill();

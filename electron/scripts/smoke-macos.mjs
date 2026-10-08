@@ -687,7 +687,7 @@ async function main() {
   prepareProfile(controlProfile);
   const controlCollided = await launchElectron(executable, controlProfile);
   let controlCollisionStatus = null;
-  for (let i = 0; i < 40; i += 1) {
+  for (let i = 0; i < 180; i += 1) {
     controlCollisionStatus = readStatus(controlProfile);
     if (controlCollisionStatus?.backgroundServices) break;
     await sleep(500);
@@ -696,7 +696,8 @@ async function main() {
   const bootDuringCollision = await bootReport();
   evidence.bootDuring8759Collision = bootDuringCollision.body?.verdict || null;
   console.log(`8759 COLLISION STATE = ${JSON.stringify({ collision: Boolean(controlCollisionStatus?.backgroundServices?.collision), verdict: evidence.bootDuring8759Collision, foreignAlive: alive(foreignManager.pid), api: controlApi.status })}`);
-  setGate("8759 COLLISION HANDLING", controlCollisionStatus?.backgroundServices?.collision === true && alive(foreignManager.pid) && controlApi.status === 200 && bootDuringCollision.body?.verdict !== "GO" ? "PASS" : "FAIL");
+  const isolatedControl = controlCollisionStatus?.backgroundServices || {};
+  setGate("8759 COLLISION HANDLING", isolatedControl.collision !== true && isolatedControl.port !== 8759 && isolatedControl.healthy === true && alive(foreignManager.pid) && controlApi.status === 200 && bootDuringCollision.body?.verdict === "GO" ? "PASS" : "FAIL");
   await closeApp(controlCollided);
   if (foreignManager.pid) foreignManager.kill();
   await waitListenersClosed(8759);

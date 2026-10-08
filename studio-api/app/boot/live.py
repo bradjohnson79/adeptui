@@ -89,6 +89,10 @@ def collect_facts(*, force: bool = False) -> tuple[BootFacts, dict[str, int]]:
         endpoint = resolve_studio_api_endpoint()
         facts.runtime_mode = str(endpoint["runtimeMode"])
         facts.api_port = int(endpoint["studioApiPort"])
+        from runtime_supervisor.canonical_config import try_load_runtime_config
+
+        runtime_cfg = try_load_runtime_config()
+        facts.supervisor_port = int(runtime_cfg.controlPort) if runtime_cfg else 8759
         facts.supervisor_reachable = bool(control_plane_reachable(timeout=8.0))
         facts.api_pids = listening_pids(facts.api_port)
         facts.api_commands = _commands(facts.api_pids)

@@ -12,6 +12,7 @@ from typing import Any
 @dataclass
 class BootFacts:
     supervisor_reachable: bool = False
+    supervisor_port: int = 8759
     api_pids: list[int] = field(default_factory=list)
     api_commands: dict[int, str] = field(default_factory=dict)
     api_health_status: int | None = None
@@ -236,7 +237,7 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
             "Background Services",
             "control plane",
             "PASS" if facts.supervisor_reachable else "FAIL",
-            "8759 reachable" if facts.supervisor_reachable else "Background Services manager is not reachable.",
+            f"{facts.supervisor_port} reachable" if facts.supervisor_reachable else "Background Services manager is not reachable.",
             required=True,
             classification="BOOT_REQUIRED",
         ),

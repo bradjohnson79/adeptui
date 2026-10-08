@@ -15,12 +15,12 @@ const existingProfile = path.join(process.env.TEMP || process.env.TMP, "adept-ui
 const liveDb = path.join(root, "data", "studio.db");
 const repoMarker = path.resolve(root).toLowerCase();
 
-function get(url, timeoutMs = 8000) {
+function get(url, timeoutMs = 8000, maxBody = 1200) {
   return new Promise((resolve) => {
     const req = http.get(url, (res) => {
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8").slice(0, 1200) }));
+      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8").slice(0, maxBody) }));
     });
     req.on("error", (err) => resolve({ status: 0, body: String(err.message) }));
     req.setTimeout(timeoutMs, () => {
@@ -78,7 +78,24 @@ function launch(exe, userData, { reset = true } = {}) {
   return child;
 }
 
-async function waitStatus(userData, timeoutMs = 30000) {
+function post(url, payload, timeoutMs = 20000) {
+  const body = JSON.stringify(payload);
+  return new Promise((resolve) => {
+    const req = http.request(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", (err) => resolve({ status: 0, body: String(err.message) }));
+    req.setTimeout(timeoutMs, () => { req.destroy(); resolve({ status: 0, body: "timeout" }); });
+    req.end(body);
+  });
+}
+
+async function waitStatus(userData, timeoutMs = 150000) {
   const file = path.join(userData, "desktop-status.json");
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -154,9 +171,17 @@ const audit = auditTree(path.join(isolated, "resources"));
 const fresh = launch(exe, freshProfile);
 const freshStatus = await waitStatus(freshProfile);
 let desktopHealth = { status: 0, body: "" };
-for (let i = 0; i < 40; i += 1) {
+for (let i = 0; i < 120; i += 1) {
   desktopHealth = await get("http://127.0.0.1:8760/api/healthz");
   if (desktopHealth.status === 200) break;
+  const statusFile = path.join(freshProfile, "desktop-status.json");
+  if (fs.existsSync(statusFile)) {
+    try {
+      if (JSON.parse(fs.readFileSync(statusFile, "utf8")).apiExited) break;
+    } catch {
+      /* the status file is still being written */
+    }
+  }
   await sleep(1500);
 }
 const devHealth = await get("http://127.0.0.1:8758/api/healthz");
@@ -170,7 +195,33 @@ if (freshStatus?.rendererOrigin) {
   apiProbe = await get(`${freshStatus.rendererOrigin}/api/healthz`);
   mediaProbe = await get(`${freshStatus.rendererOrigin}/media/__port_probe__`);
   projectsProbe = await get(`${freshStatus.rendererOrigin}/api/projects`);
-  bootProbe = await get(`${freshStatus.rendererOrigin}/api/boot/certification`, 90000);
+  bootProbe = await get(`${freshStatus.rendererOrigin}/api/boot/certification`, 120000, 200000);
+}
+let bootVerdict = null;
+let bootFailed = [];
+if (bootProbe?.body) {
+  try {
+    const parsed = JSON.parse(bootProbe.body);
+    bootVerdict = parsed.verdict || null;
+    bootFailed = (parsed.checks || []).filter((row) => row.required && row.result !== "PASS").map((row) => row.id);
+  } catch {
+    bootVerdict = null;
+  }
+  bootProbe = { status: bootProbe.status, body: bootProbe.body.slice(0, 500) };
+}
+let projectId = null;
+let projectCreated = false;
+let setupFirstRunComplete = null;
+if (desktopHealth.status === 200) {
+  const created = await post("http://127.0.0.1:8760/api/projects", { name: "Packaged Boot" });
+  try {
+    projectId = JSON.parse(created.body).id || null;
+    projectCreated = created.status === 200 && Boolean(projectId);
+  } catch {
+    projectCreated = false;
+  }
+  const setup = await get("http://127.0.0.1:8760/api/setup/status", 30000, 500000);
+  try { setupFirstRunComplete = JSON.parse(setup.body).firstRunSetupComplete; } catch { setupFirstRunComplete = null; }
 }
 const desktopPid = listeningPid(netstat(), 8760);
 const desktopCommand = commandLine(desktopPid);
@@ -179,6 +230,29 @@ stopPid(fresh.pid);
 for (let i = 0; i < 20; i += 1) {
   if (!listeningPid(netstat(), 8760)) break;
   await sleep(500);
+}
+let projectReopened = false;
+if (projectId) {
+  const reopened = launch(exe, freshProfile, { reset: false });
+  let reopenedHealth = { status: 0 };
+  for (let i = 0; i < 80; i += 1) {
+    reopenedHealth = await get("http://127.0.0.1:8760/api/healthz");
+    if (reopenedHealth.status === 200) break;
+    await sleep(1500);
+  }
+  if (reopenedHealth.status === 200) {
+    const again = await get("http://127.0.0.1:8760/api/projects", 20000, 200000);
+    try {
+      projectReopened = JSON.parse(again.body).some((row) => row.id === projectId);
+    } catch {
+      projectReopened = false;
+    }
+  }
+  stopPid(reopened.pid);
+  for (let i = 0; i < 20; i += 1) {
+    if (!listeningPid(netstat(), 8760)) break;
+    await sleep(500);
+  }
 }
 
 const liveAfterFresh = hashFile(liveDb);
@@ -247,6 +321,13 @@ const result = {
   devRepoPathDependency: repoHits > 0 || freshStatus?.paths?.devRepoPathDependency ? 1 : 0,
   collision: Boolean(freshStatus?.collision),
   apiOwned: Boolean(freshStatus?.apiOwned),
+  bootVerdict,
+  bootFailed,
+  projectId,
+  projectCreated,
+  projectReopened,
+  setupFirstRunComplete,
+  backgroundServices: freshStatus?.backgroundServices || null,
   before,
   after,
   comfyRestarted: before.comfyPid !== after.comfyPid,

@@ -183,6 +183,9 @@ async function startPackaged() {
   desktopStatus.reason = prepared.status.reason || "";
   desktopStatus.setupRequired = Boolean(prepared.status.setupRequired);
   desktopStatus.backgroundServices = prepared.status.backgroundServices || null;
+  if (desktopStatus.backgroundServices && desktopStatus.backgroundServices.port) {
+    desktopStatus.endpoint = { ...DESKTOP_API, controlPort: desktopStatus.backgroundServices.port };
+  }
   desktopStatus.ports = {
     api: prepared.status.api,
     control: prepared.status.control,

@@ -6,7 +6,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { listeningPids, commandLine, ownsPackagedCommand, portAccepts } = require("./platform/process.cjs");
 const { userLayout, ensureUserDirs } = require("./platform/paths.cjs");
-const { resolveStudioApiEndpoint, collisionMessage, CONTROL_PORT, COMFY_PORT } = require("./endpoint.cjs");
+const { resolveStudioApiEndpoint, collisionMessage, CONTROL_PORT, CONTROL_PORT_FALLBACK, COMFY_PORT } = require("./endpoint.cjs");
 
 const DESKTOP_API = resolveStudioApiEndpoint("electron-packaged");
 
@@ -45,6 +45,7 @@ function packagedEnv(layout) {
   env.ADEPT_RUNTIME_CONFIG = path.join(layout.runtimeHome, "runtime.json");
   env.PYTHONNOUSERSITE = "1";
   env.PYTHONDONTWRITEBYTECODE = "1";
+  env.PYTHONUNBUFFERED = "1";
   env.ADEPT_RUNTIME_MODE = DESKTOP_API.runtimeMode;
   env.ADEPT_STUDIO_API_PORT = String(DESKTOP_API.studioApiPort);
   env.ADEPT_RUNTIME_STATE_HOME = layout.runtimeHome;
@@ -76,35 +77,68 @@ function classifyControlPlane(control, markers) {
   return { action: "leave", collision: true, owned: false };
 }
 
-function writePackagedRuntimeConfig(layout, pythonPath, apiSource) {
+function chooseControlPort(inspections, markers) {
+  const rows = Array.isArray(inspections) ? inspections : [];
+  for (const row of rows) {
+    const plan = classifyControlPlane(row, markers);
+    if (plan.action === "start" || plan.action === "reuse") {
+      return { port: row.port, plan, inspected: row, exhausted: false };
+    }
+  }
+  const first = rows[0] || { port: CONTROL_PORT, open: true, commands: [] };
+  return {
+    port: first.port,
+    plan: { action: "leave", collision: true, owned: false },
+    inspected: first,
+    exhausted: true,
+  };
+}
+
+function writePackagedRuntimeConfig(layout, pythonPath, apiSource, controlPort = CONTROL_PORT) {
   const file = path.join(layout.runtimeHome, "runtime.json");
-  if (fs.existsSync(file)) return file;
   const stateDir = supervisorStateDir(layout);
   fs.mkdirSync(stateDir, { recursive: true });
   fs.mkdirSync(path.join(layout.runtimeHome, "comfy"), { recursive: true });
-  const config = {
-    comfyRoot: "",
-    comfyPython: "",
-    modelRoot: layout.comfyModels,
-    port: COMFY_PORT,
-    controlPort: CONTROL_PORT,
-    logDir: layout.logs,
-    stateDir,
-    servicePython: pythonPath,
-    repoRoot: "",
-    autostart: false,
-    studioApi: {
-      enabled: false,
-      python: pythonPath,
-      appRoot: apiSource,
-      port: 8758,
-    },
-  };
+  let config = null;
+  if (fs.existsSync(file)) {
+    try {
+      config = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      config = null;
+    }
+  }
+  if (!config || typeof config !== "object") {
+    config = {
+      comfyRoot: "",
+      comfyPython: "",
+      modelRoot: layout.comfyModels,
+      port: COMFY_PORT,
+      logDir: layout.logs,
+      stateDir,
+      servicePython: pythonPath,
+      repoRoot: "",
+      autostart: false,
+      studioApi: {
+        enabled: false,
+        python: pythonPath,
+        appRoot: apiSource,
+        port: 8758,
+      },
+    };
+  }
+  config.controlPort = controlPort;
+  config.modelRoot = config.modelRoot || layout.comfyModels;
+  config.port = COMFY_PORT;
+  config.studioApi = config.studioApi && typeof config.studioApi === "object" ? config.studioApi : {};
+  config.studioApi.enabled = false;
+  config.studioApi.python = config.studioApi.python || pythonPath;
+  config.studioApi.appRoot = config.studioApi.appRoot || apiSource;
+  config.studioApi.port = 8758;
   fs.writeFileSync(file, JSON.stringify(config, null, 2));
   return file;
 }
 
-function readControlStatus(tokenFile) {
+function readControlStatus(tokenFile, port) {
   return new Promise((resolve) => {
     let token = "";
     try {
@@ -120,7 +154,7 @@ function readControlStatus(tokenFile) {
     const req = http.request(
       {
         host: "127.0.0.1",
-        port: CONTROL_PORT,
+        port,
         path: "/status",
         method: "GET",
         headers: { "X-Adept-Runtime-Token": token, Accept: "application/json" },
@@ -132,7 +166,7 @@ function readControlStatus(tokenFile) {
       },
     );
     req.on("error", () => resolve({ status: 0, body: "" }));
-    req.setTimeout(1500, () => {
+    req.setTimeout(8000, () => {
       req.destroy();
       resolve({ status: 0, body: "" });
     });
@@ -140,13 +174,30 @@ function readControlStatus(tokenFile) {
   });
 }
 
-async function waitForBackgroundServices(tokenFile, timeoutMs = 25000) {
+function logTail(file) {
+  try {
+    const text = fs.readFileSync(file, "utf8");
+    return text.slice(-800);
+  } catch {
+    return "";
+  }
+}
+
+async function waitForBackgroundServices(tokenFile, port, child, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs;
   let last = { status: 0, body: "" };
   while (Date.now() < deadline) {
-    last = await readControlStatus(tokenFile);
+    if (child && child.exitCode !== null) {
+      return { healthy: false, exited: true, exitCode: child.exitCode, ...last };
+    }
+    last = await readControlStatus(tokenFile, port);
     if (last.status === 200 && /"ok"\s*:\s*true/.test(last.body)) return { healthy: true, ...last };
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    const listening = await listeningPids(port);
+    const childPid = child && child.pid ? Number(child.pid) : 0;
+    if (childPid && listening.includes(childPid) && child.exitCode === null) {
+      return { healthy: true, ownedListener: true, ...last };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
   }
   return { healthy: false, ...last };
 }
@@ -163,45 +214,60 @@ async function inspectPort(port) {
 }
 
 /**
- * Packaged launch. Studio API stays on 8760. Background Services is the
- * existing runtime_supervisor serve owner on 8759. Comfy stays optional:
- * an empty runtime config does not spawn it. A foreign listener on 8760
- * or 8759 is left alone.
+ * Packaged launch. Studio API stays on 8760. Background Services prefers
+ * 8759. A foreign listener on 8759 or 8760 is left alone. When 8759 is
+ * foreign, this package binds the isolated control port instead.
+ * Comfy is observed and is not started or stopped from an empty config.
  */
 async function preparePackagedApi({ pythonPath, apiSource, userData }) {
   const layout = userLayout(userData);
   const port = DESKTOP_API.studioApiPort;
   ensureUserDirs(layout);
-  writePackagedRuntimeConfig(layout, pythonPath, apiSource);
-  const [api, control, comfy] = await Promise.all([
+  const markers = [pythonPath, apiSource];
+  const [api, preferredControl, fallbackControl, comfy] = await Promise.all([
     inspectPort(port),
     inspectPort(CONTROL_PORT),
+    inspectPort(CONTROL_PORT_FALLBACK),
     inspectPort(COMFY_PORT),
   ]);
-  const markers = [pythonPath, apiSource];
-  const owned = api.commands.some((row) => ownsPackagedCommand(row.command, markers));
-  const controlPlan = classifyControlPlane(control, markers);
+  const chosen = chooseControlPort(
+    [
+      { ...preferredControl, port: CONTROL_PORT },
+      { ...fallbackControl, port: CONTROL_PORT_FALLBACK },
+    ],
+    markers,
+  );
+  writePackagedRuntimeConfig(layout, pythonPath, apiSource, chosen.port);
+  const control = chosen.inspected;
+  const controlPlan = chosen.plan;
+  const leftAlone = preferredControl.open && chosen.port !== CONTROL_PORT
+    ? { port: CONTROL_PORT, pids: preferredControl.pids || [] }
+    : null;
   const status = {
     api,
     control,
     comfy,
     spawned: false,
-    owned,
+    owned: api.commands.some((row) => ownsPackagedCommand(row.command, markers)),
     collision: false,
     childPid: null,
     dataDir: layout.dataDir,
     backgroundServices: {
       spawned: false,
       owned: controlPlan.owned,
-      collision: controlPlan.collision,
+      collision: Boolean(chosen.exhausted),
       healthy: false,
       pid: null,
       command: "",
+      port: chosen.port,
+      leftAlone,
     },
   };
+  const owned = status.owned;
   let supervisorChild = null;
-  if (controlPlan.collision) {
-    status.backgroundServices.reason = collisionMessage(CONTROL_PORT);
+  const supervisorLog = path.join(layout.logs, "background-services.log");
+  if (chosen.exhausted) {
+    status.backgroundServices.reason = `Adept UI could not start Background Services because ports ${CONTROL_PORT} and ${CONTROL_PORT_FALLBACK} are already in use.`;
   } else if (controlPlan.owned) {
     const ownedRow = (control.commands || []).find((row) => ownsBackgroundServices(row.command, markers));
     status.backgroundServices.reason = "Background Services already running";
@@ -209,9 +275,8 @@ async function preparePackagedApi({ pythonPath, apiSource, userData }) {
     status.backgroundServices.command = ownedRow ? ownedRow.command : "";
     status.backgroundServices.healthy = true;
   } else if (fs.existsSync(pythonPath)) {
-    const logPath = path.join(layout.logs, "background-services.log");
-    const logFd = fs.openSync(logPath, "a");
-    const args = ["-m", "runtime_supervisor", "serve"];
+    const logFd = fs.openSync(supervisorLog, "a");
+    const args = ["-u", "-m", "runtime_supervisor", "serve"];
     supervisorChild = spawn(pythonPath, args, {
       cwd: apiSource,
       env: packagedEnv(layout),
@@ -221,10 +286,17 @@ async function preparePackagedApi({ pythonPath, apiSource, userData }) {
     status.backgroundServices.spawned = true;
     status.backgroundServices.owned = true;
     status.backgroundServices.pid = supervisorChild.pid || null;
-    status.backgroundServices.command = `${pythonPath} -m runtime_supervisor serve`;
-    const ready = await waitForBackgroundServices(supervisorTokenFile(layout));
+    status.backgroundServices.command = `${pythonPath} -u -m runtime_supervisor serve`;
+    const ready = await waitForBackgroundServices(supervisorTokenFile(layout), chosen.port, supervisorChild);
     status.backgroundServices.healthy = ready.healthy;
-    status.backgroundServices.reason = ready.healthy ? "Background Services is healthy" : "Background Services did not become healthy";
+    const tail = ready.healthy ? "" : logTail(supervisorLog);
+    if (ready.exited) {
+      status.backgroundServices.reason = `Background Services exited (${ready.exitCode})${tail ? `: ${tail}` : ""}`;
+    } else if (ready.healthy) {
+      status.backgroundServices.reason = "Background Services is healthy";
+    } else {
+      status.backgroundServices.reason = `Background Services did not become healthy${tail ? `: ${tail}` : ""}`;
+    }
   } else {
     status.backgroundServices.reason = "packaged Python runtime is missing";
   }
@@ -246,7 +318,7 @@ async function preparePackagedApi({ pythonPath, apiSource, userData }) {
   }
   const logPath = path.join(layout.logs, "studio-api.log");
   const logFd = fs.openSync(logPath, "a");
-  const child = spawn(pythonPath, ["-m", "uvicorn", "app.main:app", "--host", DESKTOP_API.studioApiHost, "--port", String(port)], {
+  const child = spawn(pythonPath, ["-u", "-m", "uvicorn", "app.main:app", "--host", DESKTOP_API.studioApiHost, "--port", String(port)], {
     cwd: apiSource,
     env: packagedEnv(layout),
     windowsHide: true,
@@ -254,7 +326,7 @@ async function preparePackagedApi({ pythonPath, apiSource, userData }) {
   });
   status.spawned = true;
   status.childPid = child.pid || null;
-  status.command = `${pythonPath} -m uvicorn app.main:app --host ${DESKTOP_API.studioApiHost} --port ${port}`;
+  status.command = `${pythonPath} -u -m uvicorn app.main:app --host ${DESKTOP_API.studioApiHost} --port ${port}`;
   status.endpoint = DESKTOP_API;
   status.reason = "spawned packaged Studio API";
   return { status, child, supervisorChild, layout };
@@ -263,11 +335,13 @@ async function preparePackagedApi({ pythonPath, apiSource, userData }) {
 module.exports = {
   DESKTOP_API,
   CONTROL_PORT,
+  CONTROL_PORT_FALLBACK,
   COMFY_PORT,
   packagedEnv,
   preparePackagedApi,
   inspectPort,
   classifyControlPlane,
+  chooseControlPort,
   ownsBackgroundServices,
   writePackagedRuntimeConfig,
 };

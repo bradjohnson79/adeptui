@@ -8,6 +8,10 @@ const installed = JSON.parse(fs.readFileSync(path.join(root, "electron", "build"
 const failures = [];
 
 if (unpacked.desktopHealth?.status !== 200) failures.push("unpacked health");
+if (unpacked.freshStatus?.backgroundServices?.healthy !== true) failures.push("unpacked background services");
+if (unpacked.bootVerdict !== "GO") failures.push(`unpacked boot ${unpacked.bootVerdict}`);
+if (unpacked.projectCreated !== true || unpacked.projectReopened !== true) failures.push("project create or reopen");
+if (unpacked.setupFirstRunComplete !== false) failures.push("fresh setup handoff");
 if (unpacked.collision !== false) failures.push("unpacked port 8760 collision");
 if (unpacked.viteContacted !== 0) failures.push("vite contacted");
 if (unpacked.devVenvDependency !== 0) failures.push("developer venv used");
@@ -18,9 +22,10 @@ if (installed.installA !== 0) failures.push("install");
 if (installed.installB !== 0) failures.push("reinstall");
 if (installed.uninstallStatus !== 0) failures.push("uninstall");
 if (installed.exeAfterA !== true || installed.exeAfterB !== true) failures.push("installed executable missing");
-if (installed.exeAfterUninstall !== false) failures.push("executable remained after uninstall");
+if (installed.after?.exeAfterUninstall !== false) failures.push("executable remained after uninstall");
 if (installed.installedHealth !== 200) failures.push("installed health");
 if (installed.installedBoot !== "GO") failures.push(`installed boot ${installed.installedBoot}`);
+if (installed.backgroundServicesHealthy !== true) failures.push("installed background services");
 if (installed.installedDiagPort !== 8760) failures.push("installed API port");
 if (installed.comfyUnchanged !== true) failures.push("installer changed ComfyUI");
 if (installed.apiUnchanged !== true) failures.push("installer changed development API");

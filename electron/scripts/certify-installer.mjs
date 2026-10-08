@@ -56,7 +56,7 @@ function get(url, timeoutMs = 20000) {
   });
 }
 let installedHealth = { status: 0, body: "" };
-for (let i = 0; i < 40; i += 1) {
+for (let i = 0; i < 120; i += 1) {
   installedHealth = await get("http://127.0.0.1:8760/api/healthz");
   if (installedHealth.status === 200) break;
   await new Promise((r) => setTimeout(r, 1500));
@@ -113,6 +113,9 @@ const result = {
   installedProjectCount,
   installedEndpoint: installedStatus && installedStatus.endpoint,
   installedCommand: installedStatus && installedStatus.apiCommand,
+  backgroundServicesHealthy: Boolean(installedStatus?.backgroundServices?.healthy),
+  backgroundServicesPort: installedStatus?.backgroundServices?.port || null,
+  backgroundServicesCollision: Boolean(installedStatus?.backgroundServices?.collision),
 };
 fs.writeFileSync(path.join(root, "electron", "build", "installer-cert.json"), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));
