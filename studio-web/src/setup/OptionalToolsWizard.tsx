@@ -89,6 +89,7 @@ export function OptionalToolsWizard({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [installedNames, setInstalledNames] = useState<string[]>([]);
+  const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
 
   const tools = useMemo(() => components.filter(isListedOptional), [components]);
   const groups = useMemo(() => {
@@ -251,6 +252,33 @@ export function OptionalToolsWizard({
                         <div>Download: {item.downloadSizeLabel || formatBytes(downloadBytes(item))}</div>
                         <div>Hardware: {fit}</div>
                         {item.vramRecommendationGb ? <div>VRAM guidance: {item.vramRecommendationGb} GB</div> : null}
+                        {installed && (
+                          <div>
+                            <button type="button" onClick={() => setRemoveConfirm(item.id)}>Remove</button>
+                            {removeConfirm === item.id && (
+                              <div>
+                                <p>
+                                  {item.name} will no longer be available. Companion files named by this model are included in the confirmation.
+                                  Shared files used by another installed model, projects, and generated media are not deleted.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void api.removeSetupComponent(item.id, true).then(async (result) => {
+                                      setNote(result.message);
+                                      setRemoveConfirm(null);
+                                      if (result.status === "removed") await onRefresh();
+                                    }).catch((error: unknown) => {
+                                      setNote(error instanceof Error ? error.message : String(error));
+                                    });
+                                  }}
+                                >
+                                  Confirm removal
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </li>
                     );
                   })}

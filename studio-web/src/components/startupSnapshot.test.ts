@@ -96,6 +96,19 @@ describe("buildSnapshot", () => {
     expect(snap.allRequiredOnline).toBe(false);
   });
 
+  it("an on-demand Creator Engine does not fail startup or pin a required failure", () => {
+    const status = makeStatus({ comfyStatus: "stopped", comfyState: "offline" });
+    status.logicalServices = {
+      "runtime.comfy": { logicalId: "runtime.comfy", availability: "ON_DEMAND", gpuResidency: "FREE" },
+    };
+    const snap = buildSnapshot(status, true);
+    const creator = snap.rows.find((row) => row.id === "creator_engine");
+    expect(creator?.state).toBe("on_demand");
+    expect(creator?.required).toBe(false);
+    expect(snap.anyRequiredFailed).toBe(false);
+    expect(snap.message).not.toBe("STARTUP FAILED");
+  });
+
   it("logicalServices override creator engine and video runtime without ports", () => {
     const status = makeStatus({ routeAStatus: "stopped" });
     status.logicalServices = {

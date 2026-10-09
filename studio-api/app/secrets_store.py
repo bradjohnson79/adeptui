@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,23 +13,100 @@ from .config import settings
 
 SECRETS_DIR = settings.data_dir / "secrets"
 MASTER_KEY_FILE = SECRETS_DIR / "master.key"
+_DPAPI_PREFIX = b"DPAPI1"
 
 
 def _ensure_dir() -> None:
     SECRETS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def credential_store_kind() -> str:
+    """How the master key is stored. API keys themselves are never written as plaintext."""
+    if not MASTER_KEY_FILE.exists():
+        return "os" if sys.platform == "win32" else "encrypted-file"
+    raw = MASTER_KEY_FILE.read_bytes()
+    return "os" if raw.startswith(_DPAPI_PREFIX) else "encrypted-file"
+
+
+def _dpapi_protect(data: bytes) -> bytes | None:
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+        blob_in = DATA_BLOB(len(data), ctypes.create_string_buffer(data))
+        blob_out = DATA_BLOB()
+        if not ctypes.windll.crypt32.CryptProtectData(
+            ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)
+        ):
+            return None
+        try:
+            return ctypes.string_at(blob_out.pbData, blob_out.cbData)
+        finally:
+            ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+    except Exception:
+        return None
+
+
+def _dpapi_unprotect(data: bytes) -> bytes | None:
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+        blob_in = DATA_BLOB(len(data), ctypes.create_string_buffer(data))
+        blob_out = DATA_BLOB()
+        if not ctypes.windll.crypt32.CryptUnprotectData(
+            ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)
+        ):
+            return None
+        try:
+            return ctypes.string_at(blob_out.pbData, blob_out.cbData)
+        finally:
+            ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+    except Exception:
+        return None
+
+
+def _read_master_key() -> bytes:
+    raw = MASTER_KEY_FILE.read_bytes().strip()
+    if raw.startswith(_DPAPI_PREFIX):
+        opened = _dpapi_unprotect(raw[len(_DPAPI_PREFIX):])
+        if not opened:
+            raise InvalidToken("The operating system key store could not open the saved credential key.")
+        return opened
+    return raw
+
+
+def _write_master_key(key: bytes) -> None:
+    protected = _dpapi_protect(key)
+    payload = _DPAPI_PREFIX + protected if protected else key
+    if protected is None and sys.platform == "win32":
+        # DPAPI exists on Windows. A failure here must not leave the API key in setup JSON.
+        # The Fernet file is still encrypted. Callers surface credential_store_kind.
+        payload = key
+    MASTER_KEY_FILE.write_bytes(payload)
+    try:
+        MASTER_KEY_FILE.chmod(0o600)
+    except Exception:
+        pass
+
+
 def _fernet() -> Fernet:
     _ensure_dir()
     if MASTER_KEY_FILE.exists():
-        key = MASTER_KEY_FILE.read_bytes().strip()
+        key = _read_master_key()
     else:
         key = Fernet.generate_key()
-        MASTER_KEY_FILE.write_bytes(key)
-        try:
-            MASTER_KEY_FILE.chmod(0o600)
-        except Exception:
-            pass
+        _write_master_key(key)
     return Fernet(key)
 
 

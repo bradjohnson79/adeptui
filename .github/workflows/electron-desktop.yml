@@ -189,3 +189,23 @@ jobs:
             electron/build/linux-evidence/**
             electron/build/linux-python-ldd.txt
           if-no-files-found: warn
+
+  fedora-rpm:
+    needs: linux-x64
+    if: needs.linux-x64.result == 'success'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: adept-ui-desktop-linux-x64
+          path: electron/dist
+      - name: Install and launch the RPM in a Fedora container
+        run: |
+          docker run --rm \
+            --security-opt seccomp=unconfined \
+            -v "$PWD/electron/dist:/packages:ro" \
+            -v "$PWD/electron/scripts:/scripts:ro" \
+            fedora:41 \
+            bash /scripts/smoke-fedora-container.sh

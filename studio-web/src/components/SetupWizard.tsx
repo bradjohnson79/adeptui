@@ -15,7 +15,7 @@ import {
   RECOMMENDATION_LABELS,
   summarizeComponents,
 } from "../setup/helpers";
-import { scanAllowsCompletion, setupWizardRequired } from "../setup/firstRun";
+import { installationProfileLabel, scanAllowsCompletion, setupWizardRequired } from "../setup/firstRun";
 import { FirstRunSetupModal } from "../setup/FirstRunSetupModal";
 import { OptionalToolsWizard } from "../setup/OptionalToolsWizard";
 import { CapabilityReadinessPanel } from "./CapabilityPanel";
@@ -1721,7 +1721,35 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
         scanning={scanning}
         installing={busyId === "prepare" || preparing}
         onRescan={() => refresh(true)}
-        onBegin={startPreparation}
+        onSaveProfile={async (body) => {
+          try {
+            const next = await api.saveInstallationProfile(body);
+            setStatus(next);
+            return next;
+          } catch (error) {
+            setMessage(error instanceof Error ? error.message : String(error));
+            return null;
+          }
+        }}
+        onBegin={async () => {
+          setBusyId("prepare");
+          setMessage(null);
+          try {
+            const applied = await api.applyInstallationProfile();
+            if (applied.errors?.length) {
+              setMessage(applied.errors.map((item) => item.message).join(" "));
+            }
+            await refresh(true);
+            await refreshInstallJobs();
+            return applied;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setMessage(message);
+            return { errors: [{ id: "apply", message }] };
+          } finally {
+            setBusyId(null);
+          }
+        }}
         onFinish={() => setWizardOpen(false)}
       />
     )}
@@ -1733,8 +1761,8 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
           <ul>
             <li>{readyIds.has("python") && readyIds.has("ffmpeg") ? "✓" : "○"} Runtime dependencies</li>
             <li>{readyIds.has("comfyui") ? "✓" : "○"} ComfyUI</li>
-            <li>{scan.baselineImageWorkflow === "ready" ? "✓" : "○"} Image generation</li>
-            <li>{scan.baselineVideoWorkflow === "ready" ? "✓" : "○"} Video generation</li>
+            <li>{scan.baselineImageWorkflow === "not_required" ? "— not required for this profile" : scan.baselineImageWorkflow === "ready" ? "✓" : "○"} Image generation</li>
+            <li>{scan.baselineVideoWorkflow === "not_required" ? "— not required for this profile" : scan.baselineVideoWorkflow === "ready" ? "✓" : "○"} Video generation</li>
             <li>{scan.nodeCatalogChecked ? "✓" : "○"} ComfyUI node catalogue</li>
           </ul>
           <div className="row-actions">
@@ -1788,8 +1816,53 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
       {setupSection === "overview" && (
         <section className="panel" aria-label="Setup overview" data-testid="adept-setup-overview">
           <p>
-            {status.overall_label}. Ready {status.counts?.ready ?? 0}. Missing essentials {status.counts?.not_installed ?? 0}. Needs attention {status.counts?.needs_attention ?? 0}.
+            Current installation profile: {installationProfileLabel(status.installationProfile)}.
           </p>
+          <p>
+            Local models: {status.localModelsInstalled ?? 0} installed, {status.localModelsAvailable ?? 0} available.
+          </p>
+          <p>
+            API providers: {(status.connectedProviders || []).length} connected
+            {(status.connectedProviders || []).length ? ` (${status.connectedProviders?.map((item) => item.name).join(", ")})` : ""}.
+          </p>
+          <p>
+            System readiness: {scan?.essentialBlockerCount ? "This profile still needs the listed pieces." : status.overall_label}.
+          </p>
+          <div className="row-actions">
+            <button type="button" className="primary" data-testid="run-setup-wizard" onClick={() => setWizardOpen(true)}>
+              Run Setup Wizard
+            </button>
+            <button type="button" data-testid="manage-local-models" onClick={() => setSetupSection("models")}>
+              Manage Local Models
+            </button>
+            <button type="button" data-testid="manage-api-connections" onClick={() => setSetupSection("components")}>
+              Manage API Connections
+            </button>
+            <button type="button" data-testid="add-optional-tools" onClick={() => setOptionalOpen(true)}>
+              Add Optional Tools
+            </button>
+            <button type="button" data-testid="setup-overview-rescan" disabled={scanning} onClick={() => void refresh(true)}>
+              {scanning ? "Scanning…" : "Re-scan System"}
+            </button>
+            <button
+              type="button"
+              data-testid="repair-desktop-shortcut"
+              onClick={() => {
+                const desktop = (window as Window & {
+                  adeptDesktop?: { createDesktopShortcut?: () => Promise<{ message?: string }> };
+                }).adeptDesktop;
+                if (!desktop?.createDesktopShortcut) {
+                  setMessage("On Windows, the installer creates the Adept UI desktop shortcut. A later repair uses that same shortcut and does not add a second icon.");
+                  return;
+                }
+                void desktop.createDesktopShortcut()
+                  .then((result) => setMessage(result?.message || "The desktop shortcut was checked."))
+                  .catch(() => setMessage("The desktop did not accept the shortcut. Adept UI can still start."));
+              }}
+            >
+              Create or repair desktop shortcut
+            </button>
+          </div>
         </section>
       )}
       {setupSection === "updates" && <AdeptSetupUpdates />}

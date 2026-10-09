@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { auditPackagedTree } from "../packaged-requirements-contract.mjs";
+import { probePackagedSetup, rendererShipsComfyPrerequisite } from "./setup-profile-smoke.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const version = JSON.parse(fs.readFileSync(path.join(root, "electron", "version.json"), "utf8")).version;
@@ -299,6 +300,12 @@ async function main() {
   const health = await waitHealth();
   setGate("STUDIO API :8760", health.status === 200 ? "PASS" : "FAIL");
   setGate("STUDIO API HEALTH", health.status === 200 ? "PASS" : "FAIL");
+  if (health.status === 200) {
+    const setupProbe = await probePackagedSetup("http://127.0.0.1:8760", { tempRoot: fresh });
+    evidence.setupProfile = setupProbe.evidence;
+    for (const [name, value] of Object.entries(setupProbe.gates)) setGate(name, value);
+  }
+  setGate("RENDERER SHIPS COMFY PREREQUISITE", rendererShipsComfyPrerequisite(path.join(unpackedDir, "resources", "renderer")) ? "PASS" : "FAIL");
   const status = readStatus(fresh);
   const command = String(status?.apiCommand || "");
   evidence.apiCommand = command;
@@ -550,7 +557,7 @@ async function main() {
   console.log(JSON.stringify({ appImage: evidence.appImage, deb: evidence.deb, bootVerdict: evidence.bootVerdict, surfaces: surfacePass }, null, 2));
 
   const numericFails = ["PYWIN32 BUNDLED", "VITE :5173 DEPENDENCY", "DEV VENV DEPENDENCY", "DEV REPO DEPENDENCY", "SYSTEM PYTHON DEPENDENCY", "FALSE CUDA READY STATES", "FALSE HEALTHY STATES", "WINDOWS BINARIES BUNDLED", "MACOS BINARIES BUNDLED", "USER PROJECTS BUNDLED", "USER LIBRARY ASSETS BUNDLED", "MODEL WEIGHTS BUNDLED", "BACKUPS BUNDLED", "PLAYWRIGHT ARTIFACTS BUNDLED", "SECRETS BUNDLED", "WINDOWS COMFY FILES BUNDLED", "DEV VENV", "DEV .ENV", "ADEPT PROJECTS BEFORE LAUNCH", "WINDOWS PROJECT DATA", "DUPLICATE MANAGERS", "FAILED REQUIRED CHECKS", "WINDOWS-ONLY PROCESS TOOLING"];
-  const passFails = ["ELECTRON PROCESS STARTED", "PACKAGED RENDERER LOADED", "STUDIO API :8760", "BACKGROUND SERVICES PROCESS STARTED", "FRESH PROFILE", "FIRST PROJECT PERSISTENCE", "MAJOR PRODUCT SURFACE SMOKE", "APPIMAGE EXECUTION", "DEB INSTALL", "DEB APPLICATION LAUNCH", "DEB UNINSTALL", "DEFAULT UNINSTALL PRESERVES USER DATA", "CLEAN SHUTDOWN", "8760 COLLISION HANDLING", "8759 COLLISION HANDLING", "PACKAGED API LOSS DETECTION", "COMFY TRUTHFUL", "DESKTOP ENTRY", "RPM PACKAGE METADATA", "CO-DIRECTOR STREAM WIRING"];
+  const passFails = ["ELECTRON PROCESS STARTED", "PACKAGED RENDERER LOADED", "STUDIO API :8760", "BACKGROUND SERVICES PROCESS STARTED", "FRESH PROFILE", "FIRST PROJECT PERSISTENCE", "MAJOR PRODUCT SURFACE SMOKE", "APPIMAGE EXECUTION", "DEB INSTALL", "DEB APPLICATION LAUNCH", "DEB UNINSTALL", "DEFAULT UNINSTALL PRESERVES USER DATA", "CLEAN SHUTDOWN", "8760 COLLISION HANDLING", "8759 COLLISION HANDLING", "PACKAGED API LOSS DETECTION", "COMFY TRUTHFUL", "DESKTOP ENTRY", "RPM PACKAGE METADATA", "CO-DIRECTOR STREAM WIRING", "API PROFILE OMITS COMFY", "OFFICIAL COMFY DOWNLOAD URL", "CONNECT REJECTS NON COMFY FOLDER", "CONNECT EXISTING LEAVES FILES", "COMFY INSTALL NOT FABRICATED", "LOCAL REQUIREMENT MATCHES COMFY HEALTH", "HYBRID REQUIREMENT MATCHES COMFY HEALTH", "RENDERER SHIPS COMFY PREREQUISITE"];
   const bad = numericFails.some((name) => gates[name] !== 0)
     || passFails.some((name) => gates[name] !== "PASS")
     || gates["UNOWNED PROCESS KILLED"] === "YES"

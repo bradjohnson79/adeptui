@@ -21,8 +21,9 @@ export type FirstRunScan = {
   essentialNeeded?: { id: string; name: string; status?: string }[];
   essentialBlockerCount?: number;
   optionalAbsentCount?: number;
-  baselineImageWorkflow?: "ready" | "blocked";
-  baselineVideoWorkflow?: "ready" | "blocked";
+  baselineImageWorkflow?: "ready" | "blocked" | "not_required";
+  baselineVideoWorkflow?: "ready" | "blocked" | "not_required";
+  installationProfile?: "local" | "api" | "hybrid" | null;
   estimatedDownloadBytes?: number;
   estimatedInstallBytes?: number;
   freeBytes?: number | null;
@@ -30,11 +31,23 @@ export type FirstRunScan = {
   nodeCatalogChecked?: boolean;
 };
 
+/** Discovered models and keys are not a profile. Only a saved value is named. */
+export function installationProfileLabel(value?: string | null): string {
+  if (value === "local") return "Local";
+  if (value === "api") return "API";
+  if (value === "hybrid") return "Hybrid";
+  return "Not chosen yet";
+}
+
+function workflowSatisfied(value: FirstRunScan["baselineImageWorkflow"]): boolean {
+  return value === "ready" || value === "not_required";
+}
+
 /** The server scan is the completion authority. Optional absence is not a blocker. */
 export function scanAllowsCompletion(scan?: FirstRunScan | null): boolean {
   return scan?.essentialBlockerCount === 0
-    && scan.baselineImageWorkflow === "ready"
-    && scan.baselineVideoWorkflow === "ready";
+    && workflowSatisfied(scan.baselineImageWorkflow)
+    && workflowSatisfied(scan.baselineVideoWorkflow);
 }
 
 /**

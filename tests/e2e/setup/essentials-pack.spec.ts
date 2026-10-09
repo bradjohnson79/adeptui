@@ -9,9 +9,9 @@ test.describe("Revision D Essentials Pack", () => {
     const body = await res.json();
     expect(body.id).toBe("adept_ui_essentials");
     expect(body.generationBlockedByPack).toBeFalsy();
-    expect(body.essentialTotal).toBe(3);
+    expect(body.essentialTotal).toBe(4);
     const ids = (body.components || []).map((row: { id: string }) => row.id);
-    expect(ids).toContain("videochat3_4b");
+    expect(ids).not.toContain("videochat3_4b");
     expect(ids).toContain("sam21_hiera_tiny");
     expect(ids).not.toContain("timelens");
   });

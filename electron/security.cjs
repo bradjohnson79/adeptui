@@ -4,6 +4,7 @@ const ALLOWED_CHANNELS = new Set([
   "adept:getInfo",
   "adept:getStatus",
   "adept:openExternal",
+  "adept:createDesktopShortcut",
   "adept:selectUpdateArtifact",
 ]);
 

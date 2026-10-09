@@ -29,6 +29,22 @@ if (installed.backgroundServicesHealthy !== true) failures.push("installed backg
 if (installed.installedDiagPort !== 8760) failures.push("installed API port");
 if (installed.comfyUnchanged !== true) failures.push("installer changed ComfyUI");
 if (installed.apiUnchanged !== true) failures.push("installer changed development API");
+const setupNames = [
+  "API PROFILE OMITS COMFY",
+  "OFFICIAL COMFY DOWNLOAD URL",
+  "CONNECT REJECTS NON COMFY FOLDER",
+  "CONNECT EXISTING LEAVES FILES",
+  "COMFY INSTALL NOT FABRICATED",
+  "LOCAL REQUIREMENT MATCHES COMFY HEALTH",
+  "HYBRID REQUIREMENT MATCHES COMFY HEALTH",
+  "RENDERER SHIPS COMFY PREREQUISITE",
+];
+for (const name of setupNames) {
+  if (unpacked.setupGates?.[name] !== "PASS") failures.push(`unpacked ${name}`);
+  if (installed.setupGates?.[name] !== "PASS") failures.push(`installed ${name}`);
+}
+if (!["PRESENT", "ABSENT"].includes(unpacked.setupGates?.["COMFY DETECTED WHEN REACHABLE"])) failures.push("unpacked comfy detection");
+if (installed.setupGates?.["DESKTOP SHORTCUT"] !== "PASS") failures.push("desktop shortcut");
 
 if (failures.length) {
   console.error(failures.join("\n"));

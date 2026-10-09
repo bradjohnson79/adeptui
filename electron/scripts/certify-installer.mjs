@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { logicalSnapshot, preservationVerdict } from "./db-preservation.mjs";
+import { probePackagedSetup, rendererShipsComfyPrerequisite } from "./setup-profile-smoke.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const version = JSON.parse(fs.readFileSync(path.join(root, "electron", "version.json"), "utf8")).version;
@@ -96,6 +97,15 @@ let installedProjectCount = null;
 try { installedBootJson = JSON.parse(installedBoot.body); } catch { installedBootJson = null; }
 try { installedDiagPort = JSON.parse(installedDiag.body).layers.apiDirect.tcp.port; } catch { installedDiagPort = null; }
 try { installedProjectCount = JSON.parse(installedProjects.body).length; } catch { installedProjectCount = null; }
+const setupProbe = installedHealth.status === 200
+  ? await probePackagedSetup("http://127.0.0.1:8760", { tempRoot: userData })
+  : { gates: {}, evidence: { skipped: true } };
+const desktopShortcut = path.join(process.env.USERPROFILE || "", "Desktop", "Adept UI.lnk");
+const setupGates = {
+  ...setupProbe.gates,
+  "RENDERER SHIPS COMFY PREREQUISITE": rendererShipsComfyPrerequisite(path.join(installDir, "resources", "renderer")) ? "PASS" : "FAIL",
+  "DESKTOP SHORTCUT": fs.existsSync(desktopShortcut) ? "PASS" : "FAIL",
+};
 const installedStatus = fs.existsSync(path.join(userData, "desktop-status.json"))
   ? JSON.parse(fs.readFileSync(path.join(userData, "desktop-status.json"), "utf8"))
   : null;
@@ -143,6 +153,9 @@ const result = {
   backgroundServicesPort: installedStatus?.backgroundServices?.port || null,
   backgroundServicesCollision: Boolean(installedStatus?.backgroundServices?.collision),
   backgroundServicesReason: installedStatus?.backgroundServices?.reason || null,
+  setupGates,
+  setupEvidence: setupProbe.evidence,
+  desktopShortcut,
 };
 fs.writeFileSync(path.join(root, "electron", "build", "installer-cert.json"), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));

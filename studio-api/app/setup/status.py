@@ -801,7 +801,21 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
         "freeBytes": report["freeBytes"],
         "storageShortfall": report["storageShortfall"],
         "nodeCatalogChecked": report["nodeCatalogChecked"],
+        "installationProfile": report.get("installationProfile"),
+        "connectedProviders": report.get("connectedProviders") or [],
     }
+    from .installation_profile import selected_local_models, selected_providers
+
+    payload["installationProfile"] = report.get("installationProfile")
+    payload["connectedProviders"] = report.get("connectedProviders") or []
+    payload["selectedLocalModels"] = selected_local_models()
+    payload["selectedProviders"] = selected_providers()
+    local_rows = [
+        item for item in components
+        if str(item.get("category") or "") in {"Video Models", "Still Image Models", "Image Generation"}
+    ]
+    payload["localModelsInstalled"] = sum(1 for item in local_rows if item.get("status") == "ready")
+    payload["localModelsAvailable"] = len(local_rows)
     payload["firstRunSetupComplete"] = apply_first_run_flag(report)
     has_active_work = bool(payload["active_operation"]) or any(
         item["status"] in ("installing", "checking") for item in components

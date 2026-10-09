@@ -708,7 +708,7 @@ def _comfy_logical_row(
         if running
         else "STARTING"
         if starting
-        else "FAILED"
+        else "ON_DEMAND"
     )
     comfy_adm = (admission or {}).get("comfyui") or {}
     residents = (admission or {}).get("residents") or {}

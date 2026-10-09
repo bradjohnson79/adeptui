@@ -241,8 +241,8 @@ def lifecycle_archive(component_id: str):
 
 
 @router.post("/components/{component_id}/remove")
-def lifecycle_remove(component_id: str):
-    return service.remove_component(component_id)
+def lifecycle_remove(component_id: str, confirm_delete: bool = False):
+    return service.remove_component(component_id, confirm_delete=confirm_delete)
 
 
 @router.post("/components/{component_id}/move")

@@ -1221,11 +1221,67 @@ def archive_component(component_id: str) -> ProviderCertificationRecord:
     return updated
 
 
-def remove_component(component_id: str) -> dict[str, Any]:
+def remove_component(component_id: str, *, confirm_delete: bool = False) -> dict[str, Any]:
+    """Disconnect an optional model. Essential rows and shared files stay."""
+    from pathlib import Path
+
+    from ...config import settings
+    from ..installation_profile import PROTECTED_IDS, profile_required_ids
+    from ..state import load_state, update_state
+
+    if component_id in PROTECTED_IDS or component_id in set(profile_required_ids()):
+        return {
+            "componentId": component_id,
+            "status": "protected",
+            "deleted": False,
+            "message": (
+                "This component is required for the current installation profile. "
+                "Change the profile in the Setup Wizard before removing it. "
+                "Projects and media are unchanged."
+            ),
+        }
+    if not confirm_delete:
+        return {
+            "componentId": component_id,
+            "status": "confirmation_required",
+            "deleted": False,
+            "message": (
+                "Disconnecting this model does not delete files. Confirm to delete "
+                "Adept-managed weight files only. Shared files, projects, and generated media stay."
+            ),
+        }
+    status = (load_state().get("status") or {}).get(component_id) or {}
+    path_value = status.get("path") or status.get("install_path") if isinstance(status, dict) else None
+    deleted = False
+    managed_root = (Path(settings.data_dir) / "models").resolve()
+    if path_value:
+        target = Path(str(path_value)).resolve()
+        try:
+            target.relative_to(managed_root)
+        except ValueError:
+            target = None
+        if target is not None and target.is_file():
+            target.unlink()
+            deleted = True
+
+    def mutate(latest: dict[str, Any]) -> None:
+        status_rows = latest.get("status")
+        if isinstance(status_rows, dict):
+            status_rows.pop(component_id, None)
+        selected = latest.get("selected_local_models")
+        if isinstance(selected, list):
+            latest["selected_local_models"] = [item for item in selected if item != component_id]
+
+    update_state(mutate)
     return {
         "componentId": component_id,
-        "status": "proposal_only",
-        "message": "Removal must remain a reviewed Source Manager action. Installed files are not deleted automatically here.",
+        "status": "removed",
+        "deleted": deleted,
+        "message": (
+            "The Adept-managed weight file was deleted."
+            if deleted
+            else "The model was disconnected. Shared or external files were not deleted."
+        ),
     }
 
 

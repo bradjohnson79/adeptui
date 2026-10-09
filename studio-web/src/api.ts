@@ -3086,6 +3086,44 @@ foundationStatus: (projectId: string) =>
     req<SetupStatusResponse>(`/api/setup/status${refresh ? "?refresh=1" : ""}`),
   completeFirstRun: () =>
     req<{ firstRunSetupComplete: boolean }>("/api/setup/first-run/complete", { method: "POST" }),
+  saveInstallationProfile: (body: {
+    profile: "local" | "api" | "hybrid";
+    selectedLocalModels?: string[];
+    selectedProviders?: string[];
+  }) =>
+    req<SetupStatusResponse>("/api/setup/installation-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  comfyPrerequisite: () =>
+    req<{ healthy: boolean; installed: boolean; path?: string | null; downloadUrl: string; message: string }>(
+      "/api/setup/comfy/prerequisite",
+    ),
+  rescanComfy: () =>
+    req<{ healthy: boolean; installed: boolean; path?: string | null; downloadUrl: string; message: string }>(
+      "/api/setup/comfy/rescan",
+      { method: "POST" },
+    ),
+  connectExistingComfy: (path: string) =>
+    req<{ ok: boolean; healthy: boolean; installed: boolean; path?: string | null; downloadUrl: string; message: string }>(
+      "/api/setup/comfy/connect",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      },
+    ),
+  applyInstallationProfile: () =>
+    req<{ profile: string; queued: string[]; skipped: string[]; errors: { id: string; message: string }[] }>(
+      "/api/setup/installation-profile/apply",
+      { method: "POST" },
+    ),
+  removeSetupComponent: (componentId: string, confirmDelete = false) =>
+    req<{ componentId: string; status: string; deleted: boolean; message: string }>(
+      `/api/setup/lifecycle/components/${encodeURIComponent(componentId)}/remove?confirm_delete=${confirmDelete ? "true" : "false"}`,
+      { method: "POST" },
+    ),
   setupLifecycleComponents: (query = "", group?: string) => {
     const params = new URLSearchParams();
     if (query.trim()) params.set("query", query.trim());

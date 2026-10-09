@@ -34,6 +34,8 @@ def empty_state() -> dict[str, Any]:
         "download_queue": {},
         "source_manager": {},
         "model_license_acknowledgements": {},
+        "selected_local_models": [],
+        "selected_providers": [],
     }
 
 
@@ -62,6 +64,22 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     ):
         if not isinstance(state.get(key), dict):
             state[key] = {}
+    for key in ("selected_local_models", "selected_providers"):
+        raw = state.get(key)
+        if not isinstance(raw, list):
+            state[key] = []
+        else:
+            state[key] = [str(item) for item in raw if str(item).strip()]
+    profile = str(state.get("installation_profile") or "").strip().lower()
+    if profile not in ("local", "api", "hybrid"):
+        state.pop("installation_profile", None)
+    else:
+        state["installation_profile"] = profile
+    comfy_root = str(state.get("comfy_install_root") or "").strip()
+    if comfy_root and "://" not in comfy_root:
+        state["comfy_install_root"] = comfy_root
+    else:
+        state.pop("comfy_install_root", None)
     _drop_removed_components(state)
     # Missing means not yet migrated. Only an explicit true is complete.
     if "first_run_setup_complete" in state:

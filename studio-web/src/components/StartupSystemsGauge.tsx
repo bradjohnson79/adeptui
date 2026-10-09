@@ -325,7 +325,7 @@ export function StartupSystemsGauge() {
           {phaseTitle}
         </h2>
         <div className="startup-gauge__bar">
-          <div className={`startup-gauge__bar-fill${attention ? " startup-gauge__bar-fill--failed" : ""}`} style={{ width: `${attention ? 100 : pct}%` }} />
+          <div className={`startup-gauge__bar-fill${attention ? " startup-gauge__bar-fill--failed" : ""}`} style={{ width: `${pct}%` }} />
         </div>
         <div className="startup-gauge__pct">
           <span>{pct}%</span>

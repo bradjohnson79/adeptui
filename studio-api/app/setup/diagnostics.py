@@ -320,6 +320,11 @@ def _comfy_install_root() -> str | None:
     """Filesystem install/shared root. Never a URL."""
 
     from ..readiness.contract import is_filesystem_install_path
+    from .comfy_prerequisite import saved_comfy_install_root
+
+    saved = saved_comfy_install_root()
+    if saved:
+        return saved
 
     models = getattr(settings, "comfy_models_dir", None)
     if models:

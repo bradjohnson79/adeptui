@@ -27,6 +27,7 @@ const config = {
   },
   files: [
     "electron/main.cjs",
+    "electron/desktopShortcut.cjs",
     "electron/endpoint.cjs",
     "electron/preload.cjs",
     "electron/renderer-server.cjs",
@@ -61,6 +62,9 @@ const config = {
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    shortcutName: "Adept UI",
     deleteAppDataOnUninstall: false,
     runAfterFinish: false,
     artifactName: "${productName}-Setup-${version}-win-x64.${ext}",

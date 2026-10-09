@@ -14,7 +14,7 @@ import shutil
 import urllib.request
 from typing import Any
 
-from .state import state_path, update_state
+from .state import load_state, state_path, update_state
 
 logger = logging.getLogger(__name__)
 
@@ -87,17 +87,32 @@ def assess_first_run(
     """Read-only baseline assessment from component rows the setup scanner already produced."""
     from ..workflows.readiness import workflow_readiness
 
+    from .installation_profile import (
+        active_profile,
+        provider_blockers,
+        required_ids_for,
+        verified_providers,
+    )
+
     rows = _by_id(components)
-    baseline_ids = baseline_component_ids()
+    state = load_state()
+    profile = active_profile(state)
+    baseline_ids = required_ids_for(profile, state) if profile else baseline_component_ids()
     if fetch_nodes and node_types is None and _is_ready(rows.get("comfyui")):
         node_types = _node_types()
 
     model_states = {component_id: _is_ready(rows.get(component_id)) for component_id in baseline_ids}
-    image_workflow = workflow_readiness(
-        IMAGE_WORKFLOW_ID, node_types=node_types, model_states=model_states
+    image_required = profile in (None, "local") or (profile == "hybrid" and "zimage_models" in baseline_ids)
+    video_required = profile in (None, "local") or (profile == "hybrid" and "ltx_2_5_checkpoint" in baseline_ids)
+    image_workflow = (
+        workflow_readiness(IMAGE_WORKFLOW_ID, node_types=node_types, model_states=model_states)
+        if image_required
+        else {"id": IMAGE_WORKFLOW_ID, "status": "not_required"}
     )
-    video_workflow = workflow_readiness(
-        VIDEO_WORKFLOW_ID, node_types=node_types, model_states=model_states
+    video_workflow = (
+        workflow_readiness(VIDEO_WORKFLOW_ID, node_types=node_types, model_states=model_states)
+        if video_required
+        else {"id": VIDEO_WORKFLOW_ID, "status": "not_required"}
     )
 
     blockers: list[dict[str, str]] = []
@@ -110,8 +125,11 @@ def assess_first_run(
         else:
             blockers.append({"id": component_id, "name": name, "status": str((row or {}).get("status") or "missing")})
 
-    for workflow, label in ((image_workflow, "Baseline image workflow"), (video_workflow, "Baseline video workflow")):
-        if workflow.get("status") != _READY:
+    for workflow, label, required in (
+        (image_workflow, "Baseline image workflow", image_required),
+        (video_workflow, "Baseline video workflow", video_required),
+    ):
+        if required and workflow.get("status") != _READY:
             blockers.append(
                 {
                     "id": f"workflow:{workflow.get('id')}",
@@ -119,6 +137,8 @@ def assess_first_run(
                     "status": str(workflow.get("status") or "unknown"),
                 }
             )
+    if profile in ("api", "hybrid"):
+        blockers.extend(provider_blockers(profile, state))
 
     optional_absent = 0
     download_bytes = 0
@@ -150,8 +170,14 @@ def assess_first_run(
         "essentialBlockers": blockers,
         "essentialBlockerCount": len(blockers),
         "optionalAbsentCount": optional_absent,
-        "baselineImageWorkflow": "ready" if image_workflow.get("status") == _READY else "blocked",
-        "baselineVideoWorkflow": "ready" if video_workflow.get("status") == _READY else "blocked",
+        "baselineImageWorkflow": (
+            "not_required" if not image_required else "ready" if image_workflow.get("status") == _READY else "blocked"
+        ),
+        "baselineVideoWorkflow": (
+            "not_required" if not video_required else "ready" if video_workflow.get("status") == _READY else "blocked"
+        ),
+        "installationProfile": profile,
+        "connectedProviders": verified_providers(),
         "imageWorkflowStatus": image_workflow.get("status"),
         "videoWorkflowStatus": video_workflow.get("status"),
         "estimatedDownloadBytes": download_bytes,
@@ -209,6 +235,8 @@ def apply_first_run_flag(report: dict[str, Any]) -> bool:
         if current is True or current is False:
             return
         latest[FIRST_RUN_KEY] = ready
+        if ready and not latest.get("installation_profile"):
+            latest["installation_profile"] = "local"
         migrated = ready
 
     update_state(mutate)
@@ -241,6 +269,11 @@ def complete_first_run(components: list[dict[str, Any]], **kwargs: Any) -> bool:
         raise FirstRunNotReady
     if not report["ready"]:
         raise FirstRunNotReady
-    update_state(lambda latest: latest.__setitem__(FIRST_RUN_KEY, True))
+    def mark_complete(latest: dict[str, Any]) -> None:
+        latest[FIRST_RUN_KEY] = True
+        if not latest.get("installation_profile"):
+            latest["installation_profile"] = "local"
+
+    update_state(mark_complete)
     invalidate_status_cache()
     return True

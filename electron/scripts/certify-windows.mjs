@@ -5,6 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { logicalSnapshot, preservationVerdict } from "./db-preservation.mjs";
+import { probePackagedSetup, rendererShipsComfyPrerequisite } from "./setup-profile-smoke.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const version = JSON.parse(fs.readFileSync(path.join(root, "electron", "version.json"), "utf8")).version;
@@ -237,6 +238,13 @@ if (desktopHealth.status === 200) {
   const setup = await get("http://127.0.0.1:8760/api/setup/status", 30000, 500000);
   try { setupFirstRunComplete = JSON.parse(setup.body).firstRunSetupComplete; } catch { setupFirstRunComplete = null; }
 }
+const setupProbe = desktopHealth.status === 200
+  ? await probePackagedSetup("http://127.0.0.1:8760", { tempRoot: freshProfile })
+  : { gates: {}, evidence: { skipped: true } };
+const setupGates = {
+  ...setupProbe.gates,
+  "RENDERER SHIPS COMFY PREREQUISITE": rendererShipsComfyPrerequisite(path.join(isolated, "resources", "renderer")) ? "PASS" : "FAIL",
+};
 const desktopPid = listeningPid(netstat(), 8760);
 const desktopCommand = commandLine(desktopPid);
 const statusAfterProbes = JSON.parse(fs.readFileSync(path.join(freshProfile, "desktop-status.json"), "utf8"));
@@ -344,6 +352,8 @@ const result = {
   projectCreated,
   projectReopened,
   setupFirstRunComplete,
+  setupGates,
+  setupEvidence: setupProbe.evidence,
   backgroundServices: freshStatus?.backgroundServices || null,
   supervisorLog: fs.existsSync(path.join(freshProfile, "logs", "background-services.log"))
     ? fs.readFileSync(path.join(freshProfile, "logs", "background-services.log"), "utf8").slice(-2000)

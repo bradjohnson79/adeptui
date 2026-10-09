@@ -381,14 +381,22 @@ export type SetupOverallStatus =
   | "needs_attention";
 
 export interface SetupStatusResponse {
+  installationProfile?: "local" | "api" | "hybrid" | null;
+  connectedProviders?: { id: string; name: string }[];
+  localModelsInstalled?: number;
+  localModelsAvailable?: number;
+  selectedLocalModels?: string[];
+  selectedProviders?: string[];
   firstRunSetupComplete?: boolean;
   firstRunScan?: {
     alreadyReady?: { id: string; name: string }[];
     essentialNeeded?: { id: string; name: string; status?: string }[];
     essentialBlockerCount?: number;
     optionalAbsentCount?: number;
-    baselineImageWorkflow?: "ready" | "blocked";
-    baselineVideoWorkflow?: "ready" | "blocked";
+    baselineImageWorkflow?: "ready" | "blocked" | "not_required";
+    baselineVideoWorkflow?: "ready" | "blocked" | "not_required";
+    installationProfile?: "local" | "api" | "hybrid" | null;
+    connectedProviders?: { id: string; name: string }[];
     estimatedDownloadBytes?: number;
     estimatedInstallBytes?: number;
     freeBytes?: number | null;

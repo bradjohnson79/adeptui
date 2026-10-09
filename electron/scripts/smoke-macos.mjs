@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { auditPackagedTree, pywin32InstallPlan } from "../packaged-requirements-contract.mjs";
+import { probePackagedSetup, rendererShipsComfyPrerequisite } from "./setup-profile-smoke.mjs";
 
 const require = createRequire(import.meta.url);
 const { selectDesktopArtifact, loadFixtureCatalog } = require("../update/bridge.cjs");
@@ -517,6 +518,12 @@ async function main() {
   const health = await waitHealth();
   setGate("PACKAGED STUDIO API :8760", health.status === 200 ? "PASS" : "FAIL");
   setGate("STUDIO API :8760", health.status === 200 ? "HEALTHY" : "FAIL");
+  if (health.status === 200) {
+    const setupProbe = await probePackagedSetup("http://127.0.0.1:8760", { tempRoot: fresh });
+    evidence.setupProfile = setupProbe.evidence;
+    for (const [name, value] of Object.entries(setupProbe.gates)) setGate(name, value);
+  }
+  setGate("RENDERER SHIPS COMFY PREREQUISITE", rendererShipsComfyPrerequisite(path.join(builtApp, "Contents", "Resources", "renderer")) ? "PASS" : "FAIL");
   const status = readStatus(fresh);
   const command = String(status?.apiCommand || "");
   const services = status?.backgroundServices || {};
@@ -818,7 +825,9 @@ async function main() {
     "CLEAN SHUTDOWN", "OWNED PROCESS CLEANUP", "8760 COLLISION HANDLING", "8759 COLLISION HANDLING",
     "API LOSS DETECTION", "WINDOW BEHAVIOR", "MACOS MENU", "EXTERNAL LINKS", "MAC ARM64 UPDATE ARTIFACT SELECTION",
     "WRONG PLATFORM ARTIFACT REJECTED", "WRONG ARCH ARTIFACT REJECTED", "MACOS E2E", "MACOS NATIVE RUNNER",
-    "MACOS ARM64",
+    "MACOS ARM64", "API PROFILE OMITS COMFY", "OFFICIAL COMFY DOWNLOAD URL", "CONNECT REJECTS NON COMFY FOLDER",
+    "CONNECT EXISTING LEAVES FILES", "COMFY INSTALL NOT FABRICATED", "LOCAL REQUIREMENT MATCHES COMFY HEALTH",
+    "HYBRID REQUIREMENT MATCHES COMFY HEALTH", "RENDERER SHIPS COMFY PREREQUISITE",
   ];
   const bad = numericZero.some((name) => name === "OWNER COUNT" ? gates[name] !== 1 : gates[name] !== 0)
     || passGates.some((name) => gates[name] !== "PASS")

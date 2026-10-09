@@ -182,13 +182,14 @@ test.describe("@critical ai-guided setup lifecycle", () => {
       });
       await openSetup(page, project.id);
 
-      await expect(page.getByRole("heading", { name: "Setup Mode" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Guided", exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: "AI-Guided", exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Manual", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Setup Mode" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Guided", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "AI-Guided", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Manual", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Enter Adept UI" })).toHaveCount(0);
 
-      await page.getByRole("button", { name: "AI-Guided", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "AI-Guided Setup" })).toBeVisible();
+      await page.getByRole("button", { name: "Recommendations", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Recommendations" })).toBeVisible();
       await expect(page.getByText("Recommended For This Goal")).toBeVisible();
       await expect(page.getByText("Lifecycle Groups")).toBeVisible();
       await expect(page.getByText("Cloud Providers")).toBeVisible();
@@ -247,7 +248,7 @@ test.describe("@critical ai-guided setup lifecycle", () => {
       });
 
       await page.goto(`/project/${project.id}?workspace=setup&setupMode=ai_guided&setupComponent=ltx_2_5_checkpoint`);
-      await expect(page.getByRole("heading", { name: "AI-Guided Setup" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Recommendations" })).toBeVisible();
       await expect(page.getByText("Opened for LTX 2.5 Checkpoint.")).toBeVisible();
 
       await page.getByRole("button", { name: "Review Plan" }).first().click();
@@ -297,7 +298,7 @@ test.describe("@critical ai-guided setup lifecycle", () => {
       await expect.poll(() => page.url()).toContain("setupMode=ai_guided");
       await expect.poll(() => page.url()).toContain("setupComponent=flux1_dev_local");
       await expect.poll(() => page.url()).toContain("setupSource=production_dock");
-      await expect(page.getByRole("heading", { name: "AI-Guided Setup" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Recommendations" })).toBeVisible();
       await expect(page.getByText("Opened for FLUX.1 Dev.")).toBeVisible();
     } finally {
       await deleteProject(request, project.id);

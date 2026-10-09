@@ -53,6 +53,24 @@ def _tail(path: Path, limit: int = 4000) -> str:
     return data[-limit:].decode("utf-8", "replace")
 
 
+def engine_python_candidates(root: Path) -> list[Path]:
+    """Windows and Linux interpreters. The first file that exists is used."""
+    return [
+        root / "ComfyUI" / ".venv" / "Scripts" / "python.exe",
+        root / ".venv" / "Scripts" / "python.exe",
+        root / "python.exe",
+        root / "ComfyUI" / ".venv" / "bin" / "python",
+        root / ".venv" / "bin" / "python",
+        root / "bin" / "python",
+        root / "python",
+    ]
+
+
+def comfy_main_argument() -> str:
+    """Relative launch path. Path supplies the separator for the host OS."""
+    return str(Path("ComfyUI") / "main.py")
+
+
 def _resolve_engine(paths: RuntimePaths) -> tuple[Path | None, Path | None]:
     env_root = (os.environ.get("ADEPT_COMFY_ROOT") or "").strip()
     env_py = (os.environ.get("ADEPT_COMFY_PYTHON") or "").strip()
@@ -60,11 +78,7 @@ def _resolve_engine(paths: RuntimePaths) -> tuple[Path | None, Path | None]:
         root = Path(env_root)
         py = Path(env_py) if env_py else None
         if py is None:
-            for candidate in (
-                root / "ComfyUI" / ".venv" / "Scripts" / "python.exe",
-                root / ".venv" / "Scripts" / "python.exe",
-                root / "python.exe",
-            ):
+            for candidate in engine_python_candidates(root):
                 if candidate.is_file():
                     py = candidate
                     break
@@ -276,7 +290,7 @@ def request_start(paths: RuntimePaths, state: SupervisorState, *, spawn: bool = 
 
     args = [
         "-s",
-        "ComfyUI\\main.py",
+        comfy_main_argument(),
         "--listen",
         "127.0.0.1",
         "--port",

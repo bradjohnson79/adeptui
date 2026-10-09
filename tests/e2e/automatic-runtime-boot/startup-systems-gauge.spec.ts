@@ -81,6 +81,7 @@ test.describe("Startup Systems Gauge modal", () => {
   test("warm launch — all required online → modal skipped (no flash)", async ({ page }) => {
     await page.route("**/api/healthz", (r) => r.fulfill({ status: 200, body: "ok" }));
     await page.route("**/api/runtime-manager/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ALL_ONLINE) }));
+    await page.route("**/api/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ components: [], firstRunSetupComplete: true }) }));
     await mockBoot(page, GO_CERT);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1500);
@@ -94,6 +95,7 @@ test.describe("Startup Systems Gauge modal", () => {
       if (phase === 0) return r.fulfill({ status: 503, body: "down" });
       return r.fulfill({ status: 200, body: "ok" });
     });
+    await page.route("**/api/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ components: [], firstRunSetupComplete: true }) }));
     await page.route("**/api/runtime-manager/status", (r) => {
       if (phase < 2) return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(STARTING) });
       return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ALL_ONLINE) });
@@ -116,7 +118,7 @@ test.describe("Startup Systems Gauge modal", () => {
 
     // Advance: all online.
     phase = 2;
-    await expect(page.getByTestId("startup-gauge-message")).toHaveText(/ALL SYSTEMS ONLINE/, { timeout: 20_000 });
+    await expect(page.getByTestId("startup-gauge-message")).toHaveText(/ALL REQUIRED SYSTEMS ONLINE/, { timeout: 20_000 });
     // Auto-closes after the brief hold.
     await expect(page.getByTestId("startup-systems-gauge")).toBeHidden({ timeout: 10_000 });
   });
@@ -148,7 +150,7 @@ test.describe("Startup Systems Gauge modal", () => {
     await mockBoot(page, NO_GO_CERT);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("startup-systems-gauge")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId("boot-verdict")).toHaveText("ADEPT UI STARTUP — NO-GO");
+    await expect(page.getByTestId("boot-verdict")).toHaveText("ADEPT UI SETUP REQUIRED");
     await expect(page.getByTestId("boot-ready")).toHaveCount(0);
     await expect(page.getByTestId("startup-gauge-exit")).toHaveCount(0);
   });
@@ -161,13 +163,13 @@ test.describe("Startup Systems Gauge modal", () => {
       startCalls += 1;
       await r.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
-    await page.route("**/api/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ components: [] }) }));
+    await page.route("**/api/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ components: [], firstRunSetupComplete: true }) }));
     await page.route("**/api/boot/certification**", (r) => {
       const body = r.request().method() === "POST" ? GO_CERT : NO_GO_CERT;
       return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     });
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("boot-verdict")).toHaveText("ADEPT UI STARTUP — NO-GO", { timeout: 10_000 });
+    await expect(page.getByTestId("boot-verdict")).toHaveText("ADEPT UI SETUP REQUIRED", { timeout: 10_000 });
     await page.getByTestId("boot-retry").click();
     await expect(page.getByTestId("boot-ready")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("startup-systems-gauge")).toHaveCount(0);
@@ -183,13 +185,13 @@ test.describe("Startup Systems Gauge modal", () => {
       startCalls += 1;
       await r.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
-    await page.route("**/api/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ components: [] }) }));
+    await page.route("**/api/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ components: [], firstRunSetupComplete: true }) }));
     await page.route("**/api/boot/certification**", (r) => {
       const body = Date.now() - opened < 700 ? NO_GO_CERT : GO_CERT;
       return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     });
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("boot-verdict")).toHaveText("ADEPT UI STARTUP — NO-GO", { timeout: 10_000 });
+    await expect(page.getByTestId("boot-verdict")).toHaveText("ADEPT UI SETUP REQUIRED", { timeout: 10_000 });
     await expect(page.getByTestId("boot-ready")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("startup-systems-gauge")).toHaveCount(0);
     expect(startCalls).toBe(0);
@@ -198,7 +200,7 @@ test.describe("Startup Systems Gauge modal", () => {
   test("optional provider unavailable still reaches GO", async ({ page }) => {
     await page.route("**/api/healthz", (r) => r.fulfill({ status: 200, body: "ok" }));
     await page.route("**/api/runtime-manager/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ALL_ONLINE) }));
-    await page.route("**/api/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ components: [] }) }));
+    await page.route("**/api/setup/status", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ components: [], firstRunSetupComplete: true }) }));
     await mockBoot(page, OPTIONAL_CERT);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("boot-ready")).toBeVisible({ timeout: 10_000 });

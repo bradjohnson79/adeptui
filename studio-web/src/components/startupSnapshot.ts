@@ -100,7 +100,7 @@ export function buildSnapshot(status: RuntimeManagerStatus | null, studioApiReac
   const rows: SystemRow[] = [
     { id: "adept_core", label: "Adept Core", required: true, state: managerUp ? "online" : "starting", detail: adept?.managerPid ? `manager pid ${adept.managerPid}` : undefined },
     { id: "studio_api", label: "Studio API", required: true, state: mapRequiredState(studioUp, status?.studioApi?.status === "starting", status?.studioApi?.status, adept?.studioApiHealth), detail: adept?.studioApiPid ? `pid ${adept.studioApiPid}` : undefined },
-    { id: "creator_engine", label: "Creator Engine", required: true, state: creatorState, detail: adept?.comfyState ? `comfy ${adept.comfyState}` : undefined },
+    { id: "creator_engine", label: "Creator Engine", required: creatorState !== "on_demand", state: creatorState, detail: adept?.comfyState ? `comfy ${adept.comfyState}` : creatorState === "on_demand" ? "on demand" : undefined },
     { id: "codirector", label: "Co-Director Runtime", required: false, state: studioUp ? "online" : "starting" },
     { id: "local_ai", label: "Local AI Runtime", required: localAiRequired, state: localAiState, detail: localAiDetail },
     { id: "comfy_mcp", label: "Comfy MCP", required: false, state: comfyUp || creatorState === "online" ? "online" : "starting", detail: comfyUp || creatorState === "online" ? "attached" : "waiting for Creator Engine" },

@@ -238,6 +238,15 @@ function registerIpc() {
     packaged,
   }));
   ipcMain.handle("adept:getStatus", () => desktopStatus);
+  ipcMain.handle("adept:createDesktopShortcut", () => {
+    const { createDesktopShortcut, recordShortcut } = require("./desktopShortcut.cjs");
+    const result = createDesktopShortcut(process.execPath);
+    if (result && result.path) {
+      const record = recordShortcut(path.join(app.getPath("userData"), "desktop-shortcut.json"), result.path);
+      result.recorded = Boolean(record.recorded);
+    }
+    return result;
+  });
   ipcMain.handle("adept:openExternal", (_event, url) => {
     if (!isHttpUrl(url)) return { ok: false };
     const choice = classifyNavigation(url, { rendererOrigin: desktopStatus.rendererOrigin, packaged });

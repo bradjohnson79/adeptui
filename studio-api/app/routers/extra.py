@@ -63,6 +63,61 @@ def setup_status(refresh: bool = False):
     return get_setup_status(refresh=refresh)
 
 
+@router.post("/setup/installation-profile")
+def setup_save_installation_profile(body: dict):
+    """Save Local, API, or Hybrid on the existing setup record. Nothing is downloaded here."""
+    from ..setup.installation_profile import save_installation_profile
+    from ..setup.status import invalidate_status_cache
+
+    try:
+        save_installation_profile(
+            str(body.get("profile") or ""),
+            selected_models=list(body.get("selectedLocalModels") or []),
+            providers=list(body.get("selectedProviders") or []),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    invalidate_status_cache()
+    return get_setup_status(refresh=True)
+
+
+@router.get("/setup/comfy/prerequisite")
+def setup_comfy_prerequisite():
+    """Read ComfyUI health. Adept UI does not download or launch ComfyUI."""
+    from ..setup.comfy_prerequisite import rescan_comfy
+
+    return rescan_comfy()
+
+
+@router.post("/setup/comfy/rescan")
+def setup_comfy_rescan():
+    from ..setup.comfy_prerequisite import rescan_comfy
+
+    return rescan_comfy()
+
+
+@router.post("/setup/comfy/connect")
+def setup_comfy_connect(body: dict):
+    """Record a ComfyUI folder the user already installed. Files are not changed."""
+    from ..setup.comfy_prerequisite import connect_existing_comfy
+
+    try:
+        return connect_existing_comfy(str(body.get("path") or ""))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.post("/setup/installation-profile/apply")
+def setup_apply_installation_profile():
+    """Install only the required pieces that are not already ready."""
+    from ..setup.installation_profile import apply_saved_profile
+
+    try:
+        return apply_saved_profile()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 @router.post("/setup/first-run/complete")
 def setup_first_run_complete():
     """Save first-run completion only after required Python, FFmpeg, and ComfyUI are ready."""

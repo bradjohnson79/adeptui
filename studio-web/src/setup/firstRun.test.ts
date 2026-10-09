@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { bootHandoffTarget, requiredFirstRunReady, scanAllowsCompletion, setupWizardRequired } from "./firstRun";
+import { bootHandoffTarget, installationProfileLabel, requiredFirstRunReady, scanAllowsCompletion, setupWizardRequired } from "./firstRun";
 import { buildAiGuidedSetupPath, buildSetupWizardPath, homeLaunchAction } from "./navigation";
 import { buildHomeCreateProjectPath } from "../projectEntry";
 
@@ -52,11 +55,41 @@ describe("first-run boot handoff", () => {
       baselineImageWorkflow: "ready",
       baselineVideoWorkflow: "ready",
     })).toBe(true);
+    expect(scanAllowsCompletion({
+      essentialBlockerCount: 0,
+      baselineImageWorkflow: "not_required",
+      baselineVideoWorkflow: "not_required",
+    })).toBe(true);
   });
 
   it("stays incomplete when a successful read is not explicitly complete", () => {
     expect(bootHandoffTarget(undefined, false)).toBe("/setup");
     expect(requiredFirstRunReady([{ id: "python", status: "ready" }, { id: "ffmpeg", status: "not_installed" }, { id: "comfyui", status: "ready" }])).toBe(false);
+  });
+});
+
+describe("installation profile label", () => {
+  it("names only a saved profile", () => {
+    expect(installationProfileLabel(null)).toBe("Not chosen yet");
+    expect(installationProfileLabel(undefined)).toBe("Not chosen yet");
+    expect(installationProfileLabel("local")).toBe("Local");
+    expect(installationProfileLabel("api")).toBe("API");
+    expect(installationProfileLabel("hybrid")).toBe("Hybrid");
+  });
+});
+
+describe("setup completion copy", () => {
+  it("uses the required completion message for every profile", () => {
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "FirstRunSetupModal.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("Adept UI Setup Complete!");
+    expect(source).toContain("Your Adept UI production environment is ready.");
+    expect(source).toContain("You can return to Setup at any time to run the Setup Wizard again.");
+    expect(source).toContain("Essential system components required for Adept UI to operate will remain protected and cannot be removed through the Setup Wizard.");
+    expect(source).toContain("Continue to Adept UI");
+    expect(source).not.toContain("Enter Adept UI");
   });
 });
 
