@@ -54,12 +54,19 @@ for (const port of [8760, 8759, 8779]) {
 
 const before = { liveDb: hashFile(liveDb), liveLogical: logicalSnapshot(liveDb), comfyPid: listeningPid(8188), apiPid: listeningPid(8758) };
 fs.rmSync(installDir, { recursive: true, force: true });
-const installA = spawnSync(setup, ["/S", `/D=${installDir}`], { windowsHide: true, timeout: 180000 });
+function runInstaller(args) {
+  const result = spawnSync(setup, args, { windowsHide: true, timeout: 600000, encoding: "utf8" });
+  if (result.status !== 0) {
+    spawnSync("taskkill.exe", ["/IM", path.basename(setup), "/F"], { windowsHide: true });
+  }
+  return result;
+}
+const installA = runInstaller(["/S", `/D=${installDir}`]);
 const exe = path.join(installDir, "Adept UI.exe");
 const exeAfterA = fs.existsSync(exe);
 fs.mkdirSync(markerDir, { recursive: true });
 fs.writeFileSync(marker, "disposable-project-marker");
-const installB = spawnSync(setup, ["/S", `/D=${installDir}`], { windowsHide: true, timeout: 180000 });
+const installB = runInstaller(["/S", `/D=${installDir}`]);
 const markerAfterUpgrade = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8") : null;
 const exeAfterB = fs.existsSync(exe);
 const userData = path.join(process.env.TEMP, "adept-ui-installed-profile");
@@ -112,7 +119,7 @@ const installedStatus = fs.existsSync(path.join(userData, "desktop-status.json")
 spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true });
 const uninstaller = path.join(installDir, "Uninstall Adept UI.exe");
 const uninstall = fs.existsSync(uninstaller)
-  ? spawnSync(uninstaller, ["/S"], { windowsHide: true, timeout: 180000 })
+  ? spawnSync(uninstaller, ["/S"], { windowsHide: true, timeout: 600000, encoding: "utf8" })
   : { status: null, error: "uninstaller missing" };
 for (let i = 0; i < 20 && fs.existsSync(exe); i += 1) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
@@ -131,6 +138,8 @@ const setupBytes = fs.readFileSync(setup);
 const result = {
   installA: installA.status,
   installB: installB.status,
+  installAError: String(installA.stderr || installA.error || "").slice(-1000),
+  installBError: String(installB.stderr || installB.error || "").slice(-1000),
   exeAfterA,
   exeAfterB,
   markerAfterUpgrade,

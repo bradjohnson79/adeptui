@@ -495,14 +495,23 @@ async function main() {
     minimized = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized());
     if (!minimized) await sleep(200);
   }
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore());
+  await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    win.restore();
+    win.show();
+  });
+  let restored = false;
+  for (let attempt = 0; attempt < 15 && !restored; attempt += 1) {
+    restored = await app.evaluate(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0].isMinimized());
+    if (!restored) await sleep(200);
+  }
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].maximize());
   let zoomed = false;
   for (let attempt = 0; attempt < 10 && !zoomed; attempt += 1) {
     zoomed = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMaximized());
     if (!zoomed) await sleep(200);
   }
-  console.log(`WINDOW INFO = ${JSON.stringify({ ...windowInfo, minimized, zoomed })}`);
+  console.log(`WINDOW INFO = ${JSON.stringify({ ...windowInfo, minimized, restored, zoomed })}`);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].unmaximize());
   const menu = await app.evaluate(({ Menu }) => {
     const bar = Menu.getApplicationMenu();
