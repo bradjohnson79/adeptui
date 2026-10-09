@@ -2,7 +2,7 @@
 # Install and launch the Adept UI RPM inside Fedora. This does not touch a host ComfyUI.
 set -euo pipefail
 
-dnf install -y \
+dnf install -y --setopt=install_weak_deps=False \
   python3 \
   nodejs \
   xorg-x11-server-Xvfb \
@@ -11,8 +11,11 @@ dnf install -y \
   libXcomposite libXdamage libXrandr libXfixes cups-libs \
   procps-ng
 
-rpmfile="$(ls /packages/Adept.UI-*-linux-x64.rpm | head -n 1)"
+echo "PACKAGE TREE"
+find /packages -maxdepth 4 -type f -printf '%p\n' | head -n 40
+rpmfile="$(find /packages -type f -name 'Adept.UI-*-linux-x64.rpm' -print -quit)"
 test -n "$rpmfile"
+echo "RPM $rpmfile"
 dnf install -y "$rpmfile"
 
 bin="$(rpm -ql adept-ui | grep -E '/Adept UI$' | head -n 1)"
