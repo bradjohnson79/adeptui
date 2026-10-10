@@ -9,7 +9,7 @@ dnf install -y --setopt=install_weak_deps=False \
   gtk3 libnotify nss libXScrnSaver libXtst at-spi2-core \
   mesa-libgbm alsa-lib libdrm libxkbcommon pango cairo \
   libXcomposite libXdamage libXrandr libXfixes cups-libs \
-  procps-ng iproute curl xorg-x11-utils
+  procps-ng iproute xwininfo
 
 echo "PACKAGE TREE"
 find /packages -maxdepth 4 -type f -printf '%p\n' | head -n 40
