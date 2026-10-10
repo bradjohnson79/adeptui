@@ -1,5 +1,8 @@
 {
   "version": "1.1.1",
   "productName": "Adept UI",
-  "appId": "app.adeptui.desktop"
+  "appId": "app.adeptui.desktop",
+  "publisher": "ANOINT Inc.",
+  "description": "Adept UI — AI Filmmaking & Production Studio",
+  "copyright": "Copyright © 2026 ANOINT Inc."
 }

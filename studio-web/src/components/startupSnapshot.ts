@@ -97,10 +97,12 @@ export function buildSnapshot(status: RuntimeManagerStatus | null, studioApiReac
   const tunnelUp = status?.tunnel?.status === "running";
   const comfyLogical = logicalAvailability(status, "runtime.comfy");
   const videoLogical = logicalAvailability(status, "runtime.video");
-  const creatorState = mapLogicalAvailability(
+  const mappedCreator = mapLogicalAvailability(
     comfyLogical,
     mapRequiredState(comfyUp, comfyStarting, status?.comfyui?.status, adept?.comfyState),
   );
+  // A down ComfyUI is a setup gap, not a failed application service.
+  const creatorState: SystemState = mappedCreator === "failed" ? "on_demand" : mappedCreator;
   const videoState = mapLogicalAvailability(videoLogical, routeAUp ? "online" : "on_demand");
 
   const rows: SystemRow[] = [

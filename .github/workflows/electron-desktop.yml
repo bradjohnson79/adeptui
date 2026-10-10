@@ -201,11 +201,20 @@ jobs:
         with:
           name: adept-ui-desktop-linux-x64
           path: electron/dist
+      - name: Prepare Fedora evidence directory
+        run: mkdir -p electron/build/fedora-evidence
       - name: Install and launch the RPM in a Fedora container
         run: |
           docker run --rm \
             --security-opt seccomp=unconfined \
             -v "$PWD/electron/dist:/packages:ro" \
             -v "$PWD/electron/scripts:/scripts:ro" \
+            -v "$PWD/electron/build/fedora-evidence:/evidence" \
             fedora:41 \
             bash /scripts/smoke-fedora-container.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adept-ui-fedora-evidence
+          path: electron/build/fedora-evidence/**
+          if-no-files-found: warn

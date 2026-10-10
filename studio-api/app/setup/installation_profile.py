@@ -166,6 +166,41 @@ def provider_blockers(profile: str, state: dict[str, Any] | None = None) -> list
     return []
 
 
+def creator_engine_contract(profile: str | None, *, comfy_healthy: bool) -> dict[str, Any]:
+    """One readiness answer for Creator Engine.
+
+    Opening Adept UI never depends on ComfyUI. Local and Hybrid still report
+    that local generation is incomplete until a manual ComfyUI is healthy.
+    """
+    chosen = str(profile or "").strip().lower()
+    if chosen not in {"local", "hybrid"}:
+        return {
+            "required": False,
+            "blocksApplicationStart": False,
+            "classification": "OPTIONAL",
+            "result": "OPTIONAL",
+            "detail": "Commercial API setup does not need ComfyUI. Adept UI can open without it.",
+        }
+    if comfy_healthy:
+        return {
+            "required": False,
+            "blocksApplicationStart": False,
+            "classification": "LOCAL_PREREQUISITE",
+            "result": "PASS",
+            "detail": "ComfyUI is available for local generation.",
+        }
+    return {
+        "required": False,
+        "blocksApplicationStart": False,
+        "classification": "LOCAL_PREREQUISITE",
+        "result": "INCOMPLETE",
+        "detail": (
+            "Local setup is incomplete until ComfyUI is running. "
+            "Adept UI can still open. Adept UI will not install or start ComfyUI."
+        ),
+    }
+
+
 COMFY_NOT_DOWNLOADABLE = (
     "Creator Engine is not installed. Adept UI reuses a ComfyUI that is already healthy. "
     "It does not download ComfyUI. Local generation stays incomplete until that engine is healthy."

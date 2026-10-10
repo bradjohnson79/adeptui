@@ -14,7 +14,7 @@ function row(id: string, label: string, state: SystemRow["state"], required = fa
 const SNAPSHOT: SystemRow[] = [
   row("adept_core", "Adept Core", "online", true),
   row("studio_api", "Studio API", "online", true),
-  row("creator_engine", "Creator Engine", "online", true),
+  row("creator_engine", "Creator Engine", "online", false),
   row("codirector", "Co-Director Runtime", "online"),
   row("local_ai", "Local AI Runtime", "online", true),
   row("comfy_mcp", "Comfy MCP", "online"),
@@ -63,6 +63,41 @@ describe("startup display truth table", () => {
     expect(board.find((section) => section.id === "optional")?.rows.map((item) => item.label)).toEqual(
       expect.arrayContaining(["Video Runtime", "Remote Access"]),
     );
+  });
+
+  it("does not treat an OPTIONAL Creator Engine as a required startup failure", () => {
+    const board = buildStartupBoard(
+      [row("creator_engine", "Creator Engine", "failed", true)],
+      [check("comfy", "Creator Engine", "OPTIONAL", false, "Commercial API setup does not need ComfyUI.")],
+    );
+    const item = board.flatMap((section) => section.rows).find((entry) => entry.label === "Creator Engine");
+    expect(item?.badge).toBe("OPTIONAL");
+    expect(item?.section).toBe("optional");
+    const status = describeFinalStatus({
+      verdict: "GO",
+      progressPct: 100,
+      failed: [],
+      allRequiredOnline: true,
+    });
+    expect(status.headline).toBe("ADEPT UI READY — GO");
+    expect(status.itemKind).not.toBe("required");
+  });
+
+  it("reports incomplete local setup without failing application startup", () => {
+    const board = buildStartupBoard(
+      [row("creator_engine", "Creator Engine", "on_demand", false)],
+      [check("comfy", "Creator Engine", "INCOMPLETE", false, "Local setup is incomplete until ComfyUI is running.")],
+    );
+    const item = board.flatMap((section) => section.rows).find((entry) => entry.label === "Creator Engine");
+    expect(item?.badge).toBe("INCOMPLETE");
+    expect(item?.badge).not.toBe("FAILED");
+    const status = describeFinalStatus({
+      verdict: "GO",
+      progressPct: 100,
+      failed: [],
+      allRequiredOnline: true,
+    });
+    expect(status.headline).toBe("ADEPT UI READY — GO");
   });
 
   it("keeps Cloud 1.2 out of the board even if a stale payload includes it", () => {

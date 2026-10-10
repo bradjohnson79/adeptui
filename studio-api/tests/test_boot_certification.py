@@ -71,13 +71,47 @@ def test_duplicate_api_and_vite_are_no_go():
     assert report["verdict"] == "NO-GO"
 
 
+def _comfy(report: dict) -> dict:
+    return next(row for row in report["checks"] if row["id"] == "comfy")
+
+
 def test_comfy_unavailable_does_not_block_go():
     facts = healthy_facts()
     facts.comfy_healthy = False
     facts.comfy_pids = []
     report = evaluate(facts)
     assert report["verdict"] == "GO"
-    assert _ids(report)["comfy"] == "OPTIONAL"
+    row = _comfy(report)
+    assert row["result"] == "OPTIONAL"
+    assert row["required"] is False
+    assert row["result"] != "PASS" or row["required"] is False
+
+
+def test_api_profile_does_not_require_comfy():
+    facts = healthy_facts()
+    facts.comfy_healthy = False
+    facts.installation_profile = "api"
+    report = evaluate(facts)
+    row = _comfy(report)
+    assert report["verdict"] == "GO"
+    assert row["required"] is False
+    assert row["result"] == "OPTIONAL"
+    assert report["failed"] == []
+
+
+def test_local_and_hybrid_without_comfy_stay_open_and_incomplete():
+    for profile in ("local", "hybrid"):
+        facts = healthy_facts()
+        facts.comfy_healthy = False
+        facts.installation_profile = profile
+        report = evaluate(facts)
+        row = _comfy(report)
+        assert report["verdict"] == "GO"
+        assert report["failed"] == []
+        assert row["required"] is False
+        assert row["result"] == "INCOMPLETE"
+        assert "can still open" in row["detail"]
+        assert row["result"] != "OPTIONAL"
 
 
 def test_codirector_and_timeline_failures_are_no_go():

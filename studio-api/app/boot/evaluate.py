@@ -54,6 +54,7 @@ class BootFacts:
     setup_components: int = 0
     setup_error: str = ""
     update_source_online: bool | None = None
+    installation_profile: str = ""
     timed_out: tuple[str, ...] = ()
     not_run: tuple[str, ...] = ()
 
@@ -242,16 +243,19 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
             classification="BOOT_REQUIRED",
         ),
     )
+    from ..setup.installation_profile import creator_engine_contract
+
+    creator = creator_engine_contract(facts.installation_profile, comfy_healthy=facts.comfy_healthy)
     add(
         "comfy",
         _check(
             "Creator Engine",
             "ComfyUI",
             "health",
-            "PASS" if facts.comfy_healthy else "OPTIONAL",
-            "8188 healthy" if facts.comfy_healthy else "ComfyUI is not healthy. Boot will not restart it.",
+            str(creator["result"]),
+            str(creator["detail"]),
             required=False,
-            classification="OPTIONAL",
+            classification=str(creator["classification"]),
         ),
     )
     codirector_ok = facts.codirector_tools > 0 and facts.codirector_unknown_closed and not facts.codirector_error

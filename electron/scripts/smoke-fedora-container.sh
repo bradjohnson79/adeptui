@@ -2,7 +2,33 @@
 # Install and launch the Adept UI RPM inside Fedora. This does not touch a host ComfyUI.
 set -euo pipefail
 
+evidence="${ADEPT_FEDORA_EVIDENCE:-/evidence}"
+if [ ! -d "$evidence" ]; then
+  evidence="/tmp/fedora-evidence"
+  mkdir -p "$evidence"
+fi
+
+save_evidence() {
+  local target="$evidence"
+  mkdir -p "$target"
+  for name in \
+    adept-fedora.log adept-health.json adept-runtime-status.json \
+    adept-boot.json adept-boot-sim.json adept-prerequisite.json \
+    adept-sim-prerequisite.json ss-8760.txt ss-8759.txt ss-8779.txt \
+    xwin.txt appstream-validate.txt appstream-dump.txt
+  do
+    if [ -f "/tmp/$name" ]; then
+      cp -f "/tmp/$name" "$target/$name" || true
+    fi
+  done
+  if [ -f /tmp/rpm-files.txt ]; then
+    cp -f /tmp/rpm-files.txt "$target/rpm-files.txt" || true
+  fi
+}
+trap save_evidence EXIT
+
 dnf install -y --setopt=install_weak_deps=False \
+  appstream \
   python3 \
   nodejs \
   xorg-x11-server-Xvfb \
@@ -16,7 +42,37 @@ find /packages -maxdepth 4 -type f -printf '%p\n' | head -n 40
 rpmfile="$(find /packages -type f -name 'Adept.UI-*-linux-x64.rpm' -print -quit)"
 test -n "$rpmfile"
 echo "RPM $rpmfile"
+basename "$rpmfile" | tee "$evidence/rpm-filename.txt"
+sha256sum "$rpmfile" | tee "$evidence/rpm-sha256.txt"
 dnf install -y "$rpmfile"
+rpm -ql adept-ui | tee /tmp/rpm-files.txt >/dev/null
+
+metainfo="/usr/share/metainfo/app.adeptui.desktop.metainfo.xml"
+test -f "$metainfo"
+for size in 48 64 128 256 512; do
+  test -f "/usr/share/icons/hicolor/${size}x${size}/apps/app.adeptui.desktop.png"
+done
+desktop="$(rpm -ql adept-ui | grep -E '\.desktop$' | head -n 1)"
+test -n "$desktop"
+grep -q '^Name=Adept UI$' "$desktop"
+grep -q '^Icon=app.adeptui.desktop$' "$desktop"
+grep -q '<name>Adept UI</name>' "$metainfo"
+grep -q 'ANOINT Inc.' "$metainfo"
+grep -q 'LicenseRef-proprietary' "$metainfo"
+grep -q 'https://www.adeptui.org/' "$metainfo"
+grep -q '<release version="1.1.1"' "$metainfo"
+set +e
+appstreamcli validate "$metainfo" > "$evidence/appstream-validate.txt" 2>&1
+validate_status=$?
+set -e
+cat "$evidence/appstream-validate.txt"
+if [ "$validate_status" -ne 0 ]; then
+  echo "FEDORA APPSTREAM VALIDATE = FAIL $validate_status"
+  exit 1
+fi
+appstreamcli dump app.adeptui.desktop > "$evidence/appstream-dump.txt" 2>&1 || true
+echo "FEDORA APPSTREAM VALIDATE = PASS"
+echo "FEDORA GNOME SOFTWARE GUI = UNAVAILABLE IN CONTAINER"
 
 bin="$(rpm -ql adept-ui | grep -E '/Adept UI$' | head -n 1)"
 test -n "$bin"
@@ -159,7 +215,13 @@ body = json.loads(raw)
 failed = [row for row in body.get("checks") or [] if row.get("required") and row.get("result") != "PASS"]
 if body.get("verdict") != "GO" or failed:
     raise SystemExit(f"FEDORA BOOT {body.get('verdict')} {failed}")
+comfy = next(row for row in body.get("checks") or [] if row.get("id") == "comfy")
+if comfy.get("required") is not False or comfy.get("result") != "INCOMPLETE":
+    raise SystemExit(f"FEDORA CREATOR ENGINE {comfy}")
+if "can still open" not in str(comfy.get("detail") or ""):
+    raise SystemExit(f"FEDORA CREATOR ENGINE DETAIL {comfy}")
 print("FEDORA BOOT = GO")
+print("FEDORA CREATOR ENGINE = INCOMPLETE WITHOUT BLOCKING STARTUP")
 PY
 
 supervisor_pid="$(sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' /tmp/ss-8759.txt | head -n 1)"
@@ -273,6 +335,9 @@ body = json.loads(Path("/tmp/adept-boot-sim.json").read_text(encoding="utf-8"))
 failed = [row for row in body.get("checks") or [] if row.get("required") and row.get("result") != "PASS"]
 if body.get("verdict") != "GO" or failed:
     raise SystemExit(f"FEDORA SIMULATED COMFY BOOT {body.get('verdict')} {failed}")
+comfy = next(row for row in body.get("checks") or [] if row.get("id") == "comfy")
+if comfy.get("required") is not False or comfy.get("result") != "PASS":
+    raise SystemExit(f"FEDORA SIMULATED COMFY CREATOR ENGINE {comfy}")
 print("FEDORA SIMULATED COMFY BOOT = GO")
 PY
 stop_app

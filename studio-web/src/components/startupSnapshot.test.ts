@@ -74,7 +74,7 @@ describe("buildSnapshot", () => {
   it("failure — Comfy reports error does not fail application startup", () => {
     const snap = buildSnapshot(makeStatus({ comfyStatus: "error", comfyState: "offline" }), true);
     const creator = snap.rows.find((r) => r.id === "creator_engine");
-    expect(creator?.state).toBe("failed");
+    expect(creator?.state).toBe("on_demand");
     expect(creator?.required).toBe(false);
     expect(snap.anyRequiredFailed).toBe(false);
     expect(snap.message).not.toBe("STARTUP FAILED");

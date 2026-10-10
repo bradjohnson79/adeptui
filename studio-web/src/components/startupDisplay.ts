@@ -21,7 +21,8 @@ export type DisplayBadge =
   | "MISSING"
   | "FAILED"
   | "STARTING"
-  | "CHECKING";
+  | "CHECKING"
+  | "INCOMPLETE";
 
 export type DisplaySectionId = "core" | "production" | "optional";
 
@@ -138,6 +139,7 @@ export function badgeClass(badge: DisplayBadge): string {
       return "online";
     case "OPTIONAL":
     case "ON DEMAND":
+    case "INCOMPLETE":
       return "on_demand";
     case "FAILED":
     case "MISSING":
@@ -154,6 +156,7 @@ function badgeFromChecks(checks: BootCheckView[]): DisplayBadge {
     (check) => check.required !== false && ["FAIL", "TIMEOUT", "NOT_RUN", "MISSING"].includes(check.result),
   );
   if (blocking.length) return "FAILED";
+  if (checks.some((check) => check.result === "INCOMPLETE")) return "INCOMPLETE";
   const required = checks.filter((check) => check.required !== false && check.result !== "OPTIONAL");
   if (required.length && required.every((check) => check.result === "PASS")) return "ONLINE";
   if (checks.some((check) => check.result === "ON_DEMAND")) return "ON DEMAND";
@@ -217,11 +220,14 @@ export function buildStartupBoard(snapshotRows: SystemRow[], checks: BootCheckVi
     const required = group
       ? group.some((check) => check.required !== false && check.result !== "OPTIONAL")
       : Boolean(snap?.required);
+    const section = label === "Creator Engine" && (badge === "OPTIONAL" || badge === "INCOMPLETE")
+      ? "optional"
+      : sectionFor(label, required);
     rows.push({
       id: snap?.id ?? slug(key),
       label,
       badge,
-      section: sectionFor(label, required),
+      section,
     });
   }
 

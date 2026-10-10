@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.adeptui.desktop</id>
+  <name>Adept UI</name>
+  <summary>AI Filmmaking &amp; Production Studio</summary>
+  <developer id="inc.anoint">
+    <name>ANOINT Inc.</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <url type="homepage">https://www.adeptui.org/</url>
+  <description>
+    <p>Adept UI is an AI filmmaking and production studio from ANOINT Inc.</p>
+    <p>Create characters, build storyboards, generate images and videos, direct scenes, and finish a film in one application. Local models and hosted API services stay separate choices.</p>
+    <p>ComfyUI is a manual prerequisite for local generation. Commercial API models do not require it.</p>
+  </description>
+  <launchable type="desktop-id">Adept UI.desktop</launchable>
+  <icon type="cached">app.adeptui.desktop</icon>
+  <categories>
+    <category>Video</category>
+    <category>AudioVideo</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Adept UI home</caption>
+      <image>https://www.adeptui.org/product/adept-ui-home.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Co-Director</caption>
+      <image>https://www.adeptui.org/product/adept-ui-co-director.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Timeline</caption>
+      <image>https://www.adeptui.org/product/adept-ui-ai-filmmaking-timeline.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Storyboard</caption>
+      <image>https://www.adeptui.org/product/adept-ui-ai-storyboard-studio.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Image and video generation</caption>
+      <image>https://www.adeptui.org/product/adept-ui-ai-character-creator.webp</image>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="1.1.1" date="2026-10-10">
+      <description>
+        <p>Beta 1.1.1 for Fedora x86_64. The Runtime Supervisor identifies its own control plane, Creator Engine is not required to open the application, and ComfyUI stays a manual prerequisite for local generation.</p>
+      </description>
+    </release>
+  </releases>
+</component>

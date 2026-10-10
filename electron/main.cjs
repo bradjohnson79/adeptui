@@ -106,6 +106,7 @@ function createWindow(startUrl) {
     show: false,
     backgroundColor: "#070b14",
     title: identity.productName || "Adept UI",
+    icon: path.join(__dirname, "icons", "png", "256x256.png"),
     autoHideMenuBar: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
