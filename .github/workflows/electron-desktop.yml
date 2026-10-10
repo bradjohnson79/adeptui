@@ -83,12 +83,23 @@ jobs:
         run: |
           test "$(uname -m)" = "arm64"
           echo "MACOS NATIVE RUNNER = PASS"
+      - name: Inspect the live AdeptUI.org DMG
+        run: bash electron/scripts/diagnose-live-macos-dmg.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adept-ui-macos-dmg-diagnosis
+          path: electron/build/macos-dmg-diagnosis/**
+          if-no-files-found: warn
       - run: npm install
       - run: npm --prefix studio-web install
       - name: Stage Python, install API dependencies, stage Studio API, build app
         run: node electron/scripts/build-macos.mjs
-      - name: Launch packaged app and wait for Studio API
-        run: node electron/scripts/smoke-macos.mjs
+      - name: UNSIGNED RUNTIME DIAGNOSTIC
+        run: |
+          set -o pipefail
+          echo "UNSIGNED RUNTIME DIAGNOSTIC method = CI-built app launched before download quarantine. The existing smoke ad-hoc signs a disposable copy so the unsigned build can open. That is not Developer ID signing and it is not Gatekeeper acceptance."
+          node electron/scripts/smoke-macos.mjs 2>&1 | sed 's/^/UNSIGNED RUNTIME DIAGNOSTIC /'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -127,7 +138,7 @@ jobs:
           while IFS= read -r file; do
             [ -z "$file" ] && continue
             case "$file" in
-              electron/scripts/smoke-macos.mjs|electron/scripts/build-macos.mjs|electron/scripts/stage-packaged-runtime-darwin.mjs|electron/entitlements.mac.plist|electron/packaged-requirements.test.mjs|electron/main.cjs|studio-api/runtime_supervisor/ports.py|studio-api/runtime_supervisor/process.py|studio-api/tests/test_runtime_supervisor_lifecycle.py|electron/E*.md|studio-web/*)
+              electron/scripts/diagnose-live-macos-dmg.sh|electron/scripts/smoke-macos.mjs|electron/scripts/build-macos.mjs|electron/scripts/stage-packaged-runtime-darwin.mjs|electron/entitlements.mac.plist|electron/packaged-requirements.test.mjs|electron/main.cjs|studio-api/runtime_supervisor/ports.py|studio-api/runtime_supervisor/process.py|studio-api/tests/test_runtime_supervisor_lifecycle.py|electron/E*.md|studio-web/*)
                 ;;
               electron/platform/menu.cjs)
                 if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -F 'Alt+F4' >/dev/null; then
