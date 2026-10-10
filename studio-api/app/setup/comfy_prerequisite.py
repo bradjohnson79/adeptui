@@ -37,7 +37,7 @@ def saved_comfy_install_root() -> str | None:
     return str(folder)
 
 
-def _health() -> tuple[bool, str, str | None]:
+def _health() -> tuple[bool, str, str | None, str]:
     from .diagnostics import invalidate_verify_cache, verify_component
     from .status import invalidate_status_cache
 
@@ -45,12 +45,13 @@ def _health() -> tuple[bool, str, str | None]:
     invalidate_status_cache()
     verification = verify_component("comfyui")
     healthy = bool(verification.healthy) and not verification.issue_code
-    return healthy, str(verification.summary or ""), verification.path
+    detail = " ".join(str(item) for item in (getattr(verification, "details", None) or ()) if item)
+    return healthy, str(verification.summary or ""), verification.path, detail
 
 
 def rescan_comfy() -> dict[str, Any]:
     """Read health only. This does not download, launch, or modify ComfyUI."""
-    healthy, summary, path = _health()
+    healthy, summary, path, detail = _health()
     root = saved_comfy_install_root()
     installed = bool(root and comfy_main_file(Path(root)))
     if healthy:
@@ -72,6 +73,7 @@ def rescan_comfy() -> dict[str, Any]:
         "downloadUrl": OFFICIAL_COMFY_DOWNLOAD_URL,
         "summary": summary,
         "message": message,
+        "probeDetail": detail,
     }
 
 
@@ -96,7 +98,7 @@ def connect_existing_comfy(raw_path: str) -> dict[str, Any]:
     update_state(mutate)
     if main.read_bytes() != before:
         raise RuntimeError("Connecting ComfyUI must not change its files.")
-    healthy, summary, path = _health()
+    healthy, summary, path, detail = _health()
     if healthy:
         message = "ComfyUI is running."
     else:
@@ -112,4 +114,5 @@ def connect_existing_comfy(raw_path: str) -> dict[str, Any]:
         "downloadUrl": OFFICIAL_COMFY_DOWNLOAD_URL,
         "summary": summary,
         "message": message,
+        "probeDetail": detail,
     }

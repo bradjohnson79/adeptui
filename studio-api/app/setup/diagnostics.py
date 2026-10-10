@@ -376,7 +376,7 @@ def _service(url: str, suffix: str, name: str) -> Verification:
     except Exception as exc:
         return Verification(
             False, True, "service_unreachable", f"{name} is not reachable.",
-            path=install_root, details=(str(exc)[:200],), recommendation="install",
+            path=install_root, details=(f"probe: {url}", str(exc)[:200]), recommendation="install",
             requires_user_interaction=True,
         )
 
