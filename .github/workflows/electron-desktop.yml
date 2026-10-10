@@ -102,7 +102,9 @@ jobs:
   linux-x64:
     if: ${{ github.event_name == 'push' || inputs.platform == 'linux' || inputs.platform == 'all' || inputs.platform == '' }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 70
+    outputs:
+      built: ${{ steps.build_linux.outputs.built }}
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
@@ -140,10 +142,14 @@ jobs:
               .github/workflows/electron-desktop.yml)
                 linux_build=$(printf '%s%s' 'build-' 'linux')
                 linux_smoke=$(printf '%s%s' 'smoke-' 'linux')
+                fedora_job=$(printf '%s%s' 'fedora-' 'rpm')
                 if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -F "$linux_build" >/dev/null; then
                   run=true
                 fi
                 if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -F "$linux_smoke" >/dev/null; then
+                  run=true
+                fi
+                if git diff "$before" "${{ github.sha }}" -- "$file" | grep '^+' | grep -v '^+++' | grep -F "$fedora_job" >/dev/null; then
                   run=true
                 fi
                 ;;
@@ -172,11 +178,11 @@ jobs:
       - run: npm --prefix studio-web install
         if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
       - name: Stage Linux Python, install dependencies, build AppImage, deb, and rpm
+        id: build_linux
         if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
-        run: node electron/scripts/build-linux.mjs
-      - name: Launch packaged Adept UI under Xvfb and certify
-        if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
-        run: xvfb-run -a --server-args="-screen 0 1440x900x24" node electron/scripts/smoke-linux.mjs
+        run: |
+          node electron/scripts/build-linux.mjs
+          echo "built=true" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         if: always() && (github.event_name != 'push' || steps.linux_scope.outputs.run == 'true')
         with:
@@ -190,9 +196,36 @@ jobs:
             electron/build/linux-python-ldd.txt
           if-no-files-found: warn
 
+  linux-smoke:
+    needs: linux-x64
+    if: needs.linux-x64.outputs.built == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 libatspi2.0-0 \
+            libgbm1 libasound2 xvfb libfuse2 lsof ca-certificates fakeroot rpm
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - run: npm install
+      - run: npm --prefix studio-web install
+      - name: Rebuild the unpacked app for the Ubuntu smoke
+        run: node electron/scripts/build-linux.mjs
+      - name: Launch packaged Adept UI under Xvfb and certify
+        timeout-minutes: 40
+        run: xvfb-run -a --server-args="-screen 0 1440x900x24" node electron/scripts/smoke-linux.mjs
+
   fedora-rpm:
     needs: linux-x64
-    if: needs.linux-x64.result == 'success'
+    if: needs.linux-x64.outputs.built == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
