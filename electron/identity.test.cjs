@@ -48,7 +48,7 @@ test("AppStream names Adept UI and ANOINT Inc.", () => {
   assert.doesNotMatch(metainfo, /<name>adept-ui<\/name>/);
   assert.match(metainfo, /<project_license>LicenseRef-proprietary<\/project_license>/);
   assert.match(metainfo, /<url type="homepage">https:\/\/www\.adeptui\.org\/<\/url>/);
-  assert.match(metainfo, /<icon type="cached">app\.adeptui\.desktop<\/icon>/);
+  assert.doesNotMatch(metainfo, /<icon /);
   assert.doesNotMatch(metainfo, /type="stock"/);
   assert.match(metainfo, /<release version="1\.1\.1"/);
   assert.equal(config.linux.desktop.entry.Icon, "app.adeptui.desktop");
