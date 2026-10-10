@@ -54,6 +54,10 @@ function packagedEnv(layout) {
   env.PYTHONDONTWRITEBYTECODE = "1";
   env.PYTHONUNBUFFERED = "1";
   env.ADEPT_RUNTIME_MODE = DESKTOP_API.runtimeMode;
+  // The packaged Linux Python ships its own OpenSSL. Fedora's system
+  // openssl.cnf uses options that build does not understand, and httpx then
+  // fails every probe — including plain HTTP — with an SSL error.
+  if (process.platform === "linux") env.OPENSSL_CONF = "/dev/null";
   env.ADEPT_STUDIO_API_PORT = String(DESKTOP_API.studioApiPort);
   env.ADEPT_RUNTIME_STATE_HOME = layout.runtimeHome;
   env.ADEPT_SUPERVISOR_STATE_DIR = supervisorStateDir(layout);

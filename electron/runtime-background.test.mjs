@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { adeptControlAuthenticated, classifyControlPlane, chooseControlPort, writePackagedRuntimeConfig } = require("./runtime.cjs");
@@ -97,6 +98,11 @@ test("only an authenticated Adept status identifies an otherwise unknown listene
   assert.equal(chosen.port, 8759);
   assert.equal(chosen.plan.action, "reuse");
   assert.equal(chosen.plan.authenticated, true);
+});
+
+test("packaged Linux does not load the host OpenSSL configuration", () => {
+  const source = fs.readFileSync(fileURLToPath(new URL("./runtime.cjs", import.meta.url)), "utf8");
+  assert.match(source, /process\.platform === "linux"\) env\.OPENSSL_CONF = "\/dev\/null"/);
 });
 
 test("a free control port starts Background Services", () => {
