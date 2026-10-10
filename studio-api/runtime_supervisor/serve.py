@@ -66,6 +66,13 @@ def serve_forever(*, watch_interval: int = 15) -> int:
     try:
         cfg = load_runtime_config()
         errors = validate_runtime_config(cfg)
+        if os.environ.get("ADEPT_RUNTIME_MODE") == "electron-packaged":
+            # A missing manual ComfyUI install must not stop the control plane.
+            errors = [
+                item
+                for item in errors
+                if not item.startswith("comfy") and "Comfy main.py" not in item and "comfyPython" not in item and "comfyRoot" not in item
+            ]
         if errors:
             print("CONFIGURATION ERROR: " + "; ".join(errors), file=sys.stderr)
             return 2
@@ -310,7 +317,8 @@ def serve_forever(*, watch_interval: int = 15) -> int:
             },
         )()
     try:
-        comfy_started = request_start(paths, state, spawn=True)
+        packaged = os.environ.get("ADEPT_RUNTIME_MODE") == "electron-packaged"
+        comfy_started = request_start(paths, state, spawn=not packaged)
     except Exception as exc:  # noqa: BLE001 — missing Comfy must not take the manager down
         comfy_started = type(
             "R",

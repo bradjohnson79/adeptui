@@ -32,6 +32,13 @@ function packagedEnv(layout) {
     "HOME",
     "LANG",
     "LC_ALL",
+    "USER",
+    "LOGNAME",
+    "XDG_RUNTIME_DIR",
+    "XDG_DATA_HOME",
+    "XDG_CONFIG_HOME",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
   ];
   const env = {};
   for (const key of keep) {
@@ -69,12 +76,33 @@ function ownsBackgroundServices(cmd, markers) {
   return ownsPackagedCommand(cmd, markers);
 }
 
+function adeptControlAuthenticated(statusCode, body) {
+  if (Number(statusCode) !== 200) return false;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(body || ""));
+  } catch {
+    return false;
+  }
+  if (!parsed || parsed.ok !== true) return false;
+  const pid = parsed.managerPid;
+  const state = parsed.serviceState;
+  return (Number.isInteger(pid) && pid > 0) || (typeof state === "string" && state.trim().length > 0);
+}
+
 function classifyControlPlane(control, markers) {
   const commands = control && Array.isArray(control.commands) ? control.commands : [];
-  if (!control || !control.open) return { action: "start", collision: false, owned: false };
-  const owned = commands.some((row) => ownsBackgroundServices(row.command, markers));
-  if (owned) return { action: "reuse", collision: false, owned: true };
-  return { action: "leave", collision: true, owned: false };
+  if (control && control.authenticated === true) {
+    return { action: "reuse", collision: false, owned: true, unidentified: false, authenticated: true };
+  }
+  if (!control || !control.open) return { action: "start", collision: false, owned: false, unidentified: false };
+  const identified = commands.filter((row) => String(row && row.command ? row.command : "").trim());
+  if (identified.length === 0) {
+    return { action: "unidentified", collision: false, owned: false, unidentified: true };
+  }
+  const owned = identified.some((row) => ownsBackgroundServices(row.command, markers));
+  if (owned) return { action: "reuse", collision: false, owned: true, unidentified: false };
+  return { action: "leave", collision: true, owned: false, unidentified: false };
 }
 
 function chooseControlPort(inspections, markers) {
@@ -191,7 +219,7 @@ async function waitForBackgroundServices(tokenFile, port, child, timeoutMs = 900
       return { healthy: false, exited: true, exitCode: child.exitCode, ...last };
     }
     last = await readControlStatus(tokenFile, port);
-    if (last.status === 200 && /"ok"\s*:\s*true/.test(last.body)) return { healthy: true, ...last };
+    if (adeptControlAuthenticated(last.status, last.body)) return { healthy: true, ...last };
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
   return { healthy: false, ...last };
@@ -225,13 +253,28 @@ async function preparePackagedApi({ pythonPath, apiSource, userData }) {
     inspectPort(CONTROL_PORT_FALLBACK),
     inspectPort(COMFY_PORT),
   ]);
-  const chosen = chooseControlPort(
-    [
-      { ...preferredControl, port: CONTROL_PORT },
-      { ...fallbackControl, port: CONTROL_PORT_FALLBACK },
-    ],
-    markers,
-  );
+  const tokenFile = supervisorTokenFile(layout);
+  const controlRows = [];
+  for (const row of [
+    { ...preferredControl, port: CONTROL_PORT },
+    { ...fallbackControl, port: CONTROL_PORT_FALLBACK },
+  ]) {
+    const plan = classifyControlPlane(row, markers);
+    if (plan.action !== "unidentified") {
+      controlRows.push(row);
+      continue;
+    }
+    const ready = await waitForBackgroundServices(tokenFile, row.port, null, 2500);
+    if (ready.healthy) {
+      controlRows.push({ ...row, authenticated: true });
+      continue;
+    }
+    controlRows.push({
+      ...row,
+      commands: [{ pid: 0, command: "untrusted listener left alone" }],
+    });
+  }
+  const chosen = chooseControlPort(controlRows, markers);
   writePackagedRuntimeConfig(layout, pythonPath, apiSource, chosen.port);
   const control = chosen.inspected;
   const controlPlan = chosen.plan;
@@ -265,10 +308,14 @@ async function preparePackagedApi({ pythonPath, apiSource, userData }) {
     status.backgroundServices.reason = `Adept UI could not start Background Services because ports ${CONTROL_PORT} and ${CONTROL_PORT_FALLBACK} are already in use.`;
   } else if (controlPlan.owned) {
     const ownedRow = (control.commands || []).find((row) => ownsBackgroundServices(row.command, markers));
-    status.backgroundServices.reason = "Background Services already running";
+    const ready = await waitForBackgroundServices(supervisorTokenFile(layout), chosen.port, null, 8000);
+    status.backgroundServices.reason = ready.healthy
+      ? "Background Services already running"
+      : "Background Services is listening but did not answer";
     status.backgroundServices.pid = ownedRow ? ownedRow.pid : null;
     status.backgroundServices.command = ownedRow ? ownedRow.command : "";
-    status.backgroundServices.healthy = true;
+    status.backgroundServices.healthy = ready.healthy;
+    status.backgroundServices.owned = ready.healthy || controlPlan.owned;
   } else if (fs.existsSync(pythonPath)) {
     const logFd = fs.openSync(supervisorLog, "a");
     const args = ["-u", "-m", "runtime_supervisor", "serve"];
@@ -337,6 +384,7 @@ module.exports = {
   inspectPort,
   classifyControlPlane,
   chooseControlPort,
+  adeptControlAuthenticated,
   ownsBackgroundServices,
   writePackagedRuntimeConfig,
 };

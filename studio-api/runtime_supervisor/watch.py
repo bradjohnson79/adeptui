@@ -31,6 +31,10 @@ def _service_healthy(service: str, state: SupervisorState) -> bool:
 
 
 def _should_skip_comfy(state: SupervisorState) -> str | None:
+    import os
+
+    if os.environ.get("ADEPT_RUNTIME_MODE") == "electron-packaged":
+        return "packaged app detects ComfyUI and does not start it"
     rec = state.read_pid("comfyui")
     if rec and process_alive(rec.pid) and comfy_queue_running() > 0:
         return "queue_running — not restarting Comfy"

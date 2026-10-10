@@ -1486,6 +1486,7 @@ export interface AdeptRuntimeServiceStatus {
   comfyPid?: number | null;
   owned: boolean;
   managerPid?: number | null;
+  controlPlaneReachable?: boolean | null;
   studioApiPid?: number | null;
   studioApiOwned?: boolean;
   studioApiHealth?: string;

@@ -25,15 +25,27 @@ COMFY_OFFLINE = "offline"
 COMFY_CRASHED = "crashed"
 
 
+def supervisor_pid_matches(pid: int | None) -> bool:
+    """A live PID is the manager only when its command is the runtime supervisor."""
+    try:
+        from .process import process_alive, process_command_line
+
+        if not process_alive(pid):
+            return False
+        command = process_command_line(int(pid or 0)).lower()
+        return "runtime_supervisor" in command
+    except Exception:
+        return False
+
+
 def manager_is_running() -> bool:
-    """True when the Background Services manager (this supervisor) is alive."""
+    """True when the recorded Background Services process is still that manager."""
     try:
         from .paths import repo_root_from
-        from .process import process_alive
         from .state import SupervisorState
 
         rec = SupervisorState.from_env(repo_root_from()).read_pid("runtime_service")
-        return bool(rec and rec.owned and rec.pid and process_alive(rec.pid))
+        return bool(rec and rec.owned and supervisor_pid_matches(rec.pid))
     except Exception:
         return False
 
@@ -137,7 +149,7 @@ def collect_runtime_view(*, assume_local_api: bool = False) -> dict[str, Any]:
         from .state import SupervisorState
 
         rec = SupervisorState.from_env(repo_root_from()).read_pid("runtime_service")
-        if rec and rec.owned:
+        if rec and rec.owned and supervisor_pid_matches(rec.pid):
             manager_pid = rec.pid
     except Exception:
         manager_pid = None

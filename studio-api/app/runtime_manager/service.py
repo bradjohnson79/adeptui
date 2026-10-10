@@ -35,6 +35,16 @@ _OLLAMA_URL = "http://127.0.0.1:11434"
 _TUNNEL_HOSTNAME = "api-beta.adeptui.org"
 
 
+def _control_plane_reachable() -> bool:
+    """Short probe. A stored manager PID is not connectivity."""
+    try:
+        from runtime_supervisor.control_client import control_plane_reachable
+
+        return bool(control_plane_reachable(timeout=3.0))
+    except Exception:
+        return False
+
+
 def _ownership(raw: str | None) -> ServiceOwnership:
     key = (raw or "").lower()
     if key == "owned":
@@ -281,6 +291,7 @@ async def get_status() -> RuntimeManagerStatus:
         comfyPid=view.get("comfyPid") if isinstance(view.get("comfyPid"), int) else None,
         owned=bool(view.get("owned")),
         managerPid=view.get("managerPid") if isinstance(view.get("managerPid"), int) else None,
+        controlPlaneReachable=_control_plane_reachable(),
         studioApiPid=view.get("studioApiPid") if isinstance(view.get("studioApiPid"), int) else None,
         studioApiOwned=bool(view.get("studioApiOwned")),
         studioApiHealth=str(view.get("studioApiHealth") or "unknown"),

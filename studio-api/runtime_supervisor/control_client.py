@@ -8,62 +8,71 @@ import urllib.request
 from typing import Any
 
 from .canonical_config import try_load_runtime_config
-from .constants import CONTROL_PORT
+from .constants import CONTROL_PORT, CONTROL_PORT_FALLBACK
 from .control_token import TOKEN_HEADER, read_token
 
 
-def control_base_url() -> str:
+def control_port() -> int:
     cfg = try_load_runtime_config()
-    port = int(cfg.controlPort) if cfg else CONTROL_PORT
-    return f"http://127.0.0.1:{port}"
+    return int(cfg.controlPort) if cfg else CONTROL_PORT
 
 
-def _loopback_port_open(port: int, timeout: float = 1.0) -> bool:
-    """True when something is accepting connections on the control port."""
-    import socket
+def control_candidate_ports() -> list[int]:
+    """Configured port first, then the packaged ports. A live manager may be on either."""
+    ordered: list[int] = []
+    for port in (control_port(), CONTROL_PORT, CONTROL_PORT_FALLBACK):
+        if port not in ordered:
+            ordered.append(port)
+    return ordered
 
-    try:
-        with socket.create_connection(("127.0.0.1", int(port)), timeout=timeout):
-            return True
-    except OSError:
+
+def control_base_url() -> str:
+    return f"http://127.0.0.1:{control_port()}"
+
+
+def authenticated_adept_status(result: dict[str, Any]) -> bool:
+    """True only for a token-accepted Adept Background Services status.
+
+    A refused token, a generic ok flag, or an open socket is not identification.
+    """
+    if result.get("httpStatus") in {401, 403}:
         return False
+    if result.get("ok") is not True:
+        return False
+    pid = result.get("managerPid")
+    state = result.get("serviceState")
+    return (isinstance(pid, int) and pid > 0) or (isinstance(state, str) and bool(state.strip()))
+
+
+def _status_answers(result: dict[str, Any]) -> bool:
+    return authenticated_adept_status(result)
 
 
 def control_plane_reachable(timeout: float = 15.0) -> bool:
-    """The manager is reachable when /status answers, or the control port is open.
+    """True only when a candidate control port returns the manager status.
 
-    /status can sit behind a slow runtime view while the process is still
-    listening. A closed port is the unreachable case. A single refused
-    connection during a cold start is retried for the rest of the budget.
+    A saved PID or an open socket is not enough. The configured port is tried
+    first, then 8759 and the packaged fallback 8779. An occupied port that
+    does not answer is left alone.
     """
-    import time
-
     budget = max(1.0, float(timeout))
-    try:
-        result = call_control("GET", "/status", timeout=min(budget, 12.0))
-    except Exception:
-        result = {}
-    if isinstance(result, dict) and (
-        result.get("ok") or result.get("serviceState") or result.get("comfyState")
-    ):
-        return True
-    if isinstance(result, dict) and result.get("httpStatus") in {401, 403}:
-        return True
-    cfg = try_load_runtime_config()
-    port = int(cfg.controlPort) if cfg else CONTROL_PORT
-    deadline = time.time() + budget
-    while time.time() < deadline:
-        if _loopback_port_open(port, timeout=2.0):
+    ports = control_candidate_ports()
+    per_port = max(1.0, min(6.0, budget / len(ports)))
+    for port in ports:
+        try:
+            result = call_control("GET", "/status", timeout=per_port, port=port)
+        except Exception:
+            result = {}
+        if isinstance(result, dict) and _status_answers(result):
             return True
-        time.sleep(0.3)
     return False
 
 
-def call_control(method: str, path: str, *, timeout: float = 30.0) -> dict[str, Any]:
+def call_control(method: str, path: str, *, timeout: float = 30.0, port: int | None = None) -> dict[str, Any]:
     token = read_token()
     if not token:
         return {"ok": False, "error": "control token missing — Runtime Service is not running"}
-    url = control_base_url() + path
+    url = (f"http://127.0.0.1:{int(port)}" if port else control_base_url()) + path
     req = urllib.request.Request(
         url,
         method=method,

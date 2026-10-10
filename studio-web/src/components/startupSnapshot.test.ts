@@ -63,18 +63,21 @@ describe("buildSnapshot", () => {
     }
   });
 
-  it("partial — Comfy starting, Studio API up → Creator Engine STARTING, no fake ONLINE", () => {
+  it("partial — Comfy starting, Studio API up → Creator Engine STARTING, application stays up", () => {
     const snap = buildSnapshot(makeStatus({ comfyStatus: "starting", comfyState: "starting" }), true);
     expect(snap.rows.find((r) => r.id === "creator_engine")?.state).toBe("starting");
+    expect(snap.rows.find((r) => r.id === "creator_engine")?.required).toBe(false);
     expect(snap.rows.find((r) => r.id === "studio_api")?.state).toBe("online");
-    expect(snap.allRequiredOnline).toBe(false);
+    expect(snap.message).not.toBe("STARTUP FAILED");
   });
 
-  it("failure — Comfy reports error → anyRequiredFailed, STARTUP FAILED, no fake ONLINE", () => {
+  it("failure — Comfy reports error does not fail application startup", () => {
     const snap = buildSnapshot(makeStatus({ comfyStatus: "error", comfyState: "offline" }), true);
-    expect(snap.anyRequiredFailed).toBe(true);
-    expect(snap.message).toBe("STARTUP FAILED");
-    expect(snap.rows.find((r) => r.id === "creator_engine")?.state).toBe("failed");
+    const creator = snap.rows.find((r) => r.id === "creator_engine");
+    expect(creator?.state).toBe("failed");
+    expect(creator?.required).toBe(false);
+    expect(snap.anyRequiredFailed).toBe(false);
+    expect(snap.message).not.toBe("STARTUP FAILED");
   });
 
   it("optional services do not block readiness when Local AI is not installed", () => {
@@ -87,13 +90,13 @@ describe("buildSnapshot", () => {
     expect(snap.rows.find((r) => r.id === "video_runtime")?.state).toBe("on_demand");
   });
 
-  it("Local AI Runtime STARTING blocks readiness while configured and offline", () => {
+  it("Local AI Runtime starting does not fail application startup", () => {
     const status = makeStatus({ ollamaStatus: "stopped" });
     status.ollama = { ...status.ollama, configured: true, status: "stopped" as never };
     const snap = buildSnapshot(status, true);
     expect(snap.rows.find((r) => r.id === "local_ai")?.state).toBe("starting");
-    expect(snap.rows.find((r) => r.id === "local_ai")?.required).toBe(true);
-    expect(snap.allRequiredOnline).toBe(false);
+    expect(snap.rows.find((r) => r.id === "local_ai")?.required).toBe(false);
+    expect(snap.message).not.toBe("STARTUP FAILED");
   });
 
   it("an on-demand Creator Engine does not fail startup or pin a required failure", () => {
@@ -118,6 +121,39 @@ describe("buildSnapshot", () => {
     const snap = buildSnapshot(status, true);
     expect(snap.rows.find((r) => r.id === "creator_engine")?.state).toBe("online");
     expect(snap.rows.find((r) => r.id === "video_runtime")?.state).toBe("on_demand");
+  });
+
+  it("a manager PID without a reachable control plane is not Adept Core online", () => {
+    const status = makeStatus({ comfyStatus: "stopped", comfyState: "offline", ollamaStatus: "running" });
+    status.adeptRuntime = { ...status.adeptRuntime, managerPid: 104296, controlPlaneReachable: false, comfyState: "offline" };
+    status.ollama = { ...status.ollama, daemonOnline: true, modelReady: false, models: [] };
+    status.logicalServices = {
+      "runtime.comfy": { logicalId: "runtime.comfy", availability: "FAILED", gpuResidency: "FREE" },
+    };
+    const snap = buildSnapshot(status, true);
+    expect(snap.rows.find((r) => r.id === "adept_core")?.state).toBe("failed");
+    expect(snap.rows.find((r) => r.id === "creator_engine")?.required).toBe(false);
+    expect(snap.rows.find((r) => r.id === "creator_engine")?.detail).toBe("comfy offline");
+    expect(snap.rows.find((r) => r.id === "local_ai")?.state).toBe("degraded");
+    expect(snap.rows.find((r) => r.id === "local_ai")?.detail).toBe("daemon online — required model is not installed");
+    expect(snap.rows.find((r) => r.id === "local_ai")?.state).not.toBe("online");
+    expect(snap.message).toBe("STARTUP FAILED");
+  });
+
+  it("the Fedora offline ComfyUI report does not fail startup when the control plane answers", () => {
+    const status = makeStatus({ comfyStatus: "stopped", comfyState: "offline", ollamaStatus: "running" });
+    status.adeptRuntime = { ...status.adeptRuntime, managerPid: 104296, controlPlaneReachable: true, comfyState: "offline" };
+    status.ollama = { ...status.ollama, daemonOnline: true, modelReady: false, models: [] };
+    status.logicalServices = {
+      "runtime.comfy": { logicalId: "runtime.comfy", availability: "FAILED", gpuResidency: "FREE" },
+    };
+    const snap = buildSnapshot(status, true);
+    expect(snap.rows.find((r) => r.id === "adept_core")?.state).toBe("online");
+    expect(snap.rows.find((r) => r.id === "studio_api")?.state).toBe("online");
+    expect(snap.rows.find((r) => r.id === "creator_engine")?.required).toBe(false);
+    expect(snap.anyRequiredFailed).toBe(false);
+    expect(snap.message).not.toBe("STARTUP FAILED");
+    expect(snap.allRequiredOnline).toBe(true);
   });
 
   it("Local AI Runtime ONLINE when daemon is running", () => {

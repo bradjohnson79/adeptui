@@ -62,7 +62,8 @@ function mapLogicalAvailability(availability: string | undefined, fallback: Syst
 /** Build the human-readable system rows from the canonical status contract. */
 export function buildSnapshot(status: RuntimeManagerStatus | null, studioApiReachable: boolean): StartupSnapshot {
   const adept = status?.adeptRuntime;
-  const managerUp = Boolean(adept?.managerPid) || studioApiReachable;
+  const controlKnown = typeof adept?.controlPlaneReachable === "boolean";
+  const managerUp = controlKnown ? Boolean(adept?.controlPlaneReachable) : Boolean(adept?.managerPid) || studioApiReachable;
   const studioUp = studioApiReachable || adept?.studioApiHealth === "healthy" || status?.studioApi?.status === "running";
   const comfyUp = status?.comfyui?.status === "running" || adept?.comfyState === "ready" || adept?.comfyState === "busy";
   const comfyStarting = status?.comfyui?.status === "starting" || adept?.comfyState === "starting";
@@ -70,18 +71,23 @@ export function buildSnapshot(status: RuntimeManagerStatus | null, studioApiReac
   const ollamaStarting = status?.ollama?.status === "starting";
   const ollamaConfigured = status?.ollama?.configured !== false && status?.ollama?.status !== "not_configured";
   const ollamaFailed = status?.ollama?.status === "error";
-  const localAiRequired = !status || ollamaConfigured || ollamaStarting || ollamaUp;
+  const modelReady = Boolean(status?.ollama?.modelReady);
+  const installedModels = Array.isArray(status?.ollama?.models) ? status.ollama.models.length : 0;
   const localAiState: SystemState = ollamaUp
-    ? "online"
+    ? modelReady
+      ? "online"
+      : "degraded"
     : ollamaFailed
       ? "failed"
       : !status || ollamaStarting || (ollamaConfigured && status.ollama?.status === "stopped")
         ? "starting"
         : "on_demand";
   const localAiDetail = ollamaUp
-    ? status?.ollama?.modelReady
+    ? modelReady
       ? "model ready"
-      : "online — model still loading"
+      : installedModels
+        ? "daemon online — required model is not ready"
+        : "daemon online — required model is not installed"
     : localAiState === "starting"
       ? "starting"
       : status?.ollama?.configured === false
@@ -98,11 +104,11 @@ export function buildSnapshot(status: RuntimeManagerStatus | null, studioApiReac
   const videoState = mapLogicalAvailability(videoLogical, routeAUp ? "online" : "on_demand");
 
   const rows: SystemRow[] = [
-    { id: "adept_core", label: "Adept Core", required: true, state: managerUp ? "online" : "starting", detail: adept?.managerPid ? `manager pid ${adept.managerPid}` : undefined },
+    { id: "adept_core", label: "Adept Core", required: true, state: managerUp ? "online" : controlKnown ? "failed" : "starting", detail: adept?.managerPid ? `manager pid ${adept.managerPid}` : undefined },
     { id: "studio_api", label: "Studio API", required: true, state: mapRequiredState(studioUp, status?.studioApi?.status === "starting", status?.studioApi?.status, adept?.studioApiHealth), detail: adept?.studioApiPid ? `pid ${adept.studioApiPid}` : undefined },
-    { id: "creator_engine", label: "Creator Engine", required: creatorState !== "on_demand", state: creatorState, detail: adept?.comfyState ? `comfy ${adept.comfyState}` : creatorState === "on_demand" ? "on demand" : undefined },
+    { id: "creator_engine", label: "Creator Engine", required: false, state: creatorState, detail: adept?.comfyState ? `comfy ${adept.comfyState}` : creatorState === "on_demand" ? "on demand" : undefined },
     { id: "codirector", label: "Co-Director Runtime", required: false, state: studioUp ? "online" : "starting" },
-    { id: "local_ai", label: "Local AI Runtime", required: localAiRequired, state: localAiState, detail: localAiDetail },
+    { id: "local_ai", label: "Local AI Runtime", required: false, state: localAiState, detail: localAiDetail },
     { id: "comfy_mcp", label: "Comfy MCP", required: false, state: comfyUp || creatorState === "online" ? "online" : "starting", detail: comfyUp || creatorState === "online" ? "attached" : "waiting for Creator Engine" },
     { id: "video_runtime", label: "Video Runtime", required: false, state: videoState, detail: videoState === "online" ? "route A ready" : "on demand" },
     { id: "remote_access", label: "Remote Access", required: false, state: tunnelUp ? "online" : "on_demand" },

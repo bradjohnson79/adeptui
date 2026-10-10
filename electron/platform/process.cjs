@@ -37,6 +37,15 @@ function execText(file, args) {
   });
 }
 
+function parseSsListenPids(text) {
+  const pids = [];
+  for (const match of String(text || "").matchAll(/pid=(\d+)/g)) {
+    const pid = Number(match[1]);
+    if (Number.isInteger(pid) && pid > 0 && !pids.includes(pid)) pids.push(pid);
+  }
+  return pids;
+}
+
 function parseListeningPids(netstatText, port) {
   const pids = new Set();
   const needle = `:${port}`;
@@ -56,6 +65,8 @@ async function listeningPids(port) {
     const text = await execText("netstat.exe", ["-ano", "-p", "tcp"]);
     return parseListeningPids(text, port);
   }
+  const fromSs = parseSsListenPids(await execText("ss", ["-ltnpH", `sport = :${port}`]));
+  if (fromSs.length) return fromSs;
   const text = await execText("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
   return text
     .split(/\s+/)
@@ -81,6 +92,7 @@ function ownsPackagedCommand(cmd, markers) {
 module.exports = {
   portAccepts,
   parseListeningPids,
+  parseSsListenPids,
   listeningPids,
   commandLine,
   ownsPackagedCommand,

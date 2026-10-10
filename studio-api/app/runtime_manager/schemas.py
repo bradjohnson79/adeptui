@@ -112,6 +112,7 @@ class AdeptRuntimeServiceStatus(BaseModel):
     comfyPid: Optional[int] = None
     owned: bool = False
     managerPid: Optional[int] = None
+    controlPlaneReachable: Optional[bool] = None
     studioApiPid: Optional[int] = None
     studioApiOwned: bool = False
     studioApiHealth: str = "unknown"
