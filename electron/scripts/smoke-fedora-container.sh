@@ -222,7 +222,7 @@ stop_app
 kill "$foreign_pid" || true
 wait "$foreign_pid" 2>/dev/null || true
 
-python3 - <<'PY' >/tmp/adept-sim-comfy.log 2>&1 &
+cat > /tmp/adept-sim-comfy.py <<'PY'
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -236,10 +236,24 @@ class Handler(BaseHTTPRequestHandler):
         return
 ThreadingHTTPServer(("127.0.0.1", 8188), Handler).serve_forever()
 PY
+python3 /tmp/adept-sim-comfy.py >/tmp/adept-sim-comfy.log 2>&1 &
 sim_pid=$!
-sleep 1
+sim_ready=0
+for _ in $(seq 1 20); do
+  if curl -sf "http://127.0.0.1:8188/system_stats" >/tmp/adept-sim-comfy-body.json; then
+    sim_ready=1
+    break
+  fi
+  sleep 0.25
+done
+if [ "$sim_ready" != "1" ]; then
+  echo "FEDORA SIMULATED COMFY DID NOT BIND"
+  cat /tmp/adept-sim-comfy.log || true
+  exit 1
+fi
 launch_app
 wait_health "simulated-comfy"
+curl -sf "http://127.0.0.1:8188/system_stats" >/tmp/adept-sim-still.json || echo "FEDORA SIMULATED COMFY DIED AFTER LAUNCH"
 curl -sf "http://127.0.0.1:8760/api/setup/comfy/prerequisite" >/tmp/adept-sim-prerequisite.json
 python3 - <<'PY'
 import json
