@@ -34,9 +34,13 @@ const evidence = {
   notarization: "PENDING CREDENTIALS",
 };
 
+function emit(line) {
+  fs.writeSync(1, `${line}\n`);
+}
+
 function setGate(name, value) {
   gates[name] = value;
-  console.log(`${name} = ${value}`);
+  emit(`${name} = ${value}`);
 }
 
 function sleep(ms) {
@@ -100,6 +104,7 @@ function hashTree(dir) {
       hash.update(fs.readlinkSync(file));
       continue;
     }
+    if (!stat.isFile()) continue;
     const data = fs.readFileSync(file);
     bytes += data.length;
     hash.update(data);
@@ -237,17 +242,24 @@ function findBuiltApp() {
 }
 
 function adHocSign(appPath) {
-  spawnSync("xattr", ["-cr", appPath], { stdio: "ignore" });
-  const signed = spawnSync("codesign", ["--force", "--deep", "--sign", "-", appPath], { encoding: "utf8" });
+  emit(`UNSIGNED RUNTIME DIAGNOSTIC ad-hoc sign start ${appPath}`);
+  const cleared = spawnSync("xattr", ["-cr", appPath], { stdio: "ignore", timeout: 180000 });
+  if (cleared.error) throw cleared.error;
+  const signed = spawnSync(
+    "codesign",
+    ["--force", "--deep", "--sign", "-", "--timestamp=none", appPath],
+    { encoding: "utf8", timeout: 600000 },
+  );
   evidence.codeSign = {
     mode: "CI LAUNCH ACCOMMODATION",
     distributionSigning: false,
     status: signed.status,
-    note: "codesign --sign - lets the unsigned CI build open. It is not distribution signing.",
+    note: "codesign --sign - --timestamp=none lets the unsigned CI build open. It is not distribution signing.",
   };
-  if (signed.status !== 0) {
-    throw new Error(`CI launch accommodation sign failed: ${signed.stderr || signed.stdout}`);
+  if (signed.error || signed.status !== 0) {
+    throw new Error(`CI launch accommodation sign failed: ${signed.error || signed.stderr || signed.stdout}`);
   }
+  emit(`UNSIGNED RUNTIME DIAGNOSTIC ad-hoc sign done ${appPath}`);
 }
 
 async function launchElectron(executable, userData) {
@@ -402,7 +414,9 @@ async function main() {
   }
   setGate("Adept UI.app BUILD", "PASS");
   setGate("DMG BUILD", "PASS");
+  emit("UNSIGNED RUNTIME DIAGNOSTIC hashing built app");
   evidence.app = hashTree(builtApp);
+  emit("UNSIGNED RUNTIME DIAGNOSTIC built app hashed");
   evidence.appBundle = builtApp;
   evidence.dmg = hashFile(dmg);
   fs.mkdirSync(evidenceDir, { recursive: true });
@@ -447,7 +461,11 @@ async function main() {
   fs.rmSync(work, { recursive: true, force: true });
   fs.mkdirSync(work, { recursive: true });
   const isolatedApp = path.join(work, "Adept UI.app");
-  spawnSync("ditto", [builtApp, isolatedApp]);
+  emit("UNSIGNED RUNTIME DIAGNOSTIC copying built app");
+  const isolatedCopy = spawnSync("ditto", [builtApp, isolatedApp], { encoding: "utf8", timeout: 600000 });
+  if (isolatedCopy.error || isolatedCopy.status !== 0) {
+    throw new Error(`Disposable app copy failed: ${isolatedCopy.error || isolatedCopy.stderr || isolatedCopy.stdout}`);
+  }
   adHocSign(isolatedApp);
   const executable = executableOf(isolatedApp);
 

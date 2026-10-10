@@ -98,8 +98,8 @@ jobs:
       - name: UNSIGNED RUNTIME DIAGNOSTIC
         run: |
           set -o pipefail
-          echo "UNSIGNED RUNTIME DIAGNOSTIC method = CI-built app launched before download quarantine. The existing smoke ad-hoc signs a disposable copy so the unsigned build can open. That is not Developer ID signing and it is not Gatekeeper acceptance."
-          node electron/scripts/smoke-macos.mjs 2>&1 | sed 's/^/UNSIGNED RUNTIME DIAGNOSTIC /'
+          echo "UNSIGNED RUNTIME DIAGNOSTIC method = CI-built app launched before download quarantine. The existing smoke ad-hoc signs a disposable copy with codesign --sign - --timestamp=none so the unsigned build can open. That is not Developer ID signing and it is not Gatekeeper acceptance."
+          node electron/scripts/smoke-macos.mjs 2>&1 | sed -l 's/^/UNSIGNED RUNTIME DIAGNOSTIC /'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
