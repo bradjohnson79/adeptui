@@ -42,6 +42,13 @@ def is_shared_dependency(path: Path) -> bool:
 
 
 def windows_model_on_system_drive(path: Path, system_drive: str) -> bool:
+    """Refuse a Windows path whose drive is not the designated system drive.
+
+    POSIX paths have no drive letter. They are judged by directory containment
+    instead, so a simulated Windows profile on Linux does not skip them here.
+    """
+    if not path.drive:
+        return True
     drive = system_drive.rstrip("\\/").upper()
     if len(drive) == 1:
         drive = drive + ":"
