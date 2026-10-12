@@ -57,7 +57,12 @@ def control_plane_reachable(timeout: float = 15.0) -> bool:
     """
     budget = max(1.0, float(timeout))
     ports = control_candidate_ports()
-    per_port = max(1.0, min(6.0, budget / len(ports)))
+    # Each candidate port gets its full fair slice of the deadline. A cold
+    # /status on a fresh runner (Comfy probe, task query, provider probe) can
+    # exceed a hard 6s cap, which made the boot gate falsely report the
+    # manager unreachable. One attempt per port, but with enough time to
+    # actually answer.
+    per_port = max(1.0, budget / len(ports))
     for port in ports:
         try:
             result = call_control("GET", "/status", timeout=per_port, port=port)
