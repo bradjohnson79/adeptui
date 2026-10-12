@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -57,19 +58,37 @@ def control_plane_reachable(timeout: float = 15.0) -> bool:
     """
     budget = max(1.0, float(timeout))
     ports = control_candidate_ports()
-    # Each candidate port gets its full fair slice of the deadline. A cold
-    # /status on a fresh runner (Comfy probe, task query, provider probe) can
-    # exceed a hard 6s cap, which made the boot gate falsely report the
-    # manager unreachable. One attempt per port, but with enough time to
-    # actually answer.
+    # Each candidate port gets its own slice of the overall deadline. A cold
+    # /status on a fresh runner (schtasks query, Comfy probe, provider probe,
+    # first-call DLL warmup) can exceed any fixed cap, so within a port's
+    # slice we retry until the slice is spent. A definitive answer — an
+    # authenticated Adept status, a refused token (401/403), or any other
+    # completed HTTP response — ends that port's attempts immediately; only
+    # an unreachable/timed-out call is retried.
     per_port = max(1.0, budget / len(ports))
     for port in ports:
-        try:
-            result = call_control("GET", "/status", timeout=per_port, port=port)
-        except Exception:
-            result = {}
-        if isinstance(result, dict) and _status_answers(result):
-            return True
+        slice_deadline = time.monotonic() + per_port
+        while True:
+            remaining = slice_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                result = call_control("GET", "/status", timeout=max(1.0, remaining), port=port)
+            except Exception:
+                result = {}
+            if not isinstance(result, dict):
+                result = {}
+            if _status_answers(result):
+                return True
+            # Only a connection-level failure (no response received: refused,
+            # timed out, aborted) is retried — the manager may still be
+            # warming up. Any received response is a definitive answer about
+            # this port and ends its attempts.
+            if not result.get("unreachable"):
+                break
+            if time.monotonic() >= slice_deadline:
+                break
+            time.sleep(min(0.5, max(0.0, slice_deadline - time.monotonic())))
     return False
 
 
@@ -100,4 +119,4 @@ def call_control(method: str, path: str, *, timeout: float = 30.0, port: int | N
             return parsed
         return {"ok": False, "error": str(exc), "httpStatus": exc.code}
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return {"ok": False, "error": f"Runtime Service control plane unreachable: {exc}"}
+        return {"ok": False, "unreachable": True, "error": f"Runtime Service control plane unreachable: {exc}"}
