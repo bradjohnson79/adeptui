@@ -58,16 +58,21 @@ def control_plane_reachable(timeout: float = 15.0) -> bool:
     """
     budget = max(1.0, float(timeout))
     ports = control_candidate_ports()
-    # Each candidate port gets its own slice of the overall deadline. A cold
-    # /status on a fresh runner (schtasks query, Comfy probe, provider probe,
-    # first-call DLL warmup) can exceed any fixed cap, so within a port's
-    # slice we retry until the slice is spent. A definitive answer — an
-    # authenticated Adept status, a refused token (401/403), or any other
-    # completed HTTP response — ends that port's attempts immediately; only
-    # an unreachable/timed-out call is retried.
-    per_port = max(1.0, budget / len(ports))
-    for port in ports:
-        slice_deadline = time.monotonic() + per_port
+    # The first candidate — the configured port — is almost always the live
+    # manager, so it keeps nearly the whole deadline, matching the historical
+    # single-port behaviour that survived cold runners. A freshly spawned
+    # manager can take several seconds to answer its first /status (module
+    # imports, schtasks query, Comfy probe, DLL warmup), so a connection-level
+    # failure is retried until the port's slice is spent. Any received
+    # response is a definitive per-port answer and is never retried. Fallback
+    # ports (the Fedora collision case) share a short tail — they answer or
+    # refuse quickly.
+    tail = min(2.0, budget * 0.2) if len(ports) > 1 else 0.0
+    first_budget = budget - (tail * (len(ports) - 1))
+    deadline = time.monotonic() + budget
+    for index, port in enumerate(ports):
+        slice_budget = first_budget if index == 0 else tail
+        slice_deadline = min(deadline, time.monotonic() + max(1.0, slice_budget))
         while True:
             remaining = slice_deadline - time.monotonic()
             if remaining <= 0:
