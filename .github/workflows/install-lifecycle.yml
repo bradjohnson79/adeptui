@@ -21,4 +21,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Run installation lifecycle tests
-        run: python -m pytest install/lifecycle/tests -q
+        run: |
+          python -m pip install pytest
+          python -m pytest install/lifecycle/tests -q
