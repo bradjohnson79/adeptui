@@ -1,0 +1,264 @@
+"""Installation lifecycle certification. These are simulations, not physical installs."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from adept_lifecycle.cli import main
+from adept_lifecycle.desktop import linux_desktop_entry
+from adept_lifecycle.detect import SystemProfile, linux_family_from_os_release
+from adept_lifecycle.manager import Hooks, Layout, Lifecycle
+from adept_lifecycle.release import sign_catalog
+from adept_lifecycle.safety import is_shared_dependency, resolve_contained
+
+KEY = b"test-release-key"
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def profile(os_name: str = "windows", arch: str = "x64", family: str | None = None, ram: int = 16 << 30) -> SystemProfile:
+    return SystemProfile(os_name, "test", arch, family, ram, 50 << 30, "nvidia", 24 << 30)
+
+
+def catalog(version: str = "1.2.0", platform: str = "windows", arch: str = "x64", *, approved: bool = True, digest: str) -> dict:
+    body = {
+        "approved": approved,
+        "channel": "beta",
+        "artifacts": [
+            {
+                "platform": platform,
+                "arch": arch,
+                "version": version,
+                "sha256": digest,
+                "bytes": 100,
+                "kind": "zip",
+                "fileName": "AdeptUI.zip",
+                "distributions": ["fedora", "debian"] if platform == "linux" else None,
+            }
+        ],
+    }
+    return sign_catalog(body, KEY)
+
+
+def make_zip(path: Path, name: str = "Adept UI.exe") -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(name, b"adept")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def lifecycle(tmp: Path, system: SystemProfile, **hooks) -> Lifecycle:
+    return Lifecycle(Layout(tmp), system, KEY, Hooks(**hooks))
+
+
+def test_linux_families_and_unsupported_mac():
+    assert linux_family_from_os_release("ID=fedora") == "fedora"
+    assert linux_family_from_os_release("ID=ubuntu") == "debian"
+    assert profile("darwin", "x64").supported is False
+    assert "Apple Silicon" in profile("darwin", "x64").unsupported_reason
+    assert profile("windows", "arm64").supported is False
+
+
+def test_windows_linux_and_macos_install_alignment(tmp_path: Path):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    for os_name, arch, family in (
+        ("windows", "x64", None),
+        ("linux", "x64", "fedora"),
+        ("linux", "x64", "debian"),
+        ("darwin", "arm64", None),
+    ):
+        home = tmp_path / os_name / (family or "default")
+        result = lifecycle(home, profile(os_name, arch, family)).install(
+            catalog("1.2.0", os_name, arch, digest=digest),
+            payload,
+            shortcut=True,
+        )
+        assert result.ok, result.message
+        registry = json.loads((home / "registry.json").read_text(encoding="utf-8"))
+        assert registry["installedVersion"] == "1.2.0"
+        assert Path(registry["cli"]).is_file()
+        assert Path(registry["desktopShortcut"]).is_file()
+        second = lifecycle(home, profile(os_name, arch, family)).install(catalog("1.2.0", os_name, arch, digest=digest), payload)
+        assert second.code == "ALREADY_INSTALLED"
+        again = lifecycle(home, profile(os_name, arch, family))
+        again._shortcut(Path(registry["cli"]))
+        assert len(list((home / "desktop").glob("Adept UI*"))) == 1
+    windows_home = tmp_path / "windows" / "default"
+    launched: list[Path] = []
+    started = lifecycle(windows_home, profile(), launch=lambda path: launched.append(path) or 0)
+    assert started.launch().code == "LAUNCHED"
+    assert launched[0].name == "Adept UI.exe"
+    assert json.loads((windows_home / "startup-update.json").read_text(encoding="utf-8"))["code"] == "UPDATE_SERVICE_UNAVAILABLE"
+
+
+def test_selection_refuses_other_platforms_and_bad_signatures(tmp_path: Path):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    signed = catalog("1.2.0", "linux", "x64", digest=digest)
+    result = lifecycle(home, profile("windows")).install(signed, payload)
+    assert result.code == "NO_UPDATE"
+    unsigned = dict(signed)
+    unsigned["signature"] = "0" * 64
+    refused = lifecycle(home, profile()).install(unsigned, payload)
+    assert refused.code == "SIGNATURE_INVALID"
+    unapproved = sign_catalog({**signed, "approved": False, "signature": None}, KEY)
+    assert lifecycle(home, profile()).install(unapproved, payload).code == "NOT_APPROVED"
+
+
+def test_update_defers_during_production_and_stops_a_loop(tmp_path: Path):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    system = profile()
+    installed = lifecycle(home, system).install(catalog("1.1.1", digest=digest), payload)
+    assert installed.ok
+    newer = tmp_path / "newer.zip"
+    newer_digest = make_zip(newer, "Adept UI.exe")
+    active = lifecycle(home, system, production_active=lambda: True)
+    deferred = active.update(catalog("1.2.0", digest=newer_digest), newer, apply=True)
+    assert deferred.code == "DEFERRED"
+    assert (home / "user-data").is_dir()
+    bad = tmp_path / "bad.zip"
+    updater = lifecycle(home, system, production_active=lambda: False)
+    for _ in range(3):
+        bad.write_bytes(b"corrupted")
+        failed = updater.update(catalog("1.2.0", digest=newer_digest), bad, apply=True)
+        assert failed.code == "CHECKSUM_MISMATCH"
+    stopped = updater.update(catalog("1.2.0", digest=newer_digest), newer, apply=True)
+    assert stopped.code == "UPDATE_LOOP_STOPPED"
+
+
+def test_update_replaces_version_and_keeps_user_work(tmp_path: Path):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    system = profile()
+    assert lifecycle(home, system).install(catalog("1.1.1", digest=digest), payload).ok
+    (home / "user-data").mkdir(exist_ok=True)
+    (home / "user-data" / "project.txt").write_text("keep", encoding="utf-8")
+    newer = tmp_path / "newer.zip"
+    newer_digest = make_zip(newer)
+    result = lifecycle(home, system).update(catalog("1.2.0", digest=newer_digest), newer, apply=True)
+    assert result.ok
+    assert json.loads((home / "registry.json").read_text(encoding="utf-8"))["installedVersion"] == "1.2.0"
+    assert (home / "user-data" / "project.txt").read_text(encoding="utf-8") == "keep"
+    current = lifecycle(home, system).update(catalog("1.2.0", digest=newer_digest), newer, apply=False)
+    assert current.code == "NO_UPDATE"
+
+
+def test_uninstall_preserves_projects_and_refuses_unsafe_models(tmp_path: Path):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    system = profile()
+    app = lifecycle(home, system)
+    assert app.install(catalog("1.2.0", digest=digest), payload).ok
+    (home / "user-data").mkdir(exist_ok=True)
+    (home / "user-data" / "project.txt").write_text("scene", encoding="utf-8")
+    models = home / "models"
+    managed = models / "local.bin"
+    managed.write_bytes(b"12345")
+    shared = models / "python" / "shared.bin"
+    shared.parent.mkdir()
+    shared.write_bytes(b"no")
+    outside = Path("D:/01_Models/foreign.bin")
+    link = models / "escape.bin"
+    try:
+        link.symlink_to(managed)
+    except OSError:
+        link = None
+    inventory = {
+        "models": [
+            {"name": "Local", "path": str(managed), "managed": True, "owner": "adept-ui"},
+            {"name": "Shared", "path": str(shared), "managed": True, "owner": "adept-ui"},
+            {"name": "Foreign", "path": str(outside), "managed": True, "owner": "adept-ui"},
+            {"name": "Unknown", "path": str(managed), "managed": False, "owner": "adept-ui"},
+        ]
+    }
+    if link is not None:
+        inventory["models"].append({"name": "Link", "path": str(link), "managed": True, "owner": "adept-ui"})
+    (models / "inventory.json").write_text(json.dumps(inventory), encoding="utf-8")
+    dry = app.uninstall(remove_app=True, remove_models=True, remove_settings=False, confirmed=False)
+    assert dry.code == "NOT_CONFIRMED"
+    assert managed.is_file()
+    done = app.uninstall(remove_app=True, remove_models=True, remove_settings=False, confirmed=True)
+    assert done.ok
+    assert not managed.exists()
+    assert shared.exists()
+    assert (home / "user-data" / "project.txt").read_text(encoding="utf-8") == "scene"
+    assert not (home / "registry.json").exists()
+    assert is_shared_dependency(shared)
+    assert resolve_contained(home / "user-data" / "project.txt", home / "app") is None
+
+
+def test_failure_injection(tmp_path: Path):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    system = profile()
+    denied = lifecycle(home, system, before_write=lambda: (_ for _ in ()).throw(PermissionError("denied")))
+    assert denied.install(catalog("1.2.0", digest=digest), payload).code == "PERMISSION_DENIED"
+    low = lifecycle(home, system, disk_free=lambda _path: 10)
+    assert low.install(catalog("1.2.0", digest=digest), payload).code == "INSUFFICIENT_DISK"
+    slipped = tmp_path / "slip.zip"
+    with zipfile.ZipFile(slipped, "w") as archive:
+        archive.writestr("../outside.txt", b"bad")
+    slip_digest = hashlib.sha256(slipped.read_bytes()).hexdigest()
+    escaped = lifecycle(home, system).install(catalog("1.2.0", digest=slip_digest), slipped)
+    assert escaped.code == "INSTALL_INTERRUPTED"
+    assert not (tmp_path / "outside.txt").exists()
+
+    installed = lifecycle(home, system).install(catalog("1.1.1", digest=digest), payload)
+    assert installed.ok
+    newer = tmp_path / "newer.zip"
+    newer_digest = make_zip(newer)
+    offered = catalog("1.2.0", digest=newer_digest)
+    offered["artifacts"][0]["url"] = "https://example.invalid/app.zip"
+    offered = sign_catalog(offered, KEY)
+
+    def boom(_url: str, _dest: Path) -> None:
+        raise OSError("network down")
+
+    interrupted = lifecycle(home, system, download=boom).update(offered, newer, apply=True)
+    assert interrupted.code == "DOWNLOAD_INTERRUPTED"
+
+
+def test_doctor_repair_and_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    system = profile("linux", "x64", "fedora")
+    app = lifecycle(home, system)
+    assert app.install(catalog("1.2.0", "linux", "x64", digest=digest), payload).ok
+    assert "Name=Adept UI" in linux_desktop_entry(home / "bin" / "adeptui")
+    assert app.doctor().code == "HEALTHY"
+    cli = Path(json.loads((home / "registry.json").read_text(encoding="utf-8"))["cli"])
+    cli.unlink()
+    assert app.doctor().code == "NEEDS_REPAIR"
+    assert app.repair(payload).ok
+    assert cli.is_file()
+    assert (home / "user-data").is_dir()
+    code = main(["--root", str(home), "--version"], profile=system, key=KEY)
+    assert code == 0
+    assert "1.2.0" in capsys.readouterr().out
+    code = main(["--root", str(home), "doctor"], profile=system, key=KEY)
+    assert code == 0
+
+
+def test_bootstrap_refuses_unpublished_endpoints():
+    script = ROOT / "install" / "bootstrap" / "install.ps1"
+    text = script.read_text(encoding="utf-8")
+    assert "not published yet" in text
+    assert "github.com" not in text.lower()
+    shell = (ROOT / "install" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
+    assert "not published yet" in shell
+    assert "curl" not in shell

@@ -1,0 +1,24 @@
+name: install-lifecycle
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - install/**
+      - .github/workflows/install-lifecycle.yml
+
+jobs:
+  lifecycle:
+    name: Installation lifecycle simulation
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run installation lifecycle tests
+        run: python -m pytest install/lifecycle/tests -q
