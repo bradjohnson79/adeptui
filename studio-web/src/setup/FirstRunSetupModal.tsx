@@ -277,20 +277,23 @@ export function FirstRunSetupModal({
         {!exitAsk && step === "choice" && (
           <>
             <p>Choose how you want to create with Adept UI. We'll configure the necessary systems for you.</p>
-            {(["local", "api", "hybrid"] as const).map((id) => (
-              <label key={id} className="setup-choice">
-                <input
-                  type="radio"
-                  name="installation-profile"
-                  checked={profile === id}
-                  onChange={() => setProfile(id)}
-                />
-                <span>
-                  <strong>{PROFILE_COPY[id].title}</strong>
-                  <span>{PROFILE_COPY[id].body}</span>
-                </span>
-              </label>
-            ))}
+            <div className="setup-choice-list" role="radiogroup" aria-label="Installation profile">
+              {(["local", "api", "hybrid"] as const).map((id) => (
+                <label key={id} className={`setup-choice${profile === id ? " is-selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="installation-profile"
+                    checked={profile === id}
+                    onChange={() => setProfile(id)}
+                  />
+                  <span className="setup-choice-indicator" aria-hidden="true" />
+                  <span className="setup-choice-text">
+                    <span className="setup-choice-title">{PROFILE_COPY[id].title}</span>
+                    <span className="setup-choice-description">{PROFILE_COPY[id].body}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
             {platform !== "windows" && (
               <label className="setup-choice">
                 <input type="checkbox" checked={shortcut} onChange={(event) => setShortcut(event.target.checked)} />

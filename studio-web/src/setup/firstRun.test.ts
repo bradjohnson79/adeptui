@@ -93,6 +93,55 @@ describe("setup completion copy", () => {
   });
 });
 
+describe("installation-profile selection markup", () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "FirstRunSetupModal.tsx"),
+    "utf8",
+  );
+  const styles = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "styles.css"),
+    "utf8",
+  );
+
+  it("keeps the three approved options with exact copy", () => {
+    expect(source).toContain('title: "Local AI Models"');
+    expect(source).toContain('title: "Commercial API Models"');
+    expect(source).toContain('title: "Custom Hybrid Installation"');
+    expect(source).toContain("I want to use local AI models through my computer.");
+    expect(source).toContain("I want to use commercial API models through Adept UI, using my own provider API keys.");
+    expect(source).toContain("I want to choose which local AI models to install and connect commercial API providers.");
+  });
+
+  it("renders an accessible radio group with one shared name", () => {
+    expect(source).toContain('role="radiogroup"');
+    expect(source).toContain('aria-label="Installation profile"');
+    expect(source).toContain('name="installation-profile"');
+  });
+
+  it("presents each option as a full-row selection with separated title and description", () => {
+    expect(source).toContain("setup-choice-list");
+    expect(source).toContain("setup-choice-indicator");
+    expect(source).toContain("setup-choice-title");
+    expect(source).toContain("setup-choice-description");
+    expect(source).toContain("is-selected");
+  });
+
+  it("styles the selection table with the Adept teal accent and visible focus", () => {
+    for (const selector of [
+      ".setup-choice-list",
+      ".setup-choice",
+      ".setup-choice.is-selected",
+      ".setup-choice-indicator",
+      ".setup-choice-title",
+      ".setup-choice-description",
+    ]) {
+      expect(styles).toContain(selector);
+    }
+    expect(styles).toMatch(/\.setup-choice\.is-selected\s*\{[^}]*var\(--accent\)/s);
+    expect(styles).toContain(":focus-visible");
+  });
+});
+
 describe("setup routing stays off create project", () => {
   it("opens the wizard without a project and without create=1", () => {
     const path = buildSetupWizardPath(null);
