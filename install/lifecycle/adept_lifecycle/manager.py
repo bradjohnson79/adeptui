@@ -14,7 +14,8 @@ from typing import Any, Callable
 from .desktop import menu_entry, write_launcher
 from .detect import SystemProfile
 from .registry import atomic_write, empty_registry, read_registry
-from .release import ReleaseError, select_artifact, verify_catalog, verify_file
+from .release import ReleaseError, select_artifact, verify_catalog, verify_catalog_rsa, verify_file
+from .trust import PublicKey
 from .safety import is_shared_dependency, resolve_contained, windows_model_on_system_drive
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -28,6 +29,7 @@ class Hooks:
     download: Callable[[str, Path], None] | None = None
     launch: Callable[[Path], int] | None = None
     before_write: Callable[[], None] | None = None
+    health: Callable[[], bool] | None = None
 
 
 @dataclass
@@ -120,6 +122,7 @@ class Lifecycle:
         shortcut: bool = True,
         launch: bool = False,
         force: bool = False,
+        already_verified: bool = False,
     ) -> Result:
         if not self.profile.supported or (
             self.profile.os_name == "linux" and self.profile.linux_family not in {"fedora", "debian"}
@@ -134,7 +137,8 @@ class Lifecycle:
                 {"version": registry.get("installedVersion")},
             )
         try:
-            verify_catalog(catalog, self.key)
+            if not already_verified:
+                verify_catalog(catalog, self.key)
             artifact = select_artifact(catalog, self.profile, None)
         except ReleaseError as exc:
             self.log(exc.code)
@@ -209,6 +213,63 @@ class Lifecycle:
             subprocess.Popen([str(executable)], close_fds=True)
         self.log(f"launch {update_code}")
         return Result(True, "LAUNCHED", "Adept UI is starting.", status)
+
+    def install_discovered(
+        self,
+        catalog: dict[str, Any],
+        payload: Path,
+        public_key: PublicKey,
+        *,
+        shortcut: bool = True,
+    ) -> Result:
+        try:
+            verify_catalog_rsa(catalog, public_key)
+        except ReleaseError as exc:
+            return Result(False, exc.code, exc.message)
+        return self.install(catalog, payload, shortcut=shortcut, already_verified=True)
+
+    def apply_with_recovery(self, payload: Path, artifact: dict[str, Any], previous_version: str) -> Result:
+        """Replace the application from a staged file, restoring the previous copy on failure."""
+        if self._production_active():
+            return Result(False, "DEFERRED", "An update is waiting. It will install the next time Adept UI starts and nothing is rendering.")
+        previous = self.layout.root / "previous-app"
+        if previous.exists():
+            shutil.rmtree(previous)
+        if self.layout.app_dir.exists():
+            shutil.copytree(self.layout.app_dir, previous)
+        updater = self.external_updater_dir()
+        try:
+            self._materialize(payload, artifact)
+            if self.hooks.health and not self.hooks.health():
+                raise OSError("The updated application did not pass its health check.")
+        except OSError as exc:
+            self._restore_previous(previous)
+            self.log(f"update restored after {exc}")
+            return Result(False, "UPDATE_RESTORED", "The update did not finish. Adept UI was restored to the last working version.", {"updater": str(updater)})
+        registry = self._registry()
+        registry["installedVersion"] = str(artifact.get("version") or registry.get("installedVersion"))
+        registry["recovery"] = {"lastGoodVersion": previous_version}
+        registry["health"] = "updated"
+        self._save(registry)
+        return Result(True, "UPDATED", f"Adept UI is now {registry['installedVersion']}.", {"updater": str(updater), "previous": previous_version})
+
+    def external_updater_dir(self) -> Path:
+        """Copy the lifecycle manager outside the application directory before replacement."""
+        destination = self.layout.root / "updater" / "adept_lifecycle"
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(PACKAGE_ROOT, destination)
+        if self.layout.app_dir.resolve() in destination.resolve().parents:
+            raise OSError("The updater must not live inside the application it replaces.")
+        return destination.parent
+
+    def _restore_previous(self, previous: Path) -> None:
+        if not previous.is_dir():
+            return
+        if self.layout.app_dir.exists():
+            shutil.rmtree(self.layout.app_dir)
+        shutil.copytree(previous, self.layout.app_dir)
 
     def update(self, catalog: dict[str, Any], payload: Path | None, *, apply: bool) -> Result:
         if self._production_active():

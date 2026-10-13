@@ -16,7 +16,8 @@ from adept_lifecycle.cli import main
 from adept_lifecycle.desktop import linux_desktop_entry
 from adept_lifecycle.detect import SystemProfile, linux_family_from_os_release
 from adept_lifecycle.manager import Hooks, Layout, Lifecycle
-from adept_lifecycle.release import sign_catalog
+from adept_lifecycle.release import ReleaseError, assert_release_url, sign_catalog, sign_catalog_rsa, verify_catalog_rsa
+from adept_lifecycle.trust import generate_keypair
 from adept_lifecycle.safety import is_shared_dependency, resolve_contained
 
 KEY = b"test-release-key"
@@ -257,8 +258,58 @@ def test_doctor_repair_and_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str
 def test_bootstrap_refuses_unpublished_endpoints():
     script = ROOT / "install" / "bootstrap" / "install.ps1"
     text = script.read_text(encoding="utf-8")
-    assert "not published yet" in text
+    assert "not open yet" in text
+    assert "https://adeptui.org/releases/current.json" in text
     assert "github.com" not in text.lower()
     shell = (ROOT / "install" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
-    assert "not published yet" in shell
-    assert "curl" not in shell
+    assert "not open yet" in shell
+    assert "https://adeptui.org/releases/current.json" in shell
+    assert "github.com" not in shell.lower()
+
+
+def test_rsa_catalog_rejects_branch_urls_and_update_restores_the_previous_app(tmp_path: Path):
+    public, private = generate_keypair()
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    signed = sign_catalog_rsa(
+        {
+            "approved": True,
+            "channel": "beta",
+            "artifacts": [
+                {
+                    "platform": "windows",
+                    "arch": "x64",
+                    "version": "1.2.0",
+                    "sha256": digest,
+                    "bytes": payload.stat().st_size,
+                    "kind": "zip",
+                    "fileName": "AdeptUI.zip",
+                    "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.2.0/AdeptUI.zip",
+                }
+            ],
+        },
+        private,
+    )
+    verify_catalog_rsa(signed, public)
+    tampered = dict(signed)
+    tampered["signature"] = "rsa-sha256:" + "AA=="
+    with pytest.raises(ReleaseError):
+        verify_catalog_rsa(tampered, public)
+    with pytest.raises(ReleaseError):
+        assert_release_url("https://github.com/bradjohnson79/adeptui/archive/refs/heads/main.zip")
+    home = tmp_path / "home"
+    system = profile()
+    installed = lifecycle(home, system).install_discovered(signed, payload, public, shortcut=True)
+    assert installed.ok
+    newer = tmp_path / "newer.zip"
+    with zipfile.ZipFile(newer, "w") as archive:
+        archive.writestr("Adept UI.exe", b"replaced")
+    restored = lifecycle(home, system, health=lambda: False).apply_with_recovery(
+        newer,
+        {"version": "1.3.0", "kind": "zip"},
+        "1.2.0",
+    )
+    assert restored.code == "UPDATE_RESTORED"
+    assert (home / "app" / "Adept UI.exe").read_bytes() == b"adept"
+    updater = Path(restored.details["updater"])
+    assert (home / "app").resolve() not in updater.resolve().parents

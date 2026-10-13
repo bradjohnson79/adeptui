@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .detect import SystemProfile
+from .trust import PublicKey, PrivateKey, sign_sha256, verify_sha256
 
 
 class ReleaseError(Exception):
@@ -27,6 +28,35 @@ def sign_catalog(catalog: dict[str, Any], key: bytes) -> dict[str, Any]:
     signed = {key: value for key, value in catalog.items() if key != "signature"}
     signed["signature"] = hmac.new(key, canonical_bytes(signed), hashlib.sha256).hexdigest()
     return signed
+
+
+def sign_catalog_rsa(catalog: dict[str, Any], private_key: PrivateKey) -> dict[str, Any]:
+    signed = {key: value for key, value in catalog.items() if key != "signature"}
+    signed["signature"] = sign_sha256(canonical_bytes(signed), private_key)
+    return signed
+
+
+def verify_catalog_rsa(catalog: dict[str, Any], public_key: PublicKey) -> None:
+    if not isinstance(catalog, dict):
+        raise ReleaseError("CATALOG_INVALID", "The release catalog is not a document.")
+    if catalog.get("approved") is not True:
+        raise ReleaseError("NOT_APPROVED", "This catalog is not an owner-approved public release.")
+    signature = catalog.get("signature")
+    if not isinstance(signature, str) or not verify_sha256(canonical_bytes(catalog), signature, public_key):
+        raise ReleaseError("SIGNATURE_INVALID", "The release catalog signature does not match the pinned public key.")
+    for artifact in catalog.get("artifacts") or []:
+        if isinstance(artifact, dict) and artifact.get("url"):
+            assert_release_url(str(artifact["url"]))
+
+
+def assert_release_url(url: str) -> None:
+    lowered = url.lower()
+    if lowered.startswith("file:") or "localhost" in lowered or "127.0.0.1" in lowered:
+        raise ReleaseError("UNTRUSTED_URL", "The release catalog points at a local address.")
+    if any(token in lowered for token in ("c:\\", "/users/", "/home/", "d:\\")):
+        raise ReleaseError("UNTRUSTED_URL", "The release catalog points at a private filesystem path.")
+    if "github.com" in lowered and "/releases/download/" not in lowered:
+        raise ReleaseError("UNTRUSTED_URL", "A GitHub branch is not an installation source.")
 
 
 def verify_catalog(catalog: dict[str, Any], key: bytes | None) -> None:
