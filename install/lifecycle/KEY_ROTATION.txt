@@ -1,0 +1,18 @@
+Adept UI release signing
+
+The private key is C:\Users\bradj\.adept\release-signing.pem on the owner machine.
+It is not in git, not in the website, and not in a release artifact.
+Back that file up before rotating it. Losing it means the current catalog cannot be re-signed.
+
+The public modulus is pinned in install/lifecycle/adept_lifecycle/trust.py
+and copied into install/bootstrap/install.ps1 and install/bootstrap/install.sh.
+
+To rotate:
+1. Generate a new RSA-3072 key outside the repository.
+2. Replace the pinned public modulus and the public key in both bootstrap scripts.
+3. Re-sign install/catalog/current.json into current.sig with the new private key.
+4. Copy the catalog, signature, and scripts to www/public.
+5. Deploy the website and confirm the live catalog verifies.
+6. Keep the retired private key offline. Do not publish it.
+
+A catalog signed by any other key must fail verification.

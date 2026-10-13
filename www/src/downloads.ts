@@ -47,18 +47,22 @@ function releaseUrl(fileName: string): string {
 }
 
 const windowsInstaller = releaseUrl("Adept.UI-Setup-1.1.1-win-x64.exe");
-const macInstaller = releaseUrl("Adept.UI-1.1.1-mac-arm64.dmg");
 const linuxDeb = releaseUrl("Adept.UI-1.1.1-linux-x64.deb");
 const linuxRpm = releaseUrl("Adept.UI-1.1.1-linux-x64.rpm");
-const linuxAppImage = releaseUrl("Adept.UI-1.1.1-linux-x64.AppImage");
 
-/** Generic Linux detection opens this chooser. It is not a file download. */
-export const linuxPackageChooserHref = "#linux-packages";
+/** Public install commands. macOS stays unpublished until signing and notarization. */
+export const installCommands: Partial<Record<DesktopOs, string>> = {
+  windows: "irm https://adeptui.org/install.ps1 | iex",
+  linux: "curl -fsSL https://adeptui.org/install.sh | bash",
+};
+
+/** The install panel is the public action. Package files stay available to inspect. */
+export const linuxPackageChooserHref = "#download";
 
 export const downloads: Record<DesktopOs, PlatformRelease> = {
   windows: {
     id: "windows",
-    label: "Windows Beta",
+    label: "Windows",
     version: "1.1.1",
     url: windowsInstaller,
     available: true,
@@ -66,22 +70,22 @@ export const downloads: Record<DesktopOs, PlatformRelease> = {
   },
   macos: {
     id: "macos",
-    label: "macOS Beta",
+    label: "macOS",
     version: "1.1.1",
-    url: macInstaller,
-    available: true,
+    url: "",
+    available: false,
     builds: [],
   },
   linux: {
     id: "linux",
-    label: "Linux Beta",
+    label: "Linux",
     version: "1.1.1",
     url: "",
     available: true,
     builds: [
       {
         architecture: "x64",
-        label: "Download .deb",
+        label: "Inspect .deb",
         audience: "Ubuntu / Debian",
         detail: "Recommended for Ubuntu, Debian, Linux Mint, and Pop!_OS",
         url: linuxDeb,
@@ -90,21 +94,12 @@ export const downloads: Record<DesktopOs, PlatformRelease> = {
       },
       {
         architecture: "x64",
-        label: "Download .rpm",
+        label: "Inspect .rpm",
         audience: "Fedora / RHEL",
         detail: "Recommended for Fedora and compatible RPM-based distributions",
         url: linuxRpm,
         available: true,
         installerType: "rpm",
-      },
-      {
-        architecture: "x64",
-        label: "Download AppImage",
-        audience: "Universal Linux",
-        detail: "Portable AppImage",
-        url: linuxAppImage,
-        available: true,
-        installerType: "AppImage",
       },
     ],
   },
@@ -179,6 +174,10 @@ function trustedHttps(url: string): string | null {
  * Direct installer for Windows and macOS.
  * Linux has more than one package, so this stays empty and the chooser is used.
  */
+export function installCommand(id: DesktopOs): string | null {
+  return installCommands[id] ?? null;
+}
+
 export function configuredDownloadUrl(id: DesktopOs): string | null {
   if (id === "linux") return null;
   const release = downloads[id];
@@ -188,6 +187,7 @@ export function configuredDownloadUrl(id: DesktopOs): string | null {
 
 /** Homepage and platform links for Linux open the package chooser. */
 export function platformDownloadHref(id: DesktopOs): string | null {
+  if (installCommand(id)) return "#download";
   if (id === "linux") return downloadState(id) === "available" ? linuxPackageChooserHref : null;
   return configuredDownloadUrl(id);
 }
@@ -202,6 +202,8 @@ export function downloadState(id: DesktopOs): DownloadState {
 
 /** Names a real download only when a trusted installer URL is configured. */
 export function releaseActionLabel(id: DesktopOs): string {
+  if (id === "macos") return "Certification Pending";
+  if (installCommand(id)) return "Install Adept UI";
   const label = downloads[id].label;
   if (downloadState(id) === "available") return `Download for ${label}`;
   return `${label} — Coming Soon`;

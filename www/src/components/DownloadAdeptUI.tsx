@@ -6,8 +6,8 @@ import {
   desktopPlatforms,
   downloadState,
   downloads,
+  installCommand,
   isDesktopOs,
-  linuxPackageChooserHref,
   otherPlatforms,
   platformDownloadHref,
   readClientOs,
@@ -105,7 +105,7 @@ function LinuxPackages() {
   const packages = readyBuilds("linux");
   return (
     <div id="linux-packages" className="linux-packages">
-      <p className="linux-packages__title">Download Adept UI for Linux</p>
+      <p className="linux-packages__title">Inspect the Linux packages</p>
       <ul className="linux-packages__list">
         {packages.map((build) => (
           <li key={build.installerType ?? build.label}>
@@ -144,14 +144,41 @@ function PlatformLinks({ ids }: { ids: DesktopOs[] }) {
   );
 }
 
+function InstallCommand({ id }: { id: DesktopOs }) {
+  const command = installCommand(id);
+  const [copied, setCopied] = useState(false);
+  if (!command) {
+    return <p className="platform-card__plan">{download.macosPlan}</p>;
+  }
+  return (
+    <div className="install-command">
+      <pre>
+        <code>{command}</code>
+      </pre>
+      <button
+        type="button"
+        className="btn btn--ghost platform-card__action"
+        onClick={() => {
+          void navigator.clipboard.writeText(command).then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1600);
+          });
+        }}
+      >
+        {copied ? "Copied" : "Copy Command"}
+      </button>
+    </div>
+  );
+}
+
 function HeroDownload({ os }: { os: ClientOs }) {
-  if (os === "linux") {
+  if (os === "linux" || os === "windows") {
     return (
       <div className="download-hero">
         <div className="hero__actions">
-          <a className="btn btn--primary" href={linuxPackageChooserHref}>
-            <PlatformIcon id="linux" />
-            <span>{releaseActionLabel("linux")}</span>
+          <a className="btn btn--primary" href="#download">
+            <PlatformIcon id={os} />
+            <span>Install Adept UI</span>
           </a>
           <a className="btn btn--ghost" href={hero.explore.href}>
             {hero.explore.label}
@@ -160,7 +187,6 @@ function HeroDownload({ os }: { os: ClientOs }) {
         <p className="download-hero__note" id="download-hero-status">
           {download.note}
         </p>
-        <p className="download-hero__note">{download.linuxPlan}</p>
         <p className="download-hero__others">
           Other platforms: <PlatformLinks ids={otherPlatforms(os)} />
         </p>
@@ -255,21 +281,46 @@ export function DownloadAdeptUI({ variant }: { variant: "hero" | "panel" }) {
             .join(" ");
           const version = downloads[id].version;
           return (
-            <article key={id} role="listitem" className={className}>
+            <article
+              key={id}
+              role="listitem"
+              className={className}
+              tabIndex={0}
+              onClick={() => setSelected(id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") setSelected(id);
+              }}
+            >
               <div className="platform-card__head">
                 <PlatformIcon id={id} />
                 <h3>{downloads[id].label}</h3>
               </div>
               {recommended ? <p className="platform-card__flag">{download.recommended}</p> : null}
-              {id === "linux" ? <p className="platform-card__plan">{download.linuxPlan}</p> : null}
-              {version ? <p className="release__meta">Version {version}</p> : null}
-              {id === "linux" ? <LinuxPackages /> : <ReleaseButton id={id} onSelect={() => setSelected(id)} />}
+              <p className="platform-card__plan">
+                {id === "windows" ? download.windowsPlan : id === "linux" ? download.linuxPlan : download.macosPlan}
+              </p>
+              {version && id !== "macos" ? <p className="release__meta">Version {version}</p> : null}
+              <InstallCommand id={id} />
+              {id === "linux" ? <LinuxPackages /> : null}
+              {id === "windows" && configuredDownloadUrl("windows") ? (
+                <a href={configuredDownloadUrl("windows") ?? undefined} rel="noopener noreferrer">
+                  Inspect the Windows installer
+                </a>
+              ) : null}
             </article>
           );
         })}
       </div>
       <p id="download-status" className="download-status">
         {download.note}
+      </p>
+      <p className="download-status">{download.shortcut}</p>
+      <p className="download-status">{download.after}</p>
+      <p className="download-status">
+        {download.inspect}{" "}
+        <a href="https://adeptui.org/releases/current.json">Release catalog</a>
+        {" · "}
+        <a href="https://github.com/bradjohnson79/adeptui/releases/tag/v1.1.1">Release files</a>
       </p>
     </>
   );

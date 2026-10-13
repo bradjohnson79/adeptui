@@ -32,7 +32,7 @@ export const nav = [
 ] as const;
 
 export const cta = {
-  label: "Download",
+  label: "Install",
   href: "#download",
 } as const;
 
@@ -470,17 +470,22 @@ export const film = {
 } as const;
 
 export const download = {
-  eyebrow: "Beta",
-  title: "Download Adept UI Beta.",
-  lede: "Adept UI is desktop filmmaking software for Windows, macOS, and Linux. These builds are Beta. Choose your platform and bring the production environment to your workstation.",
-  channel: "Current release · Beta",
-  note: "Beta installers for Windows, macOS, and Linux.",
-  unavailable: "The installer will be published with the release.",
-  linuxPlan: "Choose the Linux package for your distribution. Ubuntu and Debian-based systems use the .deb package. Fedora and compatible RPM-based systems use the .rpm package. A portable AppImage is also available.",
+  eyebrow: "Install",
+  title: "Install Adept UI",
+  lede: "One command. Your AI filmmaking studio.",
+  channel: "Current release · 1.1.1 Beta",
+  note: "Windows and Linux install from one verified command. macOS stays unpublished until the app is signed and notarized.",
+  unavailable: "Certification Pending",
+  linuxPlan: "Ubuntu, Debian, Fedora, and compatible RPM systems. The command chooses the package for the distribution it detects.",
+  windowsPlan: "Windows 10 or later, 64-bit. The installer can add a desktop shortcut and open Adept UI when it finishes.",
+  macosPlan: "Certification Pending. Apple Developer ID signing and notarization are not configured, so no macOS install command is published.",
   desktopOnly: "Adept UI is available for desktop.",
   choose: "Choose your desktop platform:",
-  recommended: "Recommended for your device",
-  unknownLabel: "Coming soon",
+  recommended: "Your system",
+  unknownLabel: "Choose a platform",
+  shortcut: "A desktop shortcut is offered during installation. The application menu entry is included with the Linux packages.",
+  after: "Updates apply after Adept UI closes. Uninstall with adeptui uninstall. Your projects stay. Downloaded models stay unless you ask to remove them.",
+  inspect: "Prefer to read the installer first? The signed catalog lists the exact release files and checksums.",
 } as const;
 
 export const footer = {
@@ -489,7 +494,7 @@ export const footer = {
     { href: "#co-director", label: "Co-Director" },
     { href: "#production", label: "Production" },
     { href: "/docs", label: "Docs" },
-    { href: "#download", label: "Download" },
+    { href: "#download", label: "Install" },
     { href: "/contact", label: "Contact" },
     { href: "#faq", label: "Questions" },
   ],

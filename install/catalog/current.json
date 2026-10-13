@@ -1,0 +1,47 @@
+{
+  "approved": true,
+  "artifacts": [
+    {
+      "arch": "x64",
+      "bytes": 282676805,
+      "fileName": "Adept.UI-Setup-1.1.1-win-x64.exe",
+      "kind": "nsis",
+      "minOs": "Windows 10",
+      "platform": "windows",
+      "sha256": "59a45739451b961c4ab13aa284ae0d7954425fc6b49565e1a7bc4f7b05f7fa47",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-Setup-1.1.1-win-x64.exe",
+      "version": "1.1.1"
+    },
+    {
+      "arch": "x64",
+      "bytes": 389992076,
+      "distributions": [
+        "debian"
+      ],
+      "fileName": "Adept.UI-1.1.1-linux-x64.deb",
+      "kind": "deb",
+      "minOs": "Ubuntu 22.04",
+      "platform": "linux",
+      "sha256": "f68005e76413f4a467d8d40cea33f40a46498cc4e8e669651f418ce12e8757a6",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-1.1.1-linux-x64.deb",
+      "version": "1.1.1"
+    },
+    {
+      "arch": "x64",
+      "bytes": 344589433,
+      "distributions": [
+        "fedora"
+      ],
+      "fileName": "Adept.UI-1.1.1-linux-x64.rpm",
+      "kind": "rpm",
+      "minOs": "Fedora 39",
+      "platform": "linux",
+      "sha256": "fa0a42f40931e923080c70222a97206814099ab0de818a1425eebcd8e0e15c8c",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-1.1.1-linux-x64.rpm",
+      "version": "1.1.1"
+    }
+  ],
+  "channel": "beta",
+  "lifecycle": "1.0.0",
+  "version": "1.1.1"
+}

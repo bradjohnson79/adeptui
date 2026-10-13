@@ -17,7 +17,7 @@ from adept_lifecycle.desktop import linux_desktop_entry
 from adept_lifecycle.detect import SystemProfile, linux_family_from_os_release
 from adept_lifecycle.manager import Hooks, Layout, Lifecycle
 from adept_lifecycle.release import ReleaseError, assert_release_url, sign_catalog, sign_catalog_rsa, verify_catalog_rsa
-from adept_lifecycle.trust import generate_keypair
+from adept_lifecycle.trust import generate_keypair, pinned_public_key, verify_sha256
 from adept_lifecycle.safety import is_shared_dependency, resolve_contained
 
 KEY = b"test-release-key"
@@ -255,16 +255,41 @@ def test_doctor_repair_and_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str
     assert code == 0
 
 
-def test_bootstrap_refuses_unpublished_endpoints():
+def test_bootstrap_uses_the_pinned_catalog():
     script = ROOT / "install" / "bootstrap" / "install.ps1"
     text = script.read_text(encoding="utf-8")
-    assert "not open yet" in text
+    assert "not open yet" not in text
     assert "https://adeptui.org/releases/current.json" in text
-    assert "github.com" not in text.lower()
+    assert "https://adeptui.org/releases/current.sig" in text
+    assert "releases/download/v" in text
+    assert "127.0.0.1" not in text
+    assert "localhost" not in text.lower()
     shell = (ROOT / "install" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
-    assert "not open yet" in shell
+    assert "certification pending" in shell.lower()
     assert "https://adeptui.org/releases/current.json" in shell
-    assert "github.com" not in shell.lower()
+    assert "BEGIN PUBLIC KEY" in shell
+    assert "127.0.0.1" not in shell
+    assert "localhost" not in shell.lower()
+
+
+def test_pinned_catalog_signature_matches_the_published_release():
+    catalog = (ROOT / "install" / "catalog" / "current.json").read_bytes()
+    signature = (ROOT / "install" / "catalog" / "current.sig").read_text(encoding="utf-8").strip()
+    key = pinned_public_key()
+    assert key is not None
+    assert verify_sha256(catalog, "rsa-sha256:" + signature, key)
+    flipped = bytearray(catalog)
+    flipped[20] ^= 1
+    assert not verify_sha256(bytes(flipped), "rsa-sha256:" + signature, key)
+    body = json.loads(catalog.decode("utf-8"))
+    names = {item["fileName"] for item in body["artifacts"]}
+    assert names == {
+        "Adept.UI-Setup-1.1.1-win-x64.exe",
+        "Adept.UI-1.1.1-linux-x64.deb",
+        "Adept.UI-1.1.1-linux-x64.rpm",
+    }
+    assert all(item["url"].startswith("https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/") for item in body["artifacts"])
+    assert not any("mac" in item["fileName"].lower() or "appimage" in item["fileName"].lower() for item in body["artifacts"])
 
 
 def test_rsa_catalog_rejects_branch_urls_and_update_restores_the_previous_app(tmp_path: Path):

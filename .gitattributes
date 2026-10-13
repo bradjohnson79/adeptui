@@ -1,0 +1,8 @@
+www/public/install.ps1 text eol=lf
+www/public/install.sh text eol=lf
+www/public/releases/current.json text eol=lf
+www/public/releases/current.sig text eol=lf
+install/catalog/current.json text eol=lf
+install/catalog/current.sig text eol=lf
+install/bootstrap/install.ps1 text eol=lf
+install/bootstrap/install.sh text eol=lf

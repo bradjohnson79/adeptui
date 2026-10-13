@@ -90,7 +90,7 @@ function publicChunks(): KnowledgeChunk[] {
       tags: ["download", "windows", "macos", "linux"],
       updated: "",
       sourceType: "release",
-      text: "Adept UI 1.1 is free desktop software for Windows, macOS, and Linux, built around an open AI ecosystem. The website download provides the Windows setup, the macOS disk image, and a Linux package chooser. Ubuntu and Debian-based systems use the .deb package. Fedora and compatible RPM-based systems use the .rpm package. A portable AppImage is also available. This website does not publish hardware minimums such as RAM, VRAM, or disk size. The local application is free. Third-party APIs may cost money, and a future Adept Cloud may have its own charges. A phone is not the production app.",
+      text: "Adept UI 1.1 is free desktop software. Windows installs with irm https://adeptui.org/install.ps1 | iex. Ubuntu, Debian, Fedora, and compatible RPM systems install with curl -fsSL https://adeptui.org/install.sh | bash. macOS is certification pending until the app is signed and notarized, so no macOS install command is published. The signed catalog is at https://adeptui.org/releases/current.json. This website does not publish hardware minimums such as RAM, VRAM, or disk size. The local application is free. Third-party APIs may cost money, and a future Adept Cloud may have its own charges. A phone is not the production app.",
     },
     {
       title: "Supported models",

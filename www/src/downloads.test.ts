@@ -4,7 +4,7 @@ import {
   detectOs,
   downloadState,
   downloads,
-  linuxPackageChooserHref,
+  installCommand,
   platformDownloadHref,
   readyBuilds,
   releaseActionLabel,
@@ -83,35 +83,27 @@ describe("operating system detection", () => {
 });
 
 describe("download configuration", () => {
-  it("publishes the 1.1.1 desktop installers", () => {
+  it("publishes Windows and Linux install commands and holds macOS", () => {
     expect(downloads.windows.available).toBe(true);
-    expect(downloads.macos.available).toBe(true);
     expect(downloads.linux.available).toBe(true);
+    expect(downloads.macos.available).toBe(false);
+    expect(installCommand("windows")).toBe("irm https://adeptui.org/install.ps1 | iex");
+    expect(installCommand("linux")).toBe("curl -fsSL https://adeptui.org/install.sh | bash");
+    expect(installCommand("macos")).toBeNull();
+    expect(platformDownloadHref("windows")).toBe("#download");
+    expect(platformDownloadHref("linux")).toBe("#download");
+    expect(platformDownloadHref("macos")).toBeNull();
+    expect(configuredDownloadUrl("macos")).toBeNull();
     expect(configuredDownloadUrl("windows")).toMatch(/Adept\.UI-Setup-1\.1\.1-win-x64\.exe$/);
-    expect(configuredDownloadUrl("macos")).toMatch(/Adept\.UI-1\.1\.1-mac-arm64\.dmg$/);
-    expect(configuredDownloadUrl("linux")).toBeNull();
-    expect(platformDownloadHref("linux")).toBe(linuxPackageChooserHref);
-    expect(platformDownloadHref("windows")).toMatch(/Adept\.UI-Setup-1\.1\.1-win-x64\.exe$/);
-    expect(platformDownloadHref("macos")).toMatch(/Adept\.UI-1\.1\.1-mac-arm64\.dmg$/);
-    expect(readyBuilds("linux").map((build) => build.installerType)).toEqual(["deb", "rpm", "AppImage"]);
-    expect(readyBuilds("linux").map((build) => build.audience)).toEqual([
-      "Ubuntu / Debian",
-      "Fedora / RHEL",
-      "Universal Linux",
-    ]);
-    expect(readyBuilds("linux").find((build) => build.installerType === "AppImage")?.url).toMatch(/\.AppImage$/);
-    expect(readyBuilds("linux").find((build) => build.installerType === "deb")?.url).toMatch(/\.deb$/);
-    expect(readyBuilds("linux").find((build) => build.installerType === "rpm")?.url).toMatch(/\.rpm$/);
-    for (const release of Object.values(downloads)) {
-      expect(release.version).toBe("1.1.1");
-      expect(downloadState(release.id)).toBe("available");
-      expect(releaseActionLabel(release.id)).toBe(`Download for ${release.label}`);
-      if (release.id === "linux") {
-        expect(platformDownloadHref(release.id)).toBe(linuxPackageChooserHref);
-      } else {
-        expect(configuredDownloadUrl(release.id)?.startsWith("https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/")).toBe(true);
-      }
-    }
+    expect(readyBuilds("linux").map((build) => build.installerType)).toEqual(["deb", "rpm"]);
+    expect(downloadState("windows")).toBe("available");
+    expect(downloadState("linux")).toBe("available");
+    expect(downloadState("macos")).toBe("coming-soon");
+    expect(releaseActionLabel("windows")).toBe("Install Adept UI");
+    expect(releaseActionLabel("linux")).toBe("Install Adept UI");
+    expect(releaseActionLabel("macos")).toBe("Certification Pending");
+    expect(downloads.windows.version).toBe("1.1.1");
+    expect(downloads.linux.version).toBe("1.1.1");
   });
 
   it("rejects a URL that is not a configured https release", () => {
