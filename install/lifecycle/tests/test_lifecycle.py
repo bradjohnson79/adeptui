@@ -265,7 +265,13 @@ def test_bootstrap_uses_the_pinned_catalog():
     assert "127.0.0.1" not in text
     assert "localhost" not in text.lower()
     shell = (ROOT / "install" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
-    assert "certification pending" in shell.lower()
+    assert "certification pending" not in shell.lower()
+    assert "not notarized" in shell.lower()
+    assert 'kind="dmg"' in shell
+    assert "Apple Silicon" in shell
+    assert "xattr" not in shell
+    assert "spctl --master-disable" not in shell
+    assert "csrutil" not in shell
     assert "https://adeptui.org/releases/current.json" in shell
     assert "BEGIN PUBLIC KEY" in shell
     assert "127.0.0.1" not in shell
@@ -287,9 +293,15 @@ def test_pinned_catalog_signature_matches_the_published_release():
         "Adept.UI-Setup-1.1.1-win-x64.exe",
         "Adept.UI-1.1.1-linux-x64.deb",
         "Adept.UI-1.1.1-linux-x64.rpm",
+        "Adept.UI-1.1.1-mac-arm64.dmg",
     }
+    mac = next(item for item in body["artifacts"] if item["platform"] == "darwin")
+    assert mac["arch"] == "arm64"
+    assert mac["kind"] == "dmg"
+    assert mac["sha256"] == "84eca1be15e457c35d5b12276e4ed6d5adcad47a3a9a096d02d6ce396f3895dc"
+    assert mac["bytes"] == 396420950
     assert all(item["url"].startswith("https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/") for item in body["artifacts"])
-    assert not any("mac" in item["fileName"].lower() or "appimage" in item["fileName"].lower() for item in body["artifacts"])
+    assert not any("appimage" in item["fileName"].lower() for item in body["artifacts"])
 
 
 def test_rsa_catalog_rejects_branch_urls_and_update_restores_the_previous_app(tmp_path: Path):

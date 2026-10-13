@@ -39,6 +39,17 @@
       "sha256": "fa0a42f40931e923080c70222a97206814099ab0de818a1425eebcd8e0e15c8c",
       "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-1.1.1-linux-x64.rpm",
       "version": "1.1.1"
+    },
+    {
+      "arch": "arm64",
+      "bytes": 396420950,
+      "fileName": "Adept.UI-1.1.1-mac-arm64.dmg",
+      "kind": "dmg",
+      "minOs": "macOS 11",
+      "platform": "darwin",
+      "sha256": "84eca1be15e457c35d5b12276e4ed6d5adcad47a3a9a096d02d6ce396f3895dc",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-1.1.1-mac-arm64.dmg",
+      "version": "1.1.1"
     }
   ],
   "channel": "beta",

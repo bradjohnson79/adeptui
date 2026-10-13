@@ -172,7 +172,7 @@ function InstallCommand({ id }: { id: DesktopOs }) {
 }
 
 function HeroDownload({ os }: { os: ClientOs }) {
-  if (os === "linux" || os === "windows") {
+  if (isDesktopOs(os) && installCommand(os)) {
     return (
       <div className="download-hero">
         <div className="hero__actions">
@@ -305,6 +305,11 @@ export function DownloadAdeptUI({ variant }: { variant: "hero" | "panel" }) {
               {id === "windows" && configuredDownloadUrl("windows") ? (
                 <a href={configuredDownloadUrl("windows") ?? undefined} rel="noopener noreferrer">
                   Inspect the Windows installer
+                </a>
+              ) : null}
+              {id === "macos" && configuredDownloadUrl("macos") ? (
+                <a href={configuredDownloadUrl("macos") ?? undefined} rel="noopener noreferrer">
+                  Inspect the macOS disk image
                 </a>
               ) : null}
             </article>

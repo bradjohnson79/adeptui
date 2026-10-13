@@ -90,7 +90,7 @@ function publicChunks(): KnowledgeChunk[] {
       tags: ["download", "windows", "macos", "linux"],
       updated: "",
       sourceType: "release",
-      text: "Adept UI 1.1 is free desktop software. Windows installs with irm https://adeptui.org/install.ps1 | iex. Ubuntu, Debian, Fedora, and compatible RPM systems install with curl -fsSL https://adeptui.org/install.sh | bash. macOS is certification pending until the app is signed and notarized, so no macOS install command is published. The signed catalog is at https://adeptui.org/releases/current.json. This website does not publish hardware minimums such as RAM, VRAM, or disk size. The local application is free. Third-party APIs may cost money, and a future Adept Cloud may have its own charges. A phone is not the production app.",
+      text: "Adept UI 1.1 is free desktop software. Windows installs with irm https://adeptui.org/install.ps1 | iex. Ubuntu, Debian, Fedora, and compatible RPM systems, and Apple Silicon Macs, install with curl -fsSL https://adeptui.org/install.sh | bash. The macOS build is not notarized. The first launch may ask you to Control-click Adept UI and choose Open. Intel Macs are not a published install target for 1.1.1. The signed catalog is at https://adeptui.org/releases/current.json. This website does not publish hardware minimums such as RAM, VRAM, or disk size. The local application is free. Third-party APIs may cost money, and a future Adept Cloud may have its own charges. A phone is not the production app.",
     },
     {
       title: "Supported models",

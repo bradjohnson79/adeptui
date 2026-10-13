@@ -83,27 +83,28 @@ describe("operating system detection", () => {
 });
 
 describe("download configuration", () => {
-  it("publishes Windows and Linux install commands and holds macOS", () => {
+  it("publishes Windows, Linux, and macOS install commands", () => {
     expect(downloads.windows.available).toBe(true);
     expect(downloads.linux.available).toBe(true);
-    expect(downloads.macos.available).toBe(false);
+    expect(downloads.macos.available).toBe(true);
     expect(installCommand("windows")).toBe("irm https://adeptui.org/install.ps1 | iex");
     expect(installCommand("linux")).toBe("curl -fsSL https://adeptui.org/install.sh | bash");
-    expect(installCommand("macos")).toBeNull();
+    expect(installCommand("macos")).toBe("curl -fsSL https://adeptui.org/install.sh | bash");
     expect(platformDownloadHref("windows")).toBe("#download");
     expect(platformDownloadHref("linux")).toBe("#download");
-    expect(platformDownloadHref("macos")).toBeNull();
-    expect(configuredDownloadUrl("macos")).toBeNull();
+    expect(platformDownloadHref("macos")).toBe("#download");
+    expect(configuredDownloadUrl("macos")).toMatch(/Adept\.UI-1\.1\.1-mac-arm64\.dmg$/);
     expect(configuredDownloadUrl("windows")).toMatch(/Adept\.UI-Setup-1\.1\.1-win-x64\.exe$/);
     expect(readyBuilds("linux").map((build) => build.installerType)).toEqual(["deb", "rpm"]);
     expect(downloadState("windows")).toBe("available");
     expect(downloadState("linux")).toBe("available");
-    expect(downloadState("macos")).toBe("coming-soon");
+    expect(downloadState("macos")).toBe("available");
     expect(releaseActionLabel("windows")).toBe("Install Adept UI");
     expect(releaseActionLabel("linux")).toBe("Install Adept UI");
-    expect(releaseActionLabel("macos")).toBe("Certification Pending");
+    expect(releaseActionLabel("macos")).toBe("Install Adept UI");
     expect(downloads.windows.version).toBe("1.1.1");
     expect(downloads.linux.version).toBe("1.1.1");
+    expect(downloads.macos.version).toBe("1.1.1");
   });
 
   it("rejects a URL that is not a configured https release", () => {

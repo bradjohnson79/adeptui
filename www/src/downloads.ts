@@ -47,13 +47,15 @@ function releaseUrl(fileName: string): string {
 }
 
 const windowsInstaller = releaseUrl("Adept.UI-Setup-1.1.1-win-x64.exe");
+const macInstaller = releaseUrl("Adept.UI-1.1.1-mac-arm64.dmg");
 const linuxDeb = releaseUrl("Adept.UI-1.1.1-linux-x64.deb");
 const linuxRpm = releaseUrl("Adept.UI-1.1.1-linux-x64.rpm");
 
-/** Public install commands. macOS stays unpublished until signing and notarization. */
+/** Public install commands. The macOS build is a direct download and is not notarized. */
 export const installCommands: Partial<Record<DesktopOs, string>> = {
   windows: "irm https://adeptui.org/install.ps1 | iex",
   linux: "curl -fsSL https://adeptui.org/install.sh | bash",
+  macos: "curl -fsSL https://adeptui.org/install.sh | bash",
 };
 
 /** The install panel is the public action. Package files stay available to inspect. */
@@ -72,8 +74,8 @@ export const downloads: Record<DesktopOs, PlatformRelease> = {
     id: "macos",
     label: "macOS",
     version: "1.1.1",
-    url: "",
-    available: false,
+    url: macInstaller,
+    available: true,
     builds: [],
   },
   linux: {
@@ -202,8 +204,8 @@ export function downloadState(id: DesktopOs): DownloadState {
 
 /** Names a real download only when a trusted installer URL is configured. */
 export function releaseActionLabel(id: DesktopOs): string {
-  if (id === "macos") return "Certification Pending";
   if (installCommand(id)) return "Install Adept UI";
+  if (id === "macos") return "Certification Pending";
   const label = downloads[id].label;
   if (downloadState(id) === "available") return `Download for ${label}`;
   return `${label} — Coming Soon`;

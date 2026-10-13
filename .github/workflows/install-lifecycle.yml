@@ -24,3 +24,45 @@ jobs:
         run: |
           python -m pip install pytest
           python -m pytest install/lifecycle/tests -q
+
+  macos-install:
+    name: macOS application install
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the signed Apple Silicon release
+        run: |
+          export ADEPT_CATALOG_FILE="$GITHUB_WORKSPACE/install/catalog/current.json"
+          export ADEPT_SIGNATURE_FILE="$GITHUB_WORKSPACE/install/catalog/current.sig"
+          export ADEPT_ASSUME_YES=1
+          export ADEPT_NO_LAUNCH=1
+          bash install/bootstrap/install.sh
+      - name: Check the installed application
+        run: |
+          test -d "$HOME/Applications/Adept UI.app"
+          test -x "$HOME/Applications/Adept UI.app/Contents/MacOS/Adept UI"
+          lipo -info "$HOME/Applications/Adept UI.app/Contents/MacOS/Adept UI" | grep arm64
+          "$HOME/.local/bin/adeptui" --version
+          "$HOME/.local/bin/adeptui" doctor
+          "$HOME/.local/bin/adeptui" --help
+      - name: Record Gatekeeper and launch
+        run: |
+          {
+            echo "## codesign"
+            codesign -dv --verbose=4 "$HOME/Applications/Adept UI.app" 2>&1 || true
+            echo "## gatekeeper"
+            spctl --assess --type execute --verbose=4 "$HOME/Applications/Adept UI.app" 2>&1 || true
+            echo "## open"
+            open "$HOME/Applications/Adept UI.app" 2>&1 || true
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Uninstall and keep a personal project
+        run: |
+          mkdir -p "$HOME/Library/Application Support/Adept UI/projects"
+          echo keep > "$HOME/Library/Application Support/Adept UI/projects/keep.txt"
+          osascript -e 'tell application "Adept UI" to quit' || true
+          pkill -f "Adept UI.app/Contents/MacOS" || true
+          ADEPT_CONFIRM_UNINSTALL=1 "$HOME/.local/bin/adeptui" uninstall
+          test ! -d "$HOME/Applications/Adept UI.app"
+          test ! -f "$HOME/.local/bin/adeptui"
+          test "$(cat "$HOME/Library/Application Support/Adept UI/projects/keep.txt")" = "keep"
