@@ -473,7 +473,7 @@ export const download = {
   eyebrow: "Install",
   title: "Install Adept UI",
   lede: "One command. Your AI filmmaking studio.",
-  channel: "Current release · 1.1.1 Beta",
+  channel: "Current release · 1.1.2 Beta",
   note: "Windows, Linux, and macOS install from one verified command. The macOS build is not notarized.",
   unavailable: "Certification Pending",
   linuxPlan: "Ubuntu, Debian, Fedora, and compatible RPM systems. The command chooses the package for the distribution it detects.",

@@ -290,17 +290,17 @@ def test_pinned_catalog_signature_matches_the_published_release():
     body = json.loads(catalog.decode("utf-8"))
     names = {item["fileName"] for item in body["artifacts"]}
     assert names == {
-        "Adept.UI-Setup-1.1.1-win-x64.exe",
-        "Adept.UI-1.1.1-linux-x64.deb",
-        "Adept.UI-1.1.1-linux-x64.rpm",
-        "Adept.UI-1.1.1-mac-arm64.dmg",
+        "Adept.UI-Setup-1.1.2-win-x64.exe",
+        "Adept.UI-1.1.2-linux-x64.deb",
+        "Adept.UI-1.1.2-linux-x64.rpm",
+        "Adept.UI-1.1.2-mac-arm64.dmg",
     }
     mac = next(item for item in body["artifacts"] if item["platform"] == "darwin")
     assert mac["arch"] == "arm64"
     assert mac["kind"] == "dmg"
-    assert mac["sha256"] == "84eca1be15e457c35d5b12276e4ed6d5adcad47a3a9a096d02d6ce396f3895dc"
-    assert mac["bytes"] == 396420950
-    assert all(item["url"].startswith("https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/") for item in body["artifacts"])
+    assert mac["sha256"] == "55c678534bd5502f026ac691b08836e1551ee410e08169ee9d04ef04d3c5bcdf"
+    assert mac["bytes"] == 391347954
+    assert all(item["url"].startswith("https://github.com/bradjohnson79/adeptui/releases/download/v1.1.2/") for item in body["artifacts"])
     assert not any("appimage" in item["fileName"].lower() for item in body["artifacts"])
 
 

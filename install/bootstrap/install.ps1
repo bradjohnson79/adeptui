@@ -54,7 +54,7 @@ if ($artifact.url -notmatch '^https://github\.com/bradjohnson79/adeptui/releases
 }
 
 $destination = Join-Path $env:TEMP ([IO.Path]::GetFileName($artifact.fileName))
-$expectedBytes = [long]$artifact.size
+$expectedBytes = [long]$(if ($artifact.bytes) { $artifact.bytes } else { $artifact.size })
 $expectedMB = [math]::Round($expectedBytes / 1MB, 1)
 Write-Host "Downloading $($artifact.fileName) ($expectedMB MB)"
 $downloadStart = Get-Date

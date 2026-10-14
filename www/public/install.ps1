@@ -54,7 +54,10 @@ if ($artifact.url -notmatch '^https://github\.com/bradjohnson79/adeptui/releases
 }
 
 $destination = Join-Path $env:TEMP ([IO.Path]::GetFileName($artifact.fileName))
-Write-Host "Downloading $($artifact.fileName)"
+$expectedBytes = [long]$(if ($artifact.bytes) { $artifact.bytes } else { $artifact.size })
+$expectedMB = [math]::Round($expectedBytes / 1MB, 1)
+Write-Host "Downloading $($artifact.fileName) ($expectedMB MB)"
+$downloadStart = Get-Date
 try {
   Invoke-WebRequest -Uri $artifact.url -OutFile $destination -UseBasicParsing
 } catch {
@@ -62,6 +65,11 @@ try {
   Write-Host "The download did not finish."
   exit 5
 }
+$actualBytes = (Get-Item $destination).Length
+$elapsed = (Get-Date) - $downloadStart
+$speedMBps = if ($elapsed.TotalSeconds -gt 0) { [math]::Round($actualBytes / 1MB / $elapsed.TotalSeconds, 1) } else { 0 }
+$actualMB = [math]::Round($actualBytes / 1MB, 1)
+Write-Host "Downloaded $actualMB MB in $([math]::Round($elapsed.TotalSeconds, 0))s ($speedMBps MB/s)"
 $actual = (Get-FileHash -Algorithm SHA256 -Path $destination).Hash.ToLower()
 if ($actual -ne ([string]$artifact.sha256).ToLower()) {
   Remove-Item $destination -Force

@@ -122,7 +122,7 @@ url = str(chosen["url"])
 if not url.startswith("https://github.com/bradjohnson79/adeptui/releases/download/v"):
     raise SystemExit("The catalog does not point at an official Adept UI release.")
 destination = pathlib.Path(sys.argv[1]).parent / chosen["fileName"]
-expected_bytes = int(chosen.get("size") or 0)
+expected_bytes = int(chosen.get("bytes") or chosen.get("size") or 0)
 expected_mb = round(expected_bytes / (1024 * 1024), 1)
 print(f"Downloading {chosen['fileName']} ({expected_mb} MB)", file=sys.stderr)
 import time

@@ -3,56 +3,56 @@
   "artifacts": [
     {
       "arch": "x64",
-      "bytes": 282676805,
-      "fileName": "Adept.UI-Setup-1.1.1-win-x64.exe",
+      "bytes": 283158956,
+      "fileName": "Adept.UI-Setup-1.1.2-win-x64.exe",
       "kind": "nsis",
       "minOs": "Windows 10",
       "platform": "windows",
-      "sha256": "59a45739451b961c4ab13aa284ae0d7954425fc6b49565e1a7bc4f7b05f7fa47",
-      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-Setup-1.1.1-win-x64.exe",
-      "version": "1.1.1"
+      "sha256": "c4584f8e280665c902691019ed7f3c52ee22c0d9897a5cc7e4705aeacfad7826",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.2/Adept.UI-Setup-1.1.2-win-x64.exe",
+      "version": "1.1.2"
     },
     {
       "arch": "x64",
-      "bytes": 389992076,
+      "bytes": 390126884,
       "distributions": [
         "debian"
       ],
-      "fileName": "Adept.UI-1.1.1-linux-x64.deb",
+      "fileName": "Adept.UI-1.1.2-linux-x64.deb",
       "kind": "deb",
       "minOs": "Ubuntu 22.04",
       "platform": "linux",
-      "sha256": "f68005e76413f4a467d8d40cea33f40a46498cc4e8e669651f418ce12e8757a6",
-      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-1.1.1-linux-x64.deb",
-      "version": "1.1.1"
+      "sha256": "14ed257b690c4dcbd1d44a83b90f50a00ab882ecd7fe672359e894eb43ca2257",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.2/Adept.UI-1.1.2-linux-x64.deb",
+      "version": "1.1.2"
     },
     {
       "arch": "x64",
-      "bytes": 344589433,
+      "bytes": 344775085,
       "distributions": [
         "fedora"
       ],
-      "fileName": "Adept.UI-1.1.1-linux-x64.rpm",
+      "fileName": "Adept.UI-1.1.2-linux-x64.rpm",
       "kind": "rpm",
       "minOs": "Fedora 39",
       "platform": "linux",
-      "sha256": "fa0a42f40931e923080c70222a97206814099ab0de818a1425eebcd8e0e15c8c",
-      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-1.1.1-linux-x64.rpm",
-      "version": "1.1.1"
+      "sha256": "2bc2b953b7c7c213ce5200d9d2f93d6be00ac35e19d0b8118862551e82c781af",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.2/Adept.UI-1.1.2-linux-x64.rpm",
+      "version": "1.1.2"
     },
     {
       "arch": "arm64",
-      "bytes": 396420950,
-      "fileName": "Adept.UI-1.1.1-mac-arm64.dmg",
+      "bytes": 391347954,
+      "fileName": "Adept.UI-1.1.2-mac-arm64.dmg",
       "kind": "dmg",
       "minOs": "macOS 11",
       "platform": "darwin",
-      "sha256": "84eca1be15e457c35d5b12276e4ed6d5adcad47a3a9a096d02d6ce396f3895dc",
-      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-1.1.1-mac-arm64.dmg",
-      "version": "1.1.1"
+      "sha256": "55c678534bd5502f026ac691b08836e1551ee410e08169ee9d04ef04d3c5bcdf",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.2/Adept.UI-1.1.2-mac-arm64.dmg",
+      "version": "1.1.2"
     }
   ],
   "channel": "beta",
   "lifecycle": "1.0.0",
-  "version": "1.1.1"
+  "version": "1.1.2"
 }

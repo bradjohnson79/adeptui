@@ -3,11 +3,11 @@
 # Do not disable Gatekeeper. A quarantine attribute is applied only to a disposable copy.
 set -u
 
-url="https://github.com/bradjohnson79/adeptui/releases/download/v1.1.1/Adept.UI-1.1.1-mac-arm64.dmg"
+url="https://github.com/bradjohnson79/adeptui/releases/download/v1.1.2/Adept.UI-1.1.2-mac-arm64.dmg"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 work="${RUNNER_TEMP:-/tmp}/adept-macos-dmg-diagnosis"
 evidence="$root/electron/build/macos-dmg-diagnosis"
-dmg="$work/Adept.UI-1.1.1-mac-arm64.dmg"
+dmg="$work/Adept.UI-1.1.2-mac-arm64.dmg"
 mount="$work/mount"
 log="$evidence/diagnosis.txt"
 
