@@ -45,11 +45,11 @@ function makeStatus(opts: {
 }
 
 describe("buildSnapshot", () => {
-  it("warm — all required online → 100%, ALL REQUIRED SYSTEMS ONLINE", () => {
+  it("warm — all required online → 100%, System Online", () => {
     const snap = buildSnapshot(makeStatus({}), true);
     expect(snap.allRequiredOnline).toBe(true);
     expect(snap.overallPct).toBe(100);
-    expect(snap.message).toBe("ALL REQUIRED SYSTEMS ONLINE");
+    expect(snap.message).toBe("System Online. Preparing Adept UI. One moment please...");
     expect(snap.rows.find((r) => r.id === "creator_engine")?.state).toBe("online");
   });
 

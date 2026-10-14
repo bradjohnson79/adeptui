@@ -287,7 +287,7 @@ export function describeFinalStatus(input: {
     return {
       phaseTitle: complete ? "Adept UI Ready" : "Bringing Adept UI Online",
       progressLabel: complete ? "Startup Complete" : "Bringing Adept UI Online",
-      message: "ALL REQUIRED SYSTEMS ONLINE",
+      message: "System Online. Preparing Adept UI. One moment please...",
       headline: "ADEPT UI READY — GO",
       body: "All required systems are ready.",
       optionalNote: setupNames.length ? "Optional components can be configured from Setup." : "",
@@ -300,7 +300,7 @@ export function describeFinalStatus(input: {
   return {
     phaseTitle: input.allRequiredOnline ? "Adept UI Ready" : "Bringing Adept UI Online",
     progressLabel: input.allRequiredOnline ? "Startup Complete" : "Bringing Adept UI Online",
-    message: input.allRequiredOnline ? "ALL REQUIRED SYSTEMS ONLINE" : "",
+    message: input.allRequiredOnline ? "System Online. Preparing Adept UI. One moment please..." : "",
     headline: "",
     body: "",
     optionalNote: "",

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { formatBytes } from "./helpers";
+import { mapProviderError } from "./ProviderKeysPanel";
 import type { FirstRunScan } from "./firstRun";
 import { scanAllowsCompletion } from "./firstRun";
 import type { SetupComponentStatus, SetupStatusResponse } from "./types";
@@ -8,7 +9,7 @@ import type { SetupComponentStatus, SetupStatusResponse } from "./types";
 type WizardStep = "choice" | "details" | "providers" | "comfy" | "review" | "install" | "done" | "blocked";
 
 const OFFICIAL_COMFY_DOWNLOAD = "https://www.comfy.org/download";
-type InstallProfile = "local" | "api" | "hybrid";
+export type InstallProfile = "local" | "api" | "hybrid";
 
 const PROVIDERS = [
   { id: "fal", name: "fal.ai", detail: "Hosted image and video models." },
@@ -20,18 +21,18 @@ const PROVIDERS = [
 const LOCAL_BASELINE = ["zimage_models", "ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"];
 const LTX_GROUP = ["ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"];
 
-const PROFILE_COPY: Record<InstallProfile, { title: string; body: string }> = {
+export const PROFILE_COPY: Record<InstallProfile, { title: string; body: string }> = {
   local: {
-    title: "Local AI Models",
-    body: "I want to use local AI models through my computer. I have sufficient storage and compatible hardware.",
-  },
-  api: {
-    title: "Commercial API Models",
-    body: "I want to use commercial API models through Adept UI, using my own provider API keys.",
+    title: "Full Local Installation",
+    body: "Run supported AI models locally using the computer's hardware.",
   },
   hybrid: {
-    title: "Custom Hybrid Installation",
-    body: "I want to choose which local AI models to install and connect commercial API providers.",
+    title: "Hybrid Installation — Local + API",
+    body: "Combine local AI generation with commercial API providers.",
+  },
+  api: {
+    title: "Full API Installation",
+    body: "Use commercial API providers without installing local AI generation models.",
   },
 };
 
@@ -80,6 +81,8 @@ export function FirstRunSetupModal({
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [providerMessage, setProviderMessage] = useState<string | null>(null);
+  const [providerTesting, setProviderTesting] = useState<Record<string, boolean>>({});
+  const [providerResult, setProviderResult] = useState<Record<string, "success" | "auth_failed" | "unavailable" | "timeout" | "config_error" | null>>({});
   const [shortcut, setShortcut] = useState(true);
   const [shortcutMessage, setShortcutMessage] = useState<string | null>(null);
   const [installErrors, setInstallErrors] = useState<{ id: string; message: string }[]>([]);
@@ -160,12 +163,46 @@ export function FirstRunSetupModal({
 
   const modelsForProfile = profile === "local" ? LOCAL_BASELINE : profile === "hybrid" ? withLtxGroup(selectedModels) : [];
 
-  const connectProvider = (providerId: string) => {
+  const connectProvider = async (providerId: string) => {
     const value = (keys[providerId] || "").trim();
-    if (!value) return;
-    setProviderIds((current) => current.includes(providerId) ? current : [...current, providerId]);
-    setPendingDisconnect((current) => current.filter((id) => id !== providerId));
-    setProviderMessage("The key stays on this screen until you choose Begin Setup.");
+    if (!value) {
+      setProviderMessage("Enter an API key before testing the connection.");
+      return;
+    }
+    setProviderTesting((current) => ({ ...current, [providerId]: true }));
+    setProviderResult((current) => ({ ...current, [providerId]: null }));
+    setProviderMessage(null);
+    try {
+      // The backend probes the key first and only stores it if the provider accepts it.
+      // A failed probe returns ok:false and never touches the stored credential.
+      const result = await api.hostedProvidersConnect(providerId, value);
+      if (result && result.ok === false) {
+        const code = result.error || "";
+        if (code === "INVALID_KEY") {
+          setProviderResult((current) => ({ ...current, [providerId]: "auth_failed" }));
+          setProviderMessage(result.message || "The provider rejected this API key.");
+        } else if (code === "KEY_REQUIRED") {
+          setProviderResult((current) => ({ ...current, [providerId]: "config_error" }));
+          setProviderMessage("API key is required.");
+        } else {
+          setProviderResult((current) => ({ ...current, [providerId]: "config_error" }));
+          setProviderMessage(result.message || "The provider configuration is incomplete or unsupported.");
+        }
+        return;
+      }
+      setProviderIds((current) => current.includes(providerId) ? current : [...current, providerId]);
+      setPendingDisconnect((current) => current.filter((id) => id !== providerId));
+      setProviderResult((current) => ({ ...current, [providerId]: "success" }));
+      setProviderMessage("Connection successful. The provider accepted this API key.");
+      // Key is now saved server-side. Clear the input so runInstall does not re-process it.
+      setKeys((current) => ({ ...current, [providerId]: "" }));
+    } catch (error) {
+      const mapped = mapProviderError(error);
+      setProviderResult((current) => ({ ...current, [providerId]: mapped.state }));
+      setProviderMessage(mapped.message);
+    } finally {
+      setProviderTesting((current) => ({ ...current, [providerId]: false }));
+    }
   };
 
   const runInstall = async () => {
@@ -258,7 +295,7 @@ export function FirstRunSetupModal({
       <section className="setup-dialog setup-installer" role="dialog" aria-modal="true" aria-labelledby="setup-wizard-title">
         <header className="setup-dialog-header">
           <h2 id="setup-wizard-title">
-            {step === "done" ? "Adept UI Setup Complete!" : "How would you like to use Adept UI?"}
+            {step === "done" ? "Adept UI Setup Complete!" : "Welcome to Adept UI"}
           </h2>
         </header>
 
@@ -276,9 +313,9 @@ export function FirstRunSetupModal({
 
         {!exitAsk && step === "choice" && (
           <>
-            <p>Choose how you want to create with Adept UI. We'll configure the necessary systems for you.</p>
+            <p>Choose how you want to run your AI filmmaking studio.</p>
             <div className="setup-choice-list" role="radiogroup" aria-label="Installation profile">
-              {(["local", "api", "hybrid"] as const).map((id) => (
+              {(["local", "hybrid", "api"] as const).map((id) => (
                 <label key={id} className={`setup-choice${profile === id ? " is-selected" : ""}`}>
                   <input
                     type="radio"
@@ -383,7 +420,14 @@ export function FirstRunSetupModal({
                 <button type="button" onClick={() => setShowKey((current) => ({ ...current, [provider.id]: !current[provider.id] }))}>
                   {showKey[provider.id] ? "Hide key" : "Show key"}
                 </button>
-                <button type="button" onClick={() => void connectProvider(provider.id)}>Test Connection</button>
+                <button type="button" disabled={providerTesting[provider.id]} onClick={() => void connectProvider(provider.id)}>
+                  {providerTesting[provider.id] ? "Testing…" : "Test Connection"}
+                </button>
+                {providerResult[provider.id] === "success" && <span role="status" aria-label="Connection successful">✓ Connected</span>}
+                {providerResult[provider.id] === "auth_failed" && <span role="alert">Authentication failed</span>}
+                {providerResult[provider.id] === "unavailable" && <span role="alert">Provider unavailable</span>}
+                {providerResult[provider.id] === "timeout" && <span role="alert">Timeout</span>}
+                {providerResult[provider.id] === "config_error" && <span role="alert">Configuration error</span>}
                 <button type="button" onClick={() => {
                   setPendingDisconnect((current) => current.includes(provider.id) ? current : [...current, provider.id]);
                   setProviderIds((current) => current.filter((id) => id !== provider.id));
@@ -402,7 +446,7 @@ export function FirstRunSetupModal({
         {!exitAsk && step === "review" && (
           <>
             <p>Adept UI will install only what is missing. Projects, media, and keys you already saved stay in place. Adept UI does not download ComfyUI.</p>
-            {profile === "api" && <p>ComfyUI is not required for Commercial API Models.</p>}
+            {profile === "api" && <p>ComfyUI is not required for Full API Installation.</p>}
             {profile === "hybrid" && comfyRequired && !comfyReady && (
               <p>Commercial API providers can be connected now. Local generation stays incomplete until ComfyUI is running. This Hybrid setup is not finished until both sides check out.</p>
             )}

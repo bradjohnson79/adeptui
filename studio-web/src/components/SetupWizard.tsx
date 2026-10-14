@@ -16,7 +16,8 @@ import {
   summarizeComponents,
 } from "../setup/helpers";
 import { installationProfileLabel, scanAllowsCompletion, setupWizardRequired } from "../setup/firstRun";
-import { FirstRunSetupModal } from "../setup/FirstRunSetupModal";
+import { FirstRunSetupModal, PROFILE_COPY, type InstallProfile } from "../setup/FirstRunSetupModal";
+import { ProviderKeysPanel } from "../setup/ProviderKeysPanel";
 import { OptionalToolsWizard } from "../setup/OptionalToolsWizard";
 import { CapabilityReadinessPanel } from "./CapabilityPanel";
 import { ModelLicenseDialog, modelLicenseStatusLabel } from "../setup/ModelLicenseDialog";
@@ -37,7 +38,6 @@ import { requiredBlockers, useCapabilities } from "./CapabilityPanel";
 import { VideoModelLibrary } from "./VideoModelLibrary";
 import { PromptIntelligenceBenchmarkDashboard } from "./CoDirector/PromptIntelligenceBenchmarkDashboard";
 import { DownloadSourcesPanel } from "./DownloadSourcesPanel";
-import { HostedProvidersSetupPanel } from "./HostedProvidersSetupPanel";
 import { isApiKeyCatalogComponent } from "./hostedProviderSetupCopy";
 import { ModelStoragePanel } from "./ModelStoragePanel";
 import { LoRASetupSection } from "./lora/LoRASetupSection";
@@ -1713,6 +1713,22 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   }
   const readyIds = new Set((scan?.alreadyReady ?? []).map((item) => item.id));
 
+  /** Permanent Setup Wizard: switching profiles here preserves saved keys, selected models, and installed files. */
+  const changeProfile = async (profile: InstallProfile) => {
+    if ((status.installationProfile || "") === profile) return;
+    try {
+      const next = await api.saveInstallationProfile({
+        profile,
+        selectedLocalModels: status.selectedLocalModels || [],
+        selectedProviders: status.selectedProviders || (status.connectedProviders || []).map((item) => item.id),
+      });
+      setStatus(next);
+      setMessage(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   return (
     <>
     {wizardOpen && (
@@ -1814,29 +1830,64 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
       </nav>
 
       {setupSection === "overview" && (
+        <>
+        <section className="panel setup-wizard-permanent" aria-label="Setup Wizard" data-testid="setup-wizard-permanent">
+          <h2>Setup Wizard</h2>
+          <section aria-label="Installation Profile" data-testid="setup-profile-section">
+            <h3>Installation Profile</h3>
+            <div className="setup-choice-list" role="radiogroup" aria-label="Installation profile">
+              {(["local", "hybrid", "api"] as const).map((id) => (
+                <label key={id} className={`setup-choice${(status.installationProfile || "") === id ? " is-selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="installation-profile-page"
+                    checked={(status.installationProfile || "") === id}
+                    data-testid={`profile-radio-${id}`}
+                    onChange={() => void changeProfile(id)}
+                  />
+                  <span className="setup-choice-indicator" aria-hidden="true" />
+                  <span className="setup-choice-text">
+                    <span className="setup-choice-title">{PROFILE_COPY[id].title}</span>
+                    <span className="setup-choice-description">{PROFILE_COPY[id].body}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </section>
+          <section aria-label="API Providers & Keys" data-testid="setup-api-keys-section">
+            <h3>API Providers &amp; Keys</h3>
+            <ProviderKeysPanel
+              connectedProviders={status.connectedProviders || []}
+              onChanged={() => refresh(true)}
+            />
+          </section>
+          <section aria-label="System Configuration" data-testid="setup-system-config-section">
+            <h3>System Configuration</h3>
+            <p>
+              Installation profile: {installationProfileLabel(status.installationProfile)}.
+            </p>
+            {(status.installationProfile || "") === "api" && (
+              <p>ComfyUI and local generation models are not required for Full API Installation.</p>
+            )}
+            <p>
+              Local models: {status.localModelsInstalled ?? 0} installed, {status.localModelsAvailable ?? 0} available.
+            </p>
+            <p>
+              API providers: {(status.connectedProviders || []).length} connected
+              {(status.connectedProviders || []).length ? ` (${status.connectedProviders?.map((item) => item.name).join(", ")})` : ""}.
+            </p>
+            <p>
+              System readiness: {scan?.essentialBlockerCount ? "This profile still needs the listed pieces." : status.overall_label}.
+            </p>
+          </section>
+        </section>
         <section className="panel" aria-label="Setup overview" data-testid="adept-setup-overview">
-          <p>
-            Current installation profile: {installationProfileLabel(status.installationProfile)}.
-          </p>
-          <p>
-            Local models: {status.localModelsInstalled ?? 0} installed, {status.localModelsAvailable ?? 0} available.
-          </p>
-          <p>
-            API providers: {(status.connectedProviders || []).length} connected
-            {(status.connectedProviders || []).length ? ` (${status.connectedProviders?.map((item) => item.name).join(", ")})` : ""}.
-          </p>
-          <p>
-            System readiness: {scan?.essentialBlockerCount ? "This profile still needs the listed pieces." : status.overall_label}.
-          </p>
           <div className="row-actions">
             <button type="button" className="primary" data-testid="run-setup-wizard" onClick={() => setWizardOpen(true)}>
               Run Setup Wizard
             </button>
             <button type="button" data-testid="manage-local-models" onClick={() => setSetupSection("models")}>
               Manage Local Models
-            </button>
-            <button type="button" data-testid="manage-api-connections" onClick={() => setSetupSection("components")}>
-              Manage API Connections
             </button>
             <button type="button" data-testid="add-optional-tools" onClick={() => setOptionalOpen(true)}>
               Add Optional Tools
@@ -1864,6 +1915,7 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
             </button>
           </div>
         </section>
+        </>
       )}
       {setupSection === "updates" && <AdeptSetupUpdates />}
       {setupSection === "sources" && <SourceManagerPage embedded />}
@@ -1896,8 +1948,6 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
           </p>
 
           <ModelStoragePanel onMessage={(m) => setMessage(m)} />
-
-          <HostedProvidersSetupPanel onMessage={setMessage} />
 
           <VideoModelLibrary />
           <PromptIntelligenceBenchmarkDashboard />

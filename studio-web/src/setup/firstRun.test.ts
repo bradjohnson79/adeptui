@@ -104,12 +104,12 @@ describe("installation-profile selection markup", () => {
   );
 
   it("keeps the three approved options with exact copy", () => {
-    expect(source).toContain('title: "Local AI Models"');
-    expect(source).toContain('title: "Commercial API Models"');
-    expect(source).toContain('title: "Custom Hybrid Installation"');
-    expect(source).toContain("I want to use local AI models through my computer.");
-    expect(source).toContain("I want to use commercial API models through Adept UI, using my own provider API keys.");
-    expect(source).toContain("I want to choose which local AI models to install and connect commercial API providers.");
+    expect(source).toContain('title: "Full Local Installation"');
+    expect(source).toContain('title: "Full API Installation"');
+    expect(source).toContain('title: "Hybrid Installation — Local + API"');
+    expect(source).toContain("Run supported AI models locally using the computer's hardware.");
+    expect(source).toContain("Use commercial API providers without installing local AI generation models.");
+    expect(source).toContain("Combine local AI generation with commercial API providers.");
   });
 
   it("renders an accessible radio group with one shared name", () => {

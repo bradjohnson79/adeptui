@@ -127,7 +127,7 @@ export function buildSnapshot(status: RuntimeManagerStatus | null, studioApiReac
   const anyRequiredFailed = required.some((r) => r.state === "failed");
 
   let message = "Bringing Adept UI Online";
-  if (allRequiredOnline) message = "ALL REQUIRED SYSTEMS ONLINE";
+  if (allRequiredOnline) message = "System Online. Preparing Adept UI. One moment please...";
   else if (anyRequiredFailed) message = "STARTUP FAILED";
 
   return { rows, overallPct, allRequiredOnline, anyRequiredFailed, studioApiReachable, message };

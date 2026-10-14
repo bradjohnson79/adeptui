@@ -122,8 +122,17 @@ url = str(chosen["url"])
 if not url.startswith("https://github.com/bradjohnson79/adeptui/releases/download/v"):
     raise SystemExit("The catalog does not point at an official Adept UI release.")
 destination = pathlib.Path(sys.argv[1]).parent / chosen["fileName"]
-print(f"Downloading {chosen['fileName']}", file=sys.stderr)
+expected_bytes = int(chosen.get("size") or 0)
+expected_mb = round(expected_bytes / (1024 * 1024), 1)
+print(f"Downloading {chosen['fileName']} ({expected_mb} MB)", file=sys.stderr)
+import time
+download_start = time.monotonic()
 urllib.request.urlretrieve(url, destination)
+elapsed = time.monotonic() - download_start
+actual_bytes = destination.stat().st_size
+actual_mb = round(actual_bytes / (1024 * 1024), 1)
+speed = round(actual_bytes / (1024 * 1024) / elapsed, 1) if elapsed > 0 else 0
+print(f"Downloaded {actual_mb} MB in {round(elapsed)}s ({speed} MB/s)", file=sys.stderr)
 digest = hashlib.sha256(destination.read_bytes()).hexdigest()
 if digest.lower() != str(chosen["sha256"]).lower():
     destination.unlink()

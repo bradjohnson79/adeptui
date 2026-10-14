@@ -119,7 +119,7 @@ describe("startup display truth table", () => {
       allRequiredOnline: true,
     });
     expect(status.headline).toBe("ADEPT UI READY — GO");
-    expect(status.message).toBe("ALL REQUIRED SYSTEMS ONLINE");
+    expect(status.message).toBe("System Online. Preparing Adept UI. One moment please...");
     expect(status.body).toBe("All required systems are ready.");
     expect(status.progressLabel).toBe("Startup Complete");
     expect(status.phaseTitle).toBe("Adept UI Ready");

@@ -43,6 +43,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.1.2" date="2026-10-13">
+      <description>
+        <p>Shared Setup Wizard with inline API provider keys for Windows, Ubuntu, Fedora, and Apple Silicon. Full API Installation does not require ComfyUI or local generation models.</p>
+      </description>
+    </release>
     <release version="1.1.1" date="2026-10-10">
       <description>
         <p>Beta 1.1.1 for Fedora x86_64. The Runtime Supervisor identifies its own control plane, Creator Engine is not required to open the application, and ComfyUI stays a manual prerequisite for local generation.</p>

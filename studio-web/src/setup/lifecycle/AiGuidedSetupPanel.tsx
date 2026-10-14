@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import { useOpenCoDirector } from "../../components/CoDirector";
-import { HostedProvidersSetupPanel } from "../../components/HostedProvidersSetupPanel";
 import { filterCloudProviders, isApiKeyCatalogComponent } from "../../components/hostedProviderSetupCopy";
 import type { InstallJob } from "../../contracts/installJobs";
 import type {
@@ -395,8 +394,6 @@ export function AiGuidedSetupPanel({
           </details>
         ))}
       </div>
-
-      <HostedProvidersSetupPanel onMessage={setMessage} />
 
       <div className="setup-component-section">
         <div className="setup-section-heading">
