@@ -57,18 +57,46 @@ def _run(cmd: list[str], log) -> int:
 
 
 def _python() -> str:
-    return sys.executable
+    """The interpreter used to run PyInstaller.
+
+    On CI runners the system ``python3`` is often an externally-managed Homebrew
+    install (PEP 668) that refuses ``pip install``. Build the launcher inside an
+    isolated virtual environment so the dependency install always succeeds and the
+    host interpreter is never modified. Locally, reuse the current interpreter when
+    PyInstaller is already importable.
+    """
+    return _venv_python()
+
+
+def _venv_python() -> str:
+    """Create (once) and return the launcher-build virtualenv interpreter."""
+    import venv
+
+    venv_dir = BUILD / "build-venv"
+    if os.name == "nt":
+        candidate = venv_dir / "Scripts" / "python.exe"
+    else:
+        candidate = venv_dir / "bin" / "python"
+    if candidate.is_file():
+        return str(candidate)
+    BUILD.mkdir(parents=True, exist_ok=True)
+    builder = venv.EnvBuilder(with_pip=True, clear=False, symlinks=not (os.name == "nt"))
+    builder.create(str(venv_dir))
+    return str(candidate)
 
 
 def _ensure_pyinstaller(log) -> bool:
-    try:
-        import PyInstaller  # noqa: F401
-
+    python = _python()
+    probe = subprocess.run(
+        [python, "-c", "import PyInstaller"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if probe.returncode == 0:
         log.write("pyinstaller: already available\n")
         return True
-    except ImportError:
-        log.write("pyinstaller: installing\n")
-        return _run([_python(), "-m", "pip", "install", "--quiet", "pyinstaller"], log) == 0
+    log.write(f"pyinstaller: installing into {python}\n")
+    return _run([python, "-m", "pip", "install", "--quiet", "pyinstaller"], log) == 0
 
 
 def build() -> int:
@@ -129,7 +157,9 @@ def main() -> int:
     parser.add_argument("--stage", action="store_true", help="Stage the launcher into electron/build/launcher")
     args = parser.parse_args()
     rc = build()
-    if args.show_log and LOG.is_file():
+    if (args.show_log or rc != 0) and LOG.is_file():
+        # Always surface the log on failure (CI runners don't upload it), so the
+        # root cause is visible in the job output instead of a bare exit code.
         sys.stdout.write(LOG.read_text(encoding="utf-8"))
     if rc == 0:
         if args.stage:
