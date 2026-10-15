@@ -10,7 +10,16 @@ function run(cmd, args, opts = {}) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
+// Headless Python for the launcher build (no console window). Prefer pythonw.
+function pythonw() {
+  const venv = path.join(root, "studio-api", ".venv", "Scripts", "pythonw.exe");
+  if (fs.existsSync(venv)) return venv;
+  return "pythonw";
+}
+
 run("node", ["electron/scripts/make-icons.mjs"]);
+// Build + stage the Universal Adept Launcher (single update authority) before packaging.
+run(pythonw(), ["install/launcher/build.py", "--stage"]);
 run(process.execPath, ["electron/scripts/stage-packaged-runtime.mjs"]);
 const vite = path.join(root, "studio-web", "node_modules", "vite", "bin", "vite.js");
 run(process.execPath, [vite, "build"], { cwd: path.join(root, "studio-web") });

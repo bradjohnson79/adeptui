@@ -37,6 +37,32 @@ def _default_root() -> Path:
     return Path.home() / ".adept-ui"
 
 
+def _sibling_app_executable() -> Path | None:
+    """The Electron application installed next to this launcher.
+
+    The packaged launcher sits beside the Electron binary in the install dir
+    (Windows), inside the .app as a sibling of the real Electron binary (macOS,
+    where the launcher is ``Adept UI`` and Electron is ``Adept UI.bin``), or next
+    to the AppImage/ELF (Linux). When the registry has no recorded executable
+    yet, the launcher adopts this sibling so a first launch boots the app.
+    """
+    exe = _frozen_exe()
+    if exe is None:
+        return None
+    base = exe.parent
+    if sys.platform == "win32":
+        candidates = [base / "Adept UI.exe"]
+    elif sys.platform == "darwin":
+        # Launcher is Contents/MacOS/Adept UI; Electron is Contents/MacOS/Adept UI.bin
+        candidates = [base / "Adept UI.bin"]
+    else:
+        candidates = [base / "Adept UI", base / "Adept UI.AppImage"]
+    for candidate in candidates:
+        if candidate.is_file() and candidate.resolve() != exe.resolve():
+            return candidate
+    return None
+
+
 def _build_hooks() -> Hooks:
     """Launch hooks: official signed catalog, no second package installer."""
     return Hooks(fetch_catalog=_fetch_official_catalog)
@@ -174,6 +200,13 @@ def run(argv: list[str] | None = None) -> int:
     profile = live_profile(str(root))
     hooks = _build_hooks()
     lifecycle = Lifecycle(layout, profile, None, hooks)
+
+    # Adopt the sibling Electron application for first launch / untracked installs so
+    # the packaged launcher boots the app it was shipped beside.
+    if not os.environ.get("ADEPT_APP_EXECUTABLE"):
+        sibling = _sibling_app_executable()
+        if sibling is not None:
+            os.environ["ADEPT_APP_EXECUTABLE"] = str(sibling)
 
     registry = read_registry(layout.registry_path)
     remembered = os.environ.get("ADEPT_INSTALLED_VERSION")

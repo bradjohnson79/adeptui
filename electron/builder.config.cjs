@@ -8,6 +8,15 @@ const identity = JSON.parse(fs.readFileSync(versionFile, "utf8"));
 
 const pyDir = path.join(__dirname, "build", `python-${process.platform}-${process.arch}`);
 
+// Universal Adept Launcher: the single update authority that runs before Electron.
+// Built per-platform by install/launcher/build.py and staged into electron/build.
+const launcherDir = path.join(__dirname, "build", "launcher");
+const launcherName =
+  process.platform === "win32" ? "Adept Launcher.exe"
+  : process.platform === "darwin" ? "Adept UI"
+  : "adept-launcher";
+const launcherBinary = path.join(launcherDir, launcherName);
+
 /** @type {import('electron-builder').Configuration} */
 const config = {
   appId: identity.appId,
@@ -50,6 +59,9 @@ const config = {
       ? [{ from: "electron/build/studio-api", to: "studio-api" }]
       : []),
     ...(fs.existsSync(pyDir) ? [{ from: pyDir, to: "python" }] : []),
+    // Ship the launcher beside the Electron binary so shortcuts/entry points can
+    // invoke it as the pre-boot update authority.
+    ...(fs.existsSync(launcherBinary) ? [{ from: launcherBinary, to: launcherName }] : []),
   ],
   asar: true,
   npmRebuild: false,
@@ -80,6 +92,7 @@ const config = {
     runAfterFinish: false,
     artifactName: "${productName}-Setup-${version}-win-x64.${ext}",
     uninstallDisplayName: identity.productName,
+    include: "electron/nsis/installer.nsh",
   },
   mac: {
     target: [
@@ -122,6 +135,9 @@ const config = {
       entry: {
         Name: identity.productName,
         Comment: identity.description,
+        // Launch via the Universal Adept Launcher (single update authority),
+        // which then boots the Electron app. Electron performs no handoff.
+        Exec: "adept-launcher",
         Icon: "app.adeptui.desktop",
         StartupWMClass: identity.productName,
       },

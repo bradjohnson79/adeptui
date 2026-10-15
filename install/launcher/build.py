@@ -101,14 +101,44 @@ def build() -> int:
         return 0
 
 
+def _staged_name() -> str:
+    if sys.platform == "win32":
+        return "Adept Launcher.exe"
+    if sys.platform == "darwin":
+        return "Adept UI"
+    return "adept-launcher"
+
+
+def stage() -> Path | None:
+    """Copy the built launcher into electron/build/launcher for electron-builder."""
+    import shutil
+
+    built = DIST / _staged_name()
+    if not built.is_file():
+        return None
+    target_dir = REPO_ROOT / "electron" / "build" / "launcher"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / _staged_name()
+    shutil.copy2(built, target)
+    return target
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--show-log", action="store_true")
+    parser.add_argument("--stage", action="store_true", help="Stage the launcher into electron/build/launcher")
     args = parser.parse_args()
     rc = build()
     if args.show_log and LOG.is_file():
         sys.stdout.write(LOG.read_text(encoding="utf-8"))
     if rc == 0:
+        if args.stage:
+            staged = stage()
+            if staged:
+                print(f"Launcher staged: {staged}")
+            else:
+                print("Launcher staging FAILED (built exe not found)")
+                return 1
         print(f"Launcher built. Log: {LOG}")
     else:
         print(f"Launcher build FAILED (see {LOG})")
