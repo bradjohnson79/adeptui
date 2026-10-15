@@ -368,6 +368,10 @@ function loadedNativeFiles(pid, appRoot) {
 }
 
 function executableOf(appPath) {
+  // After the launcher swap, Contents/MacOS/Adept UI is the PyInstaller launcher;
+  // the real Electron binary Playwright must drive is Adept UI.bin.
+  const renamed = path.join(appPath, "Contents", "MacOS", "Adept UI.bin");
+  if (fs.existsSync(renamed)) return renamed;
   return path.join(appPath, "Contents", "MacOS", "Adept UI");
 }
 
