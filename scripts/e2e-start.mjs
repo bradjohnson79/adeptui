@@ -55,6 +55,19 @@ const env = {
     process.env.STUDIO_FEATURE_VISION_VALIDATION_V1 || "1",
   STUDIO_FEATURE_TIMELINE_REFERENCES_V1:
     process.env.STUDIO_FEATURE_TIMELINE_REFERENCES_V1 || "1",
+  // M2.7.1: Production Executive closed-loop in E2E (API flag still defaults OFF outside e2e-start).
+  // Override with "0"/"false" for flags-off regression runs.
+  STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1:
+    process.env.STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1 || "1",
+  // M2.8 capability intelligence: fixture mode on; feature flags default off unless suite sets them.
+  ADEPT_M28_FIXTURE_MODE: process.env.ADEPT_M28_FIXTURE_MODE || "1",
+  STUDIO_FEATURE_MODEL_RADAR_V1: process.env.STUDIO_FEATURE_MODEL_RADAR_V1 || "1",
+  STUDIO_FEATURE_SANDBOX_RUNTIME_V1: process.env.STUDIO_FEATURE_SANDBOX_RUNTIME_V1 || "1",
+  STUDIO_FEATURE_VIRTUAL_STAGE_V1: process.env.STUDIO_FEATURE_VIRTUAL_STAGE_V1 || "1",
+  STUDIO_FEATURE_SHOT_PROFILES_V1: process.env.STUDIO_FEATURE_SHOT_PROFILES_V1 || "1",
+  STUDIO_FEATURE_PRODUCTION_RECIPE_V1: process.env.STUDIO_FEATURE_PRODUCTION_RECIPE_V1 || "1",
+  STUDIO_FEATURE_LOCATION_SPIN_V1: process.env.STUDIO_FEATURE_LOCATION_SPIN_V1 || "1",
+  // Deterministic ImageGen via Job+Asset mock adapter (not fake-only inside executive).
 };
 
 fs.writeFileSync(

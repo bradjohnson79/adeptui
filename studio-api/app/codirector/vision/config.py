@@ -44,7 +44,7 @@ class VisionThresholds:
 class VisionConfig:
     weights: VisionWeights = field(default_factory=VisionWeights)
     thresholds: VisionThresholds = field(default_factory=VisionThresholds)
-    default_provider: str = "mock"
+    default_provider: str = "local"
     blocking_validators: tuple[str, ...] = ("technical", "identity")
 
 

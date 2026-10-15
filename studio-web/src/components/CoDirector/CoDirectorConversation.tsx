@@ -8,6 +8,7 @@ import { CoDirectorToolStatus } from "./CoDirectorToolStatus";
 import { CoDirectorIntelligenceStatus } from "./CoDirectorIntelligenceStatus";
 import { CoDirectorProductionAnalysisPanel } from "./CoDirectorProductionAnalysis";
 import { CoDirectorValidationWorkspace } from "./CoDirectorValidationWorkspace";
+import { CoDirectorProductionExecutive } from "./CoDirectorProductionExecutive";
 import { summarizeSetup } from "./types";
 
 export function CoDirectorConversation({ compactWelcome = false }: { compactWelcome?: boolean }) {
@@ -44,6 +45,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     retryLastSend,
     openSettings,
     visionValidationEnabled,
+    productionExecutiveEnabled,
   } = useCoDirectorSession();
   const visualValidationPending = Boolean(
     productionAnalysis?.recommendation?.visualValidationPending,
@@ -64,6 +66,13 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
           projectId={uiContext.projectId}
           enabled={Boolean(visionValidationEnabled)}
           pending={visualValidationPending}
+          sceneId={uiContext.sceneId}
+        />
+      )}
+      {uiContext.projectId && (
+        <CoDirectorProductionExecutive
+          projectId={uiContext.projectId}
+          enabled={Boolean(productionExecutiveEnabled)}
           sceneId={uiContext.sceneId}
         />
       )}

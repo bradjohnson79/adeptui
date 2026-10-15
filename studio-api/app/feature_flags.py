@@ -7,6 +7,13 @@ Active Co-Director / Director gates include:
 * ``STUDIO_FEATURE_CODIRECTOR_INTELLIGENCE_V2``
 * ``STUDIO_FEATURE_VISION_VALIDATION_V1``
 * ``STUDIO_FEATURE_TIMELINE_REFERENCES_V1``
+* ``STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1``
+* ``STUDIO_FEATURE_MODEL_RADAR_V1`` (M2.8)
+* ``STUDIO_FEATURE_SANDBOX_RUNTIME_V1`` (M2.8)
+* ``STUDIO_FEATURE_VIRTUAL_STAGE_V1`` (M2.8)
+* ``STUDIO_FEATURE_SHOT_PROFILES_V1`` (M2.8)
+* ``STUDIO_FEATURE_PRODUCTION_RECIPE_V1`` (M2.8)
+* ``STUDIO_FEATURE_LOCATION_SPIN_V1`` (M2.8)
 """
 
 from __future__ import annotations
@@ -39,6 +46,13 @@ class FeatureFlags:
     codirector_intelligence_v2: bool = False
     vision_validation_v1: bool = False
     timeline_references_v1: bool = False
+    production_executive_v1: bool = False
+    model_radar_v1: bool = False
+    sandbox_runtime_v1: bool = False
+    virtual_stage_v1: bool = False
+    shot_profiles_v1: bool = False
+    production_recipe_v1: bool = False
+    location_spin_v1: bool = False
 
     @classmethod
     def from_env(

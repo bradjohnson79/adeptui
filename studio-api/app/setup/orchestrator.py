@@ -147,7 +147,11 @@ def _checkpoint_for(component_id: str, recommendation: str) -> dict[str, Any]:
 
     extra: dict[str, Any] = {}
     if recommendation in ("correct_path", "configure") or component.installer == "path_link":
-        kind = "model_path" if component.id in ("ltx_checkpoint", "wan_models") else "path"
+        kind = (
+            "model_path"
+            if component.id in ("ltx_checkpoint", "wan_models", "zimage_models")
+            else "path"
+        )
         selector = path_selector_mode(component_id)
         noun = "file" if selector == "file" else "folder"
         if component.verifier == "linked_files":
