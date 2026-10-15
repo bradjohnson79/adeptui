@@ -284,6 +284,10 @@ def test_pinned_catalog_signature_matches_the_published_release():
     key = pinned_public_key()
     assert key is not None
     assert verify_sha256(catalog, "rsa-sha256:" + signature, key)
+    parsed = json.loads(catalog)
+    parsed["signature"] = "rsa-sha256:" + signature
+    parsed["_signed_bytes"] = catalog
+    verify_catalog_rsa(parsed, key)
     flipped = bytearray(catalog)
     flipped[20] ^= 1
     assert not verify_sha256(bytes(flipped), "rsa-sha256:" + signature, key)

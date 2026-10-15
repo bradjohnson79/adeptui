@@ -114,6 +114,7 @@ def _fetch_official_catalog() -> dict | None:
         signature = "rsa-sha256:" + signature
     signed = dict(catalog)
     signed["signature"] = signature
+    signed["_signed_bytes"] = raw
     return signed
 
 

@@ -20,7 +20,7 @@ class ReleaseError(Exception):
 
 
 def canonical_bytes(catalog: dict[str, Any]) -> bytes:
-    body = {key: value for key, value in catalog.items() if key != "signature"}
+    body = {key: value for key, value in catalog.items() if key not in {"signature", "_signed_bytes"}}
     return json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
@@ -42,7 +42,9 @@ def verify_catalog_rsa(catalog: dict[str, Any], public_key: PublicKey) -> None:
     if catalog.get("approved") is not True:
         raise ReleaseError("NOT_APPROVED", "This catalog is not an owner-approved public release.")
     signature = catalog.get("signature")
-    if not isinstance(signature, str) or not verify_sha256(canonical_bytes(catalog), signature, public_key):
+    signed_bytes = catalog.get("_signed_bytes")
+    payload = signed_bytes if isinstance(signed_bytes, (bytes, bytearray)) else canonical_bytes(catalog)
+    if not isinstance(signature, str) or not verify_sha256(payload, signature, public_key):
         raise ReleaseError("SIGNATURE_INVALID", "The release catalog signature does not match the pinned public key.")
     for artifact in catalog.get("artifacts") or []:
         if isinstance(artifact, dict) and artifact.get("url"):
