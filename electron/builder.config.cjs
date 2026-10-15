@@ -66,6 +66,9 @@ const config = {
   asar: true,
   npmRebuild: false,
   publish: null,
+  // macOS: install the Universal Adept Launcher as the bundle executable after
+  // packaging, renaming the real Electron binary to Adept UI.bin. No-op elsewhere.
+  afterPack: "electron/scripts/macos-launcher-swap.cjs",
   win: {
     target: [
       { target: "nsis", arch: ["x64"] },

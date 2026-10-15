@@ -17,6 +17,10 @@ if (process.platform !== "darwin" || process.arch !== "arm64") {
 }
 
 console.log("MACOS NATIVE RUNNER = PASS");
+// Build + stage the Universal Adept Launcher Mach-O before packaging. The
+// launcher is installed as Contents/MacOS/Adept UI (matching CFBundleExecutable);
+// the real Electron binary is renamed to Adept UI.bin in the post-build step.
+run("python3", ["install/launcher/build.py", "--stage"]);
 run(process.execPath, ["electron/scripts/stage-packaged-runtime-darwin.mjs"]);
 const py = path.join(root, "electron", "build", "python-darwin-arm64", "bin", "python");
 const api = path.join(root, "electron", "build", "studio-api", "app", "main.py");
