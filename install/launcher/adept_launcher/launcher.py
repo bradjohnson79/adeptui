@@ -56,7 +56,10 @@ def _sibling_app_executable() -> Path | None:
         # Launcher is Contents/MacOS/Adept UI; Electron is Contents/MacOS/Adept UI.bin
         candidates = [base / "Adept UI.bin"]
     else:
-        candidates = [base / "Adept UI", base / "Adept UI.AppImage"]
+        # afterPack renames the real Electron ELF to "Adept UI.bin" and installs the
+        # launcher as "Adept UI". Prefer the renamed sibling; fall back to a plain
+        # "Adept UI" (unswapped layout) or the AppImage for direct launches.
+        candidates = [base / "Adept UI.bin", base / "Adept UI", base / "Adept UI.AppImage"]
     for candidate in candidates:
         if candidate.is_file() and candidate.resolve() != exe.resolve():
             return candidate

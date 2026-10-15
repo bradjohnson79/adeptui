@@ -66,9 +66,11 @@ const config = {
   asar: true,
   npmRebuild: false,
   publish: null,
-  // macOS: install the Universal Adept Launcher as the bundle executable after
-  // packaging, renaming the real Electron binary to Adept UI.bin. No-op elsewhere.
-  afterPack: "electron/scripts/macos-launcher-swap.cjs",
+  // Install the Universal Adept Launcher as the package executable after
+  // packaging (macOS: CFBundleExecutable slot; Linux: the deb/rpm/AppImage
+  // executable slot), renaming the real Electron binary to Adept UI.bin.
+  // Windows is a no-op here — it uses the NSIS shortcut retarget instead.
+  afterPack: "electron/scripts/launcher-swap.cjs",
   win: {
     target: [
       { target: "nsis", arch: ["x64"] },
@@ -138,9 +140,6 @@ const config = {
       entry: {
         Name: identity.productName,
         Comment: identity.description,
-        // Launch via the Universal Adept Launcher (single update authority),
-        // which then boots the Electron app. Electron performs no handoff.
-        Exec: "adept-launcher",
         Icon: "app.adeptui.desktop",
         StartupWMClass: identity.productName,
       },

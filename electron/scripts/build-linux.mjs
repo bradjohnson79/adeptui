@@ -17,6 +17,10 @@ if (process.platform !== "linux" || process.arch !== "x64") {
 }
 
 console.log("LINUX NATIVE RUNNER = PASS");
+// Build + stage the Universal Adept Launcher ELF before packaging. The launcher
+// is installed as the package executable (deb/rpm/AppImage Exec target); the real
+// Electron binary is renamed to Adept UI.bin by the afterPack swap.
+run("python3", ["install/launcher/build.py", "--stage"]);
 run(process.execPath, ["electron/scripts/audit-linux-wheels.mjs"]);
 run(process.execPath, ["electron/scripts/stage-packaged-runtime-linux.mjs"]);
 const py = path.join(root, "electron", "build", "python-linux-x64", "bin", "python");
@@ -33,7 +37,8 @@ run(process.execPath, [builder, "--linux", "--x64", "--config", "electron/builde
 });
 
 const version = JSON.parse(fs.readFileSync(path.join(root, "electron", "version.json"), "utf8")).version;
-const unpacked = path.join(root, "electron", "dist", "linux-unpacked", "Adept UI");
+// After the afterPack swap, the real Electron ELF is Adept UI.bin; "Adept UI" is the launcher.
+const unpacked = path.join(root, "electron", "dist", "linux-unpacked", "Adept UI.bin");
 const appImage = path.join(root, "electron", "dist", `Adept UI-${version}-linux-x64.AppImage`);
 const deb = path.join(root, "electron", "dist", `Adept UI-${version}-linux-x64.deb`);
 const rpm = path.join(root, "electron", "dist", `Adept.UI-${version}-linux-x64.rpm`);

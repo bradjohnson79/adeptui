@@ -74,8 +74,11 @@ appstreamcli dump app.adeptui.desktop > "$evidence/appstream-dump.txt" 2>&1 || t
 echo "FEDORA APPSTREAM VALIDATE = PASS"
 echo "FEDORA GNOME SOFTWARE GUI = UNAVAILABLE IN CONTAINER"
 
-bin="$(rpm -ql adept-ui | grep -E '/Adept UI$' | head -n 1)"
-test -n "$bin"
+launcher="$(rpm -ql adept-ui | grep -E '/Adept UI$' | head -n 1)"
+test -n "$launcher"
+test -f "$launcher"
+# After the launcher swap, the real Electron ELF is the sibling "Adept UI.bin".
+bin="${launcher}.bin"
 test -f "$bin"
 rpm -ql adept-ui | grep -q '\.desktop$'
 

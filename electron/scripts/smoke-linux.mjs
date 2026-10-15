@@ -12,7 +12,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const version = JSON.parse(fs.readFileSync(path.join(root, "electron", "version.json"), "utf8")).version;
 const dist = path.join(root, "electron", "dist");
 const unpackedDir = path.join(dist, "linux-unpacked");
-const unpackedBin = path.join(unpackedDir, "Adept UI");
+// After the afterPack launcher swap, the real Electron ELF is Adept UI.bin;
+// "Adept UI" in the same dir is the launcher that boots it.
+const unpackedBin = path.join(unpackedDir, "Adept UI.bin");
+const launcherBin = path.join(unpackedDir, "Adept UI");
 const appImage = path.join(dist, `Adept UI-${version}-linux-x64.AppImage`);
 const deb = path.join(dist, `Adept UI-${version}-linux-x64.deb`);
 const rpm = path.join(dist, `Adept.UI-${version}-linux-x64.rpm`);
@@ -250,6 +253,13 @@ async function main() {
   setGate("APPIMAGE BUILD", "PASS");
   setGate("DEB BUILD", "PASS");
   setGate("LINUX X64 BUILD", "PASS");
+  // Launcher swap: the real Electron ELF is Adept UI.bin and the launcher occupies
+  // the executable slot. Prove the swap marker exists and both binaries are present.
+  const swapMarkerPath = path.join(unpackedDir, "launcher-swap.json");
+  let swapMarker = null;
+  try { swapMarker = JSON.parse(fs.readFileSync(swapMarkerPath, "utf8")); } catch { swapMarker = null; }
+  evidence.launcherSwap = swapMarker;
+  setGate("LAUNCHER SWAP", (fs.existsSync(launcherBin) && fs.existsSync(unpackedBin) && swapMarker && swapMarker.electron === unpackedBin) ? "PASS" : "FAIL");
   fs.mkdirSync(evidenceDir, { recursive: true });
   fs.chmodSync(appImage, 0o755);
   fs.chmodSync(unpackedBin, 0o755);
@@ -507,9 +517,13 @@ async function main() {
   evidence.desktop = desktopText;
   const execLine = desktopText.match(/^Exec=(.+)$/m);
   const quotedExec = execLine ? execLine[1].trim().match(/^"([^"]+)"/) : null;
-  const installedBin = (quotedExec && quotedExec[1])
+  // The desktop entry Exec targets the installed launcher ("Adept UI"). The real
+  // Electron binary is the sibling "Adept UI.bin" the launcher boots.
+  const installedLauncher = (quotedExec && quotedExec[1])
     || listingDeb.split("\n").map((line) => line.trim()).filter((line) => line.endsWith("/Adept UI")).sort((a, b) => b.length - a.length)[0]
     || "";
+  evidence.installedLauncher = installedLauncher;
+  const installedBin = installedLauncher ? `${installedLauncher}.bin` : "";
   evidence.installedBin = installedBin;
   const desktopOk = /Name=Adept UI/.test(desktopText) && /Terminal=false/.test(desktopText) && /Icon=/.test(desktopText);
   setGate("DEB INSTALL", installed.status === 0 && installedBin ? "PASS" : "FAIL");
@@ -557,7 +571,7 @@ async function main() {
   console.log(JSON.stringify({ appImage: evidence.appImage, deb: evidence.deb, bootVerdict: evidence.bootVerdict, surfaces: surfacePass }, null, 2));
 
   const numericFails = ["PYWIN32 BUNDLED", "VITE :5173 DEPENDENCY", "DEV VENV DEPENDENCY", "DEV REPO DEPENDENCY", "SYSTEM PYTHON DEPENDENCY", "FALSE CUDA READY STATES", "FALSE HEALTHY STATES", "WINDOWS BINARIES BUNDLED", "MACOS BINARIES BUNDLED", "USER PROJECTS BUNDLED", "USER LIBRARY ASSETS BUNDLED", "MODEL WEIGHTS BUNDLED", "BACKUPS BUNDLED", "PLAYWRIGHT ARTIFACTS BUNDLED", "SECRETS BUNDLED", "WINDOWS COMFY FILES BUNDLED", "DEV VENV", "DEV .ENV", "ADEPT PROJECTS BEFORE LAUNCH", "WINDOWS PROJECT DATA", "DUPLICATE MANAGERS", "FAILED REQUIRED CHECKS", "WINDOWS-ONLY PROCESS TOOLING"];
-  const passFails = ["ELECTRON PROCESS STARTED", "PACKAGED RENDERER LOADED", "STUDIO API :8760", "BACKGROUND SERVICES PROCESS STARTED", "FRESH PROFILE", "FIRST PROJECT PERSISTENCE", "MAJOR PRODUCT SURFACE SMOKE", "APPIMAGE EXECUTION", "DEB INSTALL", "DEB APPLICATION LAUNCH", "DEB UNINSTALL", "DEFAULT UNINSTALL PRESERVES USER DATA", "CLEAN SHUTDOWN", "8760 COLLISION HANDLING", "8759 COLLISION HANDLING", "PACKAGED API LOSS DETECTION", "COMFY TRUTHFUL", "DESKTOP ENTRY", "RPM PACKAGE METADATA", "CO-DIRECTOR STREAM WIRING", "API PROFILE OMITS COMFY", "OFFICIAL COMFY DOWNLOAD URL", "CONNECT REJECTS NON COMFY FOLDER", "CONNECT EXISTING LEAVES FILES", "COMFY INSTALL NOT FABRICATED", "LOCAL REQUIREMENT MATCHES COMFY HEALTH", "HYBRID REQUIREMENT MATCHES COMFY HEALTH", "RENDERER SHIPS COMFY PREREQUISITE"];
+  const passFails = ["LAUNCHER SWAP", "ELECTRON PROCESS STARTED", "PACKAGED RENDERER LOADED", "STUDIO API :8760", "BACKGROUND SERVICES PROCESS STARTED", "FRESH PROFILE", "FIRST PROJECT PERSISTENCE", "MAJOR PRODUCT SURFACE SMOKE", "APPIMAGE EXECUTION", "DEB INSTALL", "DEB APPLICATION LAUNCH", "DEB UNINSTALL", "DEFAULT UNINSTALL PRESERVES USER DATA", "CLEAN SHUTDOWN", "8760 COLLISION HANDLING", "8759 COLLISION HANDLING", "PACKAGED API LOSS DETECTION", "COMFY TRUTHFUL", "DESKTOP ENTRY", "RPM PACKAGE METADATA", "CO-DIRECTOR STREAM WIRING", "API PROFILE OMITS COMFY", "OFFICIAL COMFY DOWNLOAD URL", "CONNECT REJECTS NON COMFY FOLDER", "CONNECT EXISTING LEAVES FILES", "COMFY INSTALL NOT FABRICATED", "LOCAL REQUIREMENT MATCHES COMFY HEALTH", "HYBRID REQUIREMENT MATCHES COMFY HEALTH", "RENDERER SHIPS COMFY PREREQUISITE"];
   const bad = numericFails.some((name) => gates[name] !== 0)
     || passFails.some((name) => gates[name] !== "PASS")
     || gates["UNOWNED PROCESS KILLED"] === "YES"
