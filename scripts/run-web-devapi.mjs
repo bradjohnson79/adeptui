@@ -6,5 +6,8 @@ const child = spawn("npm", ["--prefix", "studio-web", "run", "dev"], {
   stdio: "inherit",
   shell: true,
   env: process.env,
+  // Do not allocate a visible console window when the parent is console-less
+  // (e.g. spawned from Cursor's Node service or a GUI process) on Windows.
+  windowsHide: true,
 });
 child.on("exit", (code) => process.exit(code ?? 0));

@@ -126,6 +126,15 @@ class Lifecycle:
     def _save(self, registry: dict[str, Any]) -> None:
         atomic_write(self.layout.registry_path, registry)
 
+    def _emblem_path(self) -> Path:
+        """Brand emblem for the updater page. Honors ADEPT_BRAND_EMBLEM for the frozen
+        launcher (where the repo-relative path does not exist), then falls back to the
+        source-tree location used by dev and tests."""
+        override = os.environ.get("ADEPT_BRAND_EMBLEM")
+        if override:
+            return Path(override)
+        return PACKAGE_ROOT.parents[2] / "studio-web" / "public" / "brand" / "adept-ui-emblem.webp"
+
     def _disk_free(self) -> int:
         if self.hooks.disk_free:
             return int(self.hooks.disk_free(self.layout.root))
@@ -276,7 +285,13 @@ class Lifecycle:
             return
         env = os.environ.copy()
         env["ADEPT_LAUNCHED_BY_UPDATER"] = "1"
-        subprocess.Popen([str(executable)], close_fds=True, env=env)
+        creationflags = 0
+        if sys.platform == "win32":
+            # The lifecycle/launcher is console-less. Starting a console-subsystem
+            # child without CREATE_NO_WINDOW forces Windows to allocate a visible
+            # console window. Suppress it; the packaged GUI app is unaffected.
+            creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        subprocess.Popen([str(executable)], close_fds=True, env=env, creationflags=creationflags)
 
     def _acquire_update_lock(self) -> bool:
         lock = self.layout.root / "update.lock"
@@ -320,7 +335,7 @@ class Lifecycle:
         page_path = PACKAGE_ROOT / "updater_page.html"
         page = page_path.read_text(encoding="utf-8") if page_path.is_file() else "<p>Update Manager</p>"
         progress_path = self.layout.root / "update-progress.json"
-        emblem = PACKAGE_ROOT.parents[2] / "studio-web" / "public" / "brand" / "adept-ui-emblem.webp"
+        emblem = self._emblem_path()
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, format: str, *args: Any) -> None:

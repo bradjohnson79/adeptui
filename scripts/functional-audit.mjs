@@ -14,7 +14,7 @@ const npx = process.platform === "win32" ? "npx.cmd" : "npx";
 const child = spawn(
   npx,
   ["playwright", "test", "--grep", "@critical"],
-  { cwd: root, stdio: "inherit", shell: true, env: process.env },
+  { cwd: root, stdio: "inherit", shell: true, env: process.env, windowsHide: true },
 );
 
 child.on("exit", (code) => {

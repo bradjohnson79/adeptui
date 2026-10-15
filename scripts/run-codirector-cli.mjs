@@ -25,5 +25,5 @@ if (!script) {
   process.exit(1);
 }
 
-const result = spawnSync(python, [script], { stdio: "inherit", cwd: root, shell: isWin });
+const result = spawnSync(python, [script], { stdio: "inherit", cwd: root, shell: isWin, windowsHide: true });
 process.exit(result.status ?? 1);

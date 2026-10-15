@@ -1,0 +1,29 @@
+{
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "terminal.integrated.profiles.windows": {
+        "PowerShell": {
+            "source": "PowerShell",
+            "args": ["-NoLogo", "-NoProfile", "-NonInteractive"]
+        }
+    },
+    "terminal.integrated.shellIntegration.enabled": true,
+    "terminal.integrated.shellIntegration.decorationsEnabled": false,
+    "terminal.integrated.enablePersistentSessions": false,
+    "terminal.integrated.confirmOnExit": "never",
+    "terminal.integrated.confirmOnKill": "never",
+    "terminal.integrated.defaultLocation": "editor",
+    "terminal.integrated.hideOnStartup": "always",
+    "terminal.integrated.tabs.hideCondition": "never",
+    "task.autoDetect": "off",
+    "task.problemMatchers.neverPrompt": true,
+    "task.saveBeforeRun": "never",
+    "debug.console.closeOnEnd": true,
+    "debug.internalConsoleOptions": "neverOpen",
+    "debug.openDebug": "neverOpen",
+    "workbench.panel.closeOnBlur": true,
+    "workbench.startupEditor": "none",
+    "git.autofetch": false,
+    "git.confirmSync": false,
+    "extensions.autoCheckUpdates": false,
+    "extensions.autoUpdate": false
+}

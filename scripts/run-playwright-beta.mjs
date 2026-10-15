@@ -37,6 +37,7 @@ const child = spawn(
     stdio: "inherit",
     shell: process.platform === "win32",
     cwd: root,
+    windowsHide: true,
   },
 );
 
