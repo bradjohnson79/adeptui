@@ -25,24 +25,6 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 FAILURE_LIMIT = 3
 
 
-def _pid_running(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if os.name == "nt":
-        import ctypes
-
-        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-        if not handle:
-            return False
-        ctypes.windll.kernel32.CloseHandle(handle)
-        return True
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
-
-
 def package_install_plan(kind: str, payload: Path) -> list[str] | None:
     """Command that replaces an installed package. It does not clear Gatekeeper or quarantine."""
     if kind == "nsis":
@@ -244,7 +226,6 @@ class Lifecycle:
         The lifecycle process stays outside the application directory. The
         application is started only after that check finishes.
         """
-        self._wait_for_parent()
         registry = read_registry(self.layout.registry_path)
         remembered = os.environ.get("ADEPT_INSTALLED_VERSION")
         if (not registry or not registry.get("installedVersion")) and remembered:
@@ -289,41 +270,13 @@ class Lifecycle:
         self.log(f"launch {code}")
         return Result(True, "LAUNCHED", message, status)
 
-    def _wait_for_parent(self) -> None:
-        if os.environ.get("ADEPT_HANDOFF_MODE") == "check":
-            return
-        raw = os.environ.get("ADEPT_WAIT_PID")
-        if not raw:
-            return
-        try:
-            pid = int(raw)
-        except ValueError:
-            return
-        for _ in range(160):
-            if not _pid_running(pid):
-                return
-            time.sleep(0.25)
-
     def _start_app(self, executable: Path) -> None:
-        if os.environ.get("ADEPT_HANDOFF_MODE") == "check":
-            return
         if self.hooks.launch:
             self.hooks.launch(executable)
             return
-        args = [str(executable)]
-        raw_args = os.environ.get("ADEPT_APP_ARGS")
-        if raw_args:
-            try:
-                extra = json.loads(raw_args)
-            except json.JSONDecodeError:
-                extra = []
-            if isinstance(extra, list):
-                args.extend(str(item) for item in extra if str(item).startswith("--"))
         env = os.environ.copy()
         env["ADEPT_LAUNCHED_BY_UPDATER"] = "1"
-        for name in ("ADEPT_HANDOFF_MODE", "ADEPT_WAIT_PID", "ADEPT_OPEN_UPDATER", "ADEPT_APP_ARGS"):
-            env.pop(name, None)
-        subprocess.Popen(args, close_fds=True, env=env)
+        subprocess.Popen([str(executable)], close_fds=True, env=env)
 
     def _acquire_update_lock(self) -> bool:
         lock = self.layout.root / "update.lock"
@@ -436,12 +389,6 @@ class Lifecycle:
                 indeterminate=True,
             )
             return self._continue(executable, "UPDATE_LOOP_STOPPED", version, "Adept UI is starting with the installed version.")
-        if os.environ.get("ADEPT_HANDOFF_MODE") == "check":
-            atomic_write(
-                self.layout.root / "startup-update.json",
-                {"action": "update", "code": "UPDATE_AVAILABLE", "version": version, "target": target},
-            )
-            return Result(True, "UPDATE_AVAILABLE", f"Adept UI {target} is available.", {"code": "UPDATE_AVAILABLE", "version": target})
         if self.hooks.show_updater:
             updater_url = self._serve_updater()
             marker = os.environ.get("ADEPT_UPDATER_URL_FILE")

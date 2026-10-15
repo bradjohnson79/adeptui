@@ -7,7 +7,6 @@ const unpacked = JSON.parse(fs.readFileSync(path.join(root, "electron", "build",
 const installed = JSON.parse(fs.readFileSync(path.join(root, "electron", "build", "installer-cert.json"), "utf8"));
 const failures = [];
 
-if (unpacked.freshStatus?.lifecycle?.code !== "NO_UPDATE") failures.push(`catalog check ${unpacked.freshStatus?.lifecycle?.code || "missing"}`);
 if (unpacked.desktopHealth?.status !== 200) failures.push("unpacked health");
 if (unpacked.freshStatus?.backgroundServices?.healthy !== true) failures.push("unpacked background services");
 if (unpacked.bootVerdict !== "GO") failures.push(`unpacked boot ${unpacked.bootVerdict}`);

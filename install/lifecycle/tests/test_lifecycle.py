@@ -284,10 +284,6 @@ def test_pinned_catalog_signature_matches_the_published_release():
     key = pinned_public_key()
     assert key is not None
     assert verify_sha256(catalog, "rsa-sha256:" + signature, key)
-    parsed = json.loads(catalog)
-    parsed["signature"] = "rsa-sha256:" + signature
-    parsed["_signed_bytes"] = catalog
-    verify_catalog_rsa(parsed, key)
     flipped = bytearray(catalog)
     flipped[20] ^= 1
     assert not verify_sha256(bytes(flipped), "rsa-sha256:" + signature, key)
@@ -384,30 +380,6 @@ def _installed(tmp_path: Path, version: str = "1.1.2"):
     (home / "user-data").mkdir(exist_ok=True)
     (home / "user-data" / "project.txt").write_text("keep", encoding="utf-8")
     return home, system
-
-
-def test_check_mode_keeps_the_running_app_when_current(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("ADEPT_HANDOFF_MODE", "check")
-    home, system = _installed(tmp_path)
-    launched: list[Path] = []
-    offered = sign_catalog(catalog("1.1.2", digest="ab" * 32), KEY)
-    result = lifecycle(home, system, fetch_catalog=lambda: offered, launch=lambda path: launched.append(path) or 0).launch()
-    assert result.details["code"] == "NO_UPDATE"
-    assert launched == []
-    assert (home / "user-data" / "project.txt").read_text(encoding="utf-8") == "keep"
-    assert json.loads((home / "startup-update.json").read_text(encoding="utf-8"))["code"] == "NO_UPDATE"
-
-
-def test_check_mode_reports_a_newer_release_without_replacing_the_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("ADEPT_HANDOFF_MODE", "check")
-    home, system = _installed(tmp_path)
-    launched: list[Path] = []
-    offered = sign_catalog(catalog("1.1.3", digest="cd" * 32), KEY)
-    result = lifecycle(home, system, fetch_catalog=lambda: offered, launch=lambda path: launched.append(path) or 0).launch()
-    assert result.code == "UPDATE_AVAILABLE"
-    assert launched == []
-    assert (home / "app" / "Adept UI.exe").read_bytes() == b"adept"
-    assert (home / "user-data" / "project.txt").read_text(encoding="utf-8") == "keep"
 
 
 def test_boot_without_a_catalog_does_not_show_completion(tmp_path: Path):

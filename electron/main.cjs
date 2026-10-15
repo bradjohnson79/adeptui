@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain, shell, screen } = require("electron");
-const { spawn, spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const { readDesktopVersion, packagedLayout, pathTouchesDevRepo } = require("./platform/paths.cjs");
 const { buildMenu } = require("./platform/menu.cjs");
 const { classifyNavigation, isHttpUrl } = require("./security.cjs");
@@ -26,39 +26,16 @@ function handoffToLifecycle() {
     : [path.join(pythonRoot, "bin", "python3"), path.join(pythonRoot, "bin", "python")];
   const python = pythonCandidates.find((candidate) => fs.existsSync(candidate));
   if (!python) return false;
-  const lifecycleState = path.join(app.getPath("userData"), "lifecycle");
-  fs.mkdirSync(lifecycleState, { recursive: true });
-  const sharedEnv = {
-    ...process.env,
-    PYTHONPATH: lifecycleRoot,
-    ADEPT_APP_EXECUTABLE: process.execPath,
-    ADEPT_INSTALLED_VERSION: identity.version,
-    ADEPT_LIFECYCLE_ROOT: lifecycleState,
-    ADEPT_APP_ARGS: JSON.stringify(process.argv.slice(1)),
-  };
-  const check = spawnSync(python, ["-m", "adept_lifecycle"], {
-    windowsHide: true,
-    stdio: "ignore",
-    timeout: 90000,
-    env: { ...sharedEnv, ADEPT_HANDOFF_MODE: "check" },
-  });
-  try {
-    fs.writeFileSync(path.join(lifecycleState, "handoff-check.json"), JSON.stringify({
-      status: check.status,
-      error: check.error ? String(check.error.message) : "",
-    }));
-  } catch {
-    /* the running application remains the authority if the note cannot be saved */
-  }
-  if (check.status !== 10) return false;
   const child = spawn(python, ["-m", "adept_lifecycle"], {
     detached: true,
     windowsHide: true,
     stdio: "ignore",
     env: {
-      ...sharedEnv,
-      ADEPT_HANDOFF_MODE: "apply",
-      ADEPT_WAIT_PID: String(process.pid),
+      ...process.env,
+      PYTHONPATH: lifecycleRoot,
+      ADEPT_APP_EXECUTABLE: process.execPath,
+      ADEPT_INSTALLED_VERSION: identity.version,
+      ADEPT_LIFECYCLE_ROOT: path.join(app.getPath("userData"), "lifecycle"),
       ADEPT_OPEN_UPDATER: "1",
     },
   });
@@ -100,15 +77,8 @@ function statusFile() {
 
 function writeStatus() {
   try {
-    const userData = app.getPath("userData");
-    fs.mkdirSync(userData, { recursive: true });
-    let lifecycle = null;
-    try {
-      lifecycle = JSON.parse(fs.readFileSync(path.join(userData, "lifecycle", "startup-update.json"), "utf8"));
-    } catch {
-      lifecycle = null;
-    }
-    fs.writeFileSync(statusFile(), JSON.stringify({ ...desktopStatus, lifecycle }, null, 2));
+    fs.mkdirSync(app.getPath("userData"), { recursive: true });
+    fs.writeFileSync(statusFile(), JSON.stringify(desktopStatus, null, 2));
   } catch {
     /* status is best-effort */
   }
