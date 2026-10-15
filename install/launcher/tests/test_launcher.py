@@ -218,3 +218,77 @@ def test_update_loop_stopped_after_repeated_failures(monkeypatch, tmp_path, keys
     status = read_json(tmp_path / "startup-update.json")
     assert status["code"] == "UPDATE_LOOP_STOPPED"
     assert len(launched) == 1
+
+
+def test_offline_catalog_unavailable_launches_installed_app(monkeypatch, tmp_path, keys):
+    """Offline / update service down: launcher must continue to the installed app."""
+    _, private = keys
+    install_app(tmp_path, "1.1.3")
+    # fetch_catalog returns None -> UPDATE_SERVICE_UNAVAILABLE
+    monkeypatch.setattr(launcher, "_build_hooks", lambda: launcher.Hooks(fetch_catalog=lambda: None))
+    monkeypatch.setattr(launcher, "_launch_app", lambda self, exe: None)
+    rc = launcher.run(["--root", str(tmp_path)])
+    assert rc == 0
+    status = read_json(tmp_path / "startup-update.json")
+    assert status["code"] == "UPDATE_SERVICE_UNAVAILABLE"
+
+
+def test_invalid_signature_refuses_update(monkeypatch, tmp_path):
+    """A catalog that fails RSA verification must not update; app still launches."""
+    install_app(tmp_path, "1.1.2")
+    # Sign with a DIFFERENT key than the pinned one -> SIGNATURE_INVALID.
+    other_public, other_private = generate_keypair()
+    monkeypatch.setattr("adept_lifecycle.trust.pinned_public_key", lambda: other_public)
+    # Build a catalog signed by yet another key so verification against other_public fails.
+    wrong_public, wrong_private = generate_keypair()
+    payload = tmp_path / "incoming" / "AdeptUI.zip"
+    digest = make_payload(payload)
+    catalog = signed_catalog(wrong_private, "1.1.3", digest)
+    monkeypatch.setattr(launcher, "_build_hooks", lambda: launcher.Hooks(fetch_catalog=lambda: catalog))
+    monkeypatch.setattr(launcher, "_launch_app", lambda self, exe: None)
+    rc = launcher.run(["--root", str(tmp_path)])
+    assert rc == 0
+    status = read_json(tmp_path / "startup-update.json")
+    assert status["code"] == "SIGNATURE_INVALID"
+    # Installed app untouched.
+    registry = read_json(tmp_path / "registry.json")
+    assert registry["installedVersion"] == "1.1.2"
+
+
+def test_update_lock_blocks_concurrent_update(monkeypatch, tmp_path, keys):
+    """A held update.lock must refuse a second update and not launch."""
+    _, private = keys
+    install_app(tmp_path, "1.1.2")
+    # Hold the lock with a fresh mtime.
+    (tmp_path / "update.lock").write_text("999999", encoding="utf-8")
+    payload = tmp_path / "incoming" / "AdeptUI.zip"
+    digest = make_payload(payload)
+    catalog = signed_catalog(private, "1.1.3", digest)
+    monkeypatch.setattr(launcher, "_build_hooks", lambda: launcher.Hooks(fetch_catalog=lambda: catalog))
+    launched = []
+    monkeypatch.setattr(launcher, "_launch_app", lambda self, exe: launched.append(str(exe)))
+    rc = launcher.run(["--root", str(tmp_path)])
+    assert rc == 1  # update already running -> launcher reports failure, no launch
+    assert len(launched) == 0
+
+
+def test_production_active_defers_update(monkeypatch, tmp_path, keys):
+    """An active production must defer the update and start the installed app."""
+    _, private = keys
+    app_dir = install_app(tmp_path, "1.1.2")
+    original = (app_dir / EXE_NAME).read_bytes()
+    # production-active marker defers any update.
+    (tmp_path / "user-data").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "user-data" / "production-active").write_text("1", encoding="utf-8")
+    payload = tmp_path / "incoming" / "AdeptUI.zip"
+    digest = make_payload(payload)
+    catalog = signed_catalog(private, "1.1.3", digest)
+    monkeypatch.setattr(launcher, "_build_hooks", lambda: launcher.Hooks(fetch_catalog=lambda: catalog))
+    launched = []
+    monkeypatch.setattr(launcher, "_launch_app", lambda self, exe: launched.append(str(exe)))
+    rc = launcher.run(["--root", str(tmp_path)])
+    assert rc == 0
+    status = read_json(tmp_path / "startup-update.json")
+    assert status["code"] == "DEFERRED"
+    assert len(launched) == 1
+    assert (app_dir / EXE_NAME).read_bytes() == original
