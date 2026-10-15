@@ -212,8 +212,13 @@ switch ($Action) {
   }
   'restart' {
     Invoke-Stop
-    # Start in a new window so restart can return after health checks.
-    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'npm run dev' -WorkingDirectory $RepoRoot -WindowStyle Normal
+    # Start hidden so no external console window appears over the desktop.
+    # Logs go to the integrated terminal / log files, not a pop-up.
+    $logDir = Join-Path $RepoRoot 'artifacts\dev'
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    $logOut = Join-Path $logDir 'dev-restart.log'
+    $logErr = Join-Path $logDir 'dev-restart.err.log'
+    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'npm run dev' -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $logOut -RedirectStandardError $logErr
     Write-Host '[dev] waiting for API health...'
     if (-not (Wait-HttpOk ("http://127.0.0.1:{0}/api/health" -f $ApiPort) $WaitSeconds)) {
       throw ('[dev] API did not become healthy on :{0}' -f $ApiPort)
