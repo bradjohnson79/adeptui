@@ -71,5 +71,5 @@ module.exports = async function macosLauncherSwap(context) {
     JSON.stringify(marker, null, 2),
   );
 
-  context.packager.info(`macOS launcher swap: ${productName} -> ${ELECTRON_RENAMED}, launcher installed as ${productName}`);
+  console.log(`macOS launcher swap: ${productName} -> ${ELECTRON_RENAMED}, launcher installed as ${productName}`);
 };

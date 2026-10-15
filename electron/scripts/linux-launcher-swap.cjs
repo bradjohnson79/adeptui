@@ -75,7 +75,7 @@ module.exports = async function linuxLauncherSwap(context) {
     JSON.stringify(marker, null, 2),
   );
 
-  context.packager.info(
+  console.log(
     `linux launcher swap: ${productName} -> ${ELECTRON_RENAMED}, launcher installed as ${productName}`,
   );
 };
