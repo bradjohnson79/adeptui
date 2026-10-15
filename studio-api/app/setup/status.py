@@ -452,6 +452,10 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
     state = load_state()
     previous_status = state.get("status", {})
     components: list[dict[str, Any]] = []
+    from .installation_profile import active_profile, required_ids_for
+
+    chosen_profile = active_profile(state)
+    profile_ids = set(required_ids_for(chosen_profile, state)) if chosen_profile else None
 
     # Import lazily to keep the operation engine independent from detection.
     from .operations import registry
@@ -648,7 +652,7 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             "name": definition.name,
             "description": definition.description,
             "category": getattr(definition, "category", "Core"),
-            "required": definition.required,
+            "required": definition.id in profile_ids if profile_ids is not None else definition.required,
             "status": canonical,
             "operation_phase": phase,
             "operation_id": operation_id,

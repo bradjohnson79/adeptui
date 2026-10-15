@@ -6,8 +6,11 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+import time
 import zipfile
 from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,14 +25,34 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 FAILURE_LIMIT = 3
 
 
+def package_install_plan(kind: str, payload: Path) -> list[str] | None:
+    """Command that replaces an installed package. It does not clear Gatekeeper or quarantine."""
+    if kind == "nsis":
+        return [str(payload), "/S"]
+    if kind == "deb":
+        return ["dpkg", "-i", str(payload)]
+    if kind == "rpm":
+        return ["rpm", "-Uvh", str(payload)]
+    if kind == "dmg":
+        return ["hdiutil", "attach", "-nobrowse", "-readonly", str(payload)]
+    return None
+
+
 @dataclass
 class Hooks:
     disk_free: Callable[[Path], int] | None = None
     production_active: Callable[[], bool] | None = None
     download: Callable[[str, Path], None] | None = None
+    read_payload: Callable[[dict[str, Any]], Path] | None = None
+    fetch_catalog: Callable[[], dict[str, Any] | None] | None = None
+    install_package: Callable[[Path, dict[str, Any]], None] | None = None
     launch: Callable[[Path], int] | None = None
     before_write: Callable[[], None] | None = None
     health: Callable[[], bool] | None = None
+    progress: Callable[[dict[str, Any]], None] | None = None
+    show_updater: bool = False
+    hold_completion: Callable[[], None] | None = None
+    chunk_pause: float = 0.0
 
 
 @dataclass
@@ -198,21 +221,330 @@ class Lifecycle:
         return Result(True, "INSTALLED", f"Adept UI {version} is installed.", {"launched": launched, "menu": menu})
 
     def launch(self) -> Result:
+        """Check the signed catalog, install a newer release, then start the application.
+
+        The lifecycle process stays outside the application directory. The
+        application is started only after that check finishes.
+        """
         registry = read_registry(self.layout.registry_path)
+        remembered = os.environ.get("ADEPT_INSTALLED_VERSION")
+        if (not registry or not registry.get("installedVersion")) and remembered:
+            registry = empty_registry(self.profile.os_name, self.profile.arch, str(self.layout.app_dir))
+            registry["installedVersion"] = remembered
+            self._save(registry)
         if not registry or not registry.get("installedVersion"):
+            executable = self._executable()
+            if executable is not None and os.environ.get("ADEPT_APP_EXECUTABLE"):
+                self._start_app(executable)
+                return Result(True, "LAUNCHED", "Adept UI is starting.", {"action": "continue", "code": "NOT_TRACKED"})
             return Result(False, "NOT_INSTALLED", "Install Adept UI before launching it.")
-        update_code = "DEFERRED" if self._production_active() else "UPDATE_SERVICE_UNAVAILABLE"
         executable = self._executable()
         if executable is None:
             return Result(False, "EXECUTABLE_MISSING", "The installed Adept UI application was not found.")
-        status = {"action": "continue", "code": update_code, "version": registry.get("installedVersion")}
+        if self._production_active():
+            return self._continue(executable, "DEFERRED", str(registry.get("installedVersion")), "Adept UI is starting.")
+        if not self._acquire_update_lock():
+            return Result(False, "UPDATE_IN_PROGRESS", "An update is already running.")
+        try:
+            catalog = None
+            if self.hooks.fetch_catalog is not None:
+                try:
+                    catalog = self.hooks.fetch_catalog()
+                except OSError:
+                    catalog = None
+            if not catalog:
+                return self._continue(
+                    executable,
+                    "UPDATE_SERVICE_UNAVAILABLE",
+                    str(registry.get("installedVersion")),
+                    "Adept UI is starting.",
+                )
+            return self._boot_update(catalog, executable, registry)
+        finally:
+            self._release_update_lock()
+
+    def _continue(self, executable: Path, code: str, version: str, message: str) -> Result:
+        status = {"action": "continue", "code": code, "version": version}
         atomic_write(self.layout.root / "startup-update.json", status)
+        self._start_app(executable)
+        self.log(f"launch {code}")
+        return Result(True, "LAUNCHED", message, status)
+
+    def _start_app(self, executable: Path) -> None:
         if self.hooks.launch:
             self.hooks.launch(executable)
+            return
+        env = os.environ.copy()
+        env["ADEPT_LAUNCHED_BY_UPDATER"] = "1"
+        subprocess.Popen([str(executable)], close_fds=True, env=env)
+
+    def _acquire_update_lock(self) -> bool:
+        lock = self.layout.root / "update.lock"
+        if lock.is_file():
+            age = time.time() - lock.stat().st_mtime
+            if age < 3600:
+                return False
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(str(os.getpid()), encoding="utf-8")
+        return True
+
+    def _release_update_lock(self) -> None:
+        lock = self.layout.root / "update.lock"
+        if lock.is_file():
+            lock.unlink()
+
+    def _emit(self, **fields: Any) -> None:
+        payload = {
+            "phase": fields.get("phase") or "",
+            "installedVersion": fields.get("installedVersion") or "",
+            "targetVersion": fields.get("targetVersion") or "",
+            "operation": fields.get("operation") or "",
+            "downloadBytes": int(fields.get("downloadBytes") or 0),
+            "downloadTotal": int(fields.get("downloadTotal") or 0),
+            "downloadPercent": fields.get("downloadPercent"),
+            "bytesPerSecond": fields.get("bytesPerSecond") or 0,
+            "overallPercent": fields.get("overallPercent"),
+            "indeterminate": bool(fields.get("indeterminate")),
+            "complete": bool(fields.get("complete")),
+            "footer": fields.get("footer") or "",
+            "error": fields.get("error") or "",
+        }
+        atomic_write(self.layout.root / "update-progress.json", payload)
+        if self.hooks.progress:
+            self.hooks.progress(payload)
+
+    def _serve_updater(self) -> str:
+        if getattr(self, "_updater_server", None) is not None:
+            port = self._updater_server.server_address[1]
+            return f"http://127.0.0.1:{port}/"
+        page_path = PACKAGE_ROOT / "updater_page.html"
+        page = page_path.read_text(encoding="utf-8") if page_path.is_file() else "<p>Update Manager</p>"
+        progress_path = self.layout.root / "update-progress.json"
+        emblem = PACKAGE_ROOT.parents[2] / "studio-web" / "public" / "brand" / "adept-ui-emblem.webp"
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+            def do_GET(self) -> None:
+                if self.path.startswith("/progress"):
+                    body = progress_path.read_bytes() if progress_path.is_file() else b"{}"
+                    self._send(body, "application/json")
+                    return
+                if self.path.startswith("/brand/") and emblem.is_file():
+                    self._send(emblem.read_bytes(), "image/webp")
+                    return
+                self._send(page.encode("utf-8"), "text/html; charset=utf-8")
+
+            def _send(self, body: bytes, content_type: str) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self._updater_server = server
+        url = f"http://127.0.0.1:{server.server_address[1]}/"
+        if os.environ.get("ADEPT_OPEN_UPDATER") == "1":
+            import webbrowser
+
+            webbrowser.open(url)
+        return url
+
+    def _boot_update(self, catalog: dict[str, Any], executable: Path, registry: dict[str, Any]) -> Result:
+        version = str(registry.get("installedVersion"))
+        self._emit(
+            phase="catalog",
+            installedVersion=version,
+            operation="Checking the signed release catalog",
+            indeterminate=True,
+        )
+        try:
+            if self.key:
+                verify_catalog(catalog, self.key)
+            else:
+                from .trust import pinned_public_key
+
+                public = pinned_public_key()
+                if public is None:
+                    raise ReleaseError("SIGNATURE_MISSING", "The release catalog has no verifiable signature.")
+                verify_catalog_rsa(catalog, public)
+            artifact = select_artifact(catalog, self.profile, version)
+        except ReleaseError as exc:
+            if exc.code == "NO_UPDATE":
+                return self._continue(executable, "NO_UPDATE", version, "Adept UI is up to date.")
+            self._emit(phase="error", installedVersion=version, operation=exc.message, error=exc.code, indeterminate=True)
+            return self._continue(executable, exc.code, version, exc.message)
+        target = str(artifact["version"])
+        failures = dict(registry.get("updateFailures") or {})
+        if int(failures.get(target) or 0) >= FAILURE_LIMIT:
+            self._emit(
+                phase="error",
+                installedVersion=version,
+                targetVersion=target,
+                operation="This update failed repeatedly and will not be tried again automatically.",
+                error="UPDATE_LOOP_STOPPED",
+                indeterminate=True,
+            )
+            return self._continue(executable, "UPDATE_LOOP_STOPPED", version, "Adept UI is starting with the installed version.")
+        if self.hooks.show_updater:
+            updater_url = self._serve_updater()
+            marker = os.environ.get("ADEPT_UPDATER_URL_FILE")
+            if marker:
+                Path(marker).write_text(updater_url, encoding="utf-8")
+        self._emit(
+            phase="download",
+            installedVersion=version,
+            targetVersion=target,
+            operation="Downloading update",
+            downloadPercent=0,
+            indeterminate=False,
+        )
+        payload = self.layout.staging_dir / str(artifact.get("fileName") or "update.bin")
+        try:
+            self._obtain_payload(artifact, payload, version, target)
+            self._emit(
+                phase="checksum",
+                installedVersion=version,
+                targetVersion=target,
+                operation="Checking the download",
+                indeterminate=True,
+            )
+            verify_file(payload, str(artifact["sha256"]))
+        except ReleaseError as exc:
+            self._record_update_failure(registry, failures, target)
+            if payload.exists() and exc.code == "CHECKSUM_MISMATCH":
+                payload.unlink()
+            self._emit(phase="error", installedVersion=version, targetVersion=target, operation=exc.message, error=exc.code, indeterminate=True)
+            return self._continue(executable, exc.code, version, exc.message)
+        except OSError as exc:
+            self._record_update_failure(registry, failures, target)
+            self._emit(
+                phase="error",
+                installedVersion=version,
+                targetVersion=target,
+                operation="The update download did not finish.",
+                error="DOWNLOAD_INTERRUPTED",
+                indeterminate=True,
+            )
+            return self._continue(executable, "DOWNLOAD_INTERRUPTED", version, f"The update download did not finish. {exc}")
+        needed = int(artifact.get("bytes") or payload.stat().st_size) + (200 * 1024 * 1024)
+        if self._disk_free() < needed:
+            self._emit(
+                phase="error",
+                installedVersion=version,
+                targetVersion=target,
+                operation="There is not enough free storage to install the update.",
+                error="INSUFFICIENT_DISK",
+                indeterminate=True,
+            )
+            return self._continue(executable, "INSUFFICIENT_DISK", version, "There is not enough free storage to install the update.")
+        self._emit(
+            phase="install",
+            installedVersion=version,
+            targetVersion=target,
+            operation="Installing the update",
+            indeterminate=True,
+        )
+        self.external_updater_dir()
+        kind = str(artifact.get("kind") or "zip")
+        if kind == "zip":
+            result = self.apply_with_recovery(payload, artifact, version)
+        elif self.hooks.install_package:
+            try:
+                self.hooks.install_package(payload, artifact)
+            except OSError as exc:
+                self._record_update_failure(registry, failures, target)
+                self._emit(phase="error", installedVersion=version, targetVersion=target, operation=str(exc), error="INSTALL_INTERRUPTED", indeterminate=True)
+                return self._continue(executable, "INSTALL_INTERRUPTED", version, "The update did not finish. The installed Adept UI was left in place.")
+            registry = self._registry()
+            registry["installedVersion"] = target
+            registry["health"] = "updated"
+            registry["recovery"] = {"lastGoodVersion": version}
+            self._save(registry)
+            result = Result(True, "UPDATED", f"Adept UI is now {target}.", {"previous": version})
         else:
-            subprocess.Popen([str(executable)], close_fds=True)
-        self.log(f"launch {update_code}")
-        return Result(True, "LAUNCHED", "Adept UI is starting.", status)
+            self._emit(
+                phase="error",
+                installedVersion=version,
+                targetVersion=target,
+                operation="This package cannot be replaced while Adept UI is open.",
+                error="UNSUPPORTED_PACKAGE",
+                indeterminate=True,
+            )
+            return self._continue(executable, "UNSUPPORTED_PACKAGE", version, "Adept UI is starting with the installed version.")
+        if not result.ok:
+            self._record_update_failure(registry, failures, target)
+            self._emit(phase="error", installedVersion=version, targetVersion=target, operation=result.message, error=result.code, indeterminate=True)
+            restored = self._executable() or executable
+            return self._continue(restored, result.code, version, result.message)
+        self._emit(
+            phase="complete",
+            installedVersion=target,
+            targetVersion=target,
+            operation=f"Adept UI {target} installed successfully.",
+            overallPercent=100,
+            downloadPercent=100,
+            indeterminate=False,
+            complete=True,
+            footer="Updates complete.",
+        )
+        status = {"action": "updated", "code": "UPDATED", "version": target, "footer": "Updates complete."}
+        atomic_write(self.layout.root / "startup-update.json", status)
+        if self.hooks.hold_completion:
+            self.hooks.hold_completion()
+        else:
+            time.sleep(1.25)
+        self._start_app(self._executable() or executable)
+        self.log(f"launch UPDATED {version} -> {target}")
+        return Result(True, "UPDATED", f"Adept UI is now {target}.", status)
+
+    def _record_update_failure(self, registry: dict[str, Any], failures: dict[str, Any], target: str) -> None:
+        failures[target] = int(failures.get(target) or 0) + 1
+        registry["updateFailures"] = failures
+        self._save(registry)
+
+    def _obtain_payload(self, artifact: dict[str, Any], dest: Path, installed: str, target: str) -> None:
+        if self.hooks.read_payload:
+            source = self.hooks.read_payload(artifact)
+            total = int(artifact.get("bytes") or source.stat().st_size)
+            self._copy_progress(source, dest, total, installed, target)
+            return
+        if self.hooks.download and artifact.get("url"):
+            self.layout.staging_dir.mkdir(parents=True, exist_ok=True)
+            self.hooks.download(str(artifact["url"]), dest)
+            return
+        raise OSError("The update file was not provided.")
+
+    def _copy_progress(self, source: Path, dest: Path, total: int, installed: str, target: str) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        sent = 0
+        started = time.monotonic()
+        safe_total = total if total > 0 else 1
+        with source.open("rb") as incoming, dest.open("wb") as outgoing:
+            while True:
+                chunk = incoming.read(64 * 1024)
+                if not chunk:
+                    break
+                outgoing.write(chunk)
+                sent += len(chunk)
+                elapsed = max(time.monotonic() - started, 0.001)
+                percent = min(99, int(sent * 100 / safe_total))
+                self._emit(
+                    phase="download",
+                    installedVersion=installed,
+                    targetVersion=target,
+                    operation="Downloading update",
+                    downloadBytes=sent,
+                    downloadTotal=safe_total if total > 0 else sent,
+                    downloadPercent=percent if total > 0 else None,
+                    bytesPerSecond=int(sent / elapsed),
+                    indeterminate=total <= 0,
+                )
+                if self.hooks.chunk_pause:
+                    time.sleep(self.hooks.chunk_pause)
 
     def install_discovered(
         self,
@@ -466,6 +798,9 @@ class Lifecycle:
         return written
 
     def _executable(self) -> Path | None:
+        override = os.environ.get("ADEPT_APP_EXECUTABLE")
+        if override and Path(override).exists():
+            return Path(override)
         names = {
             "windows": ["Adept UI.exe"],
             "darwin": ["Adept UI.app"],
@@ -495,7 +830,7 @@ class Lifecycle:
         if self.profile.os_name == "windows":
             path = self.layout.bin_dir / "adeptui.cmd"
             path.write_text(
-                f"@echo off\r\nset PYTHONPATH={module}\r\npython -m adept_lifecycle %*\r\n",
+                f"@echo off\r\nset PYTHONPATH={module}\r\nwhere pythonw >nul 2>&1 && pythonw -m adept_lifecycle %* && exit /b 0\r\npython -m adept_lifecycle %*\r\n",
                 encoding="utf-8",
             )
         else:
@@ -513,7 +848,7 @@ class Lifecycle:
         elif self.profile.os_name == "darwin":
             destination = self.layout.desktop_dir / "Adept UI.command"
         else:
-            destination = self.layout.desktop_dir / "Adept UI.cmd"
+            destination = self.layout.desktop_dir / "Adept UI.vbs"
         write_launcher(destination, cli, self.profile.os_name)
         return str(destination)
 

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from . import __version__
 from .detect import SystemProfile, live_profile
-from .manager import Hooks, Layout, Lifecycle
+from .manager import Hooks, Layout, Lifecycle, package_install_plan
 from .registry import read_registry
 
 
@@ -29,11 +30,14 @@ def main(argv: list[str] | None = None, profile: SystemProfile | None = None, ke
     parser.add_argument("--remove-settings", action="store_true")
     parser.add_argument("command", nargs="?", choices=("install", "update", "uninstall", "doctor", "repair"))
     args = parser.parse_args(argv)
-    root = args.root or Path.home() / ".adept-ui"
+    root = args.root or Path(os.environ.get("ADEPT_LIFECYCLE_ROOT") or Path.home() / ".adept-ui")
     layout = Layout(root)
     system = profile or live_profile(str(root))
     signing = key if key is not None else (args.key.encode("utf-8") if args.key else None)
-    lifecycle = Lifecycle(layout, system, signing, Hooks())
+    hooks = Hooks()
+    if args.command is None and not args.version and args.catalog is None:
+        hooks = _launch_hooks()
+    lifecycle = Lifecycle(layout, system, signing, hooks)
     if args.version or args.command is None and not args.catalog:
         registry = read_registry(layout.registry_path)
         if args.version:
@@ -84,6 +88,44 @@ def main(argv: list[str] | None = None, profile: SystemProfile | None = None, ke
         return 0
     print(result.message)
     return 0 if result.ok else 1
+
+
+def _fetch_official_catalog() -> dict | None:
+    import urllib.request
+
+    from .trust import OFFICIAL_CATALOG_URL, OFFICIAL_SIGNATURE_URL
+
+    try:
+        with urllib.request.urlopen(OFFICIAL_CATALOG_URL, timeout=20) as response:
+            raw = response.read()
+        with urllib.request.urlopen(OFFICIAL_SIGNATURE_URL, timeout=20) as response:
+            signature = response.read().decode("utf-8").strip()
+    except OSError:
+        return None
+    try:
+        catalog = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(catalog, dict) or not signature:
+        return None
+    if not signature.startswith("rsa-sha256:"):
+        signature = "rsa-sha256:" + signature
+    signed = dict(catalog)
+    signed["signature"] = signature
+    return signed
+
+
+def _install_native(payload: Path, artifact: dict) -> None:
+    import subprocess
+
+    plan = package_install_plan(str(artifact.get("kind") or ""), payload)
+    if not plan or plan[0] == "hdiutil":
+        raise OSError("This package is not replaced by a second installer. Gatekeeper is left unchanged.")
+    subprocess.run(plan, check=True)
+
+
+def _launch_hooks() -> Hooks:
+    return Hooks(fetch_catalog=_fetch_official_catalog, show_updater=True, install_package=_install_native)
 
 
 def _confirm(prompt: str, *, default_no: bool) -> bool:

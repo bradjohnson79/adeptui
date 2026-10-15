@@ -11,8 +11,10 @@ from app.setup.first_run import assess_first_run
 from app.setup.installation_profile import (
     LTX_GROUP,
     expand_local_selection,
+    required_ids_for,
     save_installation_profile,
 )
+from app.setup.state import load_state
 from app.setup.lifecycle.service import remove_component
 
 
@@ -179,6 +181,163 @@ def test_profile_switch_does_not_delete_weights_or_projects(setup_data_dir: Path
     assert result["queued"] == []
     assert calls == []
     assert weight.exists()
+
+
+def test_api_completion_does_not_block_on_missing_ffmpeg(setup_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    save_installation_profile("api", providers=["fal"])
+    monkeypatch.setattr(
+        "app.setup.installation_profile.verified_providers",
+        lambda: [{"id": "fal", "name": "fal.ai"}],
+    )
+    report = assess_first_run(
+        _components(python="ready", ffmpeg="not_installed"),
+        fetch_nodes=False,
+    )
+    assert report["ready"] is True
+    assert report["essentialBlockerCount"] == 0
+    assert all(item["id"] != "ffmpeg" for item in report["essentialNeeded"])
+    assert "zimage_models" not in report["baselineIds"]
+    assert "comfyui" not in report["baselineIds"]
+
+
+def test_api_apply_does_not_enqueue_ffmpeg(setup_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    save_installation_profile("api", providers=["fal"])
+    calls: list[str] = []
+
+    def refuse(component_id: str, **kwargs: object) -> dict:
+        calls.append(component_id)
+        return {
+            "id": f"job-{component_id}",
+            "active": False,
+            "state": "awaiting_confirmation",
+            "error": {"message": f"{component_id} cannot be enqueued through install jobs yet."},
+        }
+
+    monkeypatch.setattr("app.source_manager.install_jobs.service.create_or_resume_install", refuse)
+    monkeypatch.setattr(
+        "app.setup.status.build_status",
+        lambda persist=True: {
+            "components": [
+                {"id": "python", "status": "ready"},
+                {"id": "ffmpeg", "status": "not_installed"},
+            ]
+        },
+    )
+    from app.setup.installation_profile import apply_saved_profile
+
+    result = apply_saved_profile()
+    assert calls == []
+    assert result["errors"] == []
+    assert "ffmpeg" not in result["queued"]
+
+
+def test_local_missing_ffmpeg_does_not_block_or_enqueue(
+    setup_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_installation_profile("local")
+    calls: list[str] = []
+
+    def track(component_id: str, **kwargs: object) -> dict:
+        calls.append(component_id)
+        return {"id": f"job-{component_id}", "active": True, "state": "queued"}
+
+    monkeypatch.setattr("app.source_manager.install_jobs.service.create_or_resume_install", track)
+    monkeypatch.setattr(
+        "app.setup.status.build_status",
+        lambda persist=True: {
+            "components": [
+                {"id": "python", "status": "ready"},
+                {"id": "ffmpeg", "status": "not_installed"},
+                {"id": "comfyui", "status": "ready"},
+                {"id": "zimage_models", "status": "ready"},
+                {"id": "ltx_2_5_checkpoint", "status": "ready"},
+                {"id": "ltx_2_5_text_encoder", "status": "ready"},
+                {"id": "ltx_2_5_video_vae", "status": "ready"},
+            ]
+        },
+    )
+    from app.setup.installation_profile import apply_saved_profile
+
+    result = apply_saved_profile()
+    assert "ffmpeg" not in calls
+    assert result["errors"] == []
+    report = assess_first_run(
+        _components(
+            python="ready",
+            ffmpeg="not_installed",
+            comfyui="ready",
+            zimage_models="ready",
+            ltx_2_5_checkpoint="ready",
+            ltx_2_5_text_encoder="ready",
+            ltx_2_5_video_vae="ready",
+        ),
+        fetch_nodes=False,
+    )
+    assert "ffmpeg" not in report["baselineIds"]
+    assert all(item["id"] != "ffmpeg" for item in report["essentialNeeded"])
+
+
+def test_ffmpeg_is_required_only_when_a_selected_workflow_depends_on_it(
+    setup_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_installation_profile("local")
+    assert "ffmpeg" not in required_ids_for("local", load_state())
+    save_installation_profile("api", providers=["fal"])
+    assert required_ids_for("api", load_state()) == ("python",)
+    save_installation_profile("hybrid", selected_models=["ace_step_local"], providers=["fal"])
+    hybrid_ids = required_ids_for("hybrid", load_state())
+    assert "ace_step_local" in hybrid_ids
+    assert "ffmpeg" in hybrid_ids
+    calls: list[str] = []
+
+    def track(component_id: str, **kwargs: object) -> dict:
+        calls.append(component_id)
+        return {"id": f"job-{component_id}", "active": True, "state": "queued"}
+
+    monkeypatch.setattr("app.source_manager.install_jobs.service.create_or_resume_install", track)
+    monkeypatch.setattr(
+        "app.setup.status.build_status",
+        lambda persist=True: {
+            "components": [
+                {"id": "python", "status": "ready"},
+                {"id": "ffmpeg", "status": "not_installed"},
+                {"id": "comfyui", "status": "ready"},
+                {"id": "ace_step_local", "status": "ready"},
+            ]
+        },
+    )
+    from app.setup.installation_profile import apply_saved_profile
+
+    applied = apply_saved_profile()
+    assert "ffmpeg" not in calls
+    assert applied["errors"] == []
+    monkeypatch.setattr(
+        "app.setup.installation_profile.verified_providers",
+        lambda: [{"id": "fal", "name": "fal.ai"}],
+    )
+    rows = _components(
+        python="ready",
+        ffmpeg="not_installed",
+        comfyui="ready",
+    )
+    rows.append({"id": "ace_step_local", "name": "ACE-Step", "required": False, "status": "ready"})
+    report = assess_first_run(rows, fetch_nodes=False)
+    assert report["ready"] is False
+    assert any(item["id"] == "ffmpeg" for item in report["essentialNeeded"])
+
+
+def test_ffmpeg_candidate_path_counts_as_installed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from app.setup import diagnostics
+
+    binary = tmp_path / "ffmpeg"
+    binary.write_bytes(b"ffmpeg")
+    diagnostics._VERIFY_CACHE.pop("ffmpeg", None)
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda _: None)
+    monkeypatch.setattr(diagnostics, "ffmpeg_search_paths", lambda: [str(binary)])
+    monkeypatch.setattr(diagnostics, "_run_version", lambda _cmd: (True, "ffmpeg version test", ""))
+    result = diagnostics.verify_component("ffmpeg")
+    assert result.healthy is True
+    assert result.path == str(binary)
 
 
 def test_remove_protects_essentials_and_deletes_only_a_managed_file(setup_data_dir: Path) -> None:

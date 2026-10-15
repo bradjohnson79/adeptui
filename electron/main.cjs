@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain, shell, screen } = require("electron");
+const { spawn } = require("node:child_process");
 const { readDesktopVersion, packagedLayout, pathTouchesDevRepo } = require("./platform/paths.cjs");
 const { buildMenu } = require("./platform/menu.cjs");
 const { classifyNavigation, isHttpUrl } = require("./security.cjs");
@@ -13,8 +14,40 @@ const { portAccepts } = require("./platform/process.cjs");
 const { startRendererServer } = require("./renderer-server.cjs");
 
 const DEV_REPO = path.resolve(__dirname, "..");
+
+function handoffToLifecycle() {
+  if (!packaged) return false;
+  if (process.env.ADEPT_LAUNCHED_BY_UPDATER === "1") return false;
+  const lifecycleRoot = path.join(process.resourcesPath, "lifecycle");
+  if (!fs.existsSync(path.join(lifecycleRoot, "adept_lifecycle", "__init__.py"))) return false;
+  const pythonRoot = path.join(process.resourcesPath, "python");
+  const pythonCandidates = process.platform === "win32"
+    ? [path.join(pythonRoot, "pythonw.exe")]
+    : [path.join(pythonRoot, "bin", "python3"), path.join(pythonRoot, "bin", "python")];
+  const python = pythonCandidates.find((candidate) => fs.existsSync(candidate));
+  if (!python) return false;
+  const child = spawn(python, ["-m", "adept_lifecycle"], {
+    detached: true,
+    windowsHide: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      PYTHONPATH: lifecycleRoot,
+      ADEPT_APP_EXECUTABLE: process.execPath,
+      ADEPT_INSTALLED_VERSION: identity.version,
+      ADEPT_LIFECYCLE_ROOT: path.join(app.getPath("userData"), "lifecycle"),
+      ADEPT_OPEN_UPDATER: "1",
+    },
+  });
+  child.unref();
+  return true;
+}
+
 const identity = readDesktopVersion(process.resourcesPath, __dirname);
 const packaged = app.isPackaged;
+if (handoffToLifecycle()) {
+  app.exit(0);
+}
 
 let mainWindow = null;
 let rendererServer = null;

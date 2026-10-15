@@ -72,6 +72,7 @@ def test_diagnostics_returns_one_recommendation(
     from app.setup import diagnostics
 
     monkeypatch.setattr(diagnostics.shutil, "which", lambda _: None)
+    monkeypatch.setattr(diagnostics, "ffmpeg_search_paths", lambda: [])
     result = diagnostics.diagnose("ffmpeg")
 
     assert result["healthy"] is False

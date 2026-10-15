@@ -29,6 +29,30 @@ from .catalog import (
 from .paths import ensure_configured_paths
 from .state import load_state, update_state
 
+def ffmpeg_search_paths() -> list[str]:
+    """Known install locations when a desktop launch has a short PATH."""
+    if sys.platform == "darwin":
+        return ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA") or ""
+        return [
+            str(Path(local) / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe") if local else "",
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+        ]
+    return ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+
+
+def ffmpeg_executable() -> str | None:
+    """Return a runnable FFmpeg path. None means it is not installed."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    for candidate in ffmpeg_search_paths():
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return None
+
+
 # Short TTL avoids multi-second runtime probes (IndexTTS2 / Qwen voice) on every Setup poll.
 _VERIFY_CACHE_TTL_SEC = 45.0
 _VERIFY_CACHE: dict[str, tuple[float, "Verification"]] = {}
@@ -506,7 +530,7 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
         )
 
     if component.id == "ffmpeg":
-        executable_name = shutil.which("ffmpeg")
+        executable_name = ffmpeg_executable()
         if not executable_name:
             return Verification(
                 False, True, "executable_missing", "FFmpeg is not installed or is not on PATH.",

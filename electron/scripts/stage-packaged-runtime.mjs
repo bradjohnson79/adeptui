@@ -80,6 +80,9 @@ pth = pth.replace(/^#import site/m, "import site");
 if (!pth.includes("../studio-api")) {
   pth = `${pth.trim()}\r\n../studio-api\r\n`;
 }
+if (!pth.includes("../lifecycle")) {
+  pth = `${pth.trim()}\r\n../lifecycle\r\n`;
+}
 fs.writeFileSync(pthPath, pth.endsWith("\n") ? pth : `${pth}\n`);
 fs.mkdirSync(path.join(pyDir, "Lib", "site-packages"), { recursive: true });
 

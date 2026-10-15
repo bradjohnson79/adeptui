@@ -12,7 +12,12 @@ from .catalog import get_component, public_components
 from .state import load_state, update_state
 
 PROFILES = ("local", "api", "hybrid")
-SKELETON_IDS = ("python", "ffmpeg")
+SKELETON_IDS = ("python",)
+# Full API completion is the application runtime plus a verified provider.
+# FFmpeg is not part of that set. It is detected, and it is required only when
+# a selected workflow lists it as a dependency. There is no FFmpeg install job.
+API_COMPLETION_IDS = ("python",)
+DETECT_ONLY_IDS = frozenset({"python", "ffmpeg"})
 LOCAL_BASELINE_IDS = (
     "zimage_models",
     "ltx_2_5_checkpoint",
@@ -77,20 +82,28 @@ def expand_local_selection(selected: list[str]) -> list[str]:
     return expanded
 
 
-def required_ids_for(profile: str, state: dict[str, Any] | None = None) -> tuple[str, ...]:
-    """Components that must be ready for this profile. Optional models are not included."""
-    if profile == "api":
-        return SKELETON_IDS
-    if profile == "local":
-        return SKELETON_IDS + ("comfyui",) + LOCAL_BASELINE_IDS
-    selected = expand_local_selection(selected_local_models(state))
-    ordered = list(SKELETON_IDS)
-    if selected:
-        ordered.append("comfyui")
-    for component_id in selected:
+def _with_runtime(component_ids: list[str]) -> tuple[str, ...]:
+    """Python, plus the dependency closure of the selected workflows.
+
+    FFmpeg is included only when one of those workflows depends on it.
+    """
+    expanded = expand_local_selection(component_ids)
+    ordered: list[str] = []
+    for component_id in (*SKELETON_IDS, *expanded):
         if component_id not in ordered:
             ordered.append(component_id)
     return tuple(ordered)
+
+
+def required_ids_for(profile: str, state: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Components that must be ready for this profile. Optional models are not included."""
+    if profile == "api":
+        return API_COMPLETION_IDS
+    if profile == "local":
+        return _with_runtime(["comfyui", *LOCAL_BASELINE_IDS])
+    selected = selected_local_models(state)
+    chosen = ["comfyui", *selected] if selected else []
+    return _with_runtime(chosen)
 
 
 def profile_required_ids() -> tuple[str, ...]:
@@ -241,6 +254,10 @@ def apply_saved_profile() -> dict[str, Any]:
 
     for component_id in required_ids_for(profile, state):
         if component_id not in needed:
+            skipped.append(component_id)
+            continue
+        if component_id in DETECT_ONLY_IDS:
+            # Detection owns these. There is no install job, so do not enqueue one.
             skipped.append(component_id)
             continue
         try:

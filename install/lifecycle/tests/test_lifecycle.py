@@ -13,9 +13,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from adept_lifecycle.cli import main
-from adept_lifecycle.desktop import linux_desktop_entry
+from adept_lifecycle.desktop import linux_desktop_entry, windows_launcher
 from adept_lifecycle.detect import SystemProfile, linux_family_from_os_release
-from adept_lifecycle.manager import Hooks, Layout, Lifecycle
+from adept_lifecycle.manager import Hooks, Layout, Lifecycle, package_install_plan
 from adept_lifecycle.release import ReleaseError, assert_release_url, sign_catalog, sign_catalog_rsa, verify_catalog_rsa
 from adept_lifecycle.trust import generate_keypair, pinned_public_key, verify_sha256
 from adept_lifecycle.safety import is_shared_dependency, resolve_contained
@@ -350,3 +350,110 @@ def test_rsa_catalog_rejects_branch_urls_and_update_restores_the_previous_app(tm
     assert (home / "app" / "Adept UI.exe").read_bytes() == b"adept"
     updater = Path(restored.details["updater"])
     assert (home / "app").resolve() not in updater.resolve().parents
+
+
+def test_windows_shortcut_starts_the_lifecycle_without_a_console():
+    script = windows_launcher(Path(r"C:\Adept\bin\adeptui.cmd"))
+    assert "Wscript.Shell" in script
+    assert ", 0, False" in script
+    assert "Adept UI.exe" not in script
+
+
+def test_package_plans_do_not_weaken_gatekeeper():
+    payload = Path("Adept.UI-Setup.exe")
+    assert package_install_plan("nsis", payload) == [str(payload), "/S"]
+    assert package_install_plan("deb", Path("adept.deb"))[0] == "dpkg"
+    assert package_install_plan("rpm", Path("adept.rpm"))[0] == "rpm"
+    dmg = package_install_plan("dmg", Path("adept.dmg"))
+    assert dmg is not None
+    assert "xattr" not in dmg
+    assert "spctl" not in dmg
+    assert package_install_plan("zip", payload) is None
+
+
+def _installed(tmp_path: Path, version: str = "1.1.2"):
+    payload = tmp_path / "installed.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    system = profile()
+    assert lifecycle(home, system).install(catalog(version, digest=digest), payload).ok
+    (home / "user-data").mkdir(exist_ok=True)
+    (home / "user-data" / "project.txt").write_text("keep", encoding="utf-8")
+    return home, system
+
+
+def test_boot_without_a_catalog_does_not_show_completion(tmp_path: Path):
+    home, system = _installed(tmp_path)
+    launched: list[Path] = []
+    result = lifecycle(home, system, launch=lambda path: launched.append(path) or 0).launch()
+    assert result.code == "LAUNCHED"
+    assert result.details["code"] == "UPDATE_SERVICE_UNAVAILABLE"
+    progress = home / "update-progress.json"
+    assert not progress.exists() or json.loads(progress.read_text(encoding="utf-8")).get("footer") != "Updates complete."
+    assert (home / "user-data" / "project.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_boot_installs_a_newer_release_and_reports_real_bytes(tmp_path: Path):
+    home, system = _installed(tmp_path)
+    newer = tmp_path / "newer.zip"
+    digest = make_zip(newer)
+    offered = catalog("1.1.3", digest=digest)
+    offered["artifacts"][0]["bytes"] = newer.stat().st_size
+    offered = sign_catalog(offered, KEY)
+    launched: list[Path] = []
+    seen: list[dict] = []
+
+    def hold() -> None:
+        return None
+
+    result = lifecycle(
+        home,
+        system,
+        fetch_catalog=lambda: offered,
+        read_payload=lambda _artifact: newer,
+        launch=lambda path: launched.append(path) or 0,
+        progress=seen.append,
+        hold_completion=hold,
+        show_updater=True,
+    ).launch()
+    assert result.code == "UPDATED"
+    assert result.details["footer"] == "Updates complete."
+    assert launched and launched[0].name == "Adept UI.exe"
+    download = [item for item in seen if item["phase"] == "download" and item["downloadBytes"]]
+    assert download
+    assert download[-1]["downloadBytes"] == newer.stat().st_size
+    assert all(item["overallPercent"] != 100 for item in seen if not item["complete"])
+    assert seen[-1]["complete"] is True
+    assert seen[-1]["overallPercent"] == 100
+    assert seen[-1]["footer"] == "Updates complete."
+    assert (home / "user-data" / "project.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_boot_rejects_a_bad_signature_and_keeps_the_installed_app(tmp_path: Path):
+    home, system = _installed(tmp_path)
+    bad = catalog("1.1.3", digest="a" * 64)
+    bad["signature"] = "0" * 64
+    launched: list[Path] = []
+    result = lifecycle(home, system, fetch_catalog=lambda: bad, launch=lambda path: launched.append(path) or 0).launch()
+    assert result.code == "LAUNCHED"
+    assert result.details["code"] == "SIGNATURE_INVALID"
+    progress = json.loads((home / "update-progress.json").read_text(encoding="utf-8"))
+    assert progress["footer"] != "Updates complete."
+    assert progress["complete"] is False
+    assert json.loads((home / "registry.json").read_text(encoding="utf-8"))["installedVersion"] == "1.1.2"
+
+
+def test_boot_stops_after_repeated_checksum_failures(tmp_path: Path):
+    home, system = _installed(tmp_path)
+    newer = tmp_path / "newer.zip"
+    digest = make_zip(newer)
+    offered = catalog("1.1.3", digest=digest)
+    bad = tmp_path / "bad.zip"
+    bad.write_bytes(b"not-the-archive")
+    updater = lifecycle(home, system, fetch_catalog=lambda: offered, read_payload=lambda _artifact: bad, launch=lambda _path: 0)
+    for _ in range(3):
+        failed = updater.launch()
+        assert failed.details["code"] == "CHECKSUM_MISMATCH"
+    stopped = updater.launch()
+    assert stopped.details["code"] == "UPDATE_LOOP_STOPPED"
+    assert json.loads((home / "update-progress.json").read_text(encoding="utf-8"))["footer"] != "Updates complete."

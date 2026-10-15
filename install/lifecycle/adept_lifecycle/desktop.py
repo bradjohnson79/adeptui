@@ -22,7 +22,15 @@ def linux_desktop_entry(exec_path: Path) -> str:
 
 
 def windows_launcher(exec_path: Path) -> str:
-    return f'@echo off\r\nstart "" "{exec_path}"\r\n'
+    """Start the lifecycle command with no console window.
+
+    The shortcut must not start the application executable directly.
+    """
+    command = str(exec_path).replace('"', '""')
+    return (
+        'Set shell = CreateObject("Wscript.Shell")\r\n'
+        f'shell.Run """{command}""", 0, False\r\n'
+    )
 
 
 def macos_launcher(exec_path: Path) -> str:

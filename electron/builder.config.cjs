@@ -45,6 +45,7 @@ const config = {
   extraResources: [
     { from: "studio-web/dist", to: "renderer" },
     { from: "electron/version.json", to: "version.json" },
+    { from: "install/lifecycle/adept_lifecycle", to: "lifecycle/adept_lifecycle" },
     ...(fs.existsSync(path.join(__dirname, "build", "studio-api"))
       ? [{ from: "electron/build/studio-api", to: "studio-api" }]
       : []),
