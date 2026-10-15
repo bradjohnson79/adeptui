@@ -48,6 +48,8 @@ def main(argv: list[str] | None = None, profile: SystemProfile | None = None, ke
             return 0
         if args.command is None:
             result = lifecycle.launch()
+            if os.environ.get("ADEPT_HANDOFF_MODE") == "check" and result.code == "UPDATE_AVAILABLE":
+                return 10
             print(result.message)
             return 0 if result.ok else 1
         parser.print_help()
