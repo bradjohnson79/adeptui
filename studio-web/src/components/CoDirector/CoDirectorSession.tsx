@@ -136,6 +136,7 @@ type SessionValue = {
   dismissSendError: () => void;
   openSettings: () => void;
   visionValidationEnabled: boolean;
+  productionExecutiveEnabled: boolean;
   refreshProviderHealth: () => Promise<void>;
   setSelectedModelId: (modelId: string | null) => void;
   runSteps: (steps: PlannedStep[]) => Promise<void>;
@@ -1396,6 +1397,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       dismissSendError,
       openSettings,
       visionValidationEnabled: Boolean(providerHealth?.visionValidationEnabled),
+      productionExecutiveEnabled: Boolean(providerHealth?.productionExecutiveEnabled),
       refreshProviderHealth,
       setSelectedModelId,
       runSteps,

@@ -17,3 +17,14 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
+
+# Local scratch dumps (never commit)
+_t.*
+_t.txt
+_append_*.py
+_handlers_plain.txt
+_*.txt
+_*.hex
+_scratch.*
+scratch_*.py
+scratch_*.txt

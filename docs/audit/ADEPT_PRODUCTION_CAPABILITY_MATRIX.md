@@ -82,13 +82,22 @@ the Playwright fixture HTTP provider, and no test performs a real multi-GB downl
 | `references.thumbnail` | references | `not_implemented` | read | no | - | `-` |
 | `references.sheet.build` | references | `partially_wired` | write | yes | `references.read`, `storage.project_data` | `POST /api/projects/{projectId}/references/sheets/build` |
 | `references.ic_lora.ready` | references | `backend_only` | read | no | `comfyui.health` | `GET /api/projects/{projectId}/references/capabilities` |
+| `references.timeline_bindings` | references | `locally_verified` | write | no | `director.timeline.read` | `GET/POST .../director/items/{itemId}/references` |
+| `references.primary_frame` | references | `locally_verified` | read | no | `references.timeline_bindings`, `director.timeline.read` | `GET .../reference-package` |
+| `references.multiple_images` | references | `locally_verified` | write | no | `references.timeline_bindings` | `-` |
+| `references.character_identity` | references | `partially_wired` | read | no | `references.timeline_bindings` | `-` |
+| `references.style` | references | `partially_wired` | read | no | `references.timeline_bindings` | `-` |
+| `references.start_frame` | references | `partially_wired` | read | no | `references.timeline_bindings` | `-` |
+| `references.end_frame` | references | `partially_wired` | read | no | `references.timeline_bindings` | `-` |
+| `references.motion` | references | `partially_wired` | read | no | `references.timeline_bindings` | `-` |
+| `references.weighting` | references | `partially_wired` | read | no | `references.timeline_bindings`, `references.ic_lora.ready` | `-` |
 | `codirector.chat` | codirector | `backend_only` | read | no | `codirector.provider` | `POST /api/codirector/chat/stream` |
 | `codirector.provider` | codirector | `backend_only` | read | no | - | `GET /api/codirector/health` |
 | `codirector.bible.read` | codirector | `locally_verified` | read | no | - | `GET /api/codirector/projects/{projectId}/bible` |
 | `codirector.bible.propose` | codirector | `locally_verified` | write | yes | - | `POST /api/codirector/projects/{projectId}/proposals` |
 | `codirector.bible.approve` | codirector | `locally_verified` | write | yes | - | `POST /api/codirector/proposals/{proposalId}/approval` |
-| `codirector.vision.validate` | codirector | `not_configured` | write | no | - | `POST /api/codirector/vision/validate` |
-| `codirector.vision.review` | codirector | `not_configured` | write | yes | `codirector.vision.validate` | `POST /api/codirector/vision/approve` |
+| `codirector.vision.validate` | codirector | `locally_verified` | write | no | - | `POST /api/codirector/vision/validate` |
+| `codirector.vision.review` | codirector | `locally_verified` | write | yes | `codirector.vision.validate` | `POST /api/codirector/vision/approve` |
 | `codirector.tools` | codirector | `not_implemented` | write | no | - | `-` |
 | `comfyui.health` | comfyui | `backend_only` | read | no | - | `GET /api/comfy/health` |
 | `comfyui.queue` | comfyui | `backend_only` | write | yes | `comfyui.health`, `workflows.validate` | `-` |
@@ -99,7 +108,7 @@ the Playwright fixture HTTP provider, and no test performs a real multi-GB downl
 | `workflows.ready` | workflows | `backend_only` | read | no | `workflows.validate`, `comfyui.health` | `-` |
 | `workflows.image.ready` | workflows | `backend_only` | read | no | `workflows.validate`, `comfyui.health` | `-` |
 | `workflows.video.ready` | workflows | `backend_only` | read | no | `workflows.validate`, `comfyui.health` | `-` |
-| `models.image.ready` | models | `backend_only` | read | no | - | `-` |
+| `models.image.ready` | models | `locally_verified` | read | no | - | `-` |
 | `models.video.ready` | models | `backend_only` | read | no | - | `-` |
 | `extensions.comfyui.ready` | extensions | `backend_only` | read | no | `comfyui.health` | `-` |
 | `source_manager.read` | source_manager | `locally_verified` | read | no | - | `GET /api/source-manager/overview` |
@@ -112,12 +121,12 @@ the Playwright fixture HTTP provider, and no test performs a real multi-GB downl
 | `setup.prepare` | setup | `partially_wired` | write | yes | `setup.read` | `POST /api/setup/prepare` |
 | `health.read` | health | `locally_verified` | read | no | - | `GET /api/health` |
 | `capabilities.read` | capabilities | `locally_verified` | read | no | - | `GET /api/capabilities` |
-| `generation.image.queue` | generation | `backend_only` | write | yes | `comfyui.queue`, `workflows.image.ready`, `models.image.ready` | `POST /api/projects/{projectId}/imagegen` |
+| `generation.image.queue` | generation | `locally_verified` | write | yes | `comfyui.queue`, `workflows.image.ready`, `models.image.ready` | `POST /api/projects/{projectId}/imagegen` |
 | `generation.video.queue` | generation | `backend_only` | write | yes | `comfyui.queue`, `workflows.video.ready`, `models.video.ready` | `POST /api/projects/{projectId}/render` |
 | `generation.lipsync.queue` | generation | `backend_only` | write | yes | `comfyui.queue`, `generation.video.queue` | `POST /api/projects/{projectId}/lipsync` |
 | `generation.jobs.read` | generation | `locally_verified` | read | no | - | `GET /api/projects/{projectId}/jobs` |
 | `storyboard.read` | storyboard | `partially_wired` | read | no | - | `GET /api/projects/{projectId}/script` |
-| `storyboard.generate` | storyboard | `backend_only` | write | yes | `generation.image.queue` | `POST /api/projects/{projectId}/storyboard/generate` |
+| `storyboard.generate` | storyboard | `locally_verified` | write | yes | `generation.image.queue` | `POST /api/projects/{projectId}/storyboard/generate` |
 | `director.timeline.read` | director | `partially_wired` | read | no | - | `GET /api/projects/{projectId}/scenes/{sceneId}/director` |
 | `director.timeline.update` | director | `partially_wired` | write | yes | - | `PUT /api/projects/{projectId}/scenes/{sceneId}/director` |
 | `editor.sequences.read` | editor | `partially_wired` | read | no | - | `-` |

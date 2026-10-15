@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "inventoryId": "adept-ui-v1.0-approved-local-runtime",
+  "note": "Hashes only; absolute install paths are machine-local and not committed as authoritative locations.",
+  "classificationLegend": [
+    "UNKNOWN_NOT_REQUIRED",
+    "UNKNOWN_AND_REQUIRED",
+    "MACHINE_LOCAL_VERIFIED",
+    "MACHINE_LOCAL_UNVERIFIED"
+  ],
+  "models": [
+    {
+      "file": "z_image_turbo_bf16.safetensors",
+      "role": "unet",
+      "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+      "bytes": 12309866400,
+      "classification": "MACHINE_LOCAL_VERIFIED",
+      "requiredFor": [
+        "storyboard.generate",
+        "generation.image.queue",
+        "M2.7.1 closed-loop"
+      ]
+    },
+    {
+      "file": "qwen_3_4b.safetensors",
+      "role": "text_encoder",
+      "sha256": "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a",
+      "bytes": 8044982048,
+      "classification": "MACHINE_LOCAL_VERIFIED",
+      "requiredFor": [
+        "storyboard.generate",
+        "generation.image.queue",
+        "M2.7.1 closed-loop"
+      ]
+    },
+    {
+      "file": "ae.safetensors",
+      "role": "vae",
+      "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+      "bytes": 335304388,
+      "classification": "MACHINE_LOCAL_VERIFIED",
+      "requiredFor": [
+        "storyboard.generate",
+        "generation.image.queue",
+        "M2.7.1 closed-loop"
+      ]
+    },
+    {
+      "file": "qwen_4b_ace15.safetensors",
+      "role": "text_encoder_optional",
+      "sha256": "ffe5ffb855086c2ab55e467e9859fb01894781020a0376484dd19de166b79873",
+      "classification": "MACHINE_LOCAL_UNVERIFIED",
+      "requiredFor": []
+    },
+    {
+      "file": "LTX23_video_vae_bf16.safetensors",
+      "role": "video_vae",
+      "sha256": "01ea62d09bc139f95c5dee7b5c062ad6a3e6cd8be910a1983ac02e7eb5b8ee3b",
+      "classification": "UNKNOWN_NOT_REQUIRED",
+      "requiredFor": [],
+      "note": "Present locally; not required for Accepted M2.7.1 image path"
+    },
+    {
+      "file": "LTX23_audio_vae_bf16.safetensors",
+      "role": "audio_vae",
+      "sha256": "5bc10fa4adecf99dda132d916e23048cbd56797702c5fa50eb5d2079048a38c3",
+      "classification": "UNKNOWN_NOT_REQUIRED",
+      "requiredFor": []
+    },
+    {
+      "file": "Wan2_1_VAE_bf16.safetensors",
+      "role": "video_vae",
+      "sha256": "1ab9a32cc2c740f6e39d80d367ce5dcc28db8c71b79b28670546b8973e9d75f9",
+      "classification": "UNKNOWN_NOT_REQUIRED",
+      "requiredFor": []
+    },
+    {
+      "file": "Wan2_2_VAE_bf16.safetensors",
+      "role": "video_vae",
+      "sha256": "0e913a2ca571c75fcb63385a8edadcca73454af5842596cb1ad11e4142590996",
+      "classification": "UNKNOWN_NOT_REQUIRED",
+      "requiredFor": []
+    }
+  ],
+  "customNodes": [
+    {
+      "name": "comfyui-manager",
+      "classification": "MACHINE_LOCAL_UNVERIFIED",
+      "requiredFor": []
+    },
+    {
+      "name": "comfyui-kjnodes",
+      "classification": "MACHINE_LOCAL_UNVERIFIED",
+      "requiredFor": []
+    },
+    {
+      "name": "comfyui-easy-use",
+      "classification": "MACHINE_LOCAL_UNVERIFIED",
+      "requiredFor": []
+    },
+    {
+      "name": "comfyui-impact-pack",
+      "classification": "MACHINE_LOCAL_UNVERIFIED",
+      "requiredFor": []
+    },
+    {
+      "name": "ComfyUI-LTXVideo",
+      "classification": "UNKNOWN_NOT_REQUIRED",
+      "requiredFor": [],
+      "note": "Video path; not required for Accepted M2.7.1 image closed-loop"
+    },
+    {
+      "name": "ComfyUI-WanVideoWrapper",
+      "classification": "UNKNOWN_NOT_REQUIRED",
+      "requiredFor": []
+    },
+    {
+      "name": "comfyui-videohelpersuite",
+      "classification": "UNKNOWN_NOT_REQUIRED",
+      "requiredFor": []
+    },
+    {
+      "name": "comfyui_essentials",
+      "classification": "MACHINE_LOCAL_UNVERIFIED",
+      "requiredFor": []
+    },
+    {
+      "name": "rgthree-comfy",
+      "classification": "MACHINE_LOCAL_UNVERIFIED",
+      "requiredFor": []
+    },
+    {
+      "name": "ComfyMath",
+      "classification": "MACHINE_LOCAL_UNVERIFIED",
+      "requiredFor": []
+    },
+    {
+      "name": "ComfyUI-MelBandRoFormer",
+      "classification": "UNKNOWN_NOT_REQUIRED",
+      "requiredFor": []
+    },
+    {
+      "name": "WhatDreamsCost-ComfyUI",
+      "classification": "UNKNOWN_NOT_REQUIRED",
+      "requiredFor": [],
+      "note": "Not required for accepted Z-Image path; TextEncodeZImageOmni lives in ComfyUI core extras"
+    }
+  ],
+  "coreNodesRequiredForAcceptedImagePath": [
+    {
+      "node": "UNETLoader",
+      "package": "ComfyUI core (nodes.py)",
+      "classification": "MACHINE_LOCAL_VERIFIED",
+      "requiredFor": [
+        "storyboard.generate",
+        "M2.7.1"
+      ]
+    },
+    {
+      "node": "TextEncodeZImageOmni",
+      "package": "ComfyUI core extras (comfy_extras/nodes_zimage.py)",
+      "classification": "MACHINE_LOCAL_VERIFIED",
+      "requiredFor": [
+        "storyboard.generate",
+        "M2.7.1"
+      ]
+    }
+  ],
+  "customNodesRequiredForAcceptedImagePath": []
+}

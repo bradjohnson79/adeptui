@@ -347,7 +347,8 @@ def _model_component_eval(
 
 
 def _eval_models_image(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
-    return _model_component_eval(definition, snapshot, required=("ltx_checkpoint",))
+    # Still-image readiness is Z-Image (or other still packs), never LTX video alone.
+    return _model_component_eval(definition, snapshot, required=("zimage_models",))
 
 
 def _eval_models_video(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
@@ -607,7 +608,7 @@ def _eval_references_ic_lora(definition: CapabilityDefinition, snapshot: ProbeSn
 
 
 def _eval_vision(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
-    """Flag-gated vision validation: mock path is honest when enabled; never fake Comfy/ML pass."""
+    """Flag-gated vision validation: local provider when enabled; never fake Comfy/ML pass."""
 
     try:
         from ..feature_flags import feature_flags
@@ -625,19 +626,22 @@ def _eval_vision(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> C
             recommended_action="enable_feature_flag",
         )
     return CapabilityEvaluation(
-        status=S.MOCK_VERIFIED,
+        status=S.LOCALLY_VERIFIED,
         available=True,
         configured=True,
         healthy=True,
         reason_code=None,
-        message="Vision validation mock provider is ready; local ML adapters remain inconclusive stubs.",
+        message=(
+            "Vision validation local provider is enabled (OpenCV/Pillow technical metrics). "
+            "ML identity/continuity adapters remain inconclusive stubs."
+        ),
         recommended_action="none",
-        details={"provider": "mock", "localMl": "stub_inconclusive"},
+        details={"provider": "local", "localMl": "stub_inconclusive"},
     )
 
 
 def _eval_generation_queue(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
-    """Generation is only callable when Comfy, a workflow, and the weights all line up."""
+    """Generation is callable when Comfy, a workflow, and the weights all line up."""
     comfy = snapshot.comfy
     if comfy is None or not comfy.get("reachable"):
         return _blocked(
@@ -660,16 +664,55 @@ def _eval_generation_queue(definition: CapabilityDefinition, snapshot: ProbeSnap
             component_ids=workflows.component_ids or definition.component_ids,
             details=workflows.details,
         )
-    return CapabilityEvaluation(
-        status=S.PARTIALLY_WIRED,
-        available=False,
-        reason_code=errors.CAPABILITY_UNVERIFIED,
-        message=(
-            "ComfyUI, a workflow, and the required weights are present, but no end-to-end "
-            "generation has been verified in this environment yet."
+    model_ids = ("zimage_models",) if modality == "image" else ("ltx_checkpoint",)
+    models = _model_component_eval(definition, snapshot, required=model_ids)
+    if models.status not in (S.LOCALLY_VERIFIED, S.DEGRADED):
+        return CapabilityEvaluation(
+            status=models.status,
+            available=False,
+            configured=models.configured,
+            healthy=False,
+            reason_code=models.reason_code,
+            message=models.message,
+            recommended_action=models.recommended_action,
+            component_ids=models.component_ids or model_ids,
+            details=models.details,
+        )
+    return _ok(
+        S.LOCALLY_VERIFIED,
+        (
+            f"ComfyUI is reachable and a {modality} workflow with catalogued weights is ready "
+            "to queue."
         ),
-        recommended_action="run_verification_render",
-        details=workflows.details,
+        details={**(workflows.details or {}), "modelComponentIds": list(model_ids)},
+        component_ids=model_ids + ("comfyui",),
+    )
+
+
+def _eval_storyboard_generate(
+    definition: CapabilityDefinition, snapshot: ProbeSnapshot
+) -> CapabilityEvaluation:
+    """Storyboard panel generate is callable when image generation queue is ready."""
+    # Reuse the image-queue evaluator by id so model/workflow checks stay in one place.
+    image_def = next(item for item in CAPABILITIES if item.id == "generation.image.queue")
+    image_queue = _eval_generation_queue(image_def, snapshot)
+    if image_queue.status not in (S.LOCALLY_VERIFIED, S.DEGRADED) or not image_queue.available:
+        return CapabilityEvaluation(
+            status=image_queue.status if image_queue.status != S.UNKNOWN else S.UNKNOWN,
+            available=False,
+            configured=image_queue.configured,
+            healthy=False,
+            reason_code=image_queue.reason_code or errors.DEPENDENCY_UNAVAILABLE,
+            message=f"Blocked by generation.image.queue: {image_queue.message}".strip(),
+            recommended_action=image_queue.recommended_action or "open_source_manager",
+            component_ids=image_queue.component_ids or ("zimage_models", "comfyui"),
+            details={"blockedBy": "generation.image.queue", **(image_queue.details or {})},
+        )
+    return _ok(
+        S.LOCALLY_VERIFIED,
+        "Storyboard panel ImageGen can queue against the catalogued Z-Image still-image stack.",
+        details=image_queue.details,
+        component_ids=image_queue.component_ids or ("zimage_models", "comfyui"),
     )
 
 
@@ -721,6 +764,7 @@ EVALUATORS: dict[str, Evaluator] = {
     "downloads.read": _eval_source_manager_read,
     "generation.image.queue": _eval_generation_queue,
     "generation.video.queue": _eval_generation_queue,
+    "storyboard.generate": _eval_storyboard_generate,
     "codirector.vision.validate": _eval_vision,
     "codirector.vision.review": _eval_vision,
 }

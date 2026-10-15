@@ -7,6 +7,7 @@ Active Co-Director / Director gates include:
 * ``STUDIO_FEATURE_CODIRECTOR_INTELLIGENCE_V2``
 * ``STUDIO_FEATURE_VISION_VALIDATION_V1``
 * ``STUDIO_FEATURE_TIMELINE_REFERENCES_V1``
+* ``STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1``
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ class FeatureFlags:
     codirector_intelligence_v2: bool = False
     vision_validation_v1: bool = False
     timeline_references_v1: bool = False
+    production_executive_v1: bool = False
 
     @classmethod
     def from_env(

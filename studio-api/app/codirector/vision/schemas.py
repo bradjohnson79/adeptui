@@ -147,7 +147,7 @@ class ValidateRequest(BaseModel):
     sceneId: Optional[str] = None
     referenceAssetId: Optional[str] = None
     referenceSet: Optional[ReferenceSetSpec] = None
-    provider: Literal["mock", "local"] = "mock"
+    provider: Literal["mock", "local"] = "local"
     fixtureProfile: Optional[str] = None
     validators: Optional[list[str]] = None
 
