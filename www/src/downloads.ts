@@ -46,9 +46,9 @@ function releaseUrl(fileName: string): string {
   return `${releaseBase}/${encodeURIComponent(fileName)}`;
 }
 
-const windowsInstaller = releaseUrl("Adept.UI-1.1.5-terminal-r2-win-x64.zip");
-const macInstaller = releaseUrl("Adept.UI-1.1.5-terminal-r2-mac-arm64.zip");
-const linuxArchive = releaseUrl("Adept.UI-1.1.5-terminal-r2-linux-x64.zip");
+const windowsInstaller = releaseUrl("Adept.UI-1.1.5-terminal-r3-win-x64.zip");
+const macInstaller = releaseUrl("Adept.UI-1.1.5-terminal-r3-mac-arm64.zip");
+const linuxArchive = releaseUrl("Adept.UI-1.1.5-terminal-r3-linux-x64.zip");
 
 /** Public install commands. The macOS build is a direct download and is not notarized. */
 export const installCommands: Partial<Record<DesktopOs, string>> = {
