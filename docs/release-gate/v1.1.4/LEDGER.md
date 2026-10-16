@@ -1,6 +1,6 @@
 # Adept UI 1.1.4 evidence ledger
 
-Phase: 1.1.4 is the live public release. 1.1.5 is building so the first launch records the installed version and checks the catalog.
+Phase: 1.1.5 artifacts are built and the GitHub release exists. The signed catalog is ready to deploy.
 
 ## Passing
 

@@ -325,7 +325,7 @@ export function DownloadAdeptUI({ variant }: { variant: "hero" | "panel" }) {
         {download.inspect}{" "}
         <a href="https://adeptui.org/releases/current.json">Release catalog</a>
         {" · "}
-        <a href="https://github.com/bradjohnson79/adeptui/releases/tag/v1.1.4">Release files</a>
+        <a href="https://github.com/bradjohnson79/adeptui/releases/tag/v1.1.5">Release files</a>
         {" · "}
         <a href="https://adeptui.org/releases/integrity.html">Release integrity</a>
       </p>

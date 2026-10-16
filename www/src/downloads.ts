@@ -1,7 +1,7 @@
 /**
  * Public download configuration.
  * Every download control reads this record. Addresses are the published
- * GitHub release assets for Adept UI 1.1.4 Beta.
+ * GitHub release assets for Adept UI 1.1.5 Beta.
  * The page never reads a download address from the query string.
  */
 
@@ -40,16 +40,16 @@ export type PlatformRelease = {
 
 export const desktopPlatforms: DesktopOs[] = ["windows", "macos", "linux"];
 
-const releaseBase = "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.4";
+const releaseBase = "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.5";
 
 function releaseUrl(fileName: string): string {
   return `${releaseBase}/${encodeURIComponent(fileName)}`;
 }
 
-const windowsInstaller = releaseUrl("Adept.UI-Setup-1.1.4-win-x64.exe");
-const macInstaller = releaseUrl("Adept.UI-1.1.4-mac-arm64.dmg");
-const linuxDeb = releaseUrl("Adept.UI-1.1.4-linux-x64.deb");
-const linuxRpm = releaseUrl("Adept.UI-1.1.4-linux-x64.rpm");
+const windowsInstaller = releaseUrl("Adept.UI-Setup-1.1.5-win-x64.exe");
+const macInstaller = releaseUrl("Adept.UI-1.1.5-mac-arm64.dmg");
+const linuxDeb = releaseUrl("Adept.UI-1.1.5-linux-x64.deb");
+const linuxRpm = releaseUrl("Adept.UI-1.1.5-linux-x64.rpm");
 
 /** Public install commands. The macOS build is a direct download and is not notarized. */
 export const installCommands: Partial<Record<DesktopOs, string>> = {
@@ -65,7 +65,7 @@ export const downloads: Record<DesktopOs, PlatformRelease> = {
   windows: {
     id: "windows",
     label: "Windows",
-    version: "1.1.4",
+    version: "1.1.5",
     url: windowsInstaller,
     available: true,
     builds: [],
@@ -73,7 +73,7 @@ export const downloads: Record<DesktopOs, PlatformRelease> = {
   macos: {
     id: "macos",
     label: "macOS",
-    version: "1.1.4",
+    version: "1.1.5",
     url: macInstaller,
     available: true,
     builds: [],
@@ -81,7 +81,7 @@ export const downloads: Record<DesktopOs, PlatformRelease> = {
   linux: {
     id: "linux",
     label: "Linux",
-    version: "1.1.4",
+    version: "1.1.5",
     url: "",
     available: true,
     builds: [
