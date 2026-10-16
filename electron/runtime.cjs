@@ -10,6 +10,31 @@ const { resolveStudioApiEndpoint, collisionMessage, CONTROL_PORT, CONTROL_PORT_F
 
 const DESKTOP_API = resolveStudioApiEndpoint("electron-packaged");
 
+function executableMode(mode) {
+  return (mode & 0o111) !== 0 ? mode : (mode | 0o755);
+}
+
+function ensurePosixExecutable(filePath) {
+  if (process.platform === "win32") return;
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    return;
+  }
+  if (!stat.isFile()) return;
+  const next = executableMode(stat.mode);
+  if (next === stat.mode) return;
+  fs.chmodSync(filePath, next);
+}
+
+function watchSpawn(child) {
+  child.on("error", (error) => {
+    console.error(`Adept UI could not start its runtime: ${error.message}`);
+  });
+  return child;
+}
+
 function packagedEnv(layout) {
   const keep = [
     "SystemRoot",
@@ -321,14 +346,15 @@ async function preparePackagedApi({ pythonPath, apiSource, userData }) {
     status.backgroundServices.healthy = ready.healthy;
     status.backgroundServices.owned = ready.healthy || controlPlan.owned;
   } else if (fs.existsSync(pythonPath)) {
+    ensurePosixExecutable(pythonPath);
     const logFd = fs.openSync(supervisorLog, "a");
     const args = ["-u", "-m", "runtime_supervisor", "serve"];
-    supervisorChild = spawn(pythonPath, args, {
+    supervisorChild = watchSpawn(spawn(pythonPath, args, {
       cwd: apiSource,
       env: packagedEnv(layout),
       windowsHide: true,
       stdio: ["ignore", logFd, logFd],
-    });
+    }));
     status.backgroundServices.spawned = true;
     status.backgroundServices.owned = true;
     status.backgroundServices.pid = supervisorChild.pid || null;
@@ -362,14 +388,15 @@ async function preparePackagedApi({ pythonPath, apiSource, userData }) {
     status.setupRequired = true;
     return { status, child: null, supervisorChild, layout };
   }
+  ensurePosixExecutable(pythonPath);
   const logPath = path.join(layout.logs, "studio-api.log");
   const logFd = fs.openSync(logPath, "a");
-  const child = spawn(pythonPath, ["-u", "-m", "uvicorn", "app.main:app", "--host", DESKTOP_API.studioApiHost, "--port", String(port)], {
+  const child = watchSpawn(spawn(pythonPath, ["-u", "-m", "uvicorn", "app.main:app", "--host", DESKTOP_API.studioApiHost, "--port", String(port)], {
     cwd: apiSource,
     env: packagedEnv(layout),
     windowsHide: true,
     stdio: ["ignore", logFd, logFd],
-  });
+  }));
   status.spawned = true;
   status.childPid = child.pid || null;
   status.command = `${pythonPath} -u -m uvicorn app.main:app --host ${DESKTOP_API.studioApiHost} --port ${port}`;
@@ -385,6 +412,7 @@ module.exports = {
   COMFY_PORT,
   packagedEnv,
   preparePackagedApi,
+  executableMode,
   inspectPort,
   classifyControlPlane,
   chooseControlPort,

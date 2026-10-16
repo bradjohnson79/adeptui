@@ -7,8 +7,13 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { adeptControlAuthenticated, classifyControlPlane, chooseControlPort, writePackagedRuntimeConfig } = require("./runtime.cjs");
+const { adeptControlAuthenticated, classifyControlPlane, chooseControlPort, writePackagedRuntimeConfig, executableMode } = require("./runtime.cjs");
 const { parseSsListenPids } = require("./platform/process.cjs");
+
+test("a packaged Linux runtime without an executable bit can be started", () => {
+  assert.equal(executableMode(0o100644), 0o100755);
+  assert.equal(executableMode(0o100755), 0o100755);
+});
 
 test("a foreign listener on 8759 is left alone", () => {
   const plan = classifyControlPlane(
