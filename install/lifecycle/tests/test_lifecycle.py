@@ -28,23 +28,33 @@ def profile(os_name: str = "windows", arch: str = "x64", family: str | None = No
     return SystemProfile(os_name, "test", arch, family, ram, 50 << 30, "nvidia", 24 << 30)
 
 
-def catalog(version: str = "1.2.0", platform: str = "windows", arch: str = "x64", *, approved: bool = True, digest: str) -> dict:
+def catalog(
+    version: str = "1.2.0",
+    platform: str = "windows",
+    arch: str = "x64",
+    *,
+    approved: bool = True,
+    digest: str,
+    revision: int | None = None,
+) -> dict:
+    artifact = {
+        "platform": platform,
+        "arch": arch,
+        "version": version,
+        "sha256": digest,
+        "bytes": 100,
+        "kind": "zip",
+        "fileName": "AdeptUI.zip",
+        "distributions": ["fedora", "debian"] if platform == "linux" else None,
+    }
     body = {
         "approved": approved,
         "channel": "beta",
-        "artifacts": [
-            {
-                "platform": platform,
-                "arch": arch,
-                "version": version,
-                "sha256": digest,
-                "bytes": 100,
-                "kind": "zip",
-                "fileName": "AdeptUI.zip",
-                "distributions": ["fedora", "debian"] if platform == "linux" else None,
-            }
-        ],
+        "artifacts": [artifact],
     }
+    if revision is not None:
+        artifact["revision"] = revision
+        body["revision"] = revision
     return sign_catalog(body, KEY)
 
 
@@ -166,6 +176,78 @@ def test_update_replaces_version_and_keeps_user_work(tmp_path: Path):
     assert (home / "user-data" / "project.txt").read_text(encoding="utf-8") == "keep"
     current = lifecycle(home, system).update(catalog("1.2.0", digest=newer_digest), newer, apply=False)
     assert current.code == "NO_UPDATE"
+
+
+def test_same_version_revision_updates_and_rejects_a_downgrade(tmp_path: Path):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    system = profile()
+    installed = lifecycle(home, system).install(catalog("1.1.5", digest=digest), payload)
+    assert installed.ok
+    recorded = json.loads((home / "registry.json").read_text(encoding="utf-8"))
+    assert recorded["installedVersion"] == "1.1.5"
+    assert recorded["installedRevision"] == 0
+    newer = tmp_path / "revision.zip"
+    newer_digest = make_zip(newer, "Adept UI.exe")
+    same = lifecycle(home, system).update(catalog("1.1.5", digest=newer_digest, revision=0), newer, apply=False)
+    assert same.code == "NO_UPDATE"
+    revised = lifecycle(home, system).update(catalog("1.1.5", digest=newer_digest, revision=1), newer, apply=True)
+    assert revised.ok
+    recorded = json.loads((home / "registry.json").read_text(encoding="utf-8"))
+    assert recorded["installedVersion"] == "1.1.5"
+    assert recorded["installedRevision"] == 1
+    assert recorded["recovery"]["lastGoodVersion"] == "1.1.5"
+    assert recorded["recovery"]["lastGoodRevision"] == 0
+    assert (home / "app" / "Adept UI.exe").read_bytes() == b"adept"
+    again = lifecycle(home, system).update(catalog("1.1.5", digest=newer_digest, revision=1), newer, apply=False)
+    assert again.code == "NO_UPDATE"
+    older = lifecycle(home, system).update(catalog("1.1.5", digest=newer_digest, revision=0), newer, apply=True)
+    assert older.code == "NO_UPDATE"
+    assert json.loads((home / "registry.json").read_text(encoding="utf-8"))["installedRevision"] == 1
+
+
+def test_older_application_version_installs_the_newer_revision(tmp_path: Path):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    system = profile()
+    assert lifecycle(home, system).install(catalog("1.1.4", digest=digest), payload).ok
+    newer = tmp_path / "next.zip"
+    newer_digest = make_zip(newer)
+    result = lifecycle(home, system).update(catalog("1.1.5", digest=newer_digest, revision=2), newer, apply=True)
+    assert result.ok
+    recorded = json.loads((home / "registry.json").read_text(encoding="utf-8"))
+    assert recorded["installedVersion"] == "1.1.5"
+    assert recorded["installedRevision"] == 2
+
+
+def test_failed_revision_update_does_not_replace_the_installed_revision(tmp_path: Path):
+    payload = tmp_path / "app.zip"
+    digest = make_zip(payload)
+    home = tmp_path / "home"
+    system = profile()
+    assert lifecycle(home, system).install(catalog("1.1.5", digest=digest, revision=1), payload).ok
+    (home / "app" / "Adept UI.exe").write_bytes(b"original-install")
+    original = (home / "app" / "Adept UI.exe").read_bytes()
+    newer = tmp_path / "next.zip"
+    newer_digest = make_zip(newer, "Adept UI.exe")
+    refused = lifecycle(home, system).update(catalog("1.1.5", digest="ab" * 32, revision=2), newer, apply=True)
+    assert refused.code == "CHECKSUM_MISMATCH"
+    recorded = json.loads((home / "registry.json").read_text(encoding="utf-8"))
+    assert recorded["installedVersion"] == "1.1.5"
+    assert recorded["installedRevision"] == 1
+    assert (home / "app" / "Adept UI.exe").read_bytes() == original
+    interrupted = lifecycle(home, system, health=lambda: False).apply_with_recovery(
+        newer,
+        {"version": "1.1.5", "revision": 2, "kind": "zip", "fileName": newer.name, "sha256": newer_digest},
+        "1.1.5",
+    )
+    assert interrupted.code == "UPDATE_RESTORED"
+    recorded = json.loads((home / "registry.json").read_text(encoding="utf-8"))
+    assert recorded["installedRevision"] == 1
+    assert (home / "app" / "Adept UI.exe").read_bytes() == original
+    assert (home / "previous-app").is_dir()
 
 
 def test_uninstall_preserves_projects_and_refuses_unsafe_models(tmp_path: Path):
@@ -294,6 +376,14 @@ def test_bootstrap_uses_the_pinned_catalog():
     assert "BEGIN PUBLIC KEY" in shell
     assert "127.0.0.1" not in shell
     assert "localhost" not in shell.lower()
+    zip_at = shell.index('if [ "$payload_kind" = "zip" ]')
+    package_at = shell.index("sudo dpkg")
+    assert zip_at < package_at
+    assert "exit 0" in shell[zip_at:package_at]
+    assert "installedRevision" in shell
+    launcher = (ROOT / "install" / "launcher" / "adept_launcher" / "launcher.py").read_text(encoding="utf-8")
+    assert "install_native_package" not in launcher
+    assert 'kind != "zip"' in launcher
 
 
 def test_pinned_catalog_signature_matches_the_published_release():

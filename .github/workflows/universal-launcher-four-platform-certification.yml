@@ -42,9 +42,9 @@ jobs:
           catalog_hash = hashlib.sha256(catalog).hexdigest()
           signature_hash = hashlib.sha256(signature).hexdigest()
           body = json.loads(catalog)
-          if body.get("version") != "1.1.6":
+          if body.get("version") != "1.1.5":
               raise SystemExit(f"catalog version {body.get('version')}")
-          if integrity.get("status") != "PASS" or integrity.get("version") != "1.1.6":
+          if integrity.get("status") != "PASS" or integrity.get("version") != "1.1.5":
               raise SystemExit(f"integrity {integrity.get('status')} {integrity.get('version')}")
           if integrity.get("catalogSha256") != catalog_hash or integrity.get("signatureSha256") != signature_hash:
               raise SystemExit("integrity hashes do not match the live catalog")

@@ -16,7 +16,7 @@ test "$(uname -m)" = "arm64"
 export ADEPT_ASSUME_YES=1
 export ADEPT_NO_LAUNCH=1
 curl -fsSL "https://adeptui.org/install.sh" | bash
-app="$HOME/Applications/Adept UI.app"
+app="$HOME/.adept-ui/app/Adept UI.app"
 launcher="$app/Contents/MacOS/Adept UI"
 electron="$app/Contents/MacOS/Adept UI.bin"
 test -x "$launcher"
@@ -24,9 +24,23 @@ test -x "$electron"
 echo "INSTALLATION: PASS" | tee "$evidence/result.txt"
 echo "LAUNCHER: $launcher" | tee -a "$evidence/result.txt"
 echo "ELECTRON: $electron" | tee -a "$evidence/result.txt"
-/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" | tee "$evidence/bundle-version.txt"
-grep -q '1.1.6' "$evidence/bundle-version.txt"
-echo "INSTALLED_VERSION: 1.1.6" | tee -a "$evidence/result.txt"
+bundle_exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+if [ "$bundle_exe" != "Adept UI" ]; then
+  echo "BUNDLE_EXECUTABLE: FAIL $bundle_exe" | tee -a "$evidence/result.txt"
+  exit 1
+fi
+echo "BUNDLE_EXECUTABLE: launcher" | tee -a "$evidence/result.txt"
+version_file="$app/Contents/Resources/version.json"
+test -f "$version_file"
+cp "$version_file" "$evidence/version.json"
+grep -q '"version": "1.1.5"' "$version_file"
+echo "INSTALLED_VERSION: 1.1.5" | tee -a "$evidence/result.txt"
+shortcut="$HOME/Desktop/Adept UI"
+if [ -e "$shortcut" ]; then
+  echo "DESKTOP_SHORTCUT: PASS $shortcut" | tee -a "$evidence/result.txt"
+else
+  echo "DESKTOP_SHORTCUT: NOT_VERIFIED" | tee -a "$evidence/result.txt"
+fi
 set +e
 codesign --verify --deep --strict --verbose=2 "$app" >"$evidence/codesign.txt" 2>&1
 codesign_status=$?
@@ -83,7 +97,7 @@ else
   pkill -f "Adept UI.app/Contents/MacOS" || true
 fi
 
-rm -rf "$app"
+ADEPT_UNINSTALL=1 bash -c 'curl -fsSL "https://adeptui.org/install.sh" | bash'
 test ! -d "$app"
 test "$(cat "$keep")" = "disposable-project"
 echo "UNINSTALL_PRESERVES_USER_DATA: PASS" | tee -a "$evidence/result.txt"

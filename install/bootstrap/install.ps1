@@ -127,6 +127,37 @@ if ($artifact.kind -eq "zip") {
     exit 5
   }
   $program = $launcher
+  $revision = 0
+  if ($null -ne $artifact.PSObject.Properties["revision"] -and $null -ne $artifact.revision -and "$($artifact.revision)" -ne "") {
+    $revision = [int]$artifact.revision
+  } elseif ($null -ne $catalog.PSObject.Properties["revision"] -and $null -ne $catalog.revision -and "$($catalog.revision)" -ne "") {
+    $revision = [int]$catalog.revision
+  }
+  if ($revision -lt 0) { $revision = 0 }
+  $registryPath = Join-Path $root "registry.json"
+  $record = [ordered]@{
+    schema = 1
+    installedVersion = [string]$artifact.version
+    installedRevision = $revision
+    os = "windows"
+    arch = "x64"
+    location = $app
+    method = "adept-lifecycle"
+    health = "installed"
+  }
+  if (Test-Path $registryPath) {
+    try {
+      $existing = Get-Content $registryPath -Raw | ConvertFrom-Json
+      foreach ($prop in $existing.PSObject.Properties) {
+        if ($prop.Name -notin @("schema", "installedVersion", "installedRevision", "os", "arch", "location", "method", "health")) {
+          $record[$prop.Name] = $prop.Value
+        }
+      }
+    } catch {
+      Write-Host "The existing installation record could not be read. A new record will be written."
+    }
+  }
+  [System.IO.File]::WriteAllText($registryPath, ($record | ConvertTo-Json -Depth 8))
 } else {
   $installed = Start-Process -FilePath $destination -ArgumentList "/S" -Wait -PassThru
   if ($installed.ExitCode -ne 0) {

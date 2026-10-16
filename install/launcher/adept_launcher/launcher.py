@@ -66,8 +66,8 @@ def _sibling_app_executable() -> Path | None:
     return None
 
 
-def _packaged_version(executable: Path) -> str | None:
-    """Version shipped beside Electron. A first launch records this so the next check is real."""
+def _packaged_document(executable: Path) -> dict | None:
+    """Identity shipped beside Electron. A first launch records this so the next check is real."""
     import json
 
     if sys.platform == "darwin":
@@ -80,8 +80,22 @@ def _packaged_version(executable: Path) -> str | None:
         data = json.loads(candidate.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    return data if isinstance(data, dict) else None
+
+
+def _packaged_version(executable: Path) -> str | None:
+    data = _packaged_document(executable)
     version = data.get("version") if isinstance(data, dict) else None
     return str(version) if version else None
+
+
+def _packaged_revision(executable: Path) -> int:
+    from adept_lifecycle.release import BASELINE_REVISION, release_revision
+
+    data = _packaged_document(executable)
+    if not isinstance(data, dict) or "revision" not in data:
+        return BASELINE_REVISION
+    return release_revision(data.get("revision"))
 
 
 def _build_hooks() -> Hooks:
@@ -149,6 +163,8 @@ def _run_worker(layout: Layout, catalog: dict, artifact: dict, payload: Path, pr
         str(artifact.get("kind") or "zip"),
         "--sha256",
         str(artifact.get("sha256") or ""),
+        "--revision",
+        str(artifact.get("revision") if "revision" in artifact else ""),
         "--install-exe",
         str(source or ""),
     ]
@@ -167,6 +183,7 @@ def _run_worker(layout: Layout, catalog: dict, artifact: dict, payload: Path, pr
             previous=previous,
             kind=str(artifact.get("kind") or "zip"),
             sha256=str(artifact.get("sha256") or ""),
+            revision=str(artifact.get("revision") if "revision" in artifact else ""),
             install_exe=str(source or ""),
         )
     )
@@ -186,7 +203,16 @@ def _worker_main(args: argparse.Namespace) -> int:
     lifecycle = Lifecycle(layout, profile, None, Hooks())
     payload = Path(args.payload)
     kind = str(getattr(args, "kind", "") or "zip")
-    artifact = {"version": args.target, "fileName": payload.name, "kind": kind, "sha256": getattr(args, "sha256", "")}
+    from adept_lifecycle.release import release_revision
+
+    raw_revision = str(getattr(args, "revision", "") or "")
+    artifact = {
+        "version": args.target,
+        "fileName": payload.name,
+        "kind": kind,
+        "sha256": getattr(args, "sha256", ""),
+        "revision": release_revision(raw_revision) if raw_revision.strip() else 0,
+    }
     try:
         expected = str(getattr(args, "sha256", "") or "")
         if expected:
@@ -245,6 +271,7 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--previous", default="", help=argparse.SUPPRESS)
     parser.add_argument("--kind", default="zip", help=argparse.SUPPRESS)
     parser.add_argument("--sha256", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--revision", default="", help=argparse.SUPPRESS)
     parser.add_argument("--install-exe", default="", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
@@ -276,6 +303,8 @@ def run(argv: list[str] | None = None) -> int:
 
         registry = empty_registry(profile.os_name, profile.arch, str(layout.app_dir))
         registry["installedVersion"] = remembered
+        packaged_executable = lifecycle._executable()
+        registry["installedRevision"] = _packaged_revision(packaged_executable) if packaged_executable else 0
         lifecycle._save(registry)
     if not registry or not registry.get("installedVersion"):
         executable = lifecycle._executable()
@@ -317,7 +346,10 @@ def run(argv: list[str] | None = None) -> int:
             from adept_lifecycle.release import verify_catalog_rsa
 
             verify_catalog_rsa(catalog, public)
-            artifact = select_artifact(catalog, profile, version)
+            from adept_lifecycle.release import catalog_release_revision
+
+            artifact = dict(select_artifact(catalog, profile, version, registry.get("installedRevision")))
+            artifact["revision"] = catalog_release_revision(catalog, artifact)
         except ReleaseError as exc:
             if exc.code == "NO_UPDATE":
                 return _continue(lifecycle, executable, "NO_UPDATE", version, "Adept UI is up to date.")
@@ -392,7 +424,18 @@ def run(argv: list[str] | None = None) -> int:
             complete=True,
             footer="Updates complete.",
         )
-        atomic_write(layout.root / "startup-update.json", {"action": "continue", "code": "UPDATED", "version": target})
+        from adept_lifecycle.release import release_revision
+
+        recorded = read_registry(layout.registry_path) or {}
+        atomic_write(
+            layout.root / "startup-update.json",
+            {
+                "action": "continue",
+                "code": "UPDATED",
+                "version": target,
+                "revision": release_revision(recorded.get("installedRevision")),
+            },
+        )
         new_executable = lifecycle._executable() or executable
         _launch_app(lifecycle, new_executable)
         lifecycle.log(f"launch UPDATED {version} -> {target}")

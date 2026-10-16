@@ -54,6 +54,6 @@ if (!fs.existsSync(dmg)) {
 console.log("Adept UI.app BUILT = PASS");
 console.log(app);
 console.log(dmg);
-const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r2";
+const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r3";
 const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-${terminalRevision}-mac-arm64.zip`);
 run("python3", ["electron/scripts/pack-terminal-archive.py", app, terminalZip]);

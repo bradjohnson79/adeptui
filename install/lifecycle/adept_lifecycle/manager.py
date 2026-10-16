@@ -17,7 +17,15 @@ from typing import Any, Callable
 from .desktop import menu_entry, write_launcher
 from .detect import SystemProfile
 from .registry import atomic_write, empty_registry, read_registry
-from .release import ReleaseError, select_artifact, verify_catalog, verify_catalog_rsa, verify_file
+from .release import (
+    ReleaseError,
+    catalog_release_revision,
+    release_revision,
+    select_artifact,
+    verify_catalog,
+    verify_catalog_rsa,
+    verify_file,
+)
 from .trust import PublicKey
 from .safety import is_shared_dependency, resolve_contained, windows_model_on_system_drive
 
@@ -273,9 +281,11 @@ class Lifecycle:
         if self.profile.os_name == "linux":
             menu = str(menu_entry(self.layout.applications_dir, cli))
         version = str(artifact["version"])
+        revision = catalog_release_revision(catalog, artifact)
         registry.update(
             {
                 "installedVersion": version,
+                "installedRevision": revision,
                 "channel": catalog.get("channel") or "beta",
                 "location": str(self.layout.app_dir),
                 "managedFiles": managed,
@@ -285,7 +295,7 @@ class Lifecycle:
                 "modelInventory": str(self.layout.model_dir / "inventory.json"),
                 "userData": str(self.layout.user_data),
                 "health": "installed",
-                "recovery": {"lastGoodVersion": version},
+                "recovery": {"lastGoodVersion": version, "lastGoodRevision": revision},
             }
         )
         history = list(registry.get("updateHistory") or [])
@@ -458,7 +468,7 @@ class Lifecycle:
                 if public is None:
                     raise ReleaseError("SIGNATURE_MISSING", "The release catalog has no verifiable signature.")
                 verify_catalog_rsa(catalog, public)
-            artifact = select_artifact(catalog, self.profile, version)
+            artifact = select_artifact(catalog, self.profile, version, registry.get("installedRevision"))
         except ReleaseError as exc:
             if exc.code == "NO_UPDATE":
                 return self._continue(executable, "NO_UPDATE", version, "Adept UI is up to date.")
@@ -547,11 +557,14 @@ class Lifecycle:
                 self._emit(phase="error", installedVersion=version, targetVersion=target, operation=str(exc), error="INSTALL_INTERRUPTED", indeterminate=True)
                 return self._continue(executable, "INSTALL_INTERRUPTED", version, "The update did not finish. The installed Adept UI was left in place.")
             registry = self._registry()
+            previous_revision = release_revision(registry.get("installedRevision"))
+            revision = catalog_release_revision(catalog, artifact)
             registry["installedVersion"] = target
+            registry["installedRevision"] = revision
             registry["health"] = "updated"
-            registry["recovery"] = {"lastGoodVersion": version}
+            registry["recovery"] = {"lastGoodVersion": version, "lastGoodRevision": previous_revision}
             self._save(registry)
-            result = Result(True, "UPDATED", f"Adept UI is now {target}.", {"previous": version})
+            result = Result(True, "UPDATED", f"Adept UI is now {target}.", {"previous": version, "revision": revision})
         else:
             self._emit(
                 phase="error",
@@ -656,6 +669,7 @@ class Lifecycle:
             shutil.rmtree(previous)
         if self.layout.app_dir.exists():
             shutil.copytree(self.layout.app_dir, previous)
+        previous_revision = release_revision(self._registry().get("installedRevision"))
         updater = self.external_updater_dir()
         try:
             self._materialize(payload, artifact)
@@ -666,11 +680,18 @@ class Lifecycle:
             self.log(f"update restored after {exc}")
             return Result(False, "UPDATE_RESTORED", "The update did not finish. Adept UI was restored to the last working version.", {"updater": str(updater)})
         registry = self._registry()
+        revision = catalog_release_revision(None, artifact)
         registry["installedVersion"] = str(artifact.get("version") or registry.get("installedVersion"))
-        registry["recovery"] = {"lastGoodVersion": previous_version}
+        registry["installedRevision"] = revision
+        registry["recovery"] = {"lastGoodVersion": previous_version, "lastGoodRevision": previous_revision}
         registry["health"] = "updated"
         self._save(registry)
-        return Result(True, "UPDATED", f"Adept UI is now {registry['installedVersion']}.", {"updater": str(updater), "previous": previous_version})
+        return Result(
+            True,
+            "UPDATED",
+            f"Adept UI is now {registry['installedVersion']}.",
+            {"updater": str(updater), "previous": previous_version, "revision": revision},
+        )
 
     def external_updater_dir(self) -> Path:
         """Keep the updater outside the application directory before replacement.
@@ -707,7 +728,7 @@ class Lifecycle:
         failures = dict(registry.get("updateFailures") or {})
         try:
             verify_catalog(catalog, self.key)
-            artifact = select_artifact(catalog, self.profile, str(version))
+            artifact = select_artifact(catalog, self.profile, str(version), registry.get("installedRevision"))
         except ReleaseError as exc:
             if exc.code == "NO_UPDATE":
                 return Result(True, "NO_UPDATE", "Adept UI is up to date.")
@@ -740,9 +761,12 @@ class Lifecycle:
             if partial.exists():
                 partial.unlink()
             return Result(False, "DOWNLOAD_INTERRUPTED", f"The update download did not finish. {exc}")
+        previous_revision = release_revision(registry.get("installedRevision"))
+        revision = catalog_release_revision(catalog, artifact)
         registry["installedVersion"] = target
+        registry["installedRevision"] = revision
         registry["health"] = "updated"
-        registry["recovery"] = {"lastGoodVersion": version}
+        registry["recovery"] = {"lastGoodVersion": version, "lastGoodRevision": previous_revision}
         history = list(registry.get("updateHistory") or [])
         history.append({"version": target, "action": "update", "previous": version})
         registry["updateHistory"] = history
@@ -874,7 +898,11 @@ class Lifecycle:
         written: list[str] = []
         kind = str(artifact.get("kind") or "zip")
         if kind == "zip":
-            with zipfile.ZipFile(payload) as archive:
+            try:
+                archive_handle = zipfile.ZipFile(payload)
+            except zipfile.BadZipFile as exc:
+                raise OSError("The update archive could not be read.") from exc
+            with archive_handle as archive:
                 for info in archive.infolist():
                     if not info.filename or info.filename.endswith("/"):
                         continue

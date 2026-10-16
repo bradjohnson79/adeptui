@@ -42,7 +42,7 @@ if (!fs.existsSync(launcher)) {
 }
 console.log(`unpacked ${unpacked}`);
 console.log(fs.existsSync(setup) ? `installer ${setup}` : "installer missing");
-const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r2";
+const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r3";
 const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-${terminalRevision}-win-x64.zip`);
 const pythonExe = fs.existsSync(path.join(root, "studio-api", ".venv", "Scripts", "python.exe"))
   ? path.join(root, "studio-api", ".venv", "Scripts", "python.exe")

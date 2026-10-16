@@ -72,6 +72,59 @@ def verify_catalog(catalog: dict[str, Any], key: bytes | None) -> None:
         raise ReleaseError("SIGNATURE_INVALID", "The release catalog signature does not match.")
 
 
+# Installations and catalogs published before this field are revision 0.
+# A higher revision is a newer build of the same application version.
+BASELINE_REVISION = 0
+
+
+def release_revision(value: Any) -> int:
+    """Missing or unusable revisions are the documented baseline, 0."""
+    if isinstance(value, bool) or value is None or value == "":
+        return BASELINE_REVISION
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return BASELINE_REVISION
+    if number < 0:
+        return BASELINE_REVISION
+    return number
+
+
+def catalog_release_revision(catalog: dict[str, Any] | None, artifact: dict[str, Any] | None) -> int:
+    """Artifact revision wins. Otherwise the catalog revision. Otherwise baseline 0."""
+    if isinstance(artifact, dict) and "revision" in artifact:
+        return release_revision(artifact.get("revision"))
+    if isinstance(catalog, dict) and "revision" in catalog:
+        return release_revision(catalog.get("revision"))
+    return BASELINE_REVISION
+
+
+def compare_release(
+    installed_version: str | None,
+    installed_revision: Any,
+    candidate_version: str | None,
+    candidate_revision: Any,
+) -> str:
+    """Return upgrade, current, or downgrade. Revisions are compared only for equal versions."""
+    installed = parse_version(installed_version)
+    candidate = parse_version(candidate_version)
+    if candidate is None:
+        return "current"
+    if installed is None:
+        return "upgrade"
+    if candidate > installed:
+        return "upgrade"
+    if candidate < installed:
+        return "downgrade"
+    installed_rev = release_revision(installed_revision)
+    candidate_rev = release_revision(candidate_revision)
+    if candidate_rev > installed_rev:
+        return "upgrade"
+    if candidate_rev < installed_rev:
+        return "downgrade"
+    return "current"
+
+
 def parse_version(value: str | None) -> tuple[int, int, int] | None:
     if not value:
         return None
@@ -89,10 +142,10 @@ def select_artifact(
     catalog: dict[str, Any],
     profile: SystemProfile,
     installed_version: str | None,
+    installed_revision: Any = None,
 ) -> dict[str, Any]:
-    installed = parse_version(installed_version) if installed_version else None
     best: dict[str, Any] | None = None
-    best_version: tuple[int, int, int] | None = None
+    best_key: tuple[tuple[int, int, int], int] | None = None
     for artifact in catalog.get("artifacts") or []:
         if not isinstance(artifact, dict):
             continue
@@ -107,13 +160,22 @@ def select_artifact(
         version = parse_version(str(artifact.get("version") or ""))
         if version is None:
             continue
-        if installed is not None and version <= installed:
-            continue
+        revision = catalog_release_revision(catalog, artifact)
+        if installed_version:
+            decision = compare_release(
+                installed_version,
+                installed_revision,
+                str(artifact.get("version") or ""),
+                revision,
+            )
+            if decision != "upgrade":
+                continue
         if not artifact.get("sha256"):
             continue
-        if best_version is None or version > best_version:
+        key = (version, revision)
+        if best_key is None or key > best_key:
             best = artifact
-            best_version = version
+            best_key = key
     if best is None:
         raise ReleaseError("NO_UPDATE", "No approved update is available for this computer.")
     return best

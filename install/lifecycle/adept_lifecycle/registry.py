@@ -29,6 +29,7 @@ def empty_registry(profile_os: str, arch: str, location: str) -> dict[str, Any]:
     return {
         "schema": 1,
         "installedVersion": None,
+        "installedRevision": None,
         "channel": None,
         "os": profile_os,
         "arch": arch,
@@ -43,5 +44,5 @@ def empty_registry(profile_os: str, arch: str, location: str) -> dict[str, Any]:
         "updateHistory": [],
         "updateFailures": {},
         "health": "empty",
-        "recovery": {"lastGoodVersion": None},
+        "recovery": {"lastGoodVersion": None, "lastGoodRevision": None},
     }

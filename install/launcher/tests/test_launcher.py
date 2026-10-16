@@ -51,27 +51,32 @@ def make_payload(path: Path, exe_name: str = EXE_NAME) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def signed_catalog(private, version: str, digest: str, file_name: str = "AdeptUI.zip", kind: str = "zip") -> dict:
-    body = {
-        "approved": True,
-        "channel": "beta",
-        "artifacts": [
-            {
-                "platform": OS_NAME,
-                "arch": "x64" if OS_NAME != "darwin" else "arm64",
-                "version": version,
-                "sha256": digest,
-                "bytes": 100,
-                "kind": kind,
-                "fileName": file_name,
-                "distributions": ["fedora", "debian"] if OS_NAME == "linux" else None,
-            }
-        ],
+def signed_catalog(
+    private,
+    version: str,
+    digest: str,
+    file_name: str = "AdeptUI.zip",
+    kind: str = "zip",
+    revision: int | None = None,
+) -> dict:
+    artifact = {
+        "platform": OS_NAME,
+        "arch": "x64" if OS_NAME != "darwin" else "arm64",
+        "version": version,
+        "sha256": digest,
+        "bytes": 100,
+        "kind": kind,
+        "fileName": file_name,
+        "distributions": ["fedora", "debian"] if OS_NAME == "linux" else None,
     }
+    body = {"approved": True, "channel": "beta", "artifacts": [artifact]}
+    if revision is not None:
+        artifact["revision"] = revision
+        body["revision"] = revision
     return sign_catalog_rsa(body, private)
 
 
-def install_app(root: Path, version: str) -> Path:
+def install_app(root: Path, version: str, revision: int | None = None) -> Path:
     app_dir = root / "app"
     app_dir.mkdir(parents=True, exist_ok=True)
     (app_dir / EXE_NAME).write_bytes(b"installed")
@@ -81,6 +86,8 @@ def install_app(root: Path, version: str) -> Path:
         "health": "ok",
         "updateFailures": {},
     }
+    if revision is not None:
+        registry["installedRevision"] = revision
     (root / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
     return app_dir
 
@@ -313,6 +320,7 @@ def test_first_launch_records_packaged_version_before_catalog_check(monkeypatch,
     assert len(launched) == 1
     registry = read_json(tmp_path / "registry.json")
     assert registry["installedVersion"] == "1.1.4"
+    assert registry["installedRevision"] == 0
     status = read_json(tmp_path / "startup-update.json")
     assert status["code"] == "NO_UPDATE"
 
@@ -340,6 +348,54 @@ def test_newer_release_applies_the_verified_archive(monkeypatch, tmp_path, keys)
     assert read_json(tmp_path / "registry.json")["installedVersion"] == "1.1.5"
     assert read_json(tmp_path / "startup-update.json")["code"] == "UPDATED"
     assert keep.read_text(encoding="utf-8") == "keep"
+
+
+def test_same_version_revision_updates_through_the_launcher(monkeypatch, tmp_path, keys):
+    _, private = keys
+    install_app(tmp_path, "1.1.5")
+    payload = tmp_path / "incoming" / "Adept.UI-1.1.5-terminal-r3.zip"
+    digest = make_payload(payload)
+    catalog = signed_catalog(private, "1.1.5", digest, file_name=payload.name, revision=1)
+    rc, launched = run_launcher(monkeypatch, tmp_path, catalog, payload)
+    assert rc == 0
+    assert len(launched) == 1
+    registry = read_json(tmp_path / "registry.json")
+    assert registry["installedVersion"] == "1.1.5"
+    assert registry["installedRevision"] == 1
+    status = read_json(tmp_path / "startup-update.json")
+    assert status["code"] == "UPDATED"
+    assert status["revision"] == 1
+    assert (tmp_path / "app" / EXE_NAME).read_bytes() == b"adept"
+
+    rc_same, _ = run_launcher(monkeypatch, tmp_path, catalog, payload)
+    assert rc_same == 0
+    assert read_json(tmp_path / "startup-update.json")["code"] == "NO_UPDATE"
+    assert (tmp_path / "app" / EXE_NAME).read_bytes() == b"adept"
+
+    older = signed_catalog(private, "1.1.5", digest, file_name=payload.name, revision=0)
+    rc_old, _ = run_launcher(monkeypatch, tmp_path, older, payload)
+    assert rc_old == 0
+    assert read_json(tmp_path / "startup-update.json")["code"] == "NO_UPDATE"
+    assert read_json(tmp_path / "registry.json")["installedRevision"] == 1
+
+
+def test_interrupted_revision_leaves_the_installed_revision(monkeypatch, tmp_path, keys):
+    _, private = keys
+    app_dir = install_app(tmp_path, "1.1.5", revision=1)
+    original = (app_dir / EXE_NAME).read_bytes()
+    payload = tmp_path / "incoming" / "broken.zip"
+    payload.parent.mkdir(parents=True, exist_ok=True)
+    payload.write_bytes(b"not-a-zip")
+    digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+    catalog = signed_catalog(private, "1.1.5", digest, file_name=payload.name, revision=2)
+    rc, _ = run_launcher(monkeypatch, tmp_path, catalog, payload)
+    assert rc == 0
+    status = read_json(tmp_path / "startup-update.json")
+    assert status["code"] == "INSTALL_INTERRUPTED"
+    registry = read_json(tmp_path / "registry.json")
+    assert registry["installedVersion"] == "1.1.5"
+    assert registry["installedRevision"] == 1
+    assert (app_dir / EXE_NAME).read_bytes() == original
 
 
 def test_launcher_downloads_only_published_releases(tmp_path, monkeypatch):

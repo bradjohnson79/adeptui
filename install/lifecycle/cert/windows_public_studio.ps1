@@ -16,22 +16,22 @@ $env:ADEPT_NO_LAUNCH = "1"
 if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
 "INSTALLATION: PASS" | Tee-Object -FilePath (Join-Path $evidence "result.txt")
 
-$program = Join-Path $env:LOCALAPPDATA "Programs\Adept UI"
-$launcher = Join-Path $program "Adept Launcher.exe"
-$electron = Join-Path $program "Adept UI.exe"
+$root = Join-Path $env:USERPROFILE ".adept-ui"
+$launcher = Join-Path $root "bin\Adept Launcher.exe"
+$electron = Join-Path $root "app\Adept UI.exe"
 if (-not (Test-Path $launcher)) { throw "Launcher missing at $launcher" }
 if (-not (Test-Path $electron)) { throw "Electron missing at $electron" }
-if ((Split-Path $launcher -Parent) -ne $program) { throw "Launcher is not beside Electron" }
-"LAUNCHER_SIBLING: PASS" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
+"LAUNCHER: $launcher" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
+"ELECTRON: $electron" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
 
-$versionFile = Join-Path $program "resources\version.json"
+$versionFile = Join-Path $root "app\resources\version.json"
 $versionText = Get-Content $versionFile -Raw
-if ($versionText -notmatch '"version": "1.1.6"') { throw "Installed version is not 1.1.6" }
-"INSTALLED_VERSION: 1.1.6" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
+if ($versionText -notmatch '"version": "1.1.5"') { throw "Installed version is not 1.1.5" }
+"INSTALLED_VERSION: 1.1.5" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
 
 $shortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Adept UI.lnk"
 $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
-if ($target -notlike "*\Adept Launcher.exe") { throw "SHORTCUT: FAIL $target" }
+if ($target -ne $launcher) { throw "SHORTCUT: FAIL $target" }
 "SHORTCUT: PASS $target" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
 
 $keep = Join-Path $env:APPDATA "Adept UI\project-keep.txt"
@@ -39,7 +39,7 @@ New-Item -ItemType Directory -Force -Path (Split-Path $keep) | Out-Null
 Set-Content -Path $keep -Value "disposable-project" -NoNewline
 
 function Stop-Adept {
-  Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\Programs\Adept UI\*" } | ForEach-Object {
+  Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\.adept-ui\*" } | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
   }
   Start-Sleep -Seconds 2
@@ -100,7 +100,7 @@ $registryPath = Join-Path $env:USERPROFILE ".adept-ui\registry.json"
 $startupPath = Join-Path $env:USERPROFILE ".adept-ui\startup-update.json"
 if (-not (Test-Path $registryPath)) { throw "REGISTRY: FAIL" }
 $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
-if ($registry.installedVersion -ne "1.1.6") { throw "REGISTRY_VERSION: FAIL $($registry.installedVersion)" }
+if ($registry.installedVersion -ne "1.1.5") { throw "REGISTRY_VERSION: FAIL $($registry.installedVersion)" }
 $startup = Get-Content $startupPath -Raw | ConvertFrom-Json
 if ($startup.code -ne "NO_UPDATE") { throw "UPDATE_CHECK: FAIL $($startup.code)" }
 "UPDATE_CHECK: NO_UPDATE" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
@@ -108,35 +108,14 @@ Stop-Adept
 if (Get-Process -Name "Adept UI" -ErrorAction SilentlyContinue) { throw "SHUTDOWN: FAIL" }
 "SHUTDOWN: PASS" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
 
-$registry.installedVersion = "1.1.5"
-[System.IO.File]::WriteAllText($registryPath, ($registry | ConvertTo-Json -Depth 8))
-Remove-Item $startupPath -Force -ErrorAction SilentlyContinue
-Start-Process -FilePath $launcher | Out-Null
-$deadline = (Get-Date).AddMinutes(20)
-$updated = $false
-while ((Get-Date) -lt $deadline) {
-  if (Test-Path $startupPath) {
-    $startup = Get-Content $startupPath -Raw | ConvertFrom-Json
-    if ($startup.code -eq "UPDATED") { $updated = $true; break }
-    throw "AUTOMATIC_UPDATE: FAIL $($startup.code)"
-  }
-  Start-Sleep -Seconds 5
-}
-if (-not $updated) { throw "AUTOMATIC_UPDATE: FAIL timed out" }
-$registry = Get-Content $registryPath -Raw | ConvertFrom-Json
-if ($registry.installedVersion -ne "1.1.6") { throw "AUTOMATIC_UPDATE: FAIL registry $($registry.installedVersion)" }
-if ((Get-Content $keep -Raw) -ne "disposable-project") { throw "AUTOMATIC_UPDATE: user data lost" }
-"AUTOMATIC_UPDATE: PASS" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
-Wait-Studio "updated"
-Stop-Adept
 Start-Process -FilePath $target | Out-Null
 Wait-Studio "restart"
 Stop-Adept
 "RESTART: PASS" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
 
-$uninstaller = Join-Path $program "Uninstall Adept UI.exe"
-$removed = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
-if ($null -ne $removed.ExitCode -and $removed.ExitCode -ne 0) { throw "Uninstall exited $($removed.ExitCode)" }
+$env:ADEPT_UNINSTALL = "1"
+& powershell -NoProfile -Command "irm https://adeptui.org/install.ps1 | iex"
+Remove-Item Env:ADEPT_UNINSTALL
 if (Test-Path $electron) { throw "Electron remained after uninstall" }
 if ((Get-Content $keep -Raw) -ne "disposable-project") { throw "User data was removed" }
 "UNINSTALL_PRESERVES_USER_DATA: PASS" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append

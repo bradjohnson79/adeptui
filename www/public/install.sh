@@ -158,11 +158,53 @@ if digest.lower() != str(chosen["sha256"]).lower():
 pathlib.Path(sys.argv[1]).with_name("payload-path.txt").write_text(str(destination), encoding="utf-8")
 pathlib.Path(sys.argv[1]).with_name("payload-version.txt").write_text(str(chosen.get("version") or ""), encoding="utf-8")
 pathlib.Path(sys.argv[1]).with_name("payload-kind.txt").write_text(str(chosen.get("kind") or ""), encoding="utf-8")
+revision = chosen.get("revision", catalog.get("revision", 0))
+try:
+    revision = int(revision)
+except (TypeError, ValueError):
+    revision = 0
+if revision < 0:
+    revision = 0
+pathlib.Path(sys.argv[1]).with_name("payload-revision.txt").write_text(str(revision), encoding="utf-8")
 PY
 
 payload="$(cat "$workdir/payload-path.txt")"
 version="$(cat "$workdir/payload-version.txt")"
 payload_kind="$(cat "$workdir/payload-kind.txt")"
+revision="$(cat "$workdir/payload-revision.txt")"
+
+record_installed_release() {
+  python3 - "$root" "$version" "$revision" "$platform" "$arch" <<'PY'
+import json, sys
+from pathlib import Path
+root, version, revision, platform, arch = sys.argv[1:6]
+try:
+    number = int(revision)
+except ValueError:
+    number = 0
+if number < 0:
+    number = 0
+path = Path(root) / "registry.json"
+data = {}
+if path.is_file():
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data = loaded
+    except (OSError, json.JSONDecodeError):
+        data = {}
+data["schema"] = data.get("schema") or 1
+data["installedVersion"] = version
+data["installedRevision"] = number
+data["os"] = platform
+data["arch"] = arch
+data["location"] = str(Path(root) / "app")
+data["method"] = "adept-lifecycle"
+data["health"] = "installed"
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+PY
+}
 
 if [ "$payload_kind" = "zip" ]; then
   root="$HOME/.adept-ui"
@@ -202,6 +244,7 @@ PY
     launcher="$dest/Contents/MacOS/Adept UI"
     chmod 755 "$launcher" "$dest/Contents/MacOS/Adept UI.bin" 2>/dev/null || true
     test -e "$launcher"
+    record_installed_release
     if prompt_yes "Create a desktop shortcut? [Y/n] "; then
       if [ -d "$HOME/Desktop" ]; then
         osascript >/dev/null 2>&1 <<APPLESCRIPT || echo "macOS could not create a desktop alias. Adept UI is in $dest"
@@ -222,6 +265,9 @@ APPLESCRIPT
   cp "$app/Adept UI" "$bin/Adept UI"
   chmod 755 "$bin/Adept UI" "$app/Adept UI.bin"
   launcher="$bin/Adept UI"
+  test -x "$launcher"
+  test -x "$app/Adept UI.bin"
+  record_installed_release
   mkdir -p "$HOME/.local/share/applications"
   entry="$HOME/.local/share/applications/adept-ui.desktop"
   printf '%s\n' "[Desktop Entry]" "Name=Adept UI" "Comment=Adept UI" "Exec=\"$launcher\"" "Terminal=false" "Type=Application" "Categories=AudioVideo;" > "$entry"
