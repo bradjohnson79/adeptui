@@ -5,7 +5,7 @@
   "catalogSha256": "aeb9eecc32dddf0f993ca3373ba5af10bd79dd081d976c25b9b1ff9783905506",
   "signatureSha256": "01e713033204a7282a9c84d35e56e9dd60c2c6bd324a74aa029d6c90b024da6f",
   "verifiedAt": "2026-10-16T06:50:00Z",
-  "gitSha": "ee26304ba0544bcf35ced80e4854b849cfa8e18a",
+  "gitSha": "15dc27a3a0829b27fbeffbd9f4ea32a15e2d1ccb",
   "workflowRunUrl": "https://github.com/bradjohnson79/adeptui/actions/runs/38860054364",
   "checks": {
     "catalogSignature": "PASS",
