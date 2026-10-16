@@ -228,6 +228,24 @@ jobs:
           $launcher = Get-ChildItem $program -Recurse -Filter "Adept Launcher.exe" | Select-Object -First 1
           if (-not $launcher) { throw "Universal launcher was not installed" }
           if ($launcher.DirectoryName -ne $program) {
-            throw "LAUNCHER_SIBLING: FAIL. Installed at $($launcher.FullName). The published installer does not place the launcher beside Adept UI.exe, so shortcuts stay on Electron and the launcher cannot resolve its sibling. Replacing the v1.1.3 Windows binary requires owner authorization."
+            throw "LAUNCHER_SIBLING: FAIL. Installed at $($launcher.FullName). The published installer does not place the launcher beside Adept UI.exe."
           }
           Write-Host "LAUNCHER_SIBLING: PASS"
+          $shortcut = Join-Path $env:USERPROFILE "Desktop\Adept UI.lnk"
+          $shortcutTarget = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
+          if ($shortcutTarget -notlike "*\Adept Launcher.exe") { throw "SHORTCUT: FAIL $shortcutTarget" }
+          Write-Host "SHORTCUT: PASS $shortcutTarget"
+          $windowRoot = Join-Path $env:TEMP "adept-public-launcher-root"
+          $windowData = Join-Path $env:TEMP "adept-public-window"
+          New-Item -ItemType Directory -Force -Path $windowRoot, $windowData | Out-Null
+          $env:ADEPT_ELECTRON_ARGS = "--user-data-dir=$windowData"
+          Start-Process -FilePath $launcher.FullName -ArgumentList @("--root", $windowRoot) -WindowStyle Normal | Out-Null
+          $title = ""
+          foreach ($i in 1..45) {
+            Start-Sleep -Seconds 2
+            $title = @(Get-Process | Where-Object { $_.MainWindowTitle -match "Adept UI" } | Select-Object -ExpandProperty MainWindowTitle -First 1)
+            if ($title) { break }
+          }
+          Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\Programs\Adept UI\*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          if (-not $title) { throw "STUDIO_WINDOW: FAIL" }
+          Write-Host "STUDIO_WINDOW: PASS $title"

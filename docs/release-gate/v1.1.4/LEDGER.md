@@ -1,6 +1,6 @@
 # Adept UI 1.1.4 evidence ledger
 
-Phase: repair Windows launcher placement, then build 1.1.4.
+Phase: v1.1.4 artifacts are built and the GitHub release exists. Production catalog deploy and the public install gate are next.
 
 ## Passing
 
@@ -35,6 +35,14 @@ Windows packaging used `extraResources`. That directory is `resources\`, not the
 - Fedora physical desktop: the executable gate is a Fedora container, not a physical desktop.
 - Visible Studio window: NOT VERIFIED until the Windows and macOS desktop jobs record one.
 
+## Built
+
+- Commit `8d836b25`. Windows, macOS, and Linux desktop jobs succeeded.
+- Windows install certification: launcher beside Electron, shortcut targets `Adept Launcher.exe`, window title `Adept UI Studio`, boot GO, health 200, uninstall leaves the user-data marker.
+- macOS arm64 smoke: window behavior PASS, dmg launch PASS, boot GO. Notarization remains PENDING CREDENTIALS.
+- GitHub release `v1.1.4` at `8d836b25` with the four installers. Sizes match the signed catalog.
+- Catalog SHA-256 is recorded after `verify_published_catalog.py --publishable --require-openssl` returned PASS.
+
 ## Next
 
-Commit the 1.1.4 packaging repair, push, and dispatch the Windows and macOS desktop builds. The push builds Linux.
+Deploy adeptui.org, then let `release-catalog-gate` install from the public commands.
