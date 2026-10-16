@@ -1,6 +1,6 @@
 # Adept UI 1.1.4 evidence ledger
 
-Phase: v1.1.4 artifacts are built and the GitHub release exists. Production catalog deploy and the public install gate are next.
+Phase: public install gate passed for 1.1.4. Integrity record is ready to deploy.
 
 ## Passing
 
@@ -43,6 +43,15 @@ Windows packaging used `extraResources`. That directory is `resources\`, not the
 - GitHub release `v1.1.4` at `8d836b25` with the four installers. Sizes match the signed catalog.
 - Catalog SHA-256 is recorded after `verify_published_catalog.py --publishable --require-openssl` returned PASS.
 
+## Public gate
+
+Run `38847177899` completed success. Live catalog verification returned PASS before that run.
+
+- Windows: installation, launcher beside Electron, shortcut `Adept Launcher.exe`, window title `Adept UI Studio`, reinstall and user data.
+- Ubuntu: installation, Electron sibling `/opt/Adept UI/Adept UI.bin`, reinstall and user data. No physical display.
+- Fedora container: installation, the same Electron sibling, reinstall and user data. Not a physical desktop.
+- macOS: public install and reinstall. The desktop smoke of the same disk image showed the window. Notarization is an external blocker.
+
 ## Next
 
-Deploy adeptui.org, then let `release-catalog-gate` install from the public commands.
+Deploy the integrity record. Do not claim macOS notarization or a physical Fedora desktop.
