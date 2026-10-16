@@ -220,9 +220,31 @@ with zipfile.ZipFile(payload) as archive:
         destination = (app / name).resolve()
         if app.resolve() not in destination.parents and destination != app.resolve():
             raise SystemExit("The archive tried to write outside the installation folder.")
-    archive.extractall(app)
 PY
   then
+    rm -rf "$app"
+    if [ -d "$previous" ]; then
+      mv "$previous" "$app"
+    fi
+    echo "Installation did not finish."
+    exit 5
+  fi
+  if [ "$platform" = "darwin" ]; then
+    # Python's zip extractor writes macOS framework symlinks as plain files.
+    # ditto restores the bundle the archive was packed with.
+    extract_ok=0
+    ditto -x -k "$payload" "$app" && extract_ok=1
+  else
+    extract_ok=0
+    python3 - "$payload" "$app" <<'PY' && extract_ok=1
+import sys, zipfile
+from pathlib import Path
+payload, app = Path(sys.argv[1]), Path(sys.argv[2])
+with zipfile.ZipFile(payload) as archive:
+    archive.extractall(app)
+PY
+  fi
+  if [ "$extract_ok" != "1" ]; then
     rm -rf "$app"
     if [ -d "$previous" ]; then
       mv "$previous" "$app"

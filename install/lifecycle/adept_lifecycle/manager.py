@@ -808,7 +808,16 @@ class Lifecycle:
                     destination = (self.layout.app_dir / info.filename).resolve()
                     if self.layout.app_dir.resolve() not in destination.parents:
                         raise OSError("The archive tried to write outside the installation folder.")
-                archive.extractall(self.layout.app_dir)
+            if self.profile.os_name == "darwin" and shutil.which("ditto"):
+                extracted = subprocess.run(
+                    ["ditto", "-x", "-k", str(payload), str(self.layout.app_dir)],
+                    check=False,
+                )
+                if extracted.returncode != 0:
+                    raise OSError("The update archive could not be read.")
+            else:
+                with zipfile.ZipFile(payload) as archive:
+                    archive.extractall(self.layout.app_dir)
             for file in self.layout.app_dir.rglob("*"):
                 if file.is_file() and "lifecycle" not in file.parts:
                     written.append(str(file))

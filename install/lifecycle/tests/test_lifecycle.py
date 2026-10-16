@@ -369,6 +369,7 @@ def test_bootstrap_uses_the_pinned_catalog():
     assert "not notarized" in shell.lower()
     assert 'kind="zip"' in shell
     assert "hdiutil" not in shell
+    assert 'ditto -x -k' in shell
     assert "dpkg" not in shell
     assert "rpm -Uvh" not in shell
     assert "Apple Silicon" in shell
