@@ -75,7 +75,12 @@ export function rendererShipsComfyPrerequisite(rendererDir) {
       if (!/\.(js|css|html)$/i.test(entry.name)) continue;
       let text = "";
       try { text = fs.readFileSync(full, "utf8"); } catch { continue; }
-      if (text.includes(OFFICIAL_COMFY_DOWNLOAD) && text.includes("Official ComfyUI Download")) return true;
+      if (
+        text.includes("Install ComfyUI")
+        && text.includes("pip install comfy-cli")
+        && text.includes("comfy install")
+        && text.includes("Copy command")
+      ) return true;
     }
   }
   return false;

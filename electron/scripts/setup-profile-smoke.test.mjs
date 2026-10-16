@@ -46,10 +46,10 @@ test("a reachable ComfyUI is detected and a placeholder job still fails the gate
   assert.equal(gates["COMFY INSTALL NOT FABRICATED"], "FAIL");
 });
 
-test("the packaged renderer must contain the official download", () => {
+test("the packaged renderer must contain the ComfyUI terminal command", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adept-renderer-"));
-  fs.writeFileSync(path.join(dir, "app.js"), `label ${OFFICIAL_COMFY_DOWNLOAD} Official ComfyUI Download`);
+  fs.writeFileSync(path.join(dir, "app.js"), "Install ComfyUI\npip install comfy-cli; comfy install\nCopy command");
   assert.equal(rendererShipsComfyPrerequisite(dir), true);
-  fs.writeFileSync(path.join(dir, "app.js"), "no download");
+  fs.writeFileSync(path.join(dir, "app.js"), `label ${OFFICIAL_COMFY_DOWNLOAD} Official ComfyUI Download`);
   assert.equal(rendererShipsComfyPrerequisite(dir), false);
 });
