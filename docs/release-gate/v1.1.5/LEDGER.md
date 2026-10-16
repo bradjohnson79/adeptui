@@ -27,7 +27,15 @@ Automatic upgrade from the published 1.1.3 and 1.1.4 installers stayed on those 
 
 The 1.1.6 and 1.1.7 package-updater work is discontinued. The public version stays 1.1.5. New archives use unique filenames and are not replacements for the published exe, deb, rpm, or dmg.
 
-Status: archives are published beside the original 1.1.5 packages. The public catalog is being switched to these archives. Installation certification is not complete.
+Status: the first terminal archives are published and the live catalog points at them. Installation passed on the public commands. Update did not. A corrected launcher is building. Do not treat this as final certification.
+
+Public install gate https://github.com/bradjohnson79/adeptui/actions/runs/38872577737 at `d28c60cc` succeeded:
+
+- Windows: installation, uninstall, reinstall, user-data file kept, shortcut `C:\Users\runneradmin\.adept-ui\bin\Adept Launcher.exe`, window title `Adept UI Studio`.
+- Ubuntu and Fedora: the same archive installed, uninstalled, and reinstalled with the project file kept. Fedora ran in a fedora:41 container, not on a physical desktop.
+- macOS: the archive installed under `~/.adept-ui/app/Adept UI.app`, uninstalled, and reinstalled with the project file kept. Notarization remains an external blocker. The graphical window was not verified.
+
+The following update gate failed on Windows, Ubuntu, Fedora, and macOS with `INSTALL_INTERRUPTED`. The frozen launcher tried to copy `adept_lifecycle` from a PyInstaller temporary directory that does not exist. A local Windows run of the corrected launcher applied the published Windows archive: exit 0, `Adept UI.exe` present, registry `1.1.5`, previous version `1.1.4`. That local run is not a substitute for the public four-platform gate. New archives use the `r2` filename and are building from `d9081767`.
 
 Published terminal archives, added to the existing v1.1.5 release without replacing the original exe, deb, rpm, or dmg:
 
