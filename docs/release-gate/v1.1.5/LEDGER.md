@@ -1,18 +1,22 @@
 # Adept UI 1.1.5 four-platform certification ledger
 
-Phase: certification workflow is in the repository. Platform results are recorded from the GitHub Actions run, not from package inspection.
+Phase: first certification run completed. Fedora's virtual Studio window was created, then the script rejected a fail-closed update result. That script check is being retested.
 
-Published release: v1.1.5. Catalog commit `d663ddd06eb59a066438d76c8a235640038f5cd8`. Installer commit `45a564e48f85f9e3825f51cc573e02eafd489a8d`.
+Run: https://github.com/bradjohnson79/adeptui/actions/runs/38855953989
+Commit: `0658706e3d0eb924d784e47be1c7916bd7750545`
+Live catalog: v1.1.5. Signed catalog job PASS. Release integrity page PASS. Failure recovery PASS.
 
 | Platform | Environment | Installation | Studio | Upgrade | Recovery |
 |---|---|---|---|---|---|
-| Windows 11 x64 | GitHub windows-latest desktop session | waiting for the certification run | waiting | waiting | waiting |
-| macOS arm64 | GitHub macos-14 | waiting | waiting | waiting | waiting |
-| Ubuntu x64 | GitHub ubuntu-22.04 with Xvfb | waiting | waiting | waiting | waiting |
-| Fedora x64 | fedora:41 container with Xvfb, not a physical desktop | waiting | waiting | waiting | waiting |
+| Windows | GitHub windows-latest. Caption: Microsoft Windows Server 2025 Datacenter. Version 10.0.26100. AMD64. Graphical session. | GO | GO | NO-GO automatic. Migration PASS | covered by the shared recovery job |
+| macOS arm64 | GitHub macos-14. macOS 14.8.9, build 23J631 | GO | EXTERNAL BLOCKER | NO-GO automatic. Migration PASS | covered by the shared recovery job |
+| Ubuntu x64 | GitHub ubuntu-22.04. Ubuntu 22.04.5 LTS. Xvfb virtual display, not physical hardware | GO | GO | NO-GO automatic. Migration PASS | covered by the shared recovery job |
+| Fedora x64 | fedora:41 container on an Ubuntu host, Xvfb. Not a physical desktop | GO through first window | retest in progress | NO-GO automatic. Migration PASS | covered by the shared recovery job |
 
-macOS notarization: EXTERNAL BLOCKER until Apple credentials are available. The certification does not bypass Gatekeeper.
+macOS notarization: EXTERNAL BLOCKER. `spctl` reported `code has no resources but signature indicates they must be present`. The test did not remove quarantine or ad-hoc sign the application.
 
-Automatic upgrade from the immutable 1.1.3 and 1.1.4 binaries is expected to stay NO-GO. Those launchers do not apply a later installer. A public reinstall that keeps the user-data directory is recorded as migration, not as an automatic upgrade.
+Windows evidence: shortcut target `Adept Launcher.exe`, window title `Adept UI Studio`, screenshot captured, no Adept terminal, update check `NO_UPDATE`, shutdown, restart, uninstall kept the project file, reinstall stayed 1.1.5. The launcher parent PID was not sampled before the launcher exited.
 
-The launcher update worker copies a non-zip catalog artifact into its lifecycle directory. It does not run the NSIS, DEB, RPM, or DMG installer. Changing that behavior is a new updater design and is not part of this release.
+Ubuntu and Fedora evidence: desktop Exec resolves to `/opt/Adept UI/Adept UI`, Electron is the sibling `.bin`, and `xwininfo` showed a 1439x899 window named `Adept UI Studio`. The launcher log said the launcher ran. Parent PID was already 1 when sampled. Ubuntu completed shutdown, restart, user-data preservation, and reinstall. Fedora stopped after the first window because the launcher reported `Adept UI is starting` (the catalog check did not return `NO_UPDATE` inside the container) and the script treated that as a failure.
+
+Automatic upgrade from the published 1.1.3 and 1.1.4 installers stayed on those versions on Windows, Ubuntu, Fedora, and macOS. User data remained. Running the public 1.1.5 installer afterward left that data in place and installed 1.1.5. That is migration, not an automatic upgrade. The published launchers cannot apply an NSIS, DEB, RPM, or DMG artifact. Changing that is a new updater design and needs owner approval before a new public version.

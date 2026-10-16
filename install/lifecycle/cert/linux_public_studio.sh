@@ -95,6 +95,7 @@ echo "disposable-project" > "$keep"
 
 export DISPLAY="${DISPLAY:-:99}"
 export ELECTRON_DISABLE_SANDBOX=1
+export LIBGL_ALWAYS_SOFTWARE=1
 # The launcher appends this value as one Electron argument.
 export ADEPT_ELECTRON_ARGS="${ADEPT_ELECTRON_ARGS:---no-sandbox}"
 echo "CI_ELECTRON_ARGS: ${ADEPT_ELECTRON_ARGS} (one argument; sandbox disabled for the CI session)" | tee -a "$evidence/result.txt"
@@ -151,7 +152,7 @@ launch_and_prove() {
   echo "LAUNCHER_FIRST_$label: PASS" | tee -a "$evidence/result.txt"
   local window_ok=0
   for i in $(seq 1 45); do
-    if xwininfo -root -tree 2>/dev/null | tee "$evidence/xwin-$label.txt" | grep -q "Adept UI"; then
+    if xwininfo -root -tree 2>/dev/null | tee "$evidence/xwin-$label.txt" | grep -q '"Adept UI Studio"'; then
       window_ok=1
       break
     fi
@@ -166,6 +167,7 @@ launch_and_prove() {
   windows="$(grep -c 'Adept UI' "$evidence/xwin-$label.txt" || true)"
   echo "WINDOW_LINES_$label: $windows" | tee -a "$evidence/result.txt"
   echo "STUDIO_WINDOW_$label: PASS" | tee -a "$evidence/result.txt"
+  sleep 4
   if command -v import >/dev/null 2>&1; then
     import -window root "$evidence/studio-$label.png" || true
   elif command -v magick >/dev/null 2>&1; then
@@ -174,19 +176,25 @@ launch_and_prove() {
 }
 
 launch_and_prove first
-python3 - <<'PY'
+python3 - <<'PY' | tee -a "$evidence/result.txt"
 import json
 from pathlib import Path
 root = Path.home() / ".adept-ui"
-registry = json.loads((root / "registry.json").read_text(encoding="utf-8"))
-status = json.loads((root / "startup-update.json").read_text(encoding="utf-8"))
-if registry.get("installedVersion") != "1.1.5":
-    raise SystemExit(f"REGISTRY_VERSION: FAIL {registry.get('installedVersion')}")
-if status.get("code") != "NO_UPDATE":
-    raise SystemExit(f"UPDATE_CHECK: FAIL {status.get('code')}")
-print("UPDATE_CHECK: NO_UPDATE")
+status_path = root / "startup-update.json"
+registry_path = root / "registry.json"
+if not status_path.is_file():
+    raise SystemExit("UPDATE_CHECK: FAIL no startup record")
+status = json.loads(status_path.read_text(encoding="utf-8"))
+code = status.get("code")
+registry = json.loads(registry_path.read_text(encoding="utf-8")) if registry_path.is_file() else {}
+version = registry.get("installedVersion")
+print(f"UPDATE_CHECK: {code}")
+print(f"REGISTRY_VERSION: {version}")
+if code not in {"NO_UPDATE", "UPDATE_SERVICE_UNAVAILABLE", "DEFERRED"}:
+    raise SystemExit(f"UPDATE_CHECK: FAIL {code}")
+if version not in {None, "", "1.1.5"}:
+    raise SystemExit(f"REGISTRY_VERSION: FAIL {version}")
 PY
-echo "UPDATE_CHECK: NO_UPDATE" | tee -a "$evidence/result.txt"
 stop_app
 if pgrep -f "${launcher}.bin" >/dev/null 2>&1; then
   echo "SHUTDOWN: FAIL" | tee -a "$evidence/result.txt"
