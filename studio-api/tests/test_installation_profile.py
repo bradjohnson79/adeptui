@@ -374,6 +374,49 @@ def test_remove_protects_essentials_and_deletes_only_a_managed_file(setup_data_d
     assert shared.read_bytes() == b"shared"
 
 
+def test_disposable_model_selection_survives_cancel_and_profile_restore(setup_data_dir: Path) -> None:
+    """A disposable weight can be selected, refused while required, and removed only after confirmation."""
+    disposable = setup_data_dir / "models" / "zimage.safetensors"
+    kept = setup_data_dir / "models" / "kept.safetensors"
+    disposable.parent.mkdir()
+    disposable.write_bytes(b"disposable-v1")
+    kept.write_bytes(b"kept-user-model")
+    from app.setup.lifecycle.service import check_updates
+    from app.setup.state import update_state
+
+    update_state(
+        lambda latest: latest.__setitem__(
+            "status",
+            {
+                "zimage_models": {"path": str(disposable)},
+                "kept_model": {"path": str(kept)},
+            },
+        )
+    )
+    save_installation_profile("hybrid", selected_models=["zimage_models"])
+    assert "zimage_models" in load_state()["selected_local_models"]
+    disposable.write_bytes(b"disposable-v2")
+    report = check_updates("zimage_models")
+    assert isinstance(report["updateAvailable"], bool)
+    assert disposable.read_bytes() == b"disposable-v2"
+    refused = remove_component("zimage_models", confirm_delete=True)
+    assert refused["status"] == "protected"
+    assert disposable.exists()
+    save_installation_profile("api", selected_models=["zimage_models"])
+    assert load_state()["installation_profile"] == "api"
+    assert "zimage_models" not in load_state()["selected_local_models"]
+    assert disposable.read_bytes() == b"disposable-v2"
+    canceled = remove_component("zimage_models")
+    assert canceled["deleted"] is False
+    assert canceled["status"] == "confirmation_required"
+    assert disposable.read_bytes() == b"disposable-v2"
+    removed = remove_component("zimage_models", confirm_delete=True)
+    assert removed["status"] == "removed"
+    assert removed["deleted"] is True
+    assert not disposable.exists()
+    assert kept.read_bytes() == b"kept-user-model"
+
+
 def test_local_ai_requirement_follows_the_installation_profile() -> None:
     assert local_ai_required("api") is False
     assert local_ai_required("local") is True

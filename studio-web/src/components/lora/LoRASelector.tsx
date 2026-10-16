@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildAiGuidedSetupPath } from "../../setup/navigation";
 import { fetchCompatibleLoras, type CompatibleLora } from "./loraClient";
+import { LoRASetupSection } from "./LoRASetupSection";
 
 export interface LoraSelection {
   loraId: string;
@@ -40,6 +40,8 @@ export function LoRASelector({
 }) {
   const [loras, setLoras] = useState<CompatibleLora[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [managerMessage, setManagerMessage] = useState<string | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -127,11 +129,7 @@ export function LoRASelector({
   const strengthMax = Number(selectedRecord?.strength_max ?? 1.5);
   const strength = Number(single?.strength ?? selectedRecord?.recommended_strength ?? 0.8);
 
-  const manage =
-    onManage ||
-    (() => {
-      window.location.assign(buildAiGuidedSetupPath({ source: "image_studio" }));
-    });
+  const manage = onManage || (() => setManagerOpen(true));
 
   const updateStrength = (loraId: string, nextStrength: number) => {
     if (multiple) {
@@ -224,6 +222,10 @@ export function LoRASelector({
       <button type="button" className="ghost tiny" onClick={manage}>
         Manage LoRAs
       </button>
+      {managerMessage ? <p role="status">{managerMessage}</p> : null}
+      {managerOpen ? (
+        <LoRASetupSection dialogOnly onMessage={setManagerMessage} onClose={() => setManagerOpen(false)} />
+      ) : null}
     </div>
   );
 }

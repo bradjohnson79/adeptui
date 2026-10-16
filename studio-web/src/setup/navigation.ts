@@ -39,12 +39,10 @@ export function buildAiGuidedSetupPath({
   return `/setup?${params.toString()}${hash}`;
 }
 
-/** Setup opens the existing wizard. It never attaches create=1. */
+/** Setup opens the unified manager. It never attaches create=1. */
 export function buildSetupWizardPath(projectId?: string | null): string {
-  return buildAiGuidedSetupPath({
-    projectId,
-    source: "workspace_launch",
-  });
+  if (projectId) return `/project/${encodeURIComponent(projectId)}?workspace=setup`;
+  return "/setup";
 }
 
 export type HomeLaunchAction =

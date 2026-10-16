@@ -47,7 +47,7 @@ if (!app) {
 }
 console.log("Adept UI.app BUILT = PASS");
 console.log(app);
-const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r8";
+const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r9";
 const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-${terminalRevision}-mac-arm64.zip`);
 // ditto keeps the ad-hoc bundle seal. Python's zipfile does not.
 run("ditto", ["-c", "-k", "--keepParent", app, terminalZip]);

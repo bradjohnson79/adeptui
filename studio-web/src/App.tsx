@@ -1,10 +1,9 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Home from "./pages/Home";
 
 const ProjectEditor = lazy(() => import("./pages/ProjectEditor"));
 const CoDirectorPage = lazy(() => import("./pages/CoDirectorPage"));
-const SourceManagerPage = lazy(() => import("./pages/SourceManager"));
 const ModelRadarWorkspace = lazy(() => import("./components/ModelRadarWorkspace"));
 const Version12DeferredPage = lazy(() => import("./components/Version12DeferredPage"));
 const ProductionSuiteWorkspace = lazy(() => import("./components/ProductionSuiteWorkspace"));
@@ -13,7 +12,6 @@ const DiagnosticsPage = lazy(() => import("./pages/DiagnosticsPage").then((mod) 
 const LocalRuntimeSettings = lazy(() =>
   import("./components/Settings/LocalRuntime").then((mod) => ({ default: mod.LocalRuntimeSettings })),
 );
-const ComfyManagerPage = lazy(() => import("./pages/ComfyManagerPage"));
 const SetupPage = lazy(() => import("./pages/SetupPage"));
 
 function RouteFallback() {
@@ -56,20 +54,6 @@ import "./components/CoDirector/codirector-cinematic.css";
 import "./components/generationStudio/aurora-landing.css";
 import "./theme/aurora-plates.css";
 
-function SourceManagerRoute() {
-  const location = useLocation();
-  const params = new URLSearchParams(location.search);
-  const projectId = params.get("projectId");
-  if (!projectId) return <SourceManagerPage />;
-  const next = new URLSearchParams();
-  next.set("workspace", "setup");
-  next.set("setupSection", "sources");
-  next.set("setupMode", params.get("setupMode") || "ai_guided");
-  const componentId = params.get("componentId");
-  if (componentId) next.set("setupComponent", componentId);
-  return <Navigate to={`/project/${encodeURIComponent(projectId)}?${next.toString()}${location.hash || ""}`} replace />;
-}
-
 export default function App() {
   return (
     <ErrorBoundary>
@@ -83,7 +67,7 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/project/:id" element={<ProjectEditor />} />
               <Route path="/co-director" element={<CoDirectorPage />} />
-              <Route path="/source-manager" element={<SourceManagerRoute />} />
+              <Route path="/source-manager" element={<Navigate to="/setup" replace />} />
               <Route path="/model-radar" element={<ModelRadarWorkspace />} />
               <Route
                 path="/virtual-stage"
@@ -104,7 +88,7 @@ export default function App() {
               <Route path="/diagnostics/video-runtime" element={<VideoRuntimeDiagnostics />} />
               <Route path="/diagnostics" element={<DiagnosticsPage />} />
               <Route path="/setup" element={<SetupPage />} />
-              <Route path="/setup/comfy" element={<ComfyManagerPage />} />
+              <Route path="/setup/comfy" element={<Navigate to="/setup" replace />} />
               <Route path="/settings/local-runtime" element={<LocalRuntimeSettings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

@@ -45,8 +45,20 @@ type LoraRow = {
  * Setup entry for optional LoRAs. Opening Manage shows the Adept LoRA Manager.
  * Missing LoRAs never block first-run setup.
  */
-export function LoRASetupSection({ onMessage }: { onMessage: (message: string) => void }) {
-  const [open, setOpen] = useState(false);
+export function LoRASetupSection({
+  onMessage,
+  dialogOnly = false,
+  onClose,
+}: {
+  onMessage: (message: string) => void;
+  dialogOnly?: boolean;
+  onClose?: () => void;
+}) {
+  const [open, setOpen] = useState(dialogOnly);
+  const close = () => {
+    setOpen(false);
+    onClose?.();
+  };
   const [loras, setLoras] = useState<LoraRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
@@ -129,6 +141,8 @@ export function LoRASetupSection({ onMessage }: { onMessage: (message: string) =
   };
 
   return (
+    <>
+    {dialogOnly ? null : (
     <section className="panel setup-component-section" data-testid="lora-setup-section">
       <div className="setup-section-heading">
         <div>
@@ -140,9 +154,11 @@ export function LoRASetupSection({ onMessage }: { onMessage: (message: string) =
         </button>
       </div>
       <p className="muted">{loras.length ? `${loras.length} installed` : "None installed"}</p>
+    </section>
+    )}
 
       {open ? (
-        <div className="setup-dialog-backdrop" role="presentation" onClick={() => setOpen(false)}>
+        <div className="setup-dialog-backdrop" role="presentation" onClick={close}>
           <div
             className="setup-dialog lora-manager-dialog"
             role="dialog"
@@ -153,7 +169,7 @@ export function LoRASetupSection({ onMessage }: { onMessage: (message: string) =
           >
             <div className="setup-dialog-header">
               <h2 id="lora-manager-title">Adept LoRA Manager</h2>
-              <button type="button" className="ghost" onClick={() => setOpen(false)}>
+              <button type="button" className="ghost" onClick={close}>
                 Close
               </button>
             </div>
@@ -428,6 +444,6 @@ export function LoRASetupSection({ onMessage }: { onMessage: (message: string) =
           </div>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }

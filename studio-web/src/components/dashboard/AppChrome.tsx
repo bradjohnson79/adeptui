@@ -266,18 +266,6 @@ export function AppChrome({
         else goWorkspace("setup");
       },
     },
-    {
-      id: "comfy-manager",
-      label: "Comfy Manager",
-      onSelect: () => {
-        setOpenMenu(null);
-        if (projectId) {
-          navigate(`/project/${encodeURIComponent(projectId)}?workspace=setup&setupSection=comfy`);
-          return;
-        }
-        navigate("/setup/comfy");
-      },
-    },
   ];
 
   const crumbItems =
@@ -307,7 +295,7 @@ export function AppChrome({
     }));
     const tools: CommandItem[] = [
       { id: "home", title: "Home / Project Library", meta: "Navigate", run: () => browseAllProjects(navigate) },
-      { id: "setup", title: "Adept Setup", meta: "Setup", run: () => (onSetup ? onSetup() : goWorkspace("setup")) },
+      { id: "setup", title: "Setup", meta: "Setup", run: () => (onSetup ? onSetup() : goWorkspace("setup")) },
       { id: "cd", title: "Co-Director", meta: "Assistant", run: () => openCoDirectorFull() },
     ];
     const recentCmds = loadRecentProjects().map((p) => ({

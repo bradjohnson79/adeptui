@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type RuntimeManagerStatus } from "../api";
 import { bootHandoffTarget, rememberFirstRunComplete } from "../setup/firstRun";
-import { buildAiGuidedSetupPath } from "../setup/navigation";
+import { buildSetupWizardPath } from "../setup/navigation";
 import { BOOT_READY_DISMISS_KEY, BOOT_READY_TOAST_MS, bootReadyToastVisible } from "./bootReadyToast";
 import { buildSnapshot, type StartupSnapshot } from "./startupSnapshot";
 import { badgeClass, buildStartupBoard, describeFinalStatus, isCloud12 } from "./startupDisplay";
@@ -435,7 +435,7 @@ export function StartupSystemsGauge() {
                 onClick={() => {
                   setHandoffCover(false);
                   setVisible(false);
-                  navigate(buildAiGuidedSetupPath({ source: "workspace_launch", setupSection: "ai" }));
+                  navigate(buildSetupWizardPath());
                 }}
               >
                 Open Setup

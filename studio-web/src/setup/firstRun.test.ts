@@ -146,8 +146,9 @@ describe("installation-profile selection markup", () => {
 describe("setup routing stays off create project", () => {
   it("opens the wizard without a project and without create=1", () => {
     const path = buildSetupWizardPath(null);
-    expect(path.startsWith("/setup?")).toBe(true);
+    expect(path).toBe("/setup");
     expect(path).not.toContain("create=1");
+    expect(path).not.toContain("setupSection=");
     expect(buildAiGuidedSetupPath({ source: "workspace_launch" })).not.toContain("create=1");
   });
 
