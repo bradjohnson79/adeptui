@@ -17,11 +17,14 @@ test("the visible product stays Adept UI and the package id stays stable", () =>
   assert.equal(identity.description, "Adept UI — AI Filmmaking & Production Studio");
   assert.equal(config.productName, "Adept UI");
   assert.equal(config.appId, "app.adeptui.desktop");
-  assert.equal(config.deb.packageName, "adept-ui");
-  assert.equal(config.rpm.packageName, "adept-ui");
   assert.equal(config.executableName, "Adept UI");
-  assert.equal(config.nsis.shortcutName, "Adept UI");
-  assert.equal(config.nsis.uninstallDisplayName, "Adept UI");
+  assert.deepEqual(config.win.target, [{ target: "dir", arch: ["x64"] }]);
+  assert.deepEqual(config.mac.target, [{ target: "dir", arch: ["arm64"] }]);
+  assert.deepEqual(config.linux.target, [{ target: "dir", arch: ["x64"] }]);
+  assert.equal(config.nsis, undefined);
+  assert.equal(config.dmg, undefined);
+  assert.equal(config.deb, undefined);
+  assert.equal(config.rpm, undefined);
   assert.equal(config.linux.maintainer, "ANOINT Inc.");
   assert.equal(config.linux.vendor, "ANOINT Inc.");
   assert.equal(config.linux.desktop.entry.Name, "Adept UI");
@@ -34,11 +37,10 @@ test("the visible product stays Adept UI and the package id stays stable", () =>
 
 test("Windows ships the Universal Launcher beside Electron", () => {
   const configText = fs.readFileSync(path.join(root, "builder.config.cjs"), "utf8");
-  const nsis = fs.readFileSync(path.join(root, "nsis", "installer.nsh"), "utf8");
   assert.match(configText, /extraFiles:\s*\[/);
   assert.match(configText, /process\.platform === "win32" && fs\.existsSync\(launcherBinary\)/);
   assert.match(configText, /process\.platform !== "win32" && fs\.existsSync\(launcherBinary\)/);
-  assert.match(nsis, /\$INSTDIR\\Adept Launcher\.exe/);
+  assert.equal(fs.existsSync(path.join(root, "nsis", "installer.nsh")), false);
   const extraFiles = configText.slice(configText.indexOf("extraFiles:"));
   const resourcesOnly = configText.slice(0, configText.indexOf("extraFiles:"));
   assert.match(extraFiles, /process\.platform === "win32"/);
@@ -72,12 +74,8 @@ test("AppStream names Adept UI and ANOINT Inc.", () => {
   for (const size of [48, 64, 128, 256, 512]) {
     const source = path.join(root, "icons", "png", `${size}x${size}.png`);
     assert.equal(fs.existsSync(source), true, source);
-    const installed = `/usr/share/icons/hicolor/${size}x${size}/apps/app.adeptui.desktop.png`;
-    assert.ok(config.rpm.fpm.some((row) => row.endsWith(installed)));
-    assert.ok(config.deb.fpm.some((row) => row.endsWith(installed)));
   }
   assert.match(metainfo, /<launchable type="desktop-id">Adept UI\.desktop<\/launchable>/);
   assert.match(metainfo, /<metadata_license>CC0-1\.0<\/metadata_license>/);
   assert.match(metainfo, /https:\/\/www\.adeptui\.org\/product\/adept-ui-home\.webp/);
-  assert.match(config.rpm.fpm.join("\n"), /hicolor\/256x256\/apps\/app\.adeptui\.desktop\.png/);
 });

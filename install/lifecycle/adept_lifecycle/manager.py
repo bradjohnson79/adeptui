@@ -33,91 +33,6 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 FAILURE_LIMIT = 3
 
 
-def package_install_plan(kind: str, payload: Path) -> list[str] | None:
-    """Command that replaces an installed package. It does not clear Gatekeeper or quarantine."""
-    if kind == "nsis":
-        return [str(payload), "/S"]
-    if kind == "deb":
-        return ["dpkg", "-i", str(payload)]
-    if kind == "rpm":
-        return ["rpm", "-Uvh", "--replacepkgs", str(payload)]
-    if kind == "dmg":
-        return ["hdiutil", "attach", "-nobrowse", "-readonly", str(payload)]
-    return None
-
-
-def _with_admin(command: list[str]) -> list[str]:
-    """Run a package command as root when this process is not already root."""
-    if os.name == "nt":
-        return command
-    geteuid = getattr(os, "geteuid", None)
-    if geteuid is not None and geteuid() == 0:
-        return command
-    return ["sudo", "-n", *command]
-
-
-def _app_bundle(app_path: Path | None) -> Path:
-    if app_path is not None:
-        resolved = app_path.resolve()
-        candidates = [resolved, *resolved.parents]
-        for candidate in candidates:
-            if candidate.suffix == ".app":
-                return candidate
-    return Path.home() / "Applications" / "Adept UI.app"
-
-
-def install_native_package(payload: Path, kind: str, app_path: Path | None = None) -> None:
-    """Install a signed catalog artifact with the platform installer.
-
-    User data lives outside the install directory. This does not remove
-    quarantine or change Gatekeeper.
-    """
-    if kind == "dmg":
-        _install_dmg(payload, _app_bundle(app_path))
-        return
-    plan = package_install_plan(kind, payload)
-    if not plan:
-        raise OSError(f"The {kind} package has no installer.")
-    command = _with_admin(plan) if kind in {"deb", "rpm"} else plan
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip().splitlines()
-        tail = detail[-1] if detail else ""
-        raise OSError(f"The {kind} installer exited {completed.returncode}. {tail}".strip())
-
-
-def _install_dmg(payload: Path, destination: Path) -> None:
-    import tempfile
-
-    mount = Path(tempfile.mkdtemp(prefix="adept-dmg-"))
-    attached = False
-    try:
-        attach = subprocess.run(
-            ["hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(payload)],
-            check=False,
-        )
-        if attach.returncode != 0:
-            raise OSError(f"The disk image could not be opened ({attach.returncode}).")
-        attached = True
-        found = next(iter(mount.glob("*.app")), None)
-        if found is None:
-            nested = list(mount.glob("*/*.app"))
-            found = nested[0] if nested else None
-        if found is None:
-            raise OSError("The disk image does not contain Adept UI.")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.exists():
-            shutil.rmtree(destination)
-        copied = subprocess.run(["ditto", str(found), str(destination)], check=False)
-        if copied.returncode != 0:
-            raise OSError(f"The application could not be copied ({copied.returncode}).")
-    finally:
-        if attached:
-            subprocess.run(["hdiutil", "detach", str(mount)], check=False)
-        if mount.exists():
-            shutil.rmtree(mount, ignore_errors=True)
-
-
 @dataclass
 class Hooks:
     disk_free: Callable[[Path], int] | None = None
@@ -549,22 +464,6 @@ class Lifecycle:
         kind = str(artifact.get("kind") or "zip")
         if kind == "zip":
             result = self.apply_with_recovery(payload, artifact, version)
-        elif self.hooks.install_package:
-            try:
-                self.hooks.install_package(payload, artifact)
-            except OSError as exc:
-                self._record_update_failure(registry, failures, target)
-                self._emit(phase="error", installedVersion=version, targetVersion=target, operation=str(exc), error="INSTALL_INTERRUPTED", indeterminate=True)
-                return self._continue(executable, "INSTALL_INTERRUPTED", version, "The update did not finish. The installed Adept UI was left in place.")
-            registry = self._registry()
-            previous_revision = release_revision(registry.get("installedRevision"))
-            revision = catalog_release_revision(catalog, artifact)
-            registry["installedVersion"] = target
-            registry["installedRevision"] = revision
-            registry["health"] = "updated"
-            registry["recovery"] = {"lastGoodVersion": version, "lastGoodRevision": previous_revision}
-            self._save(registry)
-            result = Result(True, "UPDATED", f"Adept UI is now {target}.", {"previous": version, "revision": revision})
         else:
             self._emit(
                 phase="error",

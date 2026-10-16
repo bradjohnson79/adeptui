@@ -60,17 +60,17 @@ module.exports = async function macosLauncherSwap(context) {
   fs.copyFileSync(stagedLauncher, electronBin);
   fs.chmodSync(electronBin, 0o755);
 
-  // Marker for certification: prove the swap happened and layout is intact.
+  // Keep the swap record outside the signed bundle. A loose file in
+  // Contents/MacOS is what made codesign --strict report an unsigned object.
   const marker = {
     launcher: electronBin,
     electron: renamedBin,
     cfBundleExecutable: productName,
     timestamp: new Date().toISOString(),
   };
-  fs.writeFileSync(
-    path.join(appPath, "Contents", "MacOS", "launcher-swap.json"),
-    JSON.stringify(marker, null, 2),
-  );
+  const evidenceDir = path.join(context.outDir, "..", "build");
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  fs.writeFileSync(path.join(evidenceDir, "launcher-swap.json"), JSON.stringify(marker, null, 2));
 
   console.log(`macOS launcher swap: ${productName} -> ${ELECTRON_RENAMED}, launcher installed as ${productName}`);
   resignMacBundle(appPath);

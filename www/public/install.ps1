@@ -54,9 +54,6 @@ if (-not $verified) {
 $catalog = $catalogBytes | ConvertFrom-Json
 $artifact = @($catalog.artifacts) | Where-Object { $_.platform -eq "windows" -and $_.arch -eq "x64" -and $_.kind -eq "zip" } | Select-Object -First 1
 if (-not $artifact) {
-  $artifact = @($catalog.artifacts) | Where-Object { $_.platform -eq "windows" -and $_.arch -eq "x64" -and $_.kind -eq "nsis" } | Select-Object -First 1
-}
-if (-not $artifact) {
   Write-Host "No approved Windows build is in the Adept UI release catalog."
   exit 3
 }
@@ -159,15 +156,8 @@ if ($artifact.kind -eq "zip") {
   }
   [System.IO.File]::WriteAllText($registryPath, ($record | ConvertTo-Json -Depth 8))
 } else {
-  $installed = Start-Process -FilePath $destination -ArgumentList "/S" -Wait -PassThru
-  if ($installed.ExitCode -ne 0) {
-    Write-Host "Installation did not finish."
-    exit $installed.ExitCode
-  }
-  $installDir = Join-Path $env:LOCALAPPDATA "Programs\Adept UI"
-  $launcher = Join-Path $installDir "Adept Launcher.exe"
-  $electron = Join-Path $installDir "Adept UI.exe"
-  $program = if (Test-Path $launcher) { $launcher } else { $electron }
+  Write-Host "The release catalog does not contain an Adept UI application archive."
+  exit 3
 }
 
 if ($createShortcut -and (Test-Path $program)) {

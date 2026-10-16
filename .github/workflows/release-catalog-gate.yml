@@ -287,3 +287,32 @@ jobs:
           if (-not (Test-Path (Join-Path $root "previous-app"))) { throw "PREVIOUS_VERSION: FAIL" }
           Write-Host "UPDATE: PASS"
           Write-Host "PREVIOUS_VERSION_PRESERVED: PASS"
+          curl.exe -fsSL "https://adeptui.org/releases/current.json" -o (Join-Path $env:TEMP "adept-current.json")
+          $catalog = Get-Content (Join-Path $env:TEMP "adept-current.json") -Raw
+          $published = $catalog | ConvertFrom-Json
+          $artifact = @($published.artifacts) | Where-Object { $_.platform -eq "windows" -and $_.kind -eq "zip" } | Select-Object -First 1
+          $revision = 0
+          if ($null -ne $artifact.revision) { $revision = [int]$artifact.revision }
+          elseif ($null -ne $published.revision) { $revision = [int]$published.revision }
+          if ($revision -le 0) {
+            Write-Host "SAME_VERSION_REVISION: NOT_APPLICABLE"
+          } else {
+            $registry.installedVersion = "1.1.5"
+            $registry.installedRevision = 0
+            [IO.File]::WriteAllText($registryPath, ($registry | ConvertTo-Json -Depth 8))
+            Remove-Item (Join-Path $root "startup-update.json") -ErrorAction SilentlyContinue
+            Start-Process -FilePath $launcher -WindowStyle Hidden | Out-Null
+            $revised = $false
+            foreach ($i in 1..120) {
+              Start-Sleep -Seconds 2
+              $statusPath = Join-Path $root "startup-update.json"
+              if (Test-Path $statusPath) {
+                $status = Get-Content $statusPath -Raw | ConvertFrom-Json
+                if ($status.code -eq "UPDATED" -and $status.version -eq "1.1.5") { $revised = $true; break }
+              }
+            }
+            Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\.adept-ui\*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            $after = Get-Content $registryPath -Raw | ConvertFrom-Json
+            if (-not $revised -or [int]$after.installedRevision -ne $revision) { throw "SAME_VERSION_REVISION: FAIL" }
+            Write-Host "SAME_VERSION_REVISION: PASS $revision"
+          }

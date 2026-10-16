@@ -334,15 +334,8 @@ def test_newer_release_applies_the_verified_archive(monkeypatch, tmp_path, keys)
     payload = tmp_path / "incoming" / "Adept.UI-1.1.5-terminal.zip"
     digest = make_payload(payload)
     catalog = signed_catalog(private, "1.1.5", digest, file_name=payload.name, kind="zip")
-    calls: list[tuple] = []
-
-    def fake_install(*args) -> None:
-        calls.append(args)
-
-    monkeypatch.setattr("adept_lifecycle.manager.install_native_package", fake_install)
     rc, launched = run_launcher(monkeypatch, tmp_path, catalog, payload)
     assert rc == 0
-    assert calls == []
     assert (tmp_path / "app" / EXE_NAME).read_bytes() == b"adept"
     assert len(launched) == 1
     assert read_json(tmp_path / "registry.json")["installedVersion"] == "1.1.5"

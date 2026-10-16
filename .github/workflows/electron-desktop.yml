@@ -46,10 +46,9 @@ jobs:
       - name: Install packaged API dependencies for the Windows runtime
         run: node electron/scripts/prepare-windows-venv.mjs
       - run: node electron/scripts/build-windows.mjs
-      - name: Certify packaged boot, install, reinstall, and uninstall
+      - name: Certify packaged boot
         run: |
           node electron/scripts/certify-windows.mjs
-          node electron/scripts/certify-installer.mjs
           node electron/scripts/assert-windows-release-boot.mjs
       - uses: actions/upload-artifact@v4
         if: always()
@@ -84,14 +83,6 @@ jobs:
         run: |
           test "$(uname -m)" = "arm64"
           echo "MACOS NATIVE RUNNER = PASS"
-      - name: Inspect the live AdeptUI.org DMG
-        run: bash electron/scripts/diagnose-live-macos-dmg.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: adept-ui-macos-dmg-diagnosis
-          path: electron/build/macos-dmg-diagnosis/**
-          if-no-files-found: warn
       - run: npm install
       - run: npm --prefix studio-web install
       - name: Stage Python, install API dependencies, stage Studio API, build app
@@ -106,7 +97,6 @@ jobs:
         with:
           name: adept-ui-desktop-mac-arm64
           path: |
-            electron/dist/*.dmg
             electron/dist/*terminal*.zip
             electron/build/macos-smoke-result.json
             electron/build/macos-evidence/**
@@ -190,7 +180,7 @@ jobs:
         if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
       - run: npm --prefix studio-web install
         if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
-      - name: Stage Linux Python, install dependencies, build AppImage, deb, and rpm
+      - name: Stage Linux Python and build the portable application
         id: build_linux
         if: github.event_name != 'push' || steps.linux_scope.outputs.run == 'true'
         run: |
@@ -201,67 +191,6 @@ jobs:
         with:
           name: adept-ui-desktop-linux-x64
           path: |
-            electron/dist/*.AppImage
-            electron/dist/*.deb
-            electron/dist/*.rpm
             electron/dist/*terminal*.zip
-            electron/build/linux-smoke-result.json
-            electron/build/linux-evidence/**
             electron/build/linux-python-ldd.txt
-          if-no-files-found: warn
-
-  linux-smoke:
-    needs: linux-x64
-    if: needs.linux-x64.outputs.built == 'true'
-    runs-on: ubuntu-22.04
-    timeout-minutes: 50
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Linux build prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 libatspi2.0-0 \
-            libgbm1 libasound2 xvfb libfuse2 lsof ca-certificates fakeroot rpm
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-      - run: npm install
-      - run: npm --prefix studio-web install
-      - name: Rebuild the unpacked app for the Ubuntu smoke
-        run: node electron/scripts/build-linux.mjs
-      - name: Launch packaged Adept UI under Xvfb and certify
-        timeout-minutes: 40
-        run: xvfb-run -a --server-args="-screen 0 1440x900x24" node electron/scripts/smoke-linux.mjs
-
-  fedora-rpm:
-    needs: linux-x64
-    if: needs.linux-x64.outputs.built == 'true'
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: adept-ui-desktop-linux-x64
-          path: electron/dist
-      - name: Prepare Fedora evidence directory
-        run: mkdir -p electron/build/fedora-evidence
-      - name: Install and launch the RPM in a Fedora container
-        run: |
-          docker run --rm \
-            --security-opt seccomp=unconfined \
-            -v "$PWD/electron/dist:/packages:ro" \
-            -v "$PWD/electron/scripts:/scripts:ro" \
-            -v "$PWD/electron/build/fedora-evidence:/evidence" \
-            fedora:41 \
-            bash /scripts/smoke-fedora-container.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: adept-ui-fedora-evidence
-          path: electron/build/fedora-evidence/**
           if-no-files-found: warn

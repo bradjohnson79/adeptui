@@ -157,14 +157,8 @@ def _fetch_official_catalog() -> dict | None:
     return signed
 
 
-def _install_native(payload: Path, artifact: dict) -> None:
-    from .manager import install_native_package
-
-    install_native_package(payload, str(artifact.get("kind") or ""))
-
-
 def _launch_hooks() -> Hooks:
-    return Hooks(fetch_catalog=_fetch_official_catalog, download=_download_release, show_updater=True, install_package=_install_native)
+    return Hooks(fetch_catalog=_fetch_official_catalog, download=_download_release, show_updater=True)
 
 
 def _confirm(prompt: str, *, default_no: bool) -> bool:

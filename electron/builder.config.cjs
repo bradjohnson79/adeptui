@@ -75,16 +75,12 @@ const config = {
   asar: true,
   npmRebuild: false,
   publish: null,
-  // Install the Universal Adept Launcher as the package executable after
-  // packaging (macOS: CFBundleExecutable slot; Linux: the deb/rpm/AppImage
-  // executable slot), renaming the real Electron binary to Adept UI.bin.
-  // Windows is a no-op here — it uses the NSIS shortcut retarget instead.
+  // Install the Universal Launcher as the application executable after packaging.
+  // macOS uses the bundle executable slot. Linux renames Electron to Adept UI.bin.
+  // Windows places Adept Launcher.exe beside Adept UI.exe.
   afterPack: "electron/scripts/launcher-swap.cjs",
   win: {
-    target: [
-      { target: "nsis", arch: ["x64"] },
-      { target: "dir", arch: ["x64"] },
-    ],
+    target: [{ target: "dir", arch: ["x64"] }],
     icon: "electron/icons/icon.ico",
     legalTrademarks: identity.description,
     signExecutable: false,
@@ -92,27 +88,8 @@ const config = {
       publisherName: identity.publisher,
     },
   },
-  nsis: {
-    oneClick: false,
-    perMachine: false,
-    allowToChangeInstallationDirectory: true,
-    createDesktopShortcut: true,
-    createStartMenuShortcut: true,
-    shortcutName: identity.productName,
-    menuCategory: identity.publisher,
-    installerIcon: "electron/icons/icon.ico",
-    uninstallerIcon: "electron/icons/icon.ico",
-    deleteAppDataOnUninstall: false,
-    runAfterFinish: false,
-    artifactName: "${productName}-Setup-${version}-win-x64.${ext}",
-    uninstallDisplayName: identity.productName,
-    include: "electron/nsis/installer.nsh",
-  },
   mac: {
-    target: [
-      { target: "dmg", arch: ["arm64"] },
-      { target: "dir", arch: ["arm64"] },
-    ],
+    target: [{ target: "dir", arch: ["arm64"] }],
     icon: "electron/icons/icon.icns",
     category: "public.app-category.video",
     identity: null,
@@ -128,17 +105,8 @@ const config = {
     },
     artifactName: "${productName}-${version}-mac-arm64.${ext}",
   },
-  dmg: {
-    title: `${identity.productName} ${identity.version}`,
-    icon: "electron/icons/icon.icns",
-    artifactName: "${productName}-${version}-mac-arm64.${ext}",
-  },
   linux: {
-    target: [
-      { target: "AppImage", arch: ["x64"] },
-      { target: "deb", arch: ["x64"] },
-      { target: "rpm", arch: ["x64"] },
-    ],
+    target: [{ target: "dir", arch: ["x64"] }],
     icon: "electron/icons/png",
     category: "Video",
     synopsis: identity.description,
@@ -153,34 +121,6 @@ const config = {
         StartupWMClass: identity.productName,
       },
     },
-    artifactName: "${productName}-${version}-linux-x64.${ext}",
-  },
-  deb: {
-    artifactName: "${productName}-${version}-linux-x64.${ext}",
-    packageName: "adept-ui",
-    fpm: [
-      "electron/icons/linux/app.adeptui.desktop.metainfo.xml=/usr/share/metainfo/app.adeptui.desktop.metainfo.xml",
-      "electron/icons/png/48x48.png=/usr/share/icons/hicolor/48x48/apps/app.adeptui.desktop.png",
-      "electron/icons/png/64x64.png=/usr/share/icons/hicolor/64x64/apps/app.adeptui.desktop.png",
-      "electron/icons/png/128x128.png=/usr/share/icons/hicolor/128x128/apps/app.adeptui.desktop.png",
-      "electron/icons/png/256x256.png=/usr/share/icons/hicolor/256x256/apps/app.adeptui.desktop.png",
-      "electron/icons/png/512x512.png=/usr/share/icons/hicolor/512x512/apps/app.adeptui.desktop.png",
-    ],
-  },
-  rpm: {
-    artifactName: "Adept.UI-${version}-linux-x64.${ext}",
-    packageName: "adept-ui",
-    fpm: [
-      "electron/icons/linux/app.adeptui.desktop.metainfo.xml=/usr/share/metainfo/app.adeptui.desktop.metainfo.xml",
-      "electron/icons/png/48x48.png=/usr/share/icons/hicolor/48x48/apps/app.adeptui.desktop.png",
-      "electron/icons/png/64x64.png=/usr/share/icons/hicolor/64x64/apps/app.adeptui.desktop.png",
-      "electron/icons/png/128x128.png=/usr/share/icons/hicolor/128x128/apps/app.adeptui.desktop.png",
-      "electron/icons/png/256x256.png=/usr/share/icons/hicolor/256x256/apps/app.adeptui.desktop.png",
-      "electron/icons/png/512x512.png=/usr/share/icons/hicolor/512x512/apps/app.adeptui.desktop.png",
-    ],
-  },
-  appImage: {
-    artifactName: "${productName}-${version}-linux-x64.${ext}",
   },
 };
 

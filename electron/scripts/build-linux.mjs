@@ -17,9 +17,8 @@ if (process.platform !== "linux" || process.arch !== "x64") {
 }
 
 console.log("LINUX NATIVE RUNNER = PASS");
-// Build + stage the Universal Adept Launcher ELF before packaging. The launcher
-// is installed as the package executable (deb/rpm/AppImage Exec target); the real
-// Electron binary is renamed to Adept UI.bin by the afterPack swap.
+// Build + stage the Universal Launcher before packaging. The afterPack swap
+// renames Electron to Adept UI.bin and installs the launcher as Adept UI.
 run("python3", ["install/launcher/build.py", "--stage"]);
 run(process.execPath, ["electron/scripts/audit-linux-wheels.mjs"]);
 run(process.execPath, ["electron/scripts/stage-packaged-runtime-linux.mjs"]);
@@ -39,28 +38,14 @@ run(process.execPath, [builder, "--linux", "--x64", "--config", "electron/builde
 const version = JSON.parse(fs.readFileSync(path.join(root, "electron", "version.json"), "utf8")).version;
 // After the afterPack swap, the real Electron ELF is Adept UI.bin; "Adept UI" is the launcher.
 const unpacked = path.join(root, "electron", "dist", "linux-unpacked", "Adept UI.bin");
-const appImage = path.join(root, "electron", "dist", `Adept UI-${version}-linux-x64.AppImage`);
-const deb = path.join(root, "electron", "dist", `Adept UI-${version}-linux-x64.deb`);
-const rpm = path.join(root, "electron", "dist", `Adept.UI-${version}-linux-x64.rpm`);
-if (!fs.existsSync(unpacked) || !fs.existsSync(appImage) || !fs.existsSync(deb) || !fs.existsSync(rpm)) {
+if (!fs.existsSync(unpacked)) {
   console.error("LINUX X64 BUILD = FAIL");
-  console.error(JSON.stringify({
-    unpacked: fs.existsSync(unpacked),
-    appImage: fs.existsSync(appImage),
-    deb: fs.existsSync(deb),
-    rpm: fs.existsSync(rpm),
-  }));
+  console.error("unpacked Adept UI.bin missing");
   process.exit(1);
 }
-fs.chmodSync(appImage, 0o755);
 fs.chmodSync(unpacked, 0o755);
 console.log("LINUX X64 BUILD = PASS");
-console.log("APPIMAGE BUILD = PASS");
-console.log("DEB BUILD = PASS");
-console.log("RPM BUILD = PASS");
-console.log(appImage);
-console.log(deb);
-console.log(rpm);
+console.log(unpacked);
 const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r3";
 const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-${terminalRevision}-linux-x64.zip`);
 run("python3", [

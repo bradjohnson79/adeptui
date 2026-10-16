@@ -41,19 +41,19 @@ const candidates = [
   path.join(root, "electron", "dist", "mac", "Adept UI.app"),
 ];
 const app = candidates.find((item) => fs.existsSync(item));
-const dmg = path.join(root, "electron", "dist", `Adept UI-${version}-mac-arm64.dmg`);
 if (!app) {
   console.error("Adept UI.app BUILT = FAIL");
   process.exit(1);
 }
-if (!fs.existsSync(dmg)) {
-  console.error("Adept UI.app BUILT = FAIL");
-  console.error(`dmg missing: ${dmg}`);
-  process.exit(1);
-}
 console.log("Adept UI.app BUILT = PASS");
 console.log(app);
-console.log(dmg);
 const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r3";
 const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-${terminalRevision}-mac-arm64.zip`);
-run("python3", ["electron/scripts/pack-terminal-archive.py", app, terminalZip]);
+// ditto keeps the ad-hoc bundle seal. Python's zipfile does not.
+run("ditto", ["-c", "-k", "--keepParent", app, terminalZip]);
+const zipCheck = path.join(root, "electron", "build", "zip-verify");
+fs.rmSync(zipCheck, { recursive: true, force: true });
+fs.mkdirSync(zipCheck, { recursive: true });
+run("ditto", ["-x", "-k", terminalZip, zipCheck]);
+run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", path.join(zipCheck, "Adept UI.app")]);
+console.log("MACOS ARCHIVE SIGNATURE = PASS");

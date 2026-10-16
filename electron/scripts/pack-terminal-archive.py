@@ -1,7 +1,7 @@
 """Zip an unpacked Adept UI directory for the terminal installer.
 
-The archive root is the application itself. Existing NSIS, DMG, DEB, and RPM
-files are left in place.
+The archive root is the application itself. macOS uses ditto in the macOS
+build so the bundle seal survives the archive.
 """
 
 from __future__ import annotations

@@ -28,7 +28,6 @@ run(process.execPath, [builder, "--win", "--config", "electron/builder.config.cj
   env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: "false" },
 });
 const version = JSON.parse(fs.readFileSync(path.join(root, "electron", "version.json"), "utf8")).version;
-const setup = path.join(root, "electron", "dist", `Adept UI-Setup-${version}-win-x64.exe`);
 const unpackedDir = path.join(root, "electron", "dist", "win-unpacked");
 const unpacked = path.join(unpackedDir, "Adept UI.exe");
 const launcher = path.join(unpackedDir, "Adept Launcher.exe");
@@ -41,7 +40,6 @@ if (!fs.existsSync(launcher)) {
   process.exit(1);
 }
 console.log(`unpacked ${unpacked}`);
-console.log(fs.existsSync(setup) ? `installer ${setup}` : "installer missing");
 const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r3";
 const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-${terminalRevision}-win-x64.zip`);
 const pythonExe = fs.existsSync(path.join(root, "studio-api", ".venv", "Scripts", "python.exe"))

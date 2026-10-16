@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from adept_lifecycle.cli import main
 from adept_lifecycle.desktop import linux_desktop_entry, windows_launcher
 from adept_lifecycle.detect import SystemProfile, linux_family_from_os_release
-from adept_lifecycle.manager import Hooks, Layout, Lifecycle, package_install_plan
+from adept_lifecycle.manager import Hooks, Layout, Lifecycle
 from adept_lifecycle.release import ReleaseError, assert_release_url, canonical_bytes, sign_catalog, sign_catalog_rsa, verify_catalog_rsa
 from adept_lifecycle.trust import generate_keypair, pinned_public_key, verify_sha256
 from adept_lifecycle.safety import is_shared_dependency, resolve_contained
@@ -367,7 +367,10 @@ def test_bootstrap_uses_the_pinned_catalog():
     shell = (ROOT / "install" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
     assert "certification pending" not in shell.lower()
     assert "not notarized" in shell.lower()
-    assert 'kind="dmg"' in shell
+    assert 'kind="zip"' in shell
+    assert "hdiutil" not in shell
+    assert "dpkg" not in shell
+    assert "rpm -Uvh" not in shell
     assert "Apple Silicon" in shell
     assert "xattr" not in shell
     assert "spctl --master-disable" not in shell
@@ -377,9 +380,8 @@ def test_bootstrap_uses_the_pinned_catalog():
     assert "127.0.0.1" not in shell
     assert "localhost" not in shell.lower()
     zip_at = shell.index('if [ "$payload_kind" = "zip" ]')
-    package_at = shell.index("sudo dpkg")
-    assert zip_at < package_at
-    assert "exit 0" in shell[zip_at:package_at]
+    assert "exit 0" in shell[zip_at:]
+    assert "application archive" in shell[zip_at:]
     assert "installedRevision" in shell
     launcher = (ROOT / "install" / "launcher" / "adept_launcher" / "launcher.py").read_text(encoding="utf-8")
     assert "install_native_package" not in launcher
@@ -482,16 +484,14 @@ def test_windows_shortcut_starts_the_lifecycle_without_a_console():
     assert "Adept UI.exe" not in script
 
 
-def test_package_plans_do_not_weaken_gatekeeper():
-    payload = Path("Adept.UI-Setup.exe")
-    assert package_install_plan("nsis", payload) == [str(payload), "/S"]
-    assert package_install_plan("deb", Path("adept.deb"))[0] == "dpkg"
-    assert package_install_plan("rpm", Path("adept.rpm"))[0] == "rpm"
-    dmg = package_install_plan("dmg", Path("adept.dmg"))
-    assert dmg is not None
-    assert "xattr" not in dmg
-    assert "spctl" not in dmg
-    assert package_install_plan("zip", payload) is None
+def test_terminal_install_does_not_keep_a_package_installer():
+    shell = (ROOT / "install" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
+    windows = (ROOT / "install" / "bootstrap" / "install.ps1").read_text(encoding="utf-8")
+    manager = (ROOT / "install" / "lifecycle" / "adept_lifecycle" / "manager.py").read_text(encoding="utf-8")
+    assert "install_native_package" not in manager
+    assert "nsis" not in windows.lower()
+    assert "hdiutil" not in shell
+    assert "dpkg" not in shell
 
 
 def _installed(tmp_path: Path, version: str = "1.1.2"):
