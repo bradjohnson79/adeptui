@@ -90,15 +90,34 @@ def main(argv: list[str] | None = None, profile: SystemProfile | None = None, ke
     return 0 if result.ok else 1
 
 
+def _release_ssl_context():
+    """Trust the system CA bundle on Debian and Fedora layouts."""
+    import ssl
+
+    context = ssl.create_default_context()
+    for candidate in (
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/cert.pem",
+    ):
+        if os.path.isfile(candidate):
+            try:
+                context.load_verify_locations(cafile=candidate)
+            except (OSError, ssl.SSLError):
+                continue
+    return context
+
+
 def _fetch_official_catalog() -> dict | None:
     import urllib.request
 
     from .trust import OFFICIAL_CATALOG_URL, OFFICIAL_SIGNATURE_URL
 
     try:
-        with urllib.request.urlopen(OFFICIAL_CATALOG_URL, timeout=20) as response:
+        context = _release_ssl_context()
+        with urllib.request.urlopen(OFFICIAL_CATALOG_URL, timeout=20, context=context) as response:
             raw = response.read()
-        with urllib.request.urlopen(OFFICIAL_SIGNATURE_URL, timeout=20) as response:
+        with urllib.request.urlopen(OFFICIAL_SIGNATURE_URL, timeout=20, context=context) as response:
             signature = response.read().decode("utf-8").strip()
     except OSError:
         return None
