@@ -233,7 +233,7 @@ jobs:
           $windowData = Join-Path $env:TEMP "adept-public-window"
           New-Item -ItemType Directory -Force -Path $windowRoot, $windowData | Out-Null
           $env:ADEPT_ELECTRON_ARGS = "--user-data-dir=$windowData"
-          Start-Process -FilePath $launcher -ArgumentList @("--root", $windowRoot) -WindowStyle Normal | Out-Null
+          Start-Process -FilePath $launcher -WindowStyle Normal | Out-Null
           $title = ""
           foreach ($i in 1..45) {
             Start-Sleep -Seconds 2
