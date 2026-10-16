@@ -16,12 +16,21 @@ import { useNavigate } from "react-router-dom";
 import { api, type RuntimeManagerStatus } from "../api";
 import { bootHandoffTarget, rememberFirstRunComplete } from "../setup/firstRun";
 import { buildAiGuidedSetupPath } from "../setup/navigation";
+import { BOOT_READY_DISMISS_KEY, BOOT_READY_TOAST_MS, bootReadyToastVisible } from "./bootReadyToast";
 import { buildSnapshot, type StartupSnapshot } from "./startupSnapshot";
 import { badgeClass, buildStartupBoard, describeFinalStatus, isCloud12 } from "./startupDisplay";
 import "./StartupSystemsGauge.css";
 
 const REQUIRED_TIMEOUT_MS = 120_000;
 const READY_HOLD_MS = 1200;
+
+function readReadyDismissed(): boolean {
+  try {
+    return window.sessionStorage.getItem(BOOT_READY_DISMISS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 type BootCheck = {
   id: string;
@@ -84,6 +93,24 @@ export function StartupSystemsGauge() {
   const certFailedRef = useRef(false);
   const certRecheckedRef = useRef(false);
   const certEpochRef = useRef(0);
+  const errorDismissedRef = useRef(false);
+  const [readyDismissed, setReadyDismissed] = useState(readReadyDismissed);
+  const [readyShownAt, setReadyShownAt] = useState<number | null>(null);
+
+  const dismissReadyToast = useCallback(() => {
+    setReadyDismissed(true);
+    try {
+      window.sessionStorage.setItem(BOOT_READY_DISMISS_KEY, "1");
+    } catch {
+      /* a private window can refuse storage; the in-memory flag still closes it */
+    }
+  }, []);
+
+  const dismissAttention = useCallback(() => {
+    errorDismissedRef.current = true;
+    setHandoffCover(false);
+    setVisible(false);
+  }, []);
 
   const offerEssentialsOrClose = useCallback(async () => {
     if (handoffCheckedRef.current) return;
@@ -150,7 +177,7 @@ export function StartupSystemsGauge() {
       if (cert?.verdict === "NO-GO") {
         certFailedRef.current = true;
         setCertFailed(true);
-        setVisible(true);
+        if (!errorDismissedRef.current) setVisible(true);
         return;
       }
       if (cert?.verdict === "GO") {
@@ -217,6 +244,22 @@ export function StartupSystemsGauge() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (visible || bootCert?.verdict !== "GO" || readyDismissed) return;
+    const shownAt = readyShownAt ?? Date.now();
+    if (readyShownAt == null) {
+      setReadyShownAt(shownAt);
+      return;
+    }
+    const remaining = BOOT_READY_TOAST_MS - (Date.now() - shownAt);
+    if (remaining <= 0) {
+      dismissReadyToast();
+      return;
+    }
+    const timer = window.setTimeout(dismissReadyToast, remaining);
+    return () => window.clearTimeout(timer);
+  }, [visible, bootCert?.verdict, readyDismissed, readyShownAt, dismissReadyToast]);
+
   // Bounded polling loop while visible and not closed.
   useEffect(() => {
     if (!visible || closedRef.current) return;
@@ -282,13 +325,23 @@ export function StartupSystemsGauge() {
   }
 
   if (!visible) {
-    if (bootCert?.verdict !== "GO") return null;
+    const showReady = bootReadyToastVisible({
+      gaugeVisible: false,
+      verdict: bootCert?.verdict,
+      dismissed: readyDismissed,
+      now: Date.now(),
+      shownAt: readyShownAt ?? Date.now(),
+    });
+    if (!showReady) return null;
     return (
-      <div className="boot-ready" data-testid="boot-ready">
+      <div className="boot-ready" data-testid="boot-ready" role="status">
+        <button type="button" className="boot-ready__close" data-testid="boot-ready-close" aria-label="Close" onClick={dismissReadyToast}>
+          ×
+        </button>
         <span>ADEPT UI READY — GO</span>
-        {(bootCert.optional ?? []).some((row) => !isCloud12(row.system)) && (
+        {(bootCert?.optional ?? []).some((row) => !isCloud12(row.system)) && (
           <span data-testid="boot-optional">
-            {(bootCert.optional ?? [])
+            {(bootCert?.optional ?? [])
               .filter((row) => !isCloud12(row.system))
               .map((row) => `${row.system}: ${row.detail}`)
               .join(" · ")}
@@ -362,6 +415,9 @@ export function StartupSystemsGauge() {
         )}
         {certFailed && (
           <div className="startup-gauge__failed-block" data-testid="boot-attention">
+            <button type="button" className="boot-ready__close" data-testid="boot-attention-close" aria-label="Close" onClick={dismissAttention}>
+              ×
+            </button>
             <p className="startup-gauge__failed-title">Startup Requires Attention</p>
             <p className="startup-gauge__failed-msg">
               {(bootCert?.failed ?? []).map((row) => `${row.system}: ${row.detail}`).join(" ") || "A required startup check did not pass."}

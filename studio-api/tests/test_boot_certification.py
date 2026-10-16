@@ -222,3 +222,77 @@ def test_cloud_12_is_outside_adept_ui_11_boot():
         assert report["progressPct"] == 100
         assert all(row["system"] != "Cloud 1.2" and row["id"] != "cloud_12" for row in report["checks"])
         assert all(row["system"] != "Cloud 1.2" for row in report["optional"])
+
+
+def _local_ai(report: dict) -> dict:
+    return next(row for row in report["checks"] if row["id"] == "local_ai")
+
+
+def test_api_profile_does_not_call_a_missing_local_runtime_failed():
+    facts = healthy_facts()
+    facts.installation_profile = "api"
+    facts.local_ai_required = False
+    facts.local_ai_configured = False
+    facts.local_ai_daemon_online = False
+    facts.local_ai_model_ready = False
+    report = evaluate(facts)
+    row = _local_ai(report)
+    assert report["verdict"] == "GO"
+    assert row["result"] == "NOT_REQUIRED"
+    assert row["required"] is False
+    assert all(item["id"] != "local_ai" for item in report["optional"])
+    assert report["failed"] == []
+
+
+def test_full_local_ready_only_after_the_health_check():
+    facts = healthy_facts()
+    facts.installation_profile = "local"
+    facts.local_ai_required = True
+    facts.local_ai_configured = True
+    facts.local_ai_daemon_online = True
+    facts.local_ai_model_ready = True
+    ready = evaluate(facts)
+    assert _local_ai(ready)["result"] == "PASS"
+    assert ready["verdict"] == "GO"
+
+    down = healthy_facts()
+    down.installation_profile = "local"
+    down.local_ai_required = True
+    down.local_ai_configured = True
+    down.local_ai_daemon_online = False
+    down.local_ai_model_ready = False
+    failed = evaluate(down)
+    assert _local_ai(failed)["result"] == "FAIL"
+    assert failed["verdict"] == "GO"
+    assert failed["failed"] == []
+
+    recovered = healthy_facts()
+    recovered.installation_profile = "local"
+    recovered.local_ai_required = True
+    recovered.local_ai_configured = True
+    recovered.local_ai_daemon_online = True
+    recovered.local_ai_model_ready = True
+    assert _local_ai(evaluate(recovered))["result"] == "PASS"
+
+
+def test_local_profile_without_an_executable_is_not_configured():
+    facts = healthy_facts()
+    facts.installation_profile = "local"
+    facts.local_ai_required = True
+    facts.local_ai_configured = False
+    assert _local_ai(evaluate(facts))["result"] == "NOT_CONFIGURED"
+
+
+def test_hybrid_local_ai_follows_the_selected_models():
+    without = healthy_facts()
+    without.installation_profile = "hybrid"
+    without.local_ai_required = False
+    without.local_ai_configured = False
+    assert _local_ai(evaluate(without))["result"] == "NOT_REQUIRED"
+
+    with_models = healthy_facts()
+    with_models.installation_profile = "hybrid"
+    with_models.local_ai_required = True
+    with_models.local_ai_configured = True
+    with_models.local_ai_daemon_online = False
+    assert _local_ai(evaluate(with_models))["result"] == "FAIL"

@@ -15,9 +15,12 @@ export type BootCheckView = {
 
 export type DisplayBadge =
   | "ONLINE"
+  | "READY"
   | "PASS"
   | "ON DEMAND"
   | "OPTIONAL"
+  | "NOT REQUIRED"
+  | "NOT CONFIGURED"
   | "MISSING"
   | "FAILED"
   | "STARTING"
@@ -135,10 +138,13 @@ function sectionFor(label: string, required: boolean): DisplaySectionId {
 export function badgeClass(badge: DisplayBadge): string {
   switch (badge) {
     case "ONLINE":
+    case "READY":
     case "PASS":
       return "online";
     case "OPTIONAL":
     case "ON DEMAND":
+    case "NOT REQUIRED":
+    case "NOT CONFIGURED":
     case "INCOMPLETE":
       return "on_demand";
     case "FAILED":
@@ -182,6 +188,33 @@ function badgeFromSnapshot(state: SystemState): DisplayBadge {
   }
 }
 
+/** Local AI is Ready only after a passing health check. An unused runtime is not a failure. */
+export function localAiDisplayBadge(checks: BootCheckView[] | undefined, state?: SystemState): DisplayBadge {
+  const row = (checks ?? []).find((check) => check.system === "Local AI Runtime" || check.id === "local_ai");
+  if (row) {
+    if (row.result === "PASS") return "READY";
+    if (row.result === "NOT_REQUIRED") return "NOT REQUIRED";
+    if (row.result === "NOT_CONFIGURED") return "NOT CONFIGURED";
+    if (row.result === "FAIL" || row.result === "TIMEOUT" || row.result === "MISSING") return "FAILED";
+  }
+  switch (state) {
+    case "online":
+      return "READY";
+    case "not_required":
+    case "on_demand":
+      return "NOT REQUIRED";
+    case "not_configured":
+      return "NOT CONFIGURED";
+    case "failed":
+    case "degraded":
+      return "FAILED";
+    case "starting":
+      return "STARTING";
+    default:
+      return "CHECKING";
+  }
+}
+
 export function buildStartupBoard(snapshotRows: SystemRow[], checks: BootCheckView[]): DisplaySection[] {
   const liveChecks = checks.filter(
     (check) => !isCloud12(check.id) && !isCloud12(check.system) && !isCloud12(check.check) && !isCloud12(check.detail),
@@ -216,7 +249,11 @@ export function buildStartupBoard(snapshotRows: SystemRow[], checks: BootCheckVi
     const snap = snapshotByOwner.get(key);
     if (!group && !snap) continue;
     const label = displayLabel(key);
-    const badge = group?.length ? badgeFromChecks(group) : badgeFromSnapshot(snap!.state);
+    const badge = label === "Local AI Runtime"
+      ? localAiDisplayBadge(group, snap?.state)
+      : group?.length
+        ? badgeFromChecks(group)
+        : badgeFromSnapshot(snap!.state);
     const required = group
       ? group.some((check) => check.required !== false && check.result !== "OPTIONAL")
       : Boolean(snap?.required);

@@ -179,6 +179,62 @@ def provider_blockers(profile: str, state: dict[str, Any] | None = None) -> list
     return []
 
 
+def local_ai_required(profile: str | None, state: dict[str, Any] | None = None) -> bool:
+    """Full Local uses the local runtime. Hybrid uses it only when local models are selected."""
+    chosen = str(profile or "").strip().lower()
+    if chosen == "local":
+        return True
+    if chosen == "hybrid":
+        return bool(selected_local_models(state))
+    return False
+
+
+def local_ai_contract(
+    profile: str | None,
+    *,
+    configured: bool,
+    daemon_online: bool,
+    model_ready: bool,
+    state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Readiness for Local AI Runtime. This does not start or stop the runtime."""
+    if not local_ai_required(profile, state):
+        return {
+            "required": False,
+            "blocksApplicationStart": False,
+            "classification": "NOT_REQUIRED",
+            "result": "NOT_REQUIRED",
+            "detail": "This installation does not need a local AI runtime.",
+        }
+    if not configured:
+        return {
+            "required": False,
+            "blocksApplicationStart": False,
+            "classification": "NOT_CONFIGURED",
+            "result": "NOT_CONFIGURED",
+            "detail": "Local AI Runtime is not configured.",
+        }
+    if daemon_online and model_ready:
+        return {
+            "required": False,
+            "blocksApplicationStart": False,
+            "classification": "LOCAL_PREREQUISITE",
+            "result": "PASS",
+            "detail": "Local AI Runtime responded and the selected model is available.",
+        }
+    if daemon_online:
+        detail = "Local AI Runtime is running, but the selected model is not available."
+    else:
+        detail = "Local AI Runtime did not respond to its health check."
+    return {
+        "required": False,
+        "blocksApplicationStart": False,
+        "classification": "LOCAL_PREREQUISITE",
+        "result": "FAIL",
+        "detail": detail,
+    }
+
+
 def creator_engine_contract(profile: str | None, *, comfy_healthy: bool) -> dict[str, Any]:
     """One readiness answer for Creator Engine.
 

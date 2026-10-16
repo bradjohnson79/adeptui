@@ -4,7 +4,9 @@
  */
 import type { RuntimeManagerStatus } from "../api";
 
-export type SystemState = "checking" | "starting" | "online" | "degraded" | "failed" | "on_demand";
+export type SystemState = "checking" | "starting" | "online" | "degraded" | "failed" | "on_demand" | "not_required" | "not_configured";
+
+export type LocalAiNeed = "required" | "not_required" | "unknown";
 
 export interface SystemRow {
   id: string;
@@ -60,7 +62,11 @@ function mapLogicalAvailability(availability: string | undefined, fallback: Syst
 }
 
 /** Build the human-readable system rows from the canonical status contract. */
-export function buildSnapshot(status: RuntimeManagerStatus | null, studioApiReachable: boolean): StartupSnapshot {
+export function buildSnapshot(
+  status: RuntimeManagerStatus | null,
+  studioApiReachable: boolean,
+  localAiNeed: LocalAiNeed = "unknown",
+): StartupSnapshot {
   const adept = status?.adeptRuntime;
   const controlKnown = typeof adept?.controlPlaneReachable === "boolean";
   const managerUp = controlKnown ? Boolean(adept?.controlPlaneReachable) : Boolean(adept?.managerPid) || studioApiReachable;
@@ -73,26 +79,43 @@ export function buildSnapshot(status: RuntimeManagerStatus | null, studioApiReac
   const ollamaFailed = status?.ollama?.status === "error";
   const modelReady = Boolean(status?.ollama?.modelReady);
   const installedModels = Array.isArray(status?.ollama?.models) ? status.ollama.models.length : 0;
-  const localAiState: SystemState = ollamaUp
-    ? modelReady
-      ? "online"
-      : "degraded"
-    : ollamaFailed
-      ? "failed"
-      : !status || ollamaStarting || (ollamaConfigured && status.ollama?.status === "stopped")
-        ? "starting"
-        : "on_demand";
-  const localAiDetail = ollamaUp
-    ? modelReady
-      ? "model ready"
-      : installedModels
+  let localAiState: SystemState;
+  let localAiDetail: string;
+  if (localAiNeed === "not_required" && !(ollamaUp && modelReady)) {
+    localAiState = "not_required";
+    localAiDetail = "not required for this installation";
+  } else if (localAiNeed === "required" && !ollamaConfigured && !ollamaUp) {
+    localAiState = "not_configured";
+    localAiDetail = "not configured";
+  } else if (localAiNeed === "required" && !(ollamaUp && modelReady) && !ollamaStarting) {
+    localAiState = "failed";
+    localAiDetail = ollamaUp
+      ? installedModels
         ? "daemon online — required model is not ready"
         : "daemon online — required model is not installed"
-    : localAiState === "starting"
-      ? "starting"
-      : status?.ollama?.configured === false
-        ? "not installed"
-        : "on demand";
+      : "health check did not respond";
+  } else {
+    localAiState = ollamaUp
+      ? modelReady
+        ? "online"
+        : "degraded"
+      : ollamaFailed
+        ? "failed"
+        : !status || ollamaStarting || (ollamaConfigured && status.ollama?.status === "stopped")
+          ? "starting"
+          : "on_demand";
+    localAiDetail = ollamaUp
+      ? modelReady
+        ? "model ready"
+        : installedModels
+          ? "daemon online — required model is not ready"
+          : "daemon online — required model is not installed"
+      : localAiState === "starting"
+        ? "starting"
+        : status?.ollama?.configured === false
+          ? "not installed"
+          : "on demand";
+  }
   const routeAUp = status?.routeA?.status === "running";
   const tunnelUp = status?.tunnel?.status === "running";
   const comfyLogical = logicalAvailability(status, "runtime.comfy");

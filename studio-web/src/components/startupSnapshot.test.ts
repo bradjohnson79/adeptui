@@ -156,6 +156,46 @@ describe("buildSnapshot", () => {
     expect(snap.allRequiredOnline).toBe(true);
   });
 
+  it("Full API does not call a missing local runtime failed", () => {
+    const status = makeStatus({ ollamaStatus: "stopped" });
+    status.ollama = { ...status.ollama, configured: false, status: "not_configured" as never, daemonOnline: false, modelReady: false };
+    const snap = buildSnapshot(status, true, "not_required");
+    const row = snap.rows.find((item) => item.id === "local_ai");
+    expect(row?.state).toBe("not_required");
+    expect(row?.required).toBe(false);
+    expect(snap.message).not.toBe("STARTUP FAILED");
+  });
+
+  it("Full Local reports ready only when the runtime health check passed", () => {
+    const ready = makeStatus({ ollamaStatus: "running" });
+    ready.ollama = { ...ready.ollama, configured: true, daemonOnline: true, modelReady: true };
+    expect(buildSnapshot(ready, true, "required").rows.find((item) => item.id === "local_ai")?.state).toBe("online");
+
+    const down = makeStatus({ ollamaStatus: "error" });
+    down.ollama = { ...down.ollama, configured: true, status: "error" as never, daemonOnline: false, modelReady: false };
+    expect(buildSnapshot(down, true, "required").rows.find((item) => item.id === "local_ai")?.state).toBe("failed");
+
+    const missing = makeStatus({ ollamaStatus: "not_configured" });
+    missing.ollama = { ...missing.ollama, configured: false, status: "not_configured" as never };
+    expect(buildSnapshot(missing, true, "required").rows.find((item) => item.id === "local_ai")?.state).toBe("not_configured");
+  });
+
+  it("Hybrid uses the local runtime only when local models are selected", () => {
+    const status = makeStatus({ ollamaStatus: "stopped" });
+    status.ollama = { ...status.ollama, configured: true, daemonOnline: false, modelReady: false, status: "stopped" as never };
+    expect(buildSnapshot(status, true, "not_required").rows.find((item) => item.id === "local_ai")?.state).toBe("not_required");
+    expect(buildSnapshot(status, true, "required").rows.find((item) => item.id === "local_ai")?.state).toBe("failed");
+  });
+
+  it("a required local runtime becomes ready after the health check recovers", () => {
+    const down = makeStatus({ ollamaStatus: "stopped" });
+    down.ollama = { ...down.ollama, configured: true, daemonOnline: false, modelReady: false, status: "stopped" as never };
+    expect(buildSnapshot(down, true, "required").rows.find((item) => item.id === "local_ai")?.state).toBe("failed");
+    const back = makeStatus({ ollamaStatus: "running" });
+    back.ollama = { ...back.ollama, configured: true, daemonOnline: true, modelReady: true };
+    expect(buildSnapshot(back, true, "required").rows.find((item) => item.id === "local_ai")?.state).toBe("online");
+  });
+
   it("Local AI Runtime ONLINE when daemon is running", () => {
     const status = makeStatus({ ollamaStatus: "running" });
     status.ollama = { ...status.ollama, configured: true, daemonOnline: true, modelReady: true };

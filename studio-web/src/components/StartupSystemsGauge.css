@@ -219,16 +219,33 @@
 .boot-ready {
   position: fixed;
   right: 1.2rem;
-  bottom: 1.2rem;
-  z-index: 40;
+  bottom: 4.8rem;
+  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  max-width: 22rem;
-  padding: 0.7rem 0.9rem;
+  max-width: 18rem;
+  padding: 0.7rem 2rem 0.7rem 0.9rem;
   border-radius: 12px;
   background: rgba(12, 18, 32, 0.92);
   color: #e8ecf6;
   font-size: 0.82rem;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  pointer-events: auto;
 }
+.boot-ready__close {
+  position: absolute;
+  top: 0.28rem;
+  right: 0.28rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #e8ecf6;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.startup-gauge__failed-block { position: relative; }
+.startup-gauge__failed-block .boot-ready__close { color: #ffd7d0; }

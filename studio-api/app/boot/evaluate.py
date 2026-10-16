@@ -55,6 +55,10 @@ class BootFacts:
     setup_error: str = ""
     update_source_online: bool | None = None
     installation_profile: str = ""
+    local_ai_required: bool = False
+    local_ai_configured: bool = False
+    local_ai_daemon_online: bool = False
+    local_ai_model_ready: bool = False
     timed_out: tuple[str, ...] = ()
     not_run: tuple[str, ...] = ()
 
@@ -243,9 +247,16 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
             classification="BOOT_REQUIRED",
         ),
     )
-    from ..setup.installation_profile import creator_engine_contract
+    from ..setup.installation_profile import creator_engine_contract, local_ai_contract
 
     creator = creator_engine_contract(facts.installation_profile, comfy_healthy=facts.comfy_healthy)
+    local_ai = local_ai_contract(
+        facts.installation_profile,
+        configured=facts.local_ai_configured,
+        daemon_online=facts.local_ai_daemon_online,
+        model_ready=facts.local_ai_model_ready,
+        state={"selected_local_models": ["selected"] if facts.local_ai_required else []},
+    )
     add(
         "comfy",
         _check(
@@ -256,6 +267,18 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
             str(creator["detail"]),
             required=False,
             classification=str(creator["classification"]),
+        ),
+    )
+    add(
+        "local_ai",
+        _check(
+            "Local AI Runtime",
+            "Ollama",
+            "health",
+            str(local_ai["result"]),
+            str(local_ai["detail"]),
+            required=False,
+            classification=str(local_ai["classification"]),
         ),
     )
     codirector_ok = facts.codirector_tools > 0 and facts.codirector_unknown_closed and not facts.codirector_error
@@ -452,7 +475,7 @@ def evaluate(facts: BootFacts, *, durations: dict[str, int] | None = None) -> di
         "optional": [
             row
             for row in checks
-            if not row["required"] and row["result"] != "PASS"
+            if not row["required"] and row["result"] not in {"PASS", "NOT_REQUIRED"}
         ],
         "preloadPlan": {
             "preloaded": [

@@ -11,6 +11,8 @@ from app.setup.first_run import assess_first_run
 from app.setup.installation_profile import (
     LTX_GROUP,
     expand_local_selection,
+    local_ai_contract,
+    local_ai_required,
     required_ids_for,
     save_installation_profile,
 )
@@ -370,3 +372,18 @@ def test_remove_protects_essentials_and_deletes_only_a_managed_file(setup_data_d
     untouched = remove_component("shared_model", confirm_delete=True)
     assert untouched["deleted"] is False
     assert shared.read_bytes() == b"shared"
+
+
+def test_local_ai_requirement_follows_the_installation_profile() -> None:
+    assert local_ai_required("api") is False
+    assert local_ai_required("local") is True
+    assert local_ai_required("hybrid", {"selected_local_models": []}) is False
+    assert local_ai_required("hybrid", {"selected_local_models": ["zimage_models"]}) is True
+    absent = local_ai_contract("api", configured=False, daemon_online=False, model_ready=False)
+    assert absent["result"] == "NOT_REQUIRED"
+    missing = local_ai_contract("local", configured=False, daemon_online=False, model_ready=False)
+    assert missing["result"] == "NOT_CONFIGURED"
+    ready = local_ai_contract("local", configured=True, daemon_online=True, model_ready=True)
+    assert ready["result"] == "PASS"
+    down = local_ai_contract("local", configured=True, daemon_online=False, model_ready=False)
+    assert down["result"] == "FAIL"

@@ -36,11 +36,11 @@ _TUNNEL_HOSTNAME = "api-beta.adeptui.org"
 
 
 def _control_plane_reachable() -> bool:
-    """Short probe. A stored manager PID is not connectivity."""
+    """A stored manager PID is not connectivity. The manager can take several seconds to answer."""
     try:
         from runtime_supervisor.control_client import control_plane_reachable
 
-        return bool(control_plane_reachable(timeout=3.0))
+        return bool(control_plane_reachable(timeout=12.0))
     except Exception:
         return False
 
@@ -195,11 +195,14 @@ async def get_status() -> RuntimeManagerStatus:
     def _view_and_snap():
         from runtime_supervisor.service_status import collect_runtime_view
 
+        # Probe before the rest of this request. A probe on the request thread
+        # can time out, because the manager may call back into Studio API.
+        reached = _control_plane_reachable()
         view = collect_runtime_view(assume_local_api=True)
         snap = _collect(assume_local_api=True, include_gpu=False)
-        return view, snap
+        return view, snap, reached
 
-    view, snap = await asyncio.to_thread(_view_and_snap)
+    view, snap, control_reached = await asyncio.to_thread(_view_and_snap)
     comfy_state = str(view.get("comfyState") or "")
     comfyui = ComfyUiStatus(
         status=(
@@ -291,7 +294,7 @@ async def get_status() -> RuntimeManagerStatus:
         comfyPid=view.get("comfyPid") if isinstance(view.get("comfyPid"), int) else None,
         owned=bool(view.get("owned")),
         managerPid=view.get("managerPid") if isinstance(view.get("managerPid"), int) else None,
-        controlPlaneReachable=_control_plane_reachable(),
+        controlPlaneReachable=control_reached,
         studioApiPid=view.get("studioApiPid") if isinstance(view.get("studioApiPid"), int) else None,
         studioApiOwned=bool(view.get("studioApiOwned")),
         studioApiHealth=str(view.get("studioApiHealth") or "unknown"),

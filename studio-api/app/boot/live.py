@@ -95,11 +95,29 @@ def collect_facts(*, force: bool = False) -> tuple[BootFacts, dict[str, int]]:
         facts.supervisor_port = int(runtime_cfg.controlPort) if runtime_cfg else 8759
         facts.supervisor_reachable = bool(control_plane_reachable(timeout=20.0))
         try:
-            from ..setup.installation_profile import active_profile
+            from ..setup.installation_profile import active_profile, local_ai_required
+            from ..setup.state import load_state
 
-            facts.installation_profile = active_profile() or ""
+            setup_state = load_state()
+            facts.installation_profile = active_profile(setup_state) or ""
+            facts.local_ai_required = local_ai_required(facts.installation_profile, setup_state)
         except Exception:
             facts.installation_profile = ""
+            facts.local_ai_required = False
+        try:
+            # Health only. Do not start, stop, or restart Ollama or Comfy.
+            from runtime_supervisor.health import ollama_healthy, ollama_model_ready
+            from runtime_supervisor.paths import discover_paths
+
+            facts.local_ai_configured = discover_paths().ollama is not None
+            facts.local_ai_daemon_online = bool(ollama_healthy())
+            facts.local_ai_model_ready = bool(
+                facts.local_ai_daemon_online and ollama_model_ready()
+            )
+        except Exception:
+            facts.local_ai_configured = False
+            facts.local_ai_daemon_online = False
+            facts.local_ai_model_ready = False
         facts.api_pids = listening_pids(facts.api_port)
         facts.api_commands = _commands(facts.api_pids)
         facts.api_health_status, _body = _http(f"{endpoint['studioApiBaseUrl']}/api/healthz")

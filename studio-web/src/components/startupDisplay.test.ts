@@ -4,6 +4,7 @@ import {
   buildStartupBoard,
   describeFinalStatus,
   duplicateLabels,
+  localAiDisplayBadge,
   type BootCheckView,
 } from "./startupDisplay";
 
@@ -213,6 +214,18 @@ describe("startup display truth table", () => {
     });
     expect(status.items).toEqual(["Video Runtime"]);
     expect(JSON.stringify(status)).not.toMatch(/Cloud 1\.2/);
+  });
+
+  it("Local AI badges follow the health contract and never call an unused runtime failed", () => {
+    expect(localAiDisplayBadge([check("local_ai", "Local AI Runtime", "NOT_REQUIRED", false)], "failed")).toBe("NOT REQUIRED");
+    expect(localAiDisplayBadge([check("local_ai", "Local AI Runtime", "NOT_CONFIGURED", false)], "failed")).toBe("NOT CONFIGURED");
+    expect(localAiDisplayBadge([check("local_ai", "Local AI Runtime", "PASS", false)], "online")).toBe("READY");
+    expect(localAiDisplayBadge([check("local_ai", "Local AI Runtime", "FAIL", false, "health check did not respond")], "failed")).toBe("FAILED");
+    const board = buildStartupBoard(
+      [row("local_ai", "Local AI Runtime", "degraded", false)],
+      [check("local_ai", "Local AI Runtime", "NOT_REQUIRED", false, "This installation does not need a local AI runtime.")],
+    );
+    expect(board.flatMap((section) => section.rows).find((item) => item.label === "Local AI Runtime")?.badge).toBe("NOT REQUIRED");
   });
 
   it("does not say Bringing after startup is complete", () => {
