@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Adept UI release integrity</title>
+  <style>
+    body { font-family: Georgia, serif; margin: 2rem auto; max-width: 42rem; line-height: 1.45; color: #1c1915; background: #f6f3ee; }
+    h1 { font-size: 1.6rem; }
+    .verdict { font-size: 1.3rem; font-weight: 700; padding: 0.6rem 0.8rem; }
+    .LIVE_VERIFIED { background: #e5f2e5; }
+    .FAILED { background: #f8d7da; }
+    .STALE, .NOT_VERIFIED { background: #f3ead2; }
+    table { width: 100%; border-collapse: collapse; }
+    td { border-top: 1px solid #ddd; padding: 0.35rem 0; vertical-align: top; }
+    code { font-family: Consolas, monospace; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Release integrity</h1>
+  <p>This page reports the latest production gate. A stored pass is not shown as current when the live catalog, signature, or gate result no longer matches.</p>
+  <p id="verdict" class="verdict NOT_VERIFIED">NOT VERIFIED</p>
+  <p id="reason">Checking the live catalog and the latest production gate.</p>
+  <table id="checks"></table>
+  <p id="meta"></p>
+  <script>
+    const MAX_AGE_MS = 36 * 60 * 60 * 1000;
+    const RUNS = "https://api.github.com/repos/bradjohnson79/adeptui/actions/workflows/release-catalog-gate.yml/runs?per_page=5";
+
+    function hex(buffer) {
+      return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function label(status) {
+      if (status === "LIVE_VERIFIED") return "LIVE VERIFIED";
+      if (status === "FAILED") return "FAILED";
+      if (status === "STALE") return "STALE";
+      return "NOT VERIFIED";
+    }
+
+    function show(status, reason, integrity, historical) {
+      const verdict = document.getElementById("verdict");
+      verdict.textContent = label(status);
+      verdict.className = "verdict " + status;
+      document.getElementById("reason").textContent = reason;
+      const rows = integrity && integrity.checks ? Object.entries(integrity.checks) : [];
+      document.getElementById("checks").innerHTML = rows.map(([name, value]) => {
+        const shown = historical ? "STALE" : value;
+        return "<tr><td>" + name + "</td><td>" + shown + "</td></tr>";
+      }).join("");
+      const meta = [];
+      if (integrity && integrity.version) meta.push("Catalog version " + integrity.version);
+      if (integrity && integrity.gitSha) meta.push("Git " + integrity.gitSha);
+      if (integrity && integrity.workflowRunUrl) meta.push(integrity.workflowRunUrl);
+      document.getElementById("meta").textContent = meta.join(" · ");
+    }
+
+    async function main() {
+      try {
+        const catalogBytes = await (await fetch("/releases/current.json", { cache: "no-store" })).arrayBuffer();
+        const catalogHash = hex(await crypto.subtle.digest("SHA-256", catalogBytes));
+        const signatureText = (await (await fetch("/releases/current.sig", { cache: "no-store" })).text()).trim();
+        const signatureHash = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(signatureText)));
+        const integrity = await (await fetch("/releases/integrity.json", { cache: "no-store" })).json();
+        const runsResponse = await fetch(RUNS, { headers: { Accept: "application/vnd.github+json" } });
+        if (!runsResponse.ok) {
+          show("NOT_VERIFIED", "The production gate status could not be read. No pass is shown.", integrity, true);
+          return;
+        }
+        const newest = ((await runsResponse.json()).workflow_runs || [])[0];
+        if (!newest) {
+          show("NOT_VERIFIED", "No production gate has run for this catalog.", integrity, true);
+          return;
+        }
+        if (newest.status !== "completed") {
+          show("STALE", "A production gate is still running. The previous result is not current.", integrity, true);
+          return;
+        }
+        if (newest.conclusion !== "success") {
+          show("FAILED", "The latest production gate failed. A previous pass is not current.", integrity, true);
+          return;
+        }
+        const age = Date.now() - Date.parse(newest.updated_at);
+        if (!Number.isFinite(age) || age > MAX_AGE_MS) {
+          show("STALE", "The latest successful production gate is older than 36 hours.", integrity, true);
+          return;
+        }
+        if (integrity.catalogSha256 !== catalogHash || integrity.signatureSha256 !== signatureHash) {
+          show("STALE", "The live catalog or signature has changed since the recorded verification.", integrity, true);
+          return;
+        }
+        if (integrity.status !== "PASS" || !integrity.verifiedAt || (Date.now() - Date.parse(integrity.verifiedAt)) > MAX_AGE_MS) {
+          show("NOT_VERIFIED", "The integrity record is not a current pass.", integrity, true);
+          return;
+        }
+        show("LIVE_VERIFIED", "The live catalog matches the latest successful production gate.", integrity, false);
+      } catch (error) {
+        show("NOT_VERIFIED", "Release integrity could not be confirmed. No pass is shown.", null, true);
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>

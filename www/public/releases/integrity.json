@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "status": "NOT_VERIFIED",
+  "version": "1.1.3",
+  "catalogSha256": "",
+  "signatureSha256": "",
+  "verifiedAt": null,
+  "gitSha": null,
+  "workflowRunUrl": null,
+  "checks": {
+    "catalogSignature": "NOT_VERIFIED",
+    "windowsInstall": "NOT_VERIFIED",
+    "ubuntuInstall": "NOT_VERIFIED",
+    "fedoraInstall": "NOT_VERIFIED",
+    "macosInstall": "NOT_VERIFIED",
+    "graphicalStartup": "NOT_VERIFIED",
+    "macosNotarization": "NOT_VERIFIED"
+  }
+}

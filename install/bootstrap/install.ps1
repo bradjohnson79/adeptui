@@ -78,6 +78,7 @@ if ($actual -ne ([string]$artifact.sha256).ToLower()) {
 }
 
 function Read-Yes([string]$prompt) {
+  if ($env:ADEPT_ASSUME_YES -eq "1") { return $true }
   $answer = Read-Host $prompt
   if ([string]::IsNullOrWhiteSpace($answer)) { return $true }
   return $answer.Trim().ToLower() -in @("y", "yes")
@@ -93,6 +94,6 @@ if ($installed.ExitCode -ne 0) {
 $shortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Adept UI.lnk"
 if (-not $createShortcut -and (Test-Path $shortcut)) { Remove-Item $shortcut -Force }
 $program = Join-Path $env:LOCALAPPDATA "Programs\Adept UI\Adept UI.exe"
-if ($launchAfter -and (Test-Path $program)) { Start-Process $program }
+if ($launchAfter -and $env:ADEPT_NO_LAUNCH -ne "1" -and (Test-Path $program)) { Start-Process $program }
 Write-Host "Adept UI is installed."
 exit 0

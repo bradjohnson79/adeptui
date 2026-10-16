@@ -10,9 +10,26 @@ and copied into install/bootstrap/install.ps1 and install/bootstrap/install.sh.
 To rotate:
 1. Generate a new RSA-3072 key outside the repository.
 2. Replace the pinned public modulus and the public key in both bootstrap scripts.
-3. Re-sign install/catalog/current.json into current.sig with the new private key.
-4. Copy the catalog, signature, and scripts to www/public.
-5. Deploy the website and confirm the live catalog verifies.
+3. Re-sign install/catalog/current.json into current.sig with the new private key
+   using ONLY install/lifecycle/adept_lifecycle/sign_release.py.
+4. Copy the catalog, signature, and scripts to www/public (byte-identical files).
+5. Deploy the website and confirm the live catalog verifies with
+   install/lifecycle/verify_published_catalog.py and the release-catalog-gate workflow.
 6. Keep the retired private key offline. Do not publish it.
 
 A catalog signed by any other key must fail verification.
+
+SIGNING CONTRACT (P0, 2026-10-15): the detached signature covers the exact bytes of
+the published current.json. The public installers verify the raw downloaded bytes
+(install.sh openssl dgst, install.ps1 .NET VerifyData); the launcher verifies the
+canonical byte form. sign_release.py therefore rewrites current.json to its
+canonical bytes (sorted keys, compact separators, no signature field, no trailing
+newline) BEFORE signing and self-checks the signature over the exact file bytes.
+Never sign a pretty-printed catalog, never edit current.json after signing, and
+never reformat it during publication — any byte change invalidates every public
+installer with "bad signature".
+
+Before every publication, this command must exit 0. It is the installers' contract
+over the exact on-disk bytes, and the release pipeline runs it before the live gate:
+
+    python install/lifecycle/verify_published_catalog.py --publishable --require-openssl

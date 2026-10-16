@@ -1,0 +1,228 @@
+name: release-catalog-gate
+
+# P0 gate. A local signature check is not production acceptance.
+# 1. The committed catalog must pass the installers' byte contract before it is
+#    treated as publishable (openssl + pinned key).
+# 2. After deployment, jobs wait until the LIVE catalog bytes match the commit,
+#    then verify and install using the public commands.
+# Installation success is not graphical startup. Headless jobs print
+# GRAPHICAL_STARTUP: NOT_VERIFIED.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - www/public/releases/current.json
+      - www/public/releases/current.sig
+      - www/public/install.sh
+      - www/public/install.ps1
+      - install/catalog/**
+      - install/bootstrap/**
+      - install/lifecycle/**
+      - .github/workflows/release-catalog-gate.yml
+  schedule:
+    - cron: "17 7 * * *"
+
+jobs:
+  publish-invariant:
+    name: Sign exactly what you publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify the on-disk catalog with the install.sh openssl procedure
+        run: python install/lifecycle/verify_published_catalog.py --publishable --require-openssl
+
+  verify-sh-procedure:
+    name: "Live catalog: install.sh openssl (${{ matrix.os }})"
+    needs: publish-invariant
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait until production serves this commit
+        run: sh install/lifecycle/wait_for_live_catalog.sh
+      - name: Verify the live catalog exactly as install.sh does
+        run: |
+          set -eu
+          workdir="$(mktemp -d)"
+          curl -fsSL "https://adeptui.org/install.sh" -o "$workdir/install.sh"
+          curl -fsSL "https://adeptui.org/releases/current.json" -o "$workdir/current.json"
+          curl -fsSL "https://adeptui.org/releases/current.sig" -o "$workdir/current.sig"
+          base64 -d "$workdir/current.sig" > "$workdir/current.sig.bin" 2>/dev/null || base64 -D -i "$workdir/current.sig" -o "$workdir/current.sig.bin"
+          sed -n '/^-----BEGIN PUBLIC KEY-----$/,/^-----END PUBLIC KEY-----$/p' "$workdir/install.sh" > "$workdir/release.pub.pem"
+          test -s "$workdir/release.pub.pem"
+          openssl dgst -sha256 -verify "$workdir/release.pub.pem" -signature "$workdir/current.sig.bin" "$workdir/current.json"
+          python3 - "$workdir/current.json" <<'PY'
+          import json, subprocess, sys
+          catalog = json.load(open(sys.argv[1], encoding="utf-8"))
+          required = {("windows", "x64", "nsis"), ("linux", "x64", "deb"), ("linux", "x64", "rpm"), ("darwin", "arm64", "dmg")}
+          found = {(a["platform"], a["arch"], a["kind"]) for a in catalog["artifacts"]}
+          missing = required - found
+          if missing:
+              raise SystemExit(f"missing artifacts: {missing}")
+          for artifact in catalog["artifacts"]:
+              url = artifact["url"]
+              probe = subprocess.run(
+                  ["curl", "-fsSL", "-o", "/dev/null", "-w", "%{http_code}", "-r", "0-0", "-L", url],
+                  capture_output=True, text=True, check=False,
+              )
+              code = probe.stdout.strip()
+              print(f"{artifact['fileName']} HTTP {code}")
+              if code not in {"200", "206"}:
+                  raise SystemExit(f"{url} was not downloadable ({code})")
+          print("ARTIFACT LINKS: PASS")
+          PY
+
+  verify-ps1-procedure:
+    name: Live catalog install.ps1 .NET procedure
+    needs: publish-invariant
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait until production serves this commit
+        shell: pwsh
+        run: ./install/lifecycle/wait_for_live_catalog.ps1
+      - name: Verify the live catalog exactly as install.ps1 does
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $script = (Invoke-WebRequest -Uri "https://adeptui.org/install.ps1" -UseBasicParsing).Content
+          $modulus = [regex]::Match($script, '\$modulus = "([^"]+)"').Groups[1].Value
+          if (-not $modulus) { throw "pinned modulus not found in the published install.ps1" }
+          $tmp = Join-Path $env:RUNNER_TEMP "ps1-verify"
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          curl.exe -fsSL "https://adeptui.org/releases/current.json" -o (Join-Path $tmp "current.json")
+          curl.exe -fsSL "https://adeptui.org/releases/current.sig" -o (Join-Path $tmp "current.sig")
+          $catalogRaw = [IO.File]::ReadAllBytes((Join-Path $tmp "current.json"))
+          $signatureText = [IO.File]::ReadAllText((Join-Path $tmp "current.sig")).Trim()
+          $signature = [Convert]::FromBase64String($signatureText)
+          $rsa = [Security.Cryptography.RSA]::Create()
+          $parameters = New-Object Security.Cryptography.RSAParameters
+          $parameters.Modulus = [Convert]::FromBase64String($modulus)
+          $parameters.Exponent = [byte[]](1, 0, 1)
+          $rsa.ImportParameters($parameters)
+          $verified = $rsa.VerifyData($catalogRaw, $signature, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+          if (-not $verified) { throw "The release catalog signature does not match the pinned Adept UI key." }
+          Write-Host "install.ps1 .NET VerifyData: True"
+
+  verify-launcher-procedure:
+    name: Live catalog launcher procedure
+    needs: publish-invariant
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Wait until production serves this commit
+        run: sh install/lifecycle/wait_for_live_catalog.sh
+      - name: Verify the live catalog exactly as the launcher does
+        run: python install/lifecycle/verify_published_catalog.py
+
+  install-ubuntu-production:
+    name: Public Ubuntu install
+    needs: publish-invariant
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait until production serves this commit
+        run: sh install/lifecycle/wait_for_live_catalog.sh
+      - name: Install, remove, and reinstall the published DEB
+        run: sh install/lifecycle/ci_linux_public_install.sh
+
+  install-fedora-production:
+    name: Public Fedora install
+    needs: publish-invariant
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait until production serves this commit
+        run: sh install/lifecycle/wait_for_live_catalog.sh
+      - name: Install, remove, and reinstall the published RPM in Fedora
+        run: docker run --rm -v "$GITHUB_WORKSPACE/install/lifecycle/ci_linux_public_install.sh:/ci_linux_public_install.sh:ro" fedora:41 bash /ci_linux_public_install.sh
+
+  install-macos-production:
+    name: Public macOS install
+    needs: publish-invariant
+    if: github.event_name != 'schedule'
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait until production serves this commit
+        run: sh install/lifecycle/wait_for_live_catalog.sh
+      - name: Run the public macOS installation command
+        run: curl -fsSL "https://adeptui.org/install.sh" | ADEPT_ASSUME_YES=1 ADEPT_NO_LAUNCH=1 bash
+      - name: Check installation, preserve a project file, reinstall
+        run: |
+          set -eu
+          app="$HOME/Applications/Adept UI.app"
+          test -d "$app"
+          test -x "$app/Contents/MacOS/Adept UI"
+          test -x "$app/Contents/MacOS/Adept UI.bin"
+          lipo -info "$app/Contents/MacOS/Adept UI.bin" | grep arm64
+          "$HOME/.local/bin/adeptui" --version
+          echo "INSTALLATION: PASS"
+          echo "GRAPHICAL_STARTUP: NOT_VERIFIED"
+          echo "NOTARIZATION: NOT_VERIFIED"
+          mkdir -p "$HOME/Library/Application Support/Adept UI/projects"
+          echo keep > "$HOME/Library/Application Support/Adept UI/projects/keep.txt"
+          ADEPT_CONFIRM_UNINSTALL=1 "$HOME/.local/bin/adeptui" uninstall
+          test ! -d "$app"
+          test "$(cat "$HOME/Library/Application Support/Adept UI/projects/keep.txt")" = "keep"
+          curl -fsSL "https://adeptui.org/install.sh" | ADEPT_ASSUME_YES=1 ADEPT_NO_LAUNCH=1 bash
+          test -x "$app/Contents/MacOS/Adept UI"
+          test "$(cat "$HOME/Library/Application Support/Adept UI/projects/keep.txt")" = "keep"
+          echo "REINSTALL_AND_USER_DATA: PASS"
+
+  install-windows-production:
+    name: Public Windows install
+    needs: publish-invariant
+    if: github.event_name != 'schedule'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait until production serves this commit
+        shell: pwsh
+        run: ./install/lifecycle/wait_for_live_catalog.ps1
+      - name: Run the public Windows installation command
+        shell: pwsh
+        env:
+          ADEPT_ASSUME_YES: "1"
+          ADEPT_NO_LAUNCH: "1"
+        run: |
+          $ErrorActionPreference = "Stop"
+          & powershell -NoProfile -Command "irm https://adeptui.org/install.ps1 | iex"
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
+          $program = Join-Path $env:LOCALAPPDATA "Programs\Adept UI"
+          $launcher = Join-Path $program "Adept Launcher.exe"
+          $electron = Join-Path $program "Adept UI.exe"
+          if (-not (Test-Path $launcher)) { throw "Universal launcher was not installed at $launcher" }
+          if (-not (Test-Path $electron)) { throw "Electron was not installed at $electron" }
+          Write-Host "INSTALLATION: PASS"
+          Write-Host "GRAPHICAL_STARTUP: NOT_VERIFIED"
+          $keepDir = Join-Path $env:APPDATA "Adept UI"
+          New-Item -ItemType Directory -Force -Path $keepDir | Out-Null
+          Set-Content -Path (Join-Path $keepDir "keep.txt") -Value "keep" -NoNewline
+          $uninstaller = Join-Path $program "Uninstall Adept UI.exe"
+          if (-not (Test-Path $uninstaller)) { throw "Uninstaller missing at $uninstaller" }
+          $removed = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
+          if ($removed.ExitCode -ne 0) { throw "Uninstall exited $($removed.ExitCode)" }
+          if (Test-Path $launcher) { throw "Launcher remained after uninstall" }
+          if ((Get-Content (Join-Path $keepDir "keep.txt") -Raw) -ne "keep") { throw "User data was removed" }
+          & powershell -NoProfile -Command "irm https://adeptui.org/install.ps1 | iex"
+          if ($LASTEXITCODE -ne 0) { throw "reinstall exited $LASTEXITCODE" }
+          if (-not (Test-Path $launcher)) { throw "Launcher missing after reinstall" }
+          if ((Get-Content (Join-Path $keepDir "keep.txt") -Raw) -ne "keep") { throw "User data missing after reinstall" }
+          Write-Host "REINSTALL_AND_USER_DATA: PASS"

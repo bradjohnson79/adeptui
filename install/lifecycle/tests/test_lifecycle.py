@@ -16,7 +16,7 @@ from adept_lifecycle.cli import main
 from adept_lifecycle.desktop import linux_desktop_entry, windows_launcher
 from adept_lifecycle.detect import SystemProfile, linux_family_from_os_release
 from adept_lifecycle.manager import Hooks, Layout, Lifecycle, package_install_plan
-from adept_lifecycle.release import ReleaseError, assert_release_url, sign_catalog, sign_catalog_rsa, verify_catalog_rsa
+from adept_lifecycle.release import ReleaseError, assert_release_url, canonical_bytes, sign_catalog, sign_catalog_rsa, verify_catalog_rsa
 from adept_lifecycle.trust import generate_keypair, pinned_public_key, verify_sha256
 from adept_lifecycle.safety import is_shared_dependency, resolve_contained
 
@@ -283,24 +283,38 @@ def test_pinned_catalog_signature_matches_the_published_release():
     signature = (ROOT / "install" / "catalog" / "current.sig").read_text(encoding="utf-8").strip()
     key = pinned_public_key()
     assert key is not None
+    # The detached signature covers the exact published file bytes — the same
+    # contract the public installers enforce (install.sh openssl dgst over the
+    # raw file, install.ps1 .NET VerifyData over the downloaded bytes).
     assert verify_sha256(catalog, "rsa-sha256:" + signature, key)
     flipped = bytearray(catalog)
     flipped[20] ^= 1
     assert not verify_sha256(bytes(flipped), "rsa-sha256:" + signature, key)
     body = json.loads(catalog.decode("utf-8"))
+    # P0 regression gate (2026-10-15 macOS installer "rsa_verify:bad signature"):
+    # the published bytes MUST be the canonical form so the installers'
+    # raw-bytes verification and the launcher's canonical verification compute
+    # the identical signed message. A pretty-printed catalog with a
+    # canonical-form signature fails every public installer.
+    assert catalog == canonical_bytes(body)
+    assert "signature" not in body
+    # The website must serve byte-identical catalog and signature files.
+    www_catalog = (ROOT / "www" / "public" / "releases" / "current.json").read_bytes()
+    www_signature = (ROOT / "www" / "public" / "releases" / "current.sig").read_text(encoding="utf-8").strip()
+    assert www_catalog == catalog
+    assert www_signature == signature
+    version = body["version"]
     names = {item["fileName"] for item in body["artifacts"]}
     assert names == {
-        "Adept.UI-Setup-1.1.2-win-x64.exe",
-        "Adept.UI-1.1.2-linux-x64.deb",
-        "Adept.UI-1.1.2-linux-x64.rpm",
-        "Adept.UI-1.1.2-mac-arm64.dmg",
+        f"Adept.UI-Setup-{version}-win-x64.exe",
+        f"Adept.UI-{version}-linux-x64.deb",
+        f"Adept.UI-{version}-linux-x64.rpm",
+        f"Adept.UI-{version}-mac-arm64.dmg",
     }
     mac = next(item for item in body["artifacts"] if item["platform"] == "darwin")
     assert mac["arch"] == "arm64"
     assert mac["kind"] == "dmg"
-    assert mac["sha256"] == "55c678534bd5502f026ac691b08836e1551ee410e08169ee9d04ef04d3c5bcdf"
-    assert mac["bytes"] == 391347954
-    assert all(item["url"].startswith("https://github.com/bradjohnson79/adeptui/releases/download/v1.1.2/") for item in body["artifacts"])
+    assert all(item["url"].startswith(f"https://github.com/bradjohnson79/adeptui/releases/download/v{version}/") for item in body["artifacts"])
     assert not any("appimage" in item["fileName"].lower() for item in body["artifacts"])
 
 
