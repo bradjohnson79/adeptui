@@ -27,7 +27,19 @@ Automatic upgrade from the published 1.1.3 and 1.1.4 installers stayed on those 
 
 The 1.1.6 and 1.1.7 package-updater work is discontinued. The public version stays 1.1.5. New archives use unique filenames and are not replacements for the published exe, deb, rpm, or dmg.
 
-Status: the first terminal archives are published and the live catalog points at them. Installation passed on the public commands. Update did not. A corrected launcher is building. Do not treat this as final certification.
+Status: the live catalog points at the corrected r2 archives. Public installation and update passed on the four runners. Windows showed the Studio window. Ubuntu, Fedora, and macOS graphical windows were not verified in this gate. Fedora was a container. macOS notarization remains an external blocker.
+
+Corrected archives, added beside the first terminal archives and the original packages:
+
+| File | Bytes | SHA-256 |
+|---|---:|---|
+| Adept.UI-1.1.5-terminal-r2-win-x64.zip | 370904892 | d9dcbf2ed7a986c7e8290238c5ad5a913f81faffe55c7cf31c336caa2d430b04 |
+| Adept.UI-1.1.5-terminal-r2-linux-x64.zip | 577928766 | c5c1301f4335c45981921489be28715ebe6b52d3e772bf268be80d647b35dc1a |
+| Adept.UI-1.1.5-terminal-r2-mac-arm64.zip | 500505267 | c61a9279141e22e431462f1b5fbbb1c1505f81a52d2bd2005648040baabeb97c |
+
+The GitHub download of each r2 archive matched those hashes. Catalog SHA-256 `f1d9df8af9df84d29368d0b839eb720014c97b47dc4fd984ef2d32b8e195a146`. Signature SHA-256 `09500ed46c4d5358eb67070507b6a91ee7b851a5aa928a5dbe408e262188eaae`.
+
+Public gate https://github.com/bradjohnson79/adeptui/actions/runs/38879554190 at `d44794a4` succeeded. Windows, Ubuntu, Fedora, and macOS each reported installation, reinstall with the project file kept, `UPDATE: PASS`, and `PREVIOUS_VERSION_PRESERVED: PASS`. Windows also reported shortcut `C:\Users\runneradmin\.adept-ui\bin\Adept Launcher.exe` and `STUDIO_WINDOW: PASS Adept UI Studio`. macOS reported `NOTARIZATION: EXTERNAL_BLOCKER`. The earlier failed update left the recorded version at 1.1.4, so a failed update did not replace the installed application.
 
 Public install gate https://github.com/bradjohnson79/adeptui/actions/runs/38872577737 at `d28c60cc` succeeded:
 
