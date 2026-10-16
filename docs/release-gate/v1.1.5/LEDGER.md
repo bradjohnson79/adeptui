@@ -117,3 +117,21 @@ macOS reported `INSTALLATION: PASS`, `SIGNATURE_STRUCTURE: PASS`, `SHUTDOWN: PAS
 The desktop update selector calls the existing Universal Launcher. It does not contain a second updater. The launcher checks the signed catalog, verifies the archive, and applies the update after Studio exits.
 
 Do not modify this architecture without explicit owner authorization.
+
+## Revision 4 — unified Setup Wizard (2026-10-16)
+
+Visible version remains 1.1.5. Internal revision is 4. The public catalog points at new archives and does not replace the revision 3 files above. The terminal installer commands are unchanged.
+
+Build commit `812b15ca`.
+
+| File | Bytes | SHA-256 |
+|---|---:|---|
+| Adept.UI-1.1.5-terminal-r7-win-x64.zip | 370936676 | 368892fa4bf396f8e1589b58e4183a7f039cd1dd5ca773d47ed6d8e9d6fa30a4 |
+| Adept.UI-1.1.5-terminal-r7-linux-x64.zip | 578097608 | 02a0e306d52ca06934c6791d5e7572615992cf4c9c7a37e6e36cd91167d18128 |
+| Adept.UI-1.1.5-terminal-r7-mac-arm64.zip | 430843015 | 01d021c8217d65955f9723b52637e31f3f9ca0618905067f637b16d6e0e8ce77 |
+
+Windows build https://github.com/bradjohnson79/adeptui/actions/runs/38967067975. Linux build https://github.com/bradjohnson79/adeptui/actions/runs/38967052588. macOS build https://github.com/bradjohnson79/adeptui/actions/runs/38967071578.
+
+Catalog SHA-256 `f5337ac2871e15486aaca2524c308b828b1b204471a5a180c4551f4b12ffa11c`. Signature SHA-256 `954df2866685ee7eaa4a025869d696d86d8f6a3cc52db282f6b2b9d0cd633059`.
+
+The packaged renderer contains Install ComfyUI, the `pip install comfy-cli` command, and Copy command. It does not contain Prepare My Studio, the capability-blocker text, or Official ComfyUI Download.
