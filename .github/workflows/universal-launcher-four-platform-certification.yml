@@ -1,0 +1,199 @@
+name: universal-launcher-four-platform-certification
+
+# Uses the published adeptui.org installers. A skipped required job fails the run.
+# Xvfb results are virtual-display evidence. Fedora in this workflow is a container
+# with a virtual display, not a physical desktop. macOS notarization is not claimed.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  catalog-signature:
+    name: Signed catalog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify the live catalog with the install.sh openssl procedure
+        run: python install/lifecycle/verify_published_catalog.py
+
+  website-integrity:
+    name: Release integrity page
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare the live catalog with the integrity record
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, urllib.request
+          def fetch(url):
+              request = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
+              return urllib.request.urlopen(request, timeout=60).read()
+          catalog = fetch("https://adeptui.org/releases/current.json")
+          signature = fetch("https://adeptui.org/releases/current.sig")
+          integrity = json.loads(fetch("https://adeptui.org/releases/integrity.json"))
+          catalog_hash = hashlib.sha256(catalog).hexdigest()
+          signature_hash = hashlib.sha256(signature).hexdigest()
+          body = json.loads(catalog)
+          if body.get("version") != "1.1.5":
+              raise SystemExit(f"catalog version {body.get('version')}")
+          if integrity.get("status") != "PASS" or integrity.get("version") != "1.1.5":
+              raise SystemExit(f"integrity {integrity.get('status')} {integrity.get('version')}")
+          if integrity.get("catalogSha256") != catalog_hash or integrity.get("signatureSha256") != signature_hash:
+              raise SystemExit("integrity hashes do not match the live catalog")
+          print("WEBSITE_INTEGRITY: PASS")
+          PY
+
+  windows-studio:
+    name: Windows installation and Studio window
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install from the public command and open the Studio window
+        shell: pwsh
+        run: ./install/lifecycle/cert/windows_public_studio.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-studio-evidence
+          path: ${{ runner.temp }}/adept-cert-windows
+          if-no-files-found: ignore
+
+  macos-studio:
+    name: macOS installation and Studio window
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install from the public command
+        run: bash install/lifecycle/cert/macos_public_studio.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-studio-evidence
+          path: ${{ runner.temp }}/adept-cert-macos
+          if-no-files-found: ignore
+
+  ubuntu-studio:
+    name: Ubuntu installation and Studio window
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the public DEB and open the Studio window on Xvfb
+        run: bash install/lifecycle/cert/linux_public_studio.sh
+        env:
+          ADEPT_EVIDENCE: ${{ runner.temp }}/adept-cert-ubuntu
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ubuntu-studio-evidence
+          path: ${{ runner.temp }}/adept-cert-ubuntu
+          if-no-files-found: ignore
+
+  fedora-studio:
+    name: Fedora virtual display installation and Studio window
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the public RPM inside Fedora and open the Studio window on Xvfb
+        run: |
+          mkdir -p "${{ runner.temp }}/adept-cert-fedora"
+          docker run --rm --security-opt seccomp=unconfined \
+            -v "$PWD/install/lifecycle/cert:/cert:ro" \
+            -v "${{ runner.temp }}/adept-cert-fedora:/evidence" \
+            -e ADEPT_EVIDENCE=/evidence \
+            -e GITHUB_SHA="${{ github.sha }}" \
+            fedora:41 bash /cert/linux_public_studio.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fedora-studio-evidence
+          path: ${{ runner.temp }}/adept-cert-fedora
+          if-no-files-found: ignore
+
+  windows-upgrade:
+    name: Windows legacy upgrade
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Attempt 1.1.3 and 1.1.4 automatic upgrades
+        shell: pwsh
+        run: ./install/lifecycle/cert/windows_legacy_upgrade.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-upgrade-evidence
+          path: ${{ runner.temp }}/adept-cert-upgrade
+          if-no-files-found: ignore
+
+  ubuntu-upgrade:
+    name: Ubuntu legacy upgrade
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Attempt 1.1.3 and 1.1.4 automatic upgrades
+        run: bash install/lifecycle/cert/linux_legacy_upgrade.sh
+        env:
+          ADEPT_EVIDENCE: ${{ runner.temp }}/adept-cert-upgrade
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ubuntu-upgrade-evidence
+          path: ${{ runner.temp }}/adept-cert-upgrade
+          if-no-files-found: ignore
+
+  fedora-upgrade:
+    name: Fedora legacy upgrade
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Attempt 1.1.3 and 1.1.4 automatic upgrades in Fedora
+        run: |
+          mkdir -p "${{ runner.temp }}/adept-cert-upgrade"
+          docker run --rm --security-opt seccomp=unconfined \
+            -v "$PWD:/work" -w /work \
+            -v "${{ runner.temp }}/adept-cert-upgrade:/evidence" \
+            -e ADEPT_EVIDENCE=/evidence \
+            fedora:41 bash install/lifecycle/cert/linux_legacy_upgrade.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fedora-upgrade-evidence
+          path: ${{ runner.temp }}/adept-cert-upgrade
+          if-no-files-found: ignore
+
+  macos-upgrade:
+    name: macOS legacy upgrade
+    runs-on: macos-14
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Attempt 1.1.3 and 1.1.4 automatic upgrades
+        run: bash install/lifecycle/cert/macos_legacy_upgrade.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-upgrade-evidence
+          path: ${{ runner.temp }}/adept-cert-upgrade
+          if-no-files-found: ignore
+
+  failure-recovery:
+    name: Failure recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Reject a changed catalog and run lifecycle recovery tests
+        run: |
+          python -m pip install pytest
+          bash install/lifecycle/cert/failure_recovery.sh

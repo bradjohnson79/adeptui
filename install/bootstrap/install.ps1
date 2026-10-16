@@ -93,7 +93,10 @@ if ($installed.ExitCode -ne 0) {
 }
 $shortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Adept UI.lnk"
 if (-not $createShortcut -and (Test-Path $shortcut)) { Remove-Item $shortcut -Force }
-$program = Join-Path $env:LOCALAPPDATA "Programs\Adept UI\Adept UI.exe"
+$installDir = Join-Path $env:LOCALAPPDATA "Programs\Adept UI"
+$launcher = Join-Path $installDir "Adept Launcher.exe"
+$electron = Join-Path $installDir "Adept UI.exe"
+$program = if (Test-Path $launcher) { $launcher } else { $electron }
 if ($launchAfter -and $env:ADEPT_NO_LAUNCH -ne "1" -and (Test-Path $program)) { Start-Process $program }
 Write-Host "Adept UI is installed."
 exit 0

@@ -8,3 +8,4 @@ install/bootstrap/install.ps1 text eol=lf
 install/bootstrap/install.sh text eol=lf
 install/lifecycle/wait_for_live_catalog.sh text eol=lf
 install/lifecycle/ci_linux_public_install.sh text eol=lf
+install/lifecycle/cert/*.sh text eol=lf
