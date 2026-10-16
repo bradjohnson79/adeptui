@@ -417,12 +417,12 @@ def test_pinned_catalog_signature_matches_the_published_release():
     version = body["version"]
     names = {item["fileName"] for item in body["artifacts"]}
     assert names == {
-        f"Adept.UI-{version}-terminal-r5-win-x64.zip",
-        f"Adept.UI-{version}-terminal-r5-linux-x64.zip",
-        f"Adept.UI-{version}-terminal-r5-mac-arm64.zip",
+        f"Adept.UI-{version}-terminal-r6-win-x64.zip",
+        f"Adept.UI-{version}-terminal-r6-linux-x64.zip",
+        f"Adept.UI-{version}-terminal-r6-mac-arm64.zip",
     }
-    assert body["revision"] == 2
-    assert all(item["revision"] == 2 for item in body["artifacts"])
+    assert body["revision"] == 3
+    assert all(item["revision"] == 3 for item in body["artifacts"])
     mac = next(item for item in body["artifacts"] if item["platform"] == "darwin")
     assert mac["arch"] == "arm64"
     assert mac["kind"] == "zip"
