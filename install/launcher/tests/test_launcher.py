@@ -317,33 +317,29 @@ def test_first_launch_records_packaged_version_before_catalog_check(monkeypatch,
     assert status["code"] == "NO_UPDATE"
 
 
-def test_newer_release_uses_the_platform_installer(monkeypatch, tmp_path, keys):
+def test_newer_release_applies_the_verified_archive(monkeypatch, tmp_path, keys):
     _, private = keys
-    install_app(tmp_path, "1.1.5")
+    install_app(tmp_path, "1.1.4")
     keep = tmp_path / "user-data" / "project.txt"
     keep.parent.mkdir(parents=True)
     keep.write_text("keep", encoding="utf-8")
-    payload = tmp_path / "incoming" / "Adept.UI-Setup.exe"
-    payload.parent.mkdir(parents=True)
-    payload.write_bytes(b"installer-bytes")
-    digest = hashlib.sha256(payload.read_bytes()).hexdigest()
-    kind = {"windows": "nsis", "darwin": "dmg"}.get(OS_NAME, "deb")
-    catalog = signed_catalog(private, "1.1.6", digest, file_name=payload.name, kind=kind)
-    calls: list[tuple[str, str]] = []
+    payload = tmp_path / "incoming" / "Adept.UI-1.1.5-terminal.zip"
+    digest = make_payload(payload)
+    catalog = signed_catalog(private, "1.1.5", digest, file_name=payload.name, kind="zip")
+    calls: list[tuple] = []
 
-    def fake_install(package: Path, package_kind: str, app_path: Path | None = None) -> None:
-        calls.append((package_kind, package.name))
-        assert package.read_bytes() == b"installer-bytes"
+    def fake_install(*args) -> None:
+        calls.append(args)
 
     monkeypatch.setattr("adept_lifecycle.manager.install_native_package", fake_install)
     rc, launched = run_launcher(monkeypatch, tmp_path, catalog, payload)
     assert rc == 0
-    assert calls == [(kind, payload.name)]
+    assert calls == []
+    assert (tmp_path / "app" / EXE_NAME).read_bytes() == b"adept"
     assert len(launched) == 1
-    assert read_json(tmp_path / "registry.json")["installedVersion"] == "1.1.6"
+    assert read_json(tmp_path / "registry.json")["installedVersion"] == "1.1.5"
     assert read_json(tmp_path / "startup-update.json")["code"] == "UPDATED"
     assert keep.read_text(encoding="utf-8") == "keep"
-    assert not (tmp_path / "app" / payload.name).exists()
 
 
 def test_launcher_downloads_only_published_releases(tmp_path, monkeypatch):
