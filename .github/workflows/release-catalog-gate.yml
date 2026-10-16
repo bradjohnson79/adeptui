@@ -195,6 +195,8 @@ jobs:
             i=$((i + 1))
           done
           kill "$update_pid" >/dev/null 2>&1 || true
+          echo "UPDATE_PROGRESS: $(cat "$HOME/.adept-ui/update-progress.json" 2>/dev/null || true)"
+          echo "LAUNCHER_LOG: $(tail -n 40 /tmp/adept-update.log 2>/dev/null || true)"
           if [ ! -f "$HOME/.adept-ui/startup-update.json" ]; then
             echo "UPDATE: EXTERNAL_BLOCKER"
             echo "The macOS launcher did not write an update result. Gatekeeper is not bypassed."
@@ -275,7 +277,11 @@ jobs:
             }
           }
           Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\.adept-ui\*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-          if (-not $updated) { throw "UPDATE: FAIL" }
+          if (-not $updated) {
+            $progress = Join-Path $root "update-progress.json"
+            if (Test-Path $progress) { Write-Host "UPDATE_PROGRESS: $(Get-Content $progress -Raw)" }
+            throw "UPDATE: FAIL"
+          }
           $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
           if ($registry.installedVersion -ne "1.1.5") { throw "UPDATE_VERSION: FAIL $($registry.installedVersion)" }
           if (-not (Test-Path (Join-Path $root "previous-app"))) { throw "PREVIOUS_VERSION: FAIL" }

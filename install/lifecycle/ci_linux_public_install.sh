@@ -60,6 +60,9 @@ while [ "$i" -lt 120 ]; do
   i=$((i + 1))
 done
 kill "$update_pid" >/dev/null 2>&1 || true
+echo "UPDATE_PROGRESS: $(cat "$HOME/.adept-ui/update-progress.json" 2>/dev/null || true)"
+echo "LAUNCHER_LOG: $(tail -n 40 /tmp/adept-update.log 2>/dev/null || true)"
+echo "LIFECYCLE_LOG: $(tail -n 40 "$HOME/.adept-ui/logs/lifecycle.log" 2>/dev/null || true)"
 python3 - <<'PY'
 import json
 from pathlib import Path
