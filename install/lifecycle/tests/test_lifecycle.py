@@ -312,14 +312,15 @@ def test_pinned_catalog_signature_matches_the_published_release():
     version = body["version"]
     names = {item["fileName"] for item in body["artifacts"]}
     assert names == {
-        f"Adept.UI-Setup-{version}-win-x64.exe",
-        f"Adept.UI-{version}-linux-x64.deb",
-        f"Adept.UI-{version}-linux-x64.rpm",
-        f"Adept.UI-{version}-mac-arm64.dmg",
+        f"Adept.UI-{version}-terminal-win-x64.zip",
+        f"Adept.UI-{version}-terminal-linux-x64.zip",
+        f"Adept.UI-{version}-terminal-mac-arm64.zip",
     }
     mac = next(item for item in body["artifacts"] if item["platform"] == "darwin")
     assert mac["arch"] == "arm64"
-    assert mac["kind"] == "dmg"
+    assert mac["kind"] == "zip"
+    linux = next(item for item in body["artifacts"] if item["platform"] == "linux")
+    assert "distributions" not in linux
     assert all(item["url"].startswith(f"https://github.com/bradjohnson79/adeptui/releases/download/v{version}/") for item in body["artifacts"])
     assert not any("appimage" in item["fileName"].lower() for item in body["artifacts"])
 

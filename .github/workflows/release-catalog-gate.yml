@@ -135,7 +135,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Wait until production serves this commit
         run: sh install/lifecycle/wait_for_live_catalog.sh
-      - name: Install, remove, and reinstall the published DEB
+      - name: Install, remove, and reinstall the published archive
         run: sh install/lifecycle/ci_linux_public_install.sh
 
   install-fedora-production:
@@ -148,7 +148,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Wait until production serves this commit
         run: sh install/lifecycle/wait_for_live_catalog.sh
-      - name: Install, remove, and reinstall the published RPM in Fedora
+      - name: Install, remove, and reinstall the published archive in Fedora
         run: docker run --rm -v "$GITHUB_WORKSPACE/install/lifecycle/ci_linux_public_install.sh:/ci_linux_public_install.sh:ro" fedora:41 bash /ci_linux_public_install.sh
 
   install-macos-production:
@@ -166,18 +166,17 @@ jobs:
       - name: Check installation, preserve a project file, reinstall
         run: |
           set -eu
-          app="$HOME/Applications/Adept UI.app"
+          app="$HOME/.adept-ui/app/Adept UI.app"
           test -d "$app"
           test -x "$app/Contents/MacOS/Adept UI"
           test -x "$app/Contents/MacOS/Adept UI.bin"
           lipo -info "$app/Contents/MacOS/Adept UI.bin" | grep arm64
-          "$HOME/.local/bin/adeptui" --version
           echo "INSTALLATION: PASS"
           echo "GRAPHICAL_STARTUP: NOT_VERIFIED"
-          echo "NOTARIZATION: NOT_VERIFIED"
+          echo "NOTARIZATION: EXTERNAL_BLOCKER"
           mkdir -p "$HOME/Library/Application Support/Adept UI/projects"
           echo keep > "$HOME/Library/Application Support/Adept UI/projects/keep.txt"
-          ADEPT_CONFIRM_UNINSTALL=1 "$HOME/.local/bin/adeptui" uninstall
+          curl -fsSL "https://adeptui.org/install.sh" | ADEPT_UNINSTALL=1 bash
           test ! -d "$app"
           test "$(cat "$HOME/Library/Application Support/Adept UI/projects/keep.txt")" = "keep"
           curl -fsSL "https://adeptui.org/install.sh" | ADEPT_ASSUME_YES=1 ADEPT_NO_LAUNCH=1 bash
@@ -205,47 +204,42 @@ jobs:
           $ErrorActionPreference = "Stop"
           & powershell -NoProfile -Command "irm https://adeptui.org/install.ps1 | iex"
           if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
-          $program = Join-Path $env:LOCALAPPDATA "Programs\Adept UI"
-          $electron = Join-Path $program "Adept UI.exe"
+          $root = Join-Path $env:USERPROFILE ".adept-ui"
+          $electron = Join-Path $root "app\Adept UI.exe"
+          $launcher = Join-Path $root "bin\Adept Launcher.exe"
           if (-not (Test-Path $electron)) { throw "Electron was not installed at $electron" }
+          if (-not (Test-Path $launcher)) { throw "Universal launcher was not installed at $launcher" }
           Write-Host "INSTALLATION: PASS"
-          Write-Host "GRAPHICAL_STARTUP: NOT_VERIFIED"
-          Get-ChildItem $program -Recurse -Filter *.exe | ForEach-Object { Write-Host "INSTALLED_EXE: $($_.FullName)" }
+          Write-Host "LAUNCHER: $launcher"
           $keepDir = Join-Path $env:APPDATA "Adept UI"
           New-Item -ItemType Directory -Force -Path $keepDir | Out-Null
           Set-Content -Path (Join-Path $keepDir "keep.txt") -Value "keep" -NoNewline
-          $uninstaller = Join-Path $program "Uninstall Adept UI.exe"
-          if (-not (Test-Path $uninstaller)) { throw "Uninstaller missing at $uninstaller" }
-          $removed = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
-          if ($removed.ExitCode -ne 0) { throw "Uninstall exited $($removed.ExitCode)" }
+          $env:ADEPT_UNINSTALL = "1"
+          & powershell -NoProfile -Command "irm https://adeptui.org/install.ps1 | iex"
+          if ($LASTEXITCODE -ne 0) { throw "uninstall exited $LASTEXITCODE" }
           if (Test-Path $electron) { throw "Electron remained after uninstall" }
           if ((Get-Content (Join-Path $keepDir "keep.txt") -Raw) -ne "keep") { throw "User data was removed" }
+          Remove-Item Env:ADEPT_UNINSTALL
           & powershell -NoProfile -Command "irm https://adeptui.org/install.ps1 | iex"
           if ($LASTEXITCODE -ne 0) { throw "reinstall exited $LASTEXITCODE" }
           if (-not (Test-Path $electron)) { throw "Electron missing after reinstall" }
           if ((Get-Content (Join-Path $keepDir "keep.txt") -Raw) -ne "keep") { throw "User data missing after reinstall" }
           Write-Host "REINSTALL_AND_USER_DATA: PASS"
-          $launcher = Get-ChildItem $program -Recurse -Filter "Adept Launcher.exe" | Select-Object -First 1
-          if (-not $launcher) { throw "Universal launcher was not installed" }
-          if ($launcher.DirectoryName -ne $program) {
-            throw "LAUNCHER_SIBLING: FAIL. Installed at $($launcher.FullName). The published installer does not place the launcher beside Adept UI.exe."
-          }
-          Write-Host "LAUNCHER_SIBLING: PASS"
           $shortcut = Join-Path $env:USERPROFILE "Desktop\Adept UI.lnk"
           $shortcutTarget = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
-          if ($shortcutTarget -notlike "*\Adept Launcher.exe") { throw "SHORTCUT: FAIL $shortcutTarget" }
+          if ($shortcutTarget -ne $launcher) { throw "SHORTCUT: FAIL $shortcutTarget" }
           Write-Host "SHORTCUT: PASS $shortcutTarget"
           $windowRoot = Join-Path $env:TEMP "adept-public-launcher-root"
           $windowData = Join-Path $env:TEMP "adept-public-window"
           New-Item -ItemType Directory -Force -Path $windowRoot, $windowData | Out-Null
           $env:ADEPT_ELECTRON_ARGS = "--user-data-dir=$windowData"
-          Start-Process -FilePath $launcher.FullName -ArgumentList @("--root", $windowRoot) -WindowStyle Normal | Out-Null
+          Start-Process -FilePath $launcher -ArgumentList @("--root", $windowRoot) -WindowStyle Normal | Out-Null
           $title = ""
           foreach ($i in 1..45) {
             Start-Sleep -Seconds 2
             $title = @(Get-Process | Where-Object { $_.MainWindowTitle -match "Adept UI" } | Select-Object -ExpandProperty MainWindowTitle -First 1)
             if ($title) { break }
           }
-          Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\Programs\Adept UI\*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\.adept-ui\*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           if (-not $title) { throw "STUDIO_WINDOW: FAIL" }
           Write-Host "STUDIO_WINDOW: PASS $title"

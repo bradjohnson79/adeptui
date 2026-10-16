@@ -1,7 +1,7 @@
 /**
  * Public download configuration.
  * Every download control reads this record. Addresses are the published
- * GitHub release assets for Adept UI 1.1.6 Beta.
+ * GitHub release assets for Adept UI 1.1.5.
  * The page never reads a download address from the query string.
  */
 
@@ -40,16 +40,15 @@ export type PlatformRelease = {
 
 export const desktopPlatforms: DesktopOs[] = ["windows", "macos", "linux"];
 
-const releaseBase = "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.6";
+const releaseBase = "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.5";
 
 function releaseUrl(fileName: string): string {
   return `${releaseBase}/${encodeURIComponent(fileName)}`;
 }
 
-const windowsInstaller = releaseUrl("Adept.UI-Setup-1.1.6-win-x64.exe");
-const macInstaller = releaseUrl("Adept.UI-1.1.6-mac-arm64.dmg");
-const linuxDeb = releaseUrl("Adept.UI-1.1.6-linux-x64.deb");
-const linuxRpm = releaseUrl("Adept.UI-1.1.6-linux-x64.rpm");
+const windowsInstaller = releaseUrl("Adept.UI-1.1.5-terminal-win-x64.zip");
+const macInstaller = releaseUrl("Adept.UI-1.1.5-terminal-mac-arm64.zip");
+const linuxArchive = releaseUrl("Adept.UI-1.1.5-terminal-linux-x64.zip");
 
 /** Public install commands. The macOS build is a direct download and is not notarized. */
 export const installCommands: Partial<Record<DesktopOs, string>> = {
@@ -65,7 +64,7 @@ export const downloads: Record<DesktopOs, PlatformRelease> = {
   windows: {
     id: "windows",
     label: "Windows",
-    version: "1.1.6",
+    version: "1.1.5",
     url: windowsInstaller,
     available: true,
     builds: [],
@@ -73,7 +72,7 @@ export const downloads: Record<DesktopOs, PlatformRelease> = {
   macos: {
     id: "macos",
     label: "macOS",
-    version: "1.1.6",
+    version: "1.1.5",
     url: macInstaller,
     available: true,
     builds: [],
@@ -81,27 +80,18 @@ export const downloads: Record<DesktopOs, PlatformRelease> = {
   linux: {
     id: "linux",
     label: "Linux",
-    version: "1.1.6",
+    version: "1.1.5",
     url: "",
     available: true,
     builds: [
       {
         architecture: "x64",
-        label: "Inspect .deb",
-        audience: "Ubuntu / Debian",
-        detail: "Recommended for Ubuntu, Debian, Linux Mint, and Pop!_OS",
-        url: linuxDeb,
+        label: "Application archive",
+        audience: "Ubuntu and Fedora",
+        detail: "One archive for Ubuntu, Debian, and Fedora",
+        url: linuxArchive,
         available: true,
-        installerType: "deb",
-      },
-      {
-        architecture: "x64",
-        label: "Inspect .rpm",
-        audience: "Fedora / RHEL",
-        detail: "Recommended for Fedora and compatible RPM-based distributions",
-        url: linuxRpm,
-        available: true,
-        installerType: "rpm",
+        installerType: "zip",
       },
     ],
   },

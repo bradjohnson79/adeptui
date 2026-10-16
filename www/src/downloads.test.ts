@@ -93,18 +93,18 @@ describe("download configuration", () => {
     expect(platformDownloadHref("windows")).toBe("#download");
     expect(platformDownloadHref("linux")).toBe("#download");
     expect(platformDownloadHref("macos")).toBe("#download");
-    expect(configuredDownloadUrl("macos")).toMatch(/Adept\.UI-1\.1\.6-mac-arm64\.dmg$/);
-    expect(configuredDownloadUrl("windows")).toMatch(/Adept\.UI-Setup-1\.1\.6-win-x64\.exe$/);
-    expect(readyBuilds("linux").map((build) => build.installerType)).toEqual(["deb", "rpm"]);
+    expect(configuredDownloadUrl("macos")).toMatch(/Adept\.UI-1\.1\.5-terminal-mac-arm64\.zip$/);
+    expect(configuredDownloadUrl("windows")).toMatch(/Adept\.UI-1\.1\.5-terminal-win-x64\.zip$/);
+    expect(readyBuilds("linux").map((build) => build.installerType)).toEqual(["zip"]);
     expect(downloadState("windows")).toBe("available");
     expect(downloadState("linux")).toBe("available");
     expect(downloadState("macos")).toBe("available");
     expect(releaseActionLabel("windows")).toBe("Install Adept UI");
     expect(releaseActionLabel("linux")).toBe("Install Adept UI");
     expect(releaseActionLabel("macos")).toBe("Install Adept UI");
-    expect(downloads.windows.version).toBe("1.1.6");
-    expect(downloads.linux.version).toBe("1.1.6");
-    expect(downloads.macos.version).toBe("1.1.6");
+    expect(downloads.windows.version).toBe("1.1.5");
+    expect(downloads.linux.version).toBe("1.1.5");
+    expect(downloads.macos.version).toBe("1.1.5");
   });
 
   it("rejects a URL that is not a configured https release", () => {
