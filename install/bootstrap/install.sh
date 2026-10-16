@@ -5,6 +5,15 @@
 # The macOS build is not notarized. This script does not change Gatekeeper.
 set -eu
 
+if [ "${ADEPT_UNINSTALL:-}" = "1" ] || [ "${1:-}" = "uninstall" ]; then
+  rm -rf "$HOME/.adept-ui"
+  rm -f "$HOME/.local/share/applications/adept-ui.desktop"
+  rm -f "$HOME/Desktop/Adept UI.desktop"
+  rm -f "$HOME/Desktop/Adept UI"
+  echo "Adept UI was removed. Personal projects were kept."
+  exit 0
+fi
+
 os_name="$(uname -s)"
 machine="$(uname -m)"
 platform=""

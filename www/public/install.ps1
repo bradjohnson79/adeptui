@@ -4,6 +4,15 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+if ($env:ADEPT_UNINSTALL -eq "1") {
+  $root = Join-Path $env:USERPROFILE ".adept-ui"
+  if (Test-Path $root) { Remove-Item $root -Recurse -Force }
+  $shortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Adept UI.lnk"
+  if (Test-Path $shortcut) { Remove-Item $shortcut -Force }
+  Write-Host "Adept UI was removed. Personal projects were kept."
+  exit 0
+}
+
 if (-not [Environment]::Is64BitOperatingSystem) {
   Write-Host "Adept UI does not have a certified build for this Windows architecture."
   exit 3
