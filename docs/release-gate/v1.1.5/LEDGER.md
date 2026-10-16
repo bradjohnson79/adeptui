@@ -104,7 +104,7 @@ Visible version remains 1.1.5. Internal revision is 3. The public catalog points
 | Adept.UI-1.1.5-terminal-r6-linux-x64.zip | 578096251 | e6fe2d1997028511478802e8f33bc30d2f531b09ee752074299eab335003744b |
 | Adept.UI-1.1.5-terminal-r6-mac-arm64.zip | 430838384 | 6af1c85f9f5efce69e365ecc8feb50d934e7d42596136573a9f5cfa9cd1a0bc2 |
 
-Catalog SHA-256 `d742bf531b88b6c7cead962b4f1aa05e33790d5557efa74fc92f9522c8c01fe2`. Signature SHA-256 `063fe09301553d2384b1c09ead7aa0f182c0dec4ab3bbba3a5e2714c7078b8b8`. Live deployment `dpl_DRvfMsySJNzxf6pZrMk2mxWSzpB1`.
+Catalog SHA-256 `d742bf531b88b6c7cead962b4f1aa05e33790d5557efa74fc92f9522c8c01fe2`. Signature SHA-256 `063fe09301553d2384b1c09ead7aa0f182c0dec4ab3bbba3a5e2714c7078b8b8`. Catalog deployment `dpl_DRvfMsySJNzxf6pZrMk2mxWSzpB1`. Current production deployment `dpl_J69LQqt6BLvp8c4ZWYoJhv8AQYvy`.
 
 Linux Studio was failing because the packaged Python runtime was extracted without its executable bit. The main process then showed “A JavaScript error occurred in the main process” (`spawn .../python EACCES`). Startup now marks that runtime executable. The terminal installer was not changed.
 
