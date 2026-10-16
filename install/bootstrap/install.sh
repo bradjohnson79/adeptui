@@ -247,14 +247,14 @@ case "\${1:-}" in
     fi
     ;;
   update|repair)
-    if pgrep -f "Adept UI.app/Contents/MacOS" >/dev/null 2>&1; then
+    if pgrep -f "Adept UI.app/Contents/MacOS/Adept UI" >/dev/null 2>&1; then
       echo "Close Adept UI before updating it."
       exit 6
     fi
     curl -fsSL "https://adeptui.org/install.sh" | ADEPT_ASSUME_YES=1 ADEPT_NO_LAUNCH=1 bash
     ;;
   uninstall)
-    if pgrep -f "Adept UI.app/Contents/MacOS" >/dev/null 2>&1; then
+    if pgrep -f "Adept UI.app/Contents/MacOS/Adept UI" >/dev/null 2>&1; then
       echo "Close Adept UI before uninstalling it."
       exit 6
     fi

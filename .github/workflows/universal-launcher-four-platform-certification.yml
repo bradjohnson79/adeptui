@@ -6,6 +6,12 @@ name: universal-launcher-four-platform-certification
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/character-creator-final-closure
+    paths:
+      - .github/workflows/universal-launcher-four-platform-certification.yml
+      - install/lifecycle/cert/**
 
 jobs:
   catalog-signature:

@@ -81,11 +81,9 @@ def test_invalid_corrupt_missing_and_wrong_key_fail_closed():
 
 
 def test_previous_release_signature_does_not_verify_this_catalog():
-    previous = subprocess.check_output(
-        ["git", "show", "78a32164:install/catalog/current.sig"],
-        cwd=ROOT,
-        text=True,
-    ).strip()
+    # The bytes are the public signature from 78a32164. A shallow checkout
+    # cannot run git show for that commit, so the fixture is stored beside the test.
+    previous = (Path(__file__).resolve().parent / "fixtures" / "78a32164-current.sig").read_text(encoding="utf-8").strip()
     key = pinned_public_key()
     assert key is not None
     assert previous != _sig()
