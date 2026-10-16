@@ -73,3 +73,23 @@ Build commit for the archives: `0f53d5fc`. Runs:
 - Linux: https://github.com/bradjohnson79/adeptui/actions/runs/38867950022
 - Windows: https://github.com/bradjohnson79/adeptui/actions/runs/38867952750
 - macOS: https://github.com/bradjohnson79/adeptui/actions/runs/38867955516
+
+## Terminal-only installation (2026-10-16, current)
+
+Package installers are no longer the installation path. The public command installs one signed zip. Visible version remains 1.1.5. Internal revision is 1. The architecture is not locked.
+
+Current archives:
+
+| File | Bytes | SHA-256 |
+|---|---:|---|
+| Adept.UI-1.1.5-terminal-r3-win-x64.zip | 370844291 | 977e6de6ec6c4b0a86a09ac5aa29a0910afa460f9f20af7d56db668ea50b9def |
+| Adept.UI-1.1.5-terminal-r3-linux-x64.zip | 577927019 | 9261c7d7cb7bf40be7fdaa3b56f081faa34388d9af92446a79f4cde6659d871d |
+| Adept.UI-1.1.5-terminal-r4-mac-arm64.zip | 430838506 | ec6758a3c26e02509c504fe1ec049778ae73c5b922d2c5921dc96ef2268a2ea8 |
+
+Catalog SHA-256 `ba2c59b6bc1cd70547f47f09d707daa4ebd97d6bfda66dec2c57e48f254599ca`. Signature SHA-256 `ab35e844ec7f7fb7669ed26b49c57e859f524433b82515223d477b9d22cbf419`.
+
+Public gate https://github.com/bradjohnson79/adeptui/actions/runs/38938192171 at `886e3de3` succeeded. Windows reported `STUDIO_WINDOW: PASS Adept UI Studio`, `UPDATE: PASS`, `PREVIOUS_VERSION_PRESERVED: PASS`, and `SAME_VERSION_REVISION: PASS 1`. Ubuntu, Fedora, and macOS reported installation, reinstall with the project file kept, and update. Fedora ran in a container.
+
+macOS bundle check `SIGNATURE_STRUCTURE: PASS`. `spctl` remains `NOT_ACCEPTED`. A screenshot from https://github.com/bradjohnson79/adeptui/actions/runs/38938192203 shows the window titled Adept UI Studio and the setup choices. The System Events title probe did not read that title. Notarization remains an external blocker.
+
+Ubuntu and Fedora virtual displays started the application and showed an Error window, not Adept UI Studio. That is not a physical-desktop pass.
