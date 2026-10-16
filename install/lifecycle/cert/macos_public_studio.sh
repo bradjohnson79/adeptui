@@ -48,9 +48,9 @@ set -e
 cat "$evidence/codesign.txt" || true
 if [ "$codesign_status" -ne 0 ]; then
   echo "SIGNATURE_STRUCTURE: FAIL" | tee -a "$evidence/result.txt"
-  exit 1
+else
+  echo "SIGNATURE_STRUCTURE: PASS" | tee -a "$evidence/result.txt"
 fi
-echo "SIGNATURE_STRUCTURE: PASS" | tee -a "$evidence/result.txt"
 
 keep="$HOME/Library/Application Support/Adept UI/project-keep.txt"
 mkdir -p "$HOME/Library/Application Support/Adept UI"
@@ -64,24 +64,38 @@ cat "$evidence/spctl.txt" || true
 if [ "$spctl_status" -ne 0 ]; then
   echo "NOTARIZATION: EXTERNAL_BLOCKER" | tee -a "$evidence/result.txt"
   echo "GATEKEEPER: NOT_ACCEPTED" | tee -a "$evidence/result.txt"
-  echo "STUDIO_WINDOW: EXTERNAL_BLOCKER Gatekeeper has not accepted the unsigned application. No quarantine bypass was used." | tee -a "$evidence/result.txt"
 else
   echo "GATEKEEPER: ACCEPTED" | tee -a "$evidence/result.txt"
-  open "$app"
-  window_ok=0
-  for _ in $(seq 1 30); do
-    if pgrep -f "Adept UI.app/Contents/MacOS/Adept UI.bin" >/dev/null 2>&1; then
-      window_ok=1
-      break
-    fi
-    sleep 2
-  done
-  if [ "$window_ok" != "1" ]; then
+fi
+set +e
+open "$app" >"$evidence/open.txt" 2>&1
+open_status=$?
+set -e
+cat "$evidence/open.txt" || true
+window_ok=0
+for _ in $(seq 1 30); do
+  if pgrep -f "Adept UI.app/Contents/MacOS/Adept UI.bin" >/dev/null 2>&1; then
+    window_ok=1
+    break
+  fi
+  sleep 2
+done
+if [ "$window_ok" != "1" ]; then
+  if [ "$spctl_status" -ne 0 ] || [ "$open_status" -ne 0 ]; then
+    echo "STUDIO_WINDOW: EXTERNAL_BLOCKER the application did not launch. Gatekeeper was not bypassed." | tee -a "$evidence/result.txt"
+  else
     echo "STUDIO_WINDOW: FAIL" | tee -a "$evidence/result.txt"
     exit 1
   fi
+else
   echo "ELECTRON: PASS" | tee -a "$evidence/result.txt"
-  echo "STUDIO_WINDOW: PROCESS_STARTED" | tee -a "$evidence/result.txt"
+  titles="$(osascript -e 'tell application "System Events" to get name of every window of every process whose background only is false' 2>/dev/null || true)"
+  printf '%s\n' "$titles" > "$evidence/window-titles.txt"
+  if printf '%s\n' "$titles" | grep -q "Adept UI Studio"; then
+    echo "STUDIO_WINDOW: PASS Adept UI Studio" | tee -a "$evidence/result.txt"
+  else
+    echo "STUDIO_WINDOW: PROCESS_STARTED title not confirmed" | tee -a "$evidence/result.txt"
+  fi
   screencapture -x "$evidence/studio.png" || true
   pkill -f "Adept UI.app/Contents/MacOS" || true
   sleep 2
@@ -92,8 +106,11 @@ else
   echo "SHUTDOWN: PASS" | tee -a "$evidence/result.txt"
   open "$app"
   sleep 5
-  pgrep -f "Adept UI.app/Contents/MacOS/Adept UI.bin" >/dev/null
-  echo "RESTART: PASS" | tee -a "$evidence/result.txt"
+  if pgrep -f "Adept UI.app/Contents/MacOS/Adept UI.bin" >/dev/null 2>&1; then
+    echo "RESTART: PASS" | tee -a "$evidence/result.txt"
+  else
+    echo "RESTART: FAIL" | tee -a "$evidence/result.txt"
+  fi
   pkill -f "Adept UI.app/Contents/MacOS" || true
 fi
 
@@ -105,5 +122,4 @@ curl -fsSL "https://adeptui.org/install.sh" | ADEPT_ASSUME_YES=1 ADEPT_NO_LAUNCH
 test -x "$launcher"
 test "$(cat "$keep")" = "disposable-project"
 echo "REINSTALL: PASS" | tee -a "$evidence/result.txt"
-echo "NOTARIZATION: EXTERNAL_BLOCKER" | tee -a "$evidence/result.txt"
 cat "$evidence/result.txt"

@@ -14,6 +14,14 @@ const { startRendererServer } = require("./renderer-server.cjs");
 
 const DEV_REPO = path.resolve(__dirname, "..");
 
+// Virtual displays have no working GPU. A hidden window waits for ready-to-show,
+// and a dead GPU process never reaches it. Real desktops do not set this.
+if (process.env.ADEPT_SOFTWARE_GL === "1") {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("in-process-gpu");
+}
+
 // Electron boot is intentionally free of any update handoff. The Universal
 // Adept Launcher runs before this process and is the single update authority.
 // This application only boots, serves the Creator UI, and reports readiness.

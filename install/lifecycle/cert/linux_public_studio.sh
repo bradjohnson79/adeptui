@@ -94,6 +94,9 @@ echo "disposable-project" > "$keep"
 export DISPLAY="${DISPLAY:-:99}"
 export ELECTRON_DISABLE_SANDBOX=1
 export LIBGL_ALWAYS_SOFTWARE=1
+export ADEPT_SOFTWARE_GL=1
+export ELECTRON_OZONE_PLATFORM_HINT=x11
+export GDK_BACKEND=x11
 # The launcher appends this value as one Electron argument.
 export ADEPT_ELECTRON_ARGS="${ADEPT_ELECTRON_ARGS:---no-sandbox}"
 echo "CI_ELECTRON_ARGS: ${ADEPT_ELECTRON_ARGS} (one argument; sandbox disabled for the CI session)" | tee -a "$evidence/result.txt"
@@ -158,6 +161,8 @@ launch_and_prove() {
   done
   if [ "$window_ok" != "1" ]; then
     echo "STUDIO_WINDOW_$label: FAIL" | tee -a "$evidence/result.txt"
+    xwininfo -root -tree >"$evidence/xwin-$label-final.txt" 2>&1 || true
+    tail -n 40 "$evidence/xwin-$label-final.txt" || true
     tail -n 80 "$evidence/launcher-$label.log" || true
     exit 1
   fi
