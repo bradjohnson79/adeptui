@@ -183,18 +183,7 @@ jobs:
           test -x "$app/Contents/MacOS/Adept UI"
           test "$(cat "$HOME/Library/Application Support/Adept UI/projects/keep.txt")" = "keep"
           echo "REINSTALL_AND_USER_DATA: PASS"
-          python3 - <<'PY'
-import json
-from pathlib import Path
-root = Path.home() / ".adept-ui"
-(root / "registry.json").write_text(
-    json.dumps({"installedVersion": "1.1.4", "channel": "beta", "health": "ok", "updateFailures": {}}),
-    encoding="utf-8",
-)
-status = root / "startup-update.json"
-if status.exists():
-    status.unlink()
-PY
+          python3 install/lifecycle/ci_prepare_update.py
           "$app/Contents/MacOS/Adept UI" >/tmp/adept-update.log 2>&1 &
           update_pid="$!"
           i=0
@@ -211,21 +200,7 @@ PY
             echo "The macOS launcher did not write an update result. Gatekeeper is not bypassed."
             exit 0
           fi
-          python3 - <<'PY'
-import json
-from pathlib import Path
-root = Path.home() / ".adept-ui"
-status = json.loads((root / "startup-update.json").read_text(encoding="utf-8"))
-registry = json.loads((root / "registry.json").read_text(encoding="utf-8"))
-if status.get("code") != "UPDATED":
-    raise SystemExit(f"UPDATE: FAIL {status}")
-if registry.get("installedVersion") != "1.1.5":
-    raise SystemExit(f"UPDATE_VERSION: FAIL {registry.get('installedVersion')}")
-if not (root / "previous-app").exists():
-    raise SystemExit("PREVIOUS_VERSION: FAIL")
-print("UPDATE: PASS")
-print("PREVIOUS_VERSION_PRESERVED: PASS")
-PY
+          python3 install/lifecycle/ci_expect_update.py
 
   install-windows-production:
     name: Public Windows install

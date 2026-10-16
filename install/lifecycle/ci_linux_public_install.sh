@@ -40,6 +40,7 @@ python3 - <<'PY'
 import json
 from pathlib import Path
 root = Path.home() / ".adept-ui"
+root.mkdir(parents=True, exist_ok=True)
 (root / "registry.json").write_text(
     json.dumps({"installedVersion": "1.1.4", "channel": "beta", "health": "ok", "updateFailures": {}}),
     encoding="utf-8",
