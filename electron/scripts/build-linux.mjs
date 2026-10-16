@@ -61,3 +61,9 @@ console.log("RPM BUILD = PASS");
 console.log(appImage);
 console.log(deb);
 console.log(rpm);
+const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-linux-x64.zip`);
+run("python3", [
+  "electron/scripts/pack-terminal-archive.py",
+  path.join(root, "electron", "dist", "linux-unpacked"),
+  terminalZip,
+]);

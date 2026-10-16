@@ -42,3 +42,8 @@ if (!fs.existsSync(launcher)) {
 }
 console.log(`unpacked ${unpacked}`);
 console.log(fs.existsSync(setup) ? `installer ${setup}` : "installer missing");
+const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-win-x64.zip`);
+const pythonExe = fs.existsSync(path.join(root, "studio-api", ".venv", "Scripts", "python.exe"))
+  ? path.join(root, "studio-api", ".venv", "Scripts", "python.exe")
+  : "python";
+run(pythonExe, ["electron/scripts/pack-terminal-archive.py", unpackedDir, terminalZip]);

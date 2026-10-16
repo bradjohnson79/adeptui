@@ -64,6 +64,7 @@ jobs:
           name: adept-ui-desktop-win-x64
           path: |
             electron/dist/*.exe
+            electron/dist/*terminal*.zip
             electron/dist/win-unpacked/**
           if-no-files-found: error
 
@@ -106,6 +107,7 @@ jobs:
           name: adept-ui-desktop-mac-arm64
           path: |
             electron/dist/*.dmg
+            electron/dist/*terminal*.zip
             electron/build/macos-smoke-result.json
             electron/build/macos-evidence/**
           if-no-files-found: error
@@ -202,6 +204,7 @@ jobs:
             electron/dist/*.AppImage
             electron/dist/*.deb
             electron/dist/*.rpm
+            electron/dist/*terminal*.zip
             electron/build/linux-smoke-result.json
             electron/build/linux-evidence/**
             electron/build/linux-python-ldd.txt

@@ -110,11 +110,20 @@ openssl dgst -sha256 -verify "$workdir/release.pub.pem" -signature "$workdir/cur
 python3 - "$workdir/current.json" "$platform" "$arch" "$kind" <<'PY'
 import hashlib, json, pathlib, sys, urllib.request
 catalog = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-platform, arch, kind = sys.argv[2], sys.argv[3], sys.argv[4]
+platform, arch, package_kind = sys.argv[2], sys.argv[3], sys.argv[4]
 chosen = None
-for artifact in catalog.get("artifacts") or []:
-    if artifact.get("platform") == platform and artifact.get("arch") == arch and artifact.get("kind") == kind:
+for want in ("zip", package_kind):
+    for artifact in catalog.get("artifacts") or []:
+        if artifact.get("platform") != platform or artifact.get("arch") != arch or artifact.get("kind") != want:
+            continue
+        families = artifact.get("distributions")
+        if platform == "linux" and families:
+            expected = "debian" if package_kind == "deb" else "fedora"
+            if expected not in families:
+                continue
         chosen = artifact
+        break
+    if chosen:
         break
 if not chosen:
     raise SystemExit("No approved build for this system is in the Adept UI release catalog.")
@@ -139,10 +148,87 @@ if digest.lower() != str(chosen["sha256"]).lower():
     raise SystemExit("The downloaded installer did not match the approved checksum.")
 pathlib.Path(sys.argv[1]).with_name("payload-path.txt").write_text(str(destination), encoding="utf-8")
 pathlib.Path(sys.argv[1]).with_name("payload-version.txt").write_text(str(chosen.get("version") or ""), encoding="utf-8")
+pathlib.Path(sys.argv[1]).with_name("payload-kind.txt").write_text(str(chosen.get("kind") or ""), encoding="utf-8")
 PY
 
 payload="$(cat "$workdir/payload-path.txt")"
 version="$(cat "$workdir/payload-version.txt")"
+payload_kind="$(cat "$workdir/payload-kind.txt")"
+
+if [ "$payload_kind" = "zip" ]; then
+  root="$HOME/.adept-ui"
+  app="$root/app"
+  bin="$root/bin"
+  previous="$root/previous-app"
+  rm -rf "$previous"
+  if [ -d "$app" ]; then
+    mv "$app" "$previous"
+  fi
+  mkdir -p "$app" "$bin"
+  if ! python3 - "$payload" "$app" <<'PY'
+import sys, zipfile
+from pathlib import Path
+payload, app = Path(sys.argv[1]), Path(sys.argv[2])
+with zipfile.ZipFile(payload) as archive:
+    for info in archive.infolist():
+        name = info.filename
+        if not name or name.endswith("/"):
+            continue
+        destination = (app / name).resolve()
+        if app.resolve() not in destination.parents and destination != app.resolve():
+            raise SystemExit("The archive tried to write outside the installation folder.")
+    archive.extractall(app)
+PY
+  then
+    rm -rf "$app"
+    if [ -d "$previous" ]; then
+      mv "$previous" "$app"
+    fi
+    echo "Installation did not finish."
+    exit 5
+  fi
+  rm -rf "$previous"
+  if [ "$platform" = "darwin" ]; then
+    dest="$app/Adept UI.app"
+    launcher="$dest/Contents/MacOS/Adept UI"
+    chmod 755 "$launcher" "$dest/Contents/MacOS/Adept UI.bin" 2>/dev/null || true
+    test -e "$launcher"
+    if prompt_yes "Create a desktop shortcut? [Y/n] "; then
+      if [ -d "$HOME/Desktop" ]; then
+        osascript >/dev/null 2>&1 <<APPLESCRIPT || echo "macOS could not create a desktop alias. Adept UI is in $dest"
+tell application "Finder"
+  make alias file to POSIX file "$dest" at POSIX file "$HOME/Desktop"
+end tell
+APPLESCRIPT
+      fi
+    fi
+    echo "Adept UI is installed in $dest"
+    echo "This macOS build is not notarized."
+    echo "If macOS asks before the first launch, Control-click Adept UI and choose Open."
+    if [ "${ADEPT_NO_LAUNCH:-}" != "1" ] && prompt_yes "Launch Adept UI after installation? [Y/n] "; then
+      open "$dest" || echo "macOS did not open Adept UI. The application is installed in $dest"
+    fi
+    exit 0
+  fi
+  cp "$app/Adept UI" "$bin/Adept UI"
+  chmod 755 "$bin/Adept UI" "$app/Adept UI.bin"
+  launcher="$bin/Adept UI"
+  mkdir -p "$HOME/.local/share/applications"
+  entry="$HOME/.local/share/applications/adept-ui.desktop"
+  printf '%s\n' "[Desktop Entry]" "Name=Adept UI" "Comment=Adept UI" "Exec=\"$launcher\"" "Terminal=false" "Type=Application" "Categories=AudioVideo;" > "$entry"
+  chmod 755 "$entry"
+  if prompt_yes "Create a desktop shortcut? [Y/n] "; then
+    if [ -d "$HOME/Desktop" ]; then
+      cp "$entry" "$HOME/Desktop/Adept UI.desktop"
+      chmod 755 "$HOME/Desktop/Adept UI.desktop" || true
+    fi
+  fi
+  echo "Adept UI is installed."
+  if [ "${ADEPT_NO_LAUNCH:-}" != "1" ] && prompt_yes "Launch Adept UI after installation? [Y/n] "; then
+    "$launcher" >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
 
 if [ "$platform" = "linux" ]; then
   if prompt_yes "Create a desktop shortcut? [Y/n] "; then

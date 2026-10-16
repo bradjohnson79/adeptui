@@ -43,7 +43,10 @@ if (-not $verified) {
 }
 
 $catalog = $catalogBytes | ConvertFrom-Json
-$artifact = @($catalog.artifacts) | Where-Object { $_.platform -eq "windows" -and $_.arch -eq "x64" } | Select-Object -First 1
+$artifact = @($catalog.artifacts) | Where-Object { $_.platform -eq "windows" -and $_.arch -eq "x64" -and $_.kind -eq "zip" } | Select-Object -First 1
+if (-not $artifact) {
+  $artifact = @($catalog.artifacts) | Where-Object { $_.platform -eq "windows" -and $_.arch -eq "x64" -and $_.kind -eq "nsis" } | Select-Object -First 1
+}
 if (-not $artifact) {
   Write-Host "No approved Windows build is in the Adept UI release catalog."
   exit 3
@@ -86,17 +89,57 @@ function Read-Yes([string]$prompt) {
 
 $createShortcut = Read-Yes "Create a desktop shortcut? [Y/n]"
 $launchAfter = Read-Yes "Launch Adept UI after installation? [Y/n]"
-$installed = Start-Process -FilePath $destination -ArgumentList "/S" -Wait -PassThru
-if ($installed.ExitCode -ne 0) {
-  Write-Host "Installation did not finish."
-  exit $installed.ExitCode
-}
 $shortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Adept UI.lnk"
-if (-not $createShortcut -and (Test-Path $shortcut)) { Remove-Item $shortcut -Force }
-$installDir = Join-Path $env:LOCALAPPDATA "Programs\Adept UI"
-$launcher = Join-Path $installDir "Adept Launcher.exe"
-$electron = Join-Path $installDir "Adept UI.exe"
-$program = if (Test-Path $launcher) { $launcher } else { $electron }
+
+if ($artifact.kind -eq "zip") {
+  $root = Join-Path $env:USERPROFILE ".adept-ui"
+  $app = Join-Path $root "app"
+  $bin = Join-Path $root "bin"
+  $previous = Join-Path $root "previous-app"
+  if (Test-Path $previous) { Remove-Item $previous -Recurse -Force }
+  if (Test-Path $app) { Rename-Item $app $previous }
+  New-Item -ItemType Directory -Force -Path $app, $bin | Out-Null
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  try {
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($destination, $app)
+  } catch {
+    if (Test-Path $app) { Remove-Item $app -Recurse -Force }
+    if (Test-Path $previous) { Rename-Item $previous $app }
+    Write-Host "Installation did not finish."
+    exit 5
+  }
+  if (Test-Path $previous) { Remove-Item $previous -Recurse -Force }
+  $packedLauncher = Join-Path $app "Adept Launcher.exe"
+  $launcher = Join-Path $bin "Adept Launcher.exe"
+  if (Test-Path $packedLauncher) { Copy-Item $packedLauncher $launcher -Force }
+  $electron = Join-Path $app "Adept UI.exe"
+  if (-not (Test-Path $launcher) -or -not (Test-Path $electron)) {
+    Write-Host "The application archive did not contain Adept UI."
+    exit 5
+  }
+  $program = $launcher
+} else {
+  $installed = Start-Process -FilePath $destination -ArgumentList "/S" -Wait -PassThru
+  if ($installed.ExitCode -ne 0) {
+    Write-Host "Installation did not finish."
+    exit $installed.ExitCode
+  }
+  $installDir = Join-Path $env:LOCALAPPDATA "Programs\Adept UI"
+  $launcher = Join-Path $installDir "Adept Launcher.exe"
+  $electron = Join-Path $installDir "Adept UI.exe"
+  $program = if (Test-Path $launcher) { $launcher } else { $electron }
+}
+
+if ($createShortcut -and (Test-Path $program)) {
+  $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+  $link.TargetPath = $program
+  $link.WorkingDirectory = Split-Path $program -Parent
+  if (Test-Path $electron) { $link.IconLocation = "$electron,0" }
+  $link.Description = "Adept UI"
+  $link.Save()
+} elseif (Test-Path $shortcut) {
+  Remove-Item $shortcut -Force
+}
 if ($launchAfter -and $env:ADEPT_NO_LAUNCH -ne "1" -and (Test-Path $program)) { Start-Process $program }
 Write-Host "Adept UI is installed."
 exit 0

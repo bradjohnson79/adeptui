@@ -891,7 +891,7 @@ class Lifecycle:
         names = {
             "windows": ["Adept UI.exe"],
             "darwin": ["Adept UI.app"],
-            "linux": ["Adept UI.AppImage", "Adept UI"],
+            "linux": ["Adept UI.bin", "Adept UI.AppImage", "Adept UI"],
         }
         for name in names.get(self.profile.os_name, []):
             candidate = self.layout.app_dir / name
