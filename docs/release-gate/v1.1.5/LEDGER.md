@@ -1,6 +1,6 @@
 # Adept UI 1.1.5 four-platform certification ledger
 
-Phase: executable installation and Studio checks have been run. Automatic upgrade from 1.1.3 and 1.1.4 remains NO-GO. macOS Gatekeeper remains an external blocker. Fedora was not run on a physical desktop.
+Phase: executable installation and Studio checks have been run. Automatic upgrade from 1.1.3 and 1.1.4 remains NO-GO. macOS Gatekeeper remains an external blocker. Fedora was not run on a physical desktop. Lifecycle tests passed on https://github.com/bradjohnson79/adeptui/actions/runs/38858485654 at `83c48072`.
 
 Runs:
 - https://github.com/bradjohnson79/adeptui/actions/runs/38855953989
