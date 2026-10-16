@@ -86,8 +86,8 @@ echo "DESKTOP_ENTRY: PASS" | tee -a "$evidence/result.txt"
 version_file="$(dirname "$launcher")/resources/version.json"
 test -f "$version_file"
 cp "$version_file" "$evidence/version.json"
-grep -q '"version": "1.1.5"' "$version_file"
-echo "INSTALLED_VERSION: 1.1.5" | tee -a "$evidence/result.txt"
+grep -q '"version": "1.1.6"' "$version_file"
+echo "INSTALLED_VERSION: 1.1.6" | tee -a "$evidence/result.txt"
 
 keep="$HOME/.config/Adept UI/project-keep.txt"
 mkdir -p "$HOME/.config/Adept UI"
@@ -143,7 +143,7 @@ launch_and_prove() {
   if ! grep -q "LAUNCHER_PARENT_$label: OBSERVED" "$evidence/result.txt"; then
     echo "LAUNCHER_PARENT_$label: NOT_OBSERVED parent=${parent:-none}" | tee -a "$evidence/result.txt"
   fi
-  if ! grep -Eq "Adept UI is up to date|Adept UI is starting" "$evidence/launcher-$label.log"; then
+  if ! grep -Eq "Adept UI is up to date|Adept UI is starting|Adept UI is now" "$evidence/launcher-$label.log"; then
     if ! grep -q "LAUNCHER_PARENT_$label: OBSERVED" "$evidence/result.txt"; then
       echo "LAUNCHER_FIRST_$label: FAIL" | tee -a "$evidence/result.txt"
       exit 1
@@ -192,9 +192,66 @@ print(f"UPDATE_CHECK: {code}")
 print(f"REGISTRY_VERSION: {version}")
 if code not in {"NO_UPDATE", "UPDATE_SERVICE_UNAVAILABLE", "DEFERRED"}:
     raise SystemExit(f"UPDATE_CHECK: FAIL {code}")
-if version not in {None, "", "1.1.5"}:
+if version not in {None, "", "1.1.6"}:
     raise SystemExit(f"REGISTRY_VERSION: FAIL {version}")
 PY
+stop_app
+python3 - <<'PY'
+import json
+from pathlib import Path
+root = Path.home() / ".adept-ui"
+registry_path = root / "registry.json"
+registry = json.loads(registry_path.read_text(encoding="utf-8"))
+registry["installedVersion"] = "1.1.5"
+registry_path.write_text(json.dumps(registry), encoding="utf-8")
+status = root / "startup-update.json"
+if status.exists():
+    status.unlink()
+PY
+"$launcher" >"$evidence/launcher-update.log" 2>&1 &
+app_pid=$!
+update_ok=0
+for _ in $(seq 1 240); do
+  if [ -f "$HOME/.adept-ui/startup-update.json" ]; then
+    code="$(python3 -c 'import json; print(json.load(open("'"$HOME/.adept-ui/startup-update.json"'"))["code"])')"
+    if [ "$code" = "UPDATED" ]; then
+      update_ok=1
+      break
+    fi
+    echo "AUTOMATIC_UPDATE: FAIL $code" | tee -a "$evidence/result.txt"
+    exit 1
+  fi
+  sleep 5
+done
+if [ "$update_ok" != "1" ]; then
+  echo "AUTOMATIC_UPDATE: FAIL timed out" | tee -a "$evidence/result.txt"
+  tail -n 40 "$evidence/launcher-update.log" || true
+  exit 1
+fi
+python3 - <<'PY' | tee -a "$evidence/result.txt"
+import json
+from pathlib import Path
+registry = json.loads((Path.home() / ".adept-ui" / "registry.json").read_text(encoding="utf-8"))
+keep = Path.home() / ".config" / "Adept UI" / "project-keep.txt"
+if registry.get("installedVersion") != "1.1.6" or keep.read_text(encoding="utf-8").strip() != "disposable-project":
+    print("AUTOMATIC_UPDATE: FAIL registry or user data")
+    raise SystemExit(1)
+print("AUTOMATIC_UPDATE: PASS")
+PY
+grep -q '"Adept UI Studio"' "$evidence/xwin-update.txt" 2>/dev/null || true
+window_ok=0
+for _ in $(seq 1 45); do
+  if xwininfo -root -tree 2>/dev/null | grep -q '"Adept UI Studio"'; then
+    window_ok=1
+    break
+  fi
+  sleep 2
+done
+if [ "$window_ok" != "1" ]; then
+  echo "STUDIO_WINDOW_updated: FAIL" | tee -a "$evidence/result.txt"
+  exit 1
+fi
+echo "STUDIO_WINDOW_updated: PASS" | tee -a "$evidence/result.txt"
 stop_app
 if pgrep -f "${launcher}.bin" >/dev/null 2>&1; then
   echo "SHUTDOWN: FAIL" | tee -a "$evidence/result.txt"
@@ -217,6 +274,6 @@ curl -fsSL "https://adeptui.org/install.sh" | ADEPT_ASSUME_YES=1 ADEPT_NO_LAUNCH
 test -x "$launcher"
 test -x "${launcher}.bin"
 test "$(cat "$keep")" = "disposable-project"
-grep -q '"version": "1.1.5"' "$version_file"
+grep -q '"version": "1.1.6"' "$version_file"
 echo "REINSTALL: PASS" | tee -a "$evidence/result.txt"
 echo "DISPLAY: VIRTUAL_XVFB" | tee -a "$evidence/result.txt"

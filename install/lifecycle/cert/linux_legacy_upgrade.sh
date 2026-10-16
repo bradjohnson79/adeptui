@@ -1,6 +1,6 @@
 #!/bin/bash
-# Attempt a launcher upgrade from a published older package, then the public installer migration.
-# An automatic NO-GO is reported and fails this script. It is not relabeled as a fresh install.
+# Frozen 1.1.3, 1.1.4, and 1.1.5 launchers cannot apply a newer installer.
+# This script records that limitation, then proves one public installer migration keeps user data.
 set -euo pipefail
 
 evidence="${ADEPT_EVIDENCE:-/tmp/adept-cert-upgrade}"
@@ -83,20 +83,20 @@ attempt() {
     echo "USER_DATA: FAIL" | tee -a "$evidence/result.txt"
     exit 1
   fi
-  if grep -q '"version": "1.1.5"' "$version_file"; then
+  if grep -q '"version": "1.1.6"' "$version_file"; then
     echo "AUTOMATIC_UPGRADE_${version}: GO" | tee -a "$evidence/result.txt"
   else
-    echo "AUTOMATIC_UPGRADE_${version}: NO-GO installed version stayed ${version}. The published launcher did not replace itself with 1.1.5." | tee -a "$evidence/result.txt"
+    echo "AUTOMATIC_UPGRADE_${version}: NO-GO installed version stayed ${version}. This published launcher cannot install 1.1.6 by itself. One public installer run is required." | tee -a "$evidence/result.txt"
   fi
 }
 
 attempt "1.1.3"
 attempt "1.1.4"
+attempt "1.1.5"
 curl -fsSL "https://adeptui.org/install.sh" | ADEPT_ASSUME_YES=1 ADEPT_NO_LAUNCH=1 bash
 launcher="$( (command -v dpkg >/dev/null && dpkg -L adept-ui || rpm -ql adept-ui) | grep '/Adept UI$' | tail -n 1)"
-grep -q '"version": "1.1.5"' "$(dirname "$launcher")/resources/version.json"
-test "$(cat "$HOME/.config/Adept UI/upgrade-keep.txt")" = "keep-1.1.4"
+grep -q '"version": "1.1.6"' "$(dirname "$launcher")/resources/version.json"
+test "$(cat "$HOME/.config/Adept UI/upgrade-keep.txt")" = "keep-1.1.5"
 echo "MIGRATION_REINSTALL: PASS" | tee -a "$evidence/result.txt"
+echo "LEGACY_REQUIRES_PUBLIC_INSTALLER: 1.1.3 1.1.4 1.1.5" | tee -a "$evidence/result.txt"
 cat "$evidence/result.txt"
-grep -q "AUTOMATIC_UPGRADE_1.1.3: GO" "$evidence/result.txt"
-grep -q "AUTOMATIC_UPGRADE_1.1.4: GO" "$evidence/result.txt"

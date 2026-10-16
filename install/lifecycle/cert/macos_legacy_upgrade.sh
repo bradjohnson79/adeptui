@@ -60,20 +60,20 @@ attempt() {
     echo "USER_DATA: FAIL" | tee -a "$evidence/result.txt"
     exit 1
   fi
-  if [ "$bundle" = "1.1.5" ]; then
+  if [ "$bundle" = "1.1.6" ]; then
     echo "AUTOMATIC_UPGRADE_${version}: GO" | tee -a "$evidence/result.txt"
   else
-    echo "AUTOMATIC_UPGRADE_${version}: NO-GO installed version stayed ${bundle}. The published launcher did not replace itself with 1.1.5." | tee -a "$evidence/result.txt"
+    echo "AUTOMATIC_UPGRADE_${version}: NO-GO installed version stayed ${bundle}. This published launcher cannot install 1.1.6 by itself. One public installer run is required." | tee -a "$evidence/result.txt"
   fi
 }
 
 attempt "1.1.3"
 attempt "1.1.4"
+attempt "1.1.5"
 curl -fsSL "https://adeptui.org/install.sh" | ADEPT_ASSUME_YES=1 ADEPT_NO_LAUNCH=1 bash
 bundle="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$HOME/Applications/Adept UI.app/Contents/Info.plist")"
-test "$bundle" = "1.1.5"
-test "$(cat "$HOME/Library/Application Support/Adept UI/upgrade-keep.txt")" = "keep-1.1.4"
+test "$bundle" = "1.1.6"
+test "$(cat "$HOME/Library/Application Support/Adept UI/upgrade-keep.txt")" = "keep-1.1.5"
 echo "MIGRATION_REINSTALL: PASS" | tee -a "$evidence/result.txt"
+echo "LEGACY_REQUIRES_PUBLIC_INSTALLER: 1.1.3 1.1.4 1.1.5" | tee -a "$evidence/result.txt"
 cat "$evidence/result.txt"
-grep -q "AUTOMATIC_UPGRADE_1.1.3: GO" "$evidence/result.txt"
-grep -q "AUTOMATIC_UPGRADE_1.1.4: GO" "$evidence/result.txt"

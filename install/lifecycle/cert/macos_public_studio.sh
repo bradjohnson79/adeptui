@@ -25,8 +25,18 @@ echo "INSTALLATION: PASS" | tee "$evidence/result.txt"
 echo "LAUNCHER: $launcher" | tee -a "$evidence/result.txt"
 echo "ELECTRON: $electron" | tee -a "$evidence/result.txt"
 /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" | tee "$evidence/bundle-version.txt"
-grep -q '1.1.5' "$evidence/bundle-version.txt"
-echo "INSTALLED_VERSION: 1.1.5" | tee -a "$evidence/result.txt"
+grep -q '1.1.6' "$evidence/bundle-version.txt"
+echo "INSTALLED_VERSION: 1.1.6" | tee -a "$evidence/result.txt"
+set +e
+codesign --verify --deep --strict --verbose=2 "$app" >"$evidence/codesign.txt" 2>&1
+codesign_status=$?
+set -e
+cat "$evidence/codesign.txt" || true
+if [ "$codesign_status" -ne 0 ]; then
+  echo "SIGNATURE_STRUCTURE: FAIL" | tee -a "$evidence/result.txt"
+  exit 1
+fi
+echo "SIGNATURE_STRUCTURE: PASS" | tee -a "$evidence/result.txt"
 
 keep="$HOME/Library/Application Support/Adept UI/project-keep.txt"
 mkdir -p "$HOME/Library/Application Support/Adept UI"

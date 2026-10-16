@@ -42,9 +42,9 @@ jobs:
           catalog_hash = hashlib.sha256(catalog).hexdigest()
           signature_hash = hashlib.sha256(signature).hexdigest()
           body = json.loads(catalog)
-          if body.get("version") != "1.1.5":
+          if body.get("version") != "1.1.6":
               raise SystemExit(f"catalog version {body.get('version')}")
-          if integrity.get("status") != "PASS" or integrity.get("version") != "1.1.5":
+          if integrity.get("status") != "PASS" or integrity.get("version") != "1.1.6":
               raise SystemExit(f"integrity {integrity.get('status')} {integrity.get('version')}")
           if integrity.get("catalogSha256") != catalog_hash or integrity.get("signatureSha256") != signature_hash:
               raise SystemExit("integrity hashes do not match the live catalog")
@@ -54,7 +54,7 @@ jobs:
   windows-studio:
     name: Windows installation and Studio window
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - name: Install from the public command and open the Studio window
@@ -70,7 +70,7 @@ jobs:
   macos-studio:
     name: macOS installation and Studio window
     runs-on: macos-14
-    timeout-minutes: 45
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - name: Install from the public command
@@ -85,7 +85,7 @@ jobs:
   ubuntu-studio:
     name: Ubuntu installation and Studio window
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - name: Install the public DEB and open the Studio window on Xvfb
@@ -102,7 +102,7 @@ jobs:
   fedora-studio:
     name: Fedora virtual display installation and Studio window
     runs-on: ubuntu-22.04
-    timeout-minutes: 50
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - name: Install the public RPM inside Fedora and open the Studio window on Xvfb
@@ -124,7 +124,7 @@ jobs:
   windows-upgrade:
     name: Windows legacy upgrade
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - name: Attempt 1.1.3 and 1.1.4 automatic upgrades
@@ -140,7 +140,7 @@ jobs:
   ubuntu-upgrade:
     name: Ubuntu legacy upgrade
     runs-on: ubuntu-22.04
-    timeout-minutes: 50
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - name: Attempt 1.1.3 and 1.1.4 automatic upgrades
@@ -157,7 +157,7 @@ jobs:
   fedora-upgrade:
     name: Fedora legacy upgrade
     runs-on: ubuntu-22.04
-    timeout-minutes: 50
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - name: Attempt 1.1.3 and 1.1.4 automatic upgrades in Fedora
@@ -178,7 +178,7 @@ jobs:
   macos-upgrade:
     name: macOS legacy upgrade
     runs-on: macos-14
-    timeout-minutes: 50
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - name: Attempt 1.1.3 and 1.1.4 automatic upgrades

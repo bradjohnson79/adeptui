@@ -26,8 +26,8 @@ if ((Split-Path $launcher -Parent) -ne $program) { throw "Launcher is not beside
 
 $versionFile = Join-Path $program "resources\version.json"
 $versionText = Get-Content $versionFile -Raw
-if ($versionText -notmatch '"version": "1.1.5"') { throw "Installed version is not 1.1.5" }
-"INSTALLED_VERSION: 1.1.5" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
+if ($versionText -notmatch '"version": "1.1.6"') { throw "Installed version is not 1.1.6" }
+"INSTALLED_VERSION: 1.1.6" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
 
 $shortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Adept UI.lnk"
 $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
@@ -100,13 +100,35 @@ $registryPath = Join-Path $env:USERPROFILE ".adept-ui\registry.json"
 $startupPath = Join-Path $env:USERPROFILE ".adept-ui\startup-update.json"
 if (-not (Test-Path $registryPath)) { throw "REGISTRY: FAIL" }
 $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
-if ($registry.installedVersion -ne "1.1.5") { throw "REGISTRY_VERSION: FAIL $($registry.installedVersion)" }
+if ($registry.installedVersion -ne "1.1.6") { throw "REGISTRY_VERSION: FAIL $($registry.installedVersion)" }
 $startup = Get-Content $startupPath -Raw | ConvertFrom-Json
 if ($startup.code -ne "NO_UPDATE") { throw "UPDATE_CHECK: FAIL $($startup.code)" }
 "UPDATE_CHECK: NO_UPDATE" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
 Stop-Adept
 if (Get-Process -Name "Adept UI" -ErrorAction SilentlyContinue) { throw "SHUTDOWN: FAIL" }
 "SHUTDOWN: PASS" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
+
+$registry.installedVersion = "1.1.5"
+[System.IO.File]::WriteAllText($registryPath, ($registry | ConvertTo-Json -Depth 8))
+Remove-Item $startupPath -Force -ErrorAction SilentlyContinue
+Start-Process -FilePath $launcher | Out-Null
+$deadline = (Get-Date).AddMinutes(20)
+$updated = $false
+while ((Get-Date) -lt $deadline) {
+  if (Test-Path $startupPath) {
+    $startup = Get-Content $startupPath -Raw | ConvertFrom-Json
+    if ($startup.code -eq "UPDATED") { $updated = $true; break }
+    throw "AUTOMATIC_UPDATE: FAIL $($startup.code)"
+  }
+  Start-Sleep -Seconds 5
+}
+if (-not $updated) { throw "AUTOMATIC_UPDATE: FAIL timed out" }
+$registry = Get-Content $registryPath -Raw | ConvertFrom-Json
+if ($registry.installedVersion -ne "1.1.6") { throw "AUTOMATIC_UPDATE: FAIL registry $($registry.installedVersion)" }
+if ((Get-Content $keep -Raw) -ne "disposable-project") { throw "AUTOMATIC_UPDATE: user data lost" }
+"AUTOMATIC_UPDATE: PASS" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
+Wait-Studio "updated"
+Stop-Adept
 Start-Process -FilePath $target | Out-Null
 Wait-Studio "restart"
 Stop-Adept

@@ -43,10 +43,10 @@ function Invoke-Automatic([string]$version) {
   }
   $versionText = Get-Content (Join-Path $program "resources\version.json") -Raw
   if ((Get-Content $keep -Raw) -ne "keep-$version") { throw "User data lost during $version launch" }
-  if ($versionText -match '"version": "1.1.5"') {
+  if ($versionText -match '"version": "1.1.6"') {
     "AUTOMATIC_UPGRADE_${version}: GO" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
   } else {
-    "AUTOMATIC_UPGRADE_${version}: NO-GO installed version stayed $version. The published launcher did not replace itself with 1.1.5." | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
+    "AUTOMATIC_UPGRADE_${version}: NO-GO installed version stayed $version. This published launcher cannot install 1.1.6 by itself. One public installer run is required." | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
   }
   Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\Programs\Adept UI\*" } | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
@@ -55,6 +55,7 @@ function Invoke-Automatic([string]$version) {
 
 Invoke-Automatic "1.1.3"
 Invoke-Automatic "1.1.4"
+Invoke-Automatic "1.1.5"
 
 $env:ADEPT_ASSUME_YES = "1"
 $env:ADEPT_NO_LAUNCH = "1"
@@ -62,9 +63,8 @@ $env:ADEPT_NO_LAUNCH = "1"
 if ($LASTEXITCODE -ne 0) { throw "Migration installer exited $LASTEXITCODE" }
 $program = Join-Path $env:LOCALAPPDATA "Programs\Adept UI"
 $versionText = Get-Content (Join-Path $program "resources\version.json") -Raw
-if ($versionText -notmatch '"version": "1.1.5"') { throw "Migration did not install 1.1.5" }
-if ((Get-Content (Join-Path $env:APPDATA "Adept UI\upgrade-keep.txt") -Raw) -ne "keep-1.1.4") { throw "Migration removed user data" }
+if ($versionText -notmatch '"version": "1.1.6"') { throw "Migration did not install 1.1.6" }
+if ((Get-Content (Join-Path $env:APPDATA "Adept UI\upgrade-keep.txt") -Raw) -ne "keep-1.1.5") { throw "Migration removed user data" }
 "MIGRATION_REINSTALL: PASS" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
+"LEGACY_REQUIRES_PUBLIC_INSTALLER: 1.1.3 1.1.4 1.1.5" | Tee-Object -FilePath (Join-Path $evidence "result.txt") -Append
 Get-Content (Join-Path $evidence "result.txt")
-$automatic = Select-String -Path (Join-Path $evidence "result.txt") -Pattern "AUTOMATIC_UPGRADE_1\.1\.[34]: GO" -AllMatches
-if ($automatic.Matches.Count -lt 2) { exit 2 }

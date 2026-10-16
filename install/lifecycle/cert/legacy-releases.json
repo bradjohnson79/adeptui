@@ -50,5 +50,31 @@
       "bytes": 409242171,
       "sha256": "6ad9d089278ab83aa05a87ca7a24b839961815bf28a48efc95043aa6110dbc3e"
     }
+  },
+  "1.1.5": {
+    "windows": {
+      "fileName": "Adept.UI-Setup-1.1.5-win-x64.exe",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.5/Adept.UI-Setup-1.1.5-win-x64.exe",
+      "bytes": 291928877,
+      "sha256": "27e0334efea40463a8ec960711205ae8c3de3abe4b3f450c17351a21e198807c"
+    },
+    "deb": {
+      "fileName": "Adept.UI-1.1.5-linux-x64.deb",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.5/Adept.UI-1.1.5-linux-x64.deb",
+      "bytes": 403729200,
+      "sha256": "ead83d12ec6ee2f4561358f218078c54468eeaf5c7a1cffd37ca58b9c0445ce9"
+    },
+    "rpm": {
+      "fileName": "Adept.UI-1.1.5-linux-x64.rpm",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.5/Adept.UI-1.1.5-linux-x64.rpm",
+      "bytes": 358651569,
+      "sha256": "79b1d9358b64cfa71537dd15bfab3ad34b3f0438eb4a9fdc9fb71262a1198a8e"
+    },
+    "dmg": {
+      "fileName": "Adept.UI-1.1.5-mac-arm64.dmg",
+      "url": "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.5/Adept.UI-1.1.5-mac-arm64.dmg",
+      "bytes": 409234403,
+      "sha256": "939c14b766f7c19501cde30678b4e367440049d092cd11619d30e440793fb5a3"
+    }
   }
 }
