@@ -208,30 +208,22 @@ def _stored_flag() -> str:
 
 
 def apply_first_run_flag(report: dict[str, Any]) -> bool:
-    """Persist the flag from one assessment. True is allowed only when the blocker count is zero."""
+    """Read the saved completion flag. A finished setup stays finished when a local piece is missing."""
     ready = bool(report.get("ready")) and int(report.get("essentialBlockerCount") or 0) == 0
     stored = _stored_flag()
     if stored == "unreadable":
         return True
-    if stored == "true" and ready:
+    # A saved completion stays complete. A missing model or ComfyUI does not reopen setup.
+    if stored == "true":
         return True
-    if stored == "false" and not ready:
+    if stored == "false":
         return False
 
     migrated = False
-    cleared = False
 
     def mutate(latest: dict[str, Any]) -> None:
-        nonlocal migrated, cleared
+        nonlocal migrated
         current = latest.get(FIRST_RUN_KEY)
-        if current is True and ready:
-            return
-        if current is False and not ready:
-            return
-        if current is True and not ready:
-            latest[FIRST_RUN_KEY] = False
-            cleared = True
-            return
         if current is True or current is False:
             return
         latest[FIRST_RUN_KEY] = ready
@@ -242,8 +234,6 @@ def apply_first_run_flag(report: dict[str, Any]) -> bool:
     update_state(mutate)
     if migrated:
         logger.info(MIGRATION_LOG)
-    if cleared:
-        logger.info(INVARIANT_LOG)
     final = _stored_flag()
     if final == "unreadable":
         return True
@@ -263,10 +253,7 @@ def complete_first_run(components: list[dict[str, Any]], **kwargs: Any) -> bool:
     if stored == "unreadable":
         return True
     if stored == "true":
-        if report["ready"]:
-            return True
-        apply_first_run_flag(report)
-        raise FirstRunNotReady
+        return True
     if not report["ready"]:
         raise FirstRunNotReady
     def mark_complete(latest: dict[str, Any]) -> None:

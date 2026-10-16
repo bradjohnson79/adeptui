@@ -63,8 +63,8 @@ def rescan_comfy() -> dict[str, Any]:
         )
     else:
         message = (
-            "ComfyUI was not found. Install it from the official download, launch it, "
-            "then re-scan or connect the folder."
+            "ComfyUI was not found. Copy the install command, paste it into your terminal, "
+            "follow the prompts, then re-scan or connect the folder."
         )
     return {
         "healthy": healthy,
@@ -86,7 +86,7 @@ def connect_existing_comfy(raw_path: str) -> dict[str, Any]:
     main = comfy_main_file(folder)
     if main is None:
         raise ValueError(
-            "That folder does not contain ComfyUI. Install it from the official download, "
+            "That folder does not contain ComfyUI. Use the install command in Setup, "
             "then choose the ComfyUI folder."
         )
     install_root = str(main.parent.resolve())
@@ -103,7 +103,7 @@ def connect_existing_comfy(raw_path: str) -> dict[str, Any]:
         message = "ComfyUI is running."
     else:
         message = (
-            "That folder contains ComfyUI. Launch it, then choose Re-scan ComfyUI. "
+            "That folder contains ComfyUI. Launch it, then choose Re-scan System. "
             "Adept UI will not start it."
         )
     return {

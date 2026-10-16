@@ -51,17 +51,15 @@ export function scanAllowsCompletion(scan?: FirstRunScan | null): boolean {
 }
 
 /**
- * The installer modal opens only while the essential baseline is incomplete.
- * A missing scan does not count as incomplete unless the saved flag is explicitly false.
- * A ready scan never reopens the modal, even before the flag write returns.
+ * The wizard opens only while setup has not been saved as complete.
+ * A missing local model or ComfyUI does not reopen it after completion.
  */
 export function setupWizardRequired(status: {
   firstRunSetupComplete?: boolean;
   firstRunScan?: FirstRunScan | null;
 } | null | undefined): boolean {
   if (!status) return false;
-  if (status.firstRunScan) return !scanAllowsCompletion(status.firstRunScan);
-  return status.firstRunSetupComplete === false;
+  return status.firstRunSetupComplete !== true;
 }
 
 /** Python, FFmpeg, and ComfyUI only. The image and video baseline is firstRunScan. */

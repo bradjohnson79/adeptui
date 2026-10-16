@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { ActiveDownloadsPanel } from "../components/ActiveDownloadsPanel";
-import { CapabilityReadinessPanel, useCapabilities } from "../components/CapabilityPanel";
+import { useCapabilities } from "../components/CapabilityPanel";
 import { CharacterVoiceModelsPanel } from "../components/CharacterVoiceModelsPanel";
 import { InstallHistoryPanel } from "../components/InstallHistoryPanel";
 import { AddSourceWorkflow } from "../components/install/AddSourceWorkflow";
@@ -271,23 +271,6 @@ export default function SourceManagerPage({ embedded = false }: { embedded?: boo
             {error}
           </p>
         )}
-
-        {!embedded && <section className="setup-component-section ds-surface" aria-labelledby="sm-capabilities-heading">
-          <div className="setup-section-heading">
-            <h2 id="sm-capabilities-heading">What is blocked right now</h2>
-            <p>
-              Read from the capability registry, so this says the same thing as the Health surface
-              and the Setup Wizard. Actions here navigate — no download starts without your
-              explicit approval on a component card.
-            </p>
-          </div>
-          <CapabilityReadinessPanel
-            projectId={projectId}
-            title="Blocked capabilities"
-            subsystems={relevantSubsystems}
-            limit={12}
-          />
-        </section>}
 
         <section className="setup-component-section ds-surface" aria-labelledby="sm-providers-heading">
           <div className="setup-section-heading">

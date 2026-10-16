@@ -234,7 +234,7 @@ test.describe("@critical @isolated capabilities", () => {
     }
   });
 
-  test("Setup Wizard refuses to claim ready while a required capability is blocked", async ({
+  test("Setup shows the three installation choices and no capability-blocker dashboard", async ({
     page,
     request,
   }) => {
@@ -244,31 +244,16 @@ test.describe("@critical @isolated capabilities", () => {
 
     const project = await createTempProject(request, `E2E Setup Caps ${Date.now()}`);
     try {
-      const snapshot: Snapshot = await (await request.get(`${API}/api/capabilities`)).json();
-      const required = new Set([
-        "storage.project_data",
-        "storage.database",
-        "comfyui.health",
-        "models.video.ready",
-        "workflows.video.ready",
-      ]);
-      const requiredBlockers = snapshot.blockers.filter((b) => required.has(b.capabilityId));
-
       await page.goto(`/project/${project.id}?workspace=setup`);
       await expect(page.locator(".setup-wizard-page").first()).toBeVisible({ timeout: 60_000 });
 
-      const overall = page.getByTestId("setup-overall-status");
-      await expect(overall).toBeVisible({ timeout: 30_000 });
-
-      if (requiredBlockers.length > 0) {
-        await expect(page.getByTestId("setup-capability-blockers")).toBeVisible({
-          timeout: 30_000,
-        });
-        await expect(overall).not.toHaveText(/^Ready$/);
-        await expect(page.getByTestId("setup-blockers-open-source-manager")).toBeVisible();
-      } else {
-        await expect(page.getByTestId("setup-capability-blockers")).toHaveCount(0);
-      }
+      await expect(page.getByTestId("setup-capability-blockers")).toHaveCount(0);
+      await expect(page.getByText("Prepare My Studio")).toHaveCount(0);
+      const wizard = page.getByTestId("setup-wizard-modal").or(page.getByTestId("setup-wizard-permanent"));
+      await expect(wizard.first()).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText("Full Local Installation").first()).toBeVisible();
+      await expect(page.getByText("Hybrid Installation — Local + API").first()).toBeVisible();
+      await expect(page.getByText("Full API Installation").first()).toBeVisible();
 
       observer.assertHealthyBrowser();
     } finally {

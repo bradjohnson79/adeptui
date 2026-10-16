@@ -40,7 +40,7 @@ if (!fs.existsSync(launcher)) {
   process.exit(1);
 }
 console.log(`unpacked ${unpacked}`);
-const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r6";
+const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r7";
 const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-${terminalRevision}-win-x64.zip`);
 const pythonExe = fs.existsSync(path.join(root, "studio-api", ".venv", "Scripts", "python.exe"))
   ? path.join(root, "studio-api", ".venv", "Scripts", "python.exe")

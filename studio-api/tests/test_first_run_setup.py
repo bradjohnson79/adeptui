@@ -127,14 +127,15 @@ def test_existing_install_migrates_once_when_the_baseline_is_ready(
     assert caplog.text.count(MIGRATION_LOG) == 1
 
 
-def test_true_flag_clears_when_an_essential_blocker_returns(
+def test_completed_setup_stays_complete_when_a_local_piece_is_missing(
     setup_data_dir: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     assert complete_first_run(_components(), node_types=_nodes(), fetch_nodes=False) is True
     with caplog.at_level(logging.INFO):
-        assert _resolve(_components(ltx_2_5_video_vae="error")) is False
-    assert _flag(setup_data_dir) is False
-    assert INVARIANT_LOG in caplog.text
+        assert _resolve(_components(ltx_2_5_video_vae="error")) is True
+        assert complete_first_run(_components(comfyui="not_installed"), node_types=_nodes(), fetch_nodes=False) is True
+    assert _flag(setup_data_dir) is True
+    assert INVARIANT_LOG not in caplog.text
 
 
 def test_complete_refuses_until_the_baseline_is_ready(setup_data_dir: Path) -> None:

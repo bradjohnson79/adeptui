@@ -74,7 +74,7 @@ jobs:
     timeout-minutes: 180
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      ADEPT_TERMINAL_REVISION: r6
+      ADEPT_TERMINAL_REVISION: r7
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

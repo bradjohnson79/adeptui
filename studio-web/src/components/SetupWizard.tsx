@@ -3,23 +3,18 @@ import { useLocation } from "react-router-dom";
 import { api, ApiError } from "../api";
 import {
   componentStateLabel,
-  formatBytes,
   formatComponentSize,
   formatDuration,
   isNetworkUnavailableError,
   nextPollDelayMs,
-  overallStatus,
-  OVERALL_LABELS,
   primaryActionKind,
   progressPercent,
   RECOMMENDATION_LABELS,
-  summarizeComponents,
 } from "../setup/helpers";
 import { installationProfileLabel, scanAllowsCompletion, setupWizardRequired } from "../setup/firstRun";
 import { FirstRunSetupModal, PROFILE_COPY, type InstallProfile } from "../setup/FirstRunSetupModal";
 import { ProviderKeysPanel } from "../setup/ProviderKeysPanel";
 import { OptionalToolsWizard } from "../setup/OptionalToolsWizard";
-import { CapabilityReadinessPanel } from "./CapabilityPanel";
 import { ModelLicenseDialog, modelLicenseStatusLabel } from "../setup/ModelLicenseDialog";
 import type {
   ComponentDiagnosticResult,
@@ -30,11 +25,9 @@ import type {
   SetupPrimaryAction,
   SetupPrimaryActionKind,
   SetupStatusResponse,
-  StudioPreparationPlan,
 } from "../setup/types";
 import type { InstallJob } from "../contracts/installJobs";
 import { useInstallJobsPoll } from "../hooks/useInstallJobsPoll";
-import { requiredBlockers, useCapabilities } from "./CapabilityPanel";
 import { VideoModelLibrary } from "./VideoModelLibrary";
 import { PromptIntelligenceBenchmarkDashboard } from "./CoDirector/PromptIntelligenceBenchmarkDashboard";
 import { DownloadSourcesPanel } from "./DownloadSourcesPanel";
@@ -460,86 +453,6 @@ function SetupComponentCard({
         </div>
       ) : null}
     </article>
-  );
-}
-
-function SetupSummary({
-  status,
-  preparing,
-  projectId,
-  onPrepare,
-}: {
-  status: SetupStatusResponse;
-  preparing: boolean;
-  projectId?: string;
-  onPrepare: () => void;
-}) {
-  const counts = status.counts ?? status.summary ?? summarizeComponents(status.components);
-  const componentOverall = status.overall_status ?? overallStatus(status.components);
-  const { snapshot } = useCapabilities({ pollMs: 30000 });
-  const blockers = requiredBlockers(snapshot);
-
-  // Component states alone can read "ready" while a capability that needs them is still
-  // blocked — a missing ComfyUI node type, or a pack with no published source. When the
-  // registry reports a required capability as blocked, the wizard must not claim readiness.
-  const overall = componentOverall === "ready" && blockers.length > 0
-    ? "additional_setup_required"
-    : componentOverall;
-  const needsPreparation = overall !== "ready" && overall !== "preparing";
-
-  return (
-    <section className="panel setup-summary" aria-labelledby="setup-system-status" data-project-id={projectId || ""}>
-      <div className="setup-summary-main">
-        <div>
-          <div className="section-label">System Status</div>
-          <div className="setup-counts" id="setup-system-status">
-            <span><strong>{counts.required_ready ?? counts.ready}</strong> Required Ready</span>
-            <span><strong>{counts.optional_not_installed ?? 0}</strong> Optional — Not Installed</span>
-            <span><strong>{counts.required_needs_attention ?? counts.needs_attention}</strong> Needs Attention</span>
-          </div>
-        </div>
-        <div className="setup-overall" role="status" aria-live="polite">
-          <span>Overall Status</span>
-          <strong data-testid="setup-overall-status">
-            {OVERALL_LABELS[preparing ? "preparing" : overall]}
-          </strong>
-        </div>
-      </div>
-      {blockers.length > 0 && (
-        <div className="setup-capability-blockers" data-testid="setup-capability-blockers">
-          <p className="setup-issue">
-            {blockers.length} capability {blockers.length === 1 ? "blocker" : "blockers"} must be
-            cleared before generation can run:
-          </p>
-          <ul>
-            {blockers.map((blocker) => (
-              <li key={blocker.capabilityId} data-testid={`setup-blocker-${blocker.capabilityId}`}>
-                <strong>{blocker.displayName}</strong> — {blocker.message}
-                {blocker.componentIds.length > 0 && (
-                  <>
-                    {" "}
-                    <a
-                      href={`#setup-card-${blocker.componentIds[0]}`}
-                      data-testid={`setup-blocker-jump-${blocker.capabilityId}`}
-                    >
-                      View required components
-                    </a>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-          <a href="#adept-setup-sections" data-testid="setup-blockers-open-source-manager">
-            View components
-          </a>
-        </div>
-      )}
-      {needsPreparation && (
-        <button type="button" className="primary setup-prepare-button" disabled={preparing} onClick={onPrepare}>
-          {preparing ? "Preparing Studio…" : "Prepare My Studio"}
-        </button>
-      )}
-    </section>
   );
 }
 
@@ -1161,36 +1074,6 @@ function SetupCheckpointDialog({
   );
 }
 
-function PreparationPlanDialog({
-  plan,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  plan: StudioPreparationPlan;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <SetupDialogShell titleId="setup-plan-title" title="Prepare My Studio" busy={busy} onClose={onCancel}>
-      <p className="setup-plan-summary">
-        {plan.required_actions.length} required component{plan.required_actions.length === 1 ? "" : "s"}
-        {plan.required_disk_bytes > 0 ? ` · ${formatBytes(plan.required_disk_bytes)} required` : ""}
-        {plan.estimated_seconds ? ` · about ${Math.max(1, Math.ceil(plan.estimated_seconds / 60))} minutes` : ""}
-      </p>
-      <p>Setup will install or configure required components, then check each installation automatically.</p>
-      {!plan.can_run_unattended && <p className="setup-plan-note">Setup will pause when your input is required.</p>}
-      <div className="row-actions">
-        <button type="button" className="primary" disabled={busy} onClick={onConfirm}>
-          {busy ? "Starting…" : "Prepare Studio"}
-        </button>
-        <button type="button" className="ghost" disabled={busy} onClick={onCancel}>Cancel</button>
-      </div>
-    </SetupDialogShell>
-  );
-}
-
 export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   const location = useLocation();
   const firstRunSaveRef = useRef(false);
@@ -1201,7 +1084,6 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   const [operations, setOperations] = useState<Record<string, SetupOperation>>({});
   const [trackedOperationIds, setTrackedOperationIds] = useState<string[]>([]);
   const [activeCheckpoint, setActiveCheckpoint] = useState<{ operationId: string; checkpoint: SetupCheckpoint } | null>(null);
-  const [plan, setPlan] = useState<StudioPreparationPlan | null>(null);
   const [legacyDetection, setLegacyDetection] = useState<SetupLegacyDetection | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -1390,33 +1272,6 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   const trackOperation = (operationId: string, operation?: SetupOperation) => {
     setTrackedOperationIds((current) => Array.from(new Set([...current, operationId])));
     if (operation) setOperations((current) => ({ ...current, [operation.operation_id]: operation }));
-  };
-
-  const preparePlan = async () => {
-    setBusyId("prepare-plan");
-    setMessage(null);
-    try {
-      setPlan(await api.setupPreparePlan());
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const startPreparation = async () => {
-    setBusyId("prepare");
-    setMessage(null);
-    try {
-      const result = await api.setupPrepare();
-      trackOperation(result.operation_id, result);
-      setPlan(null);
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusyId(null);
-    }
   };
 
   const runPackAction = async (
@@ -1707,11 +1562,9 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
       .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)));
   };
 
-  const scan = status.firstRunScan;
   if (setupWizardRequired(status) && !wizardOpen) {
     setWizardOpen(true);
   }
-  const readyIds = new Set((scan?.alreadyReady ?? []).map((item) => item.id));
 
   /** Permanent Setup Wizard: switching profiles here preserves saved keys, selected models, and installed files. */
   const changeProfile = async (profile: InstallProfile) => {
@@ -1771,25 +1624,6 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
     )}
     <div className="page setup-wizard-page" hidden={wizardOpen}>
       <PanelHeading title="Adept Setup" tip="Checks readiness and prepares required studio components." />
-      {scan && (
-        <section className="panel" aria-label="System scan" data-testid="setup-system-scan">
-          <h2>{scanning ? "Scanning your computer…" : "System status"}</h2>
-          <ul>
-            <li>{readyIds.has("python") && readyIds.has("ffmpeg") ? "✓" : "○"} Runtime dependencies</li>
-            <li>{readyIds.has("comfyui") ? "✓" : "○"} ComfyUI</li>
-            <li>{scan.baselineImageWorkflow === "not_required" ? "— not required for this profile" : scan.baselineImageWorkflow === "ready" ? "✓" : "○"} Image generation</li>
-            <li>{scan.baselineVideoWorkflow === "not_required" ? "— not required for this profile" : scan.baselineVideoWorkflow === "ready" ? "✓" : "○"} Video generation</li>
-            <li>{scan.nodeCatalogChecked ? "✓" : "○"} ComfyUI node catalogue</li>
-          </ul>
-          <div className="row-actions">
-            <button type="button" data-testid="setup-rescan" disabled={scanning} onClick={() => void refresh(true)}>
-              {scanning ? "Scanning…" : "Re-scan system"}
-            </button>
-          </div>
-        </section>
-      )}
-      <SetupSummary status={status} preparing={preparing} projectId={projectId} onPrepare={() => void preparePlan()} />
-
       <LoRASetupSection onMessage={setMessage} />
 
       <div className="row-actions">
@@ -1877,7 +1711,7 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
               {(status.connectedProviders || []).length ? ` (${status.connectedProviders?.map((item) => item.name).join(", ")})` : ""}.
             </p>
             <p>
-              System readiness: {scan?.essentialBlockerCount ? "This profile still needs the listed pieces." : status.overall_label}.
+              System readiness: {status.overall_label}.
             </p>
           </section>
         </section>
@@ -2035,8 +1869,6 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
       ) : null}
 
       <BackgroundServicesSection comfyuiReady={Boolean(comfyuiReady)} />
-
-      <CapabilityReadinessPanel projectId={projectId} />
     </div>
 
       <OptionalToolsWizard
@@ -2055,14 +1887,6 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
             setLicenseFor(null);
             void refresh();
           }}
-        />
-      )}
-      {plan && (
-        <PreparationPlanDialog
-          plan={plan}
-          busy={busyId === "prepare"}
-          onCancel={() => setPlan(null)}
-          onConfirm={() => void startPreparation()}
         />
       )}
       {preflightFor && (

@@ -46,7 +46,7 @@ if (!fs.existsSync(unpacked)) {
 fs.chmodSync(unpacked, 0o755);
 console.log("LINUX X64 BUILD = PASS");
 console.log(unpacked);
-const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r6";
+const terminalRevision = process.env.ADEPT_TERMINAL_REVISION || "r7";
 const terminalZip = path.join(root, "electron", "dist", `Adept.UI-${version}-terminal-${terminalRevision}-linux-x64.zip`);
 run("python3", [
   "electron/scripts/pack-terminal-archive.py",

@@ -30,18 +30,19 @@ describe("first-run boot handoff", () => {
     expect(bootHandoffTarget(undefined, true)).toBe("/");
   });
 
-  it("opens the installer only while the essential baseline is incomplete", () => {
+  it("opens the wizard until setup is saved complete, even when a scan looks ready or blocked", () => {
     expect(setupWizardRequired(null)).toBe(false);
     expect(setupWizardRequired({ firstRunSetupComplete: true })).toBe(false);
     expect(setupWizardRequired({ firstRunSetupComplete: false })).toBe(true);
+    expect(setupWizardRequired({})).toBe(true);
     expect(setupWizardRequired({
       firstRunSetupComplete: true,
       firstRunScan: { essentialBlockerCount: 1, baselineImageWorkflow: "blocked", baselineVideoWorkflow: "ready" },
-    })).toBe(true);
+    })).toBe(false);
     expect(setupWizardRequired({
       firstRunSetupComplete: false,
       firstRunScan: { essentialBlockerCount: 0, baselineImageWorkflow: "ready", baselineVideoWorkflow: "ready" },
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it("does not complete while the image or video baseline is blocked", () => {

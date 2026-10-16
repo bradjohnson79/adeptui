@@ -4,11 +4,11 @@ import { formatBytes } from "./helpers";
 import { mapProviderError } from "./ProviderKeysPanel";
 import type { FirstRunScan } from "./firstRun";
 import { scanAllowsCompletion } from "./firstRun";
+import { comfyInstallCommand, comfyInstallRequired } from "./comfyInstall";
 import type { SetupComponentStatus, SetupStatusResponse } from "./types";
 
 type WizardStep = "choice" | "details" | "providers" | "comfy" | "review" | "install" | "done" | "blocked";
 
-const OFFICIAL_COMFY_DOWNLOAD = "https://www.comfy.org/download";
 export type InstallProfile = "local" | "api" | "hybrid";
 
 const PROVIDERS = [
@@ -113,19 +113,13 @@ export function FirstRunSetupModal({
   ).map((id) => byId.get(id)).filter((row): row is SetupComponentStatus => Boolean(row));
 
   const comfyReady = comfyProbe ?? byId.get("comfyui")?.status === "ready";
-  const comfyRequired = profile === "local" || (profile === "hybrid" && withLtxGroup(selectedModels).length > 0);
+  const comfyRequired = comfyInstallRequired(
+    profile,
+    profile === "hybrid" ? withLtxGroup(selectedModels) : [],
+    comfyReady,
+  );
+  const comfyCommand = comfyInstallCommand(platform);
   const stepAfterLocalChoices = comfyRequired && !comfyReady ? "comfy" : "review";
-
-  const openOfficialComfyDownload = () => {
-    const desktop = (window as Window & {
-      adeptDesktop?: { openExternal?: (url: string) => Promise<unknown> };
-    }).adeptDesktop;
-    if (desktop?.openExternal) {
-      void desktop.openExternal(OFFICIAL_COMFY_DOWNLOAD);
-      return;
-    }
-    window.open(OFFICIAL_COMFY_DOWNLOAD, "_blank", "noopener,noreferrer");
-  };
 
   const rescanComfy = async () => {
     setComfyMessage(null);
@@ -438,14 +432,16 @@ export function FirstRunSetupModal({
             {providerMessage && <p role="status">{providerMessage}</p>}
             <div className="row-actions">
               <button type="button" onClick={() => setStep(profile === "api" ? "choice" : "details")}>Back</button>
-              <button type="button" className="primary" onClick={() => setStep(stepAfterLocalChoices)}>Review</button>
+              <button type="button" className="primary" onClick={() => setStep(stepAfterLocalChoices)}>
+                {comfyRequired && !comfyReady ? "Next" : "Review"}
+              </button>
             </div>
           </>
         )}
 
         {!exitAsk && step === "review" && (
           <>
-            <p>Adept UI will install only what is missing. Projects, media, and keys you already saved stay in place. Adept UI does not download ComfyUI.</p>
+            <p>Adept UI will install only what is missing. Projects, media, and keys you already saved stay in place.</p>
             {profile === "api" && <p>ComfyUI is not required for Full API Installation.</p>}
             {profile === "hybrid" && comfyRequired && !comfyReady && (
               <p>Commercial API providers can be connected now. Local generation stays incomplete until ComfyUI is running. This Hybrid setup is not finished until both sides check out.</p>
@@ -475,16 +471,26 @@ export function FirstRunSetupModal({
 
         {!exitAsk && step === "comfy" && (
           <>
-            <p>Install and launch ComfyUI before continuing with local generation. Adept UI will detect it. Adept UI does not download or start ComfyUI.</p>
-            {profile === "hybrid" && (
-              <p>Commercial API providers can be configured while this is pending. Local models stay incomplete until ComfyUI is running, so Hybrid is not certified yet.</p>
-            )}
-            <p>{comfyReady ? "ComfyUI is running." : "ComfyUI is not running."}</p>
+            <h3>Install ComfyUI</h3>
+            <p>ComfyUI is used to run your selected local AI generation tools.</p>
+            <p>Copy the command below, paste it into your terminal, and follow the prompts.</p>
+            <pre data-testid="comfy-install-command">{comfyCommand}</pre>
             {comfyMessage && <p role="status">{comfyMessage}</p>}
             <div className="row-actions">
               <button type="button" onClick={() => setStep(profile === "hybrid" ? "providers" : "details")}>Back</button>
-              <button type="button" onClick={openOfficialComfyDownload}>Official ComfyUI Download</button>
-              <button type="button" onClick={() => void rescanComfy()}>Re-scan ComfyUI</button>
+              <button
+                type="button"
+                data-testid="copy-comfy-install"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(comfyCommand).then(
+                    () => setComfyMessage("Command copied. Paste it into your terminal and follow the prompts."),
+                    () => setComfyMessage(comfyCommand),
+                  );
+                }}
+              >
+                Copy command
+              </button>
+              <button type="button" data-testid="setup-comfy-rescan" onClick={() => void rescanComfy()}>Re-scan System</button>
               <button type="button" onClick={() => void connectExistingComfy()}>Connect Existing Installation</button>
               <button type="button" className="primary" disabled={!comfyReady} onClick={() => setStep("review")}>Review</button>
             </div>
@@ -500,15 +506,21 @@ export function FirstRunSetupModal({
             <p>Setup stopped on a specific piece. You can try that piece again. Nothing else was marked finished.</p>
             <ul>
               {installErrors.map((item) => <li key={item.id}>{item.message}</li>)}
-              {(scan?.essentialNeeded || []).map((item) => <li key={item.id}>{item.name}</li>)}
+              {(scan?.essentialNeeded || [])
+                .filter((item) => item.id !== "comfyui" || comfyRequired)
+                .map((item) => <li key={item.id}>{item.name}</li>)}
             </ul>
             {shortcutMessage && <p>{shortcutMessage}</p>}
             {comfyRequired && !comfyReady && (
-              <div className="row-actions">
-                <button type="button" onClick={openOfficialComfyDownload}>Official ComfyUI Download</button>
-                <button type="button" onClick={() => void rescanComfy()}>Re-scan ComfyUI</button>
-                <button type="button" onClick={() => void connectExistingComfy()}>Connect Existing Installation</button>
-              </div>
+              <>
+                <p>Copy the command below, paste it into your terminal, and follow the prompts.</p>
+                <pre data-testid="comfy-install-command-retry">{comfyCommand}</pre>
+                <div className="row-actions">
+                  <button type="button" onClick={() => void navigator.clipboard?.writeText(comfyCommand)}>Copy command</button>
+                  <button type="button" onClick={() => void rescanComfy()}>Re-scan System</button>
+                  <button type="button" onClick={() => void connectExistingComfy()}>Connect Existing Installation</button>
+                </div>
+              </>
             )}
             {comfyMessage && <p role="status">{comfyMessage}</p>}
             <div className="row-actions">
