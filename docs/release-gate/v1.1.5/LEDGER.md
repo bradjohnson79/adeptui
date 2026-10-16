@@ -143,3 +143,27 @@ Public installation gate https://github.com/bradjohnson79/adeptui/actions/runs/3
 Studio certification https://github.com/bradjohnson79/adeptui/actions/runs/38969153085 installed from adeptui.org. Ubuntu on Xvfb reported `SETUP_WIZARD: PASS`, `STUDIO_WINDOW_first: PASS`, `RESTART: PASS`, and `UNINSTALL_PRESERVES_USER_DATA: PASS`. The first-run screenshot shows only Full Local Installation, Hybrid Installation — Local + API, and Full API Installation. It does not show System Status, a capability-blocker list, or Prepare My Studio. Fedora in a container reported the Studio window title, restart, and user-data preservation, with `SETUP_WIZARD: NOT_VERIFIED` and a blank virtual-display frame. Neither Linux result is a physical desktop. Windows reported the Studio window, shortcut, restart, and user-data preservation. The Windows frame captured the startup gauge while services were still starting. macOS reported `SIGNATURE_STRUCTURE: PASS`, `GATEKEEPER: NOT_ACCEPTED`, `NOTARIZATION: EXTERNAL_BLOCKER`, and `STUDIO_WINDOW: PROCESS_STARTED title not confirmed`. The macOS screenshot of that same run shows the three Setup Wizard choices.
 
 Prepared for owner approval. The existing Setup Wizard lock stays as written. This revision does not add a new lock. After the owner approves, the lock record can name this certified behavior: three choices only, no System Status, no capability-blocker dashboard, no Prepare My Studio, ComfyUI terminal instructions only when a local profile needs ComfyUI, and a completed API installation stays complete.
+
+## Revision 5 — unified Setup Manager (2026-10-16)
+
+Visible version remains 1.1.5. Internal revision is 5. The public catalog points at new archives and does not replace the revision 4 files above. The terminal installer commands are unchanged. Owner certification of the Setup Manager is not granted by this record.
+
+Product commit `e83477128131407a565fb3416a4799aaa6625257`. Catalog commit `641aa649670e79f537c2be1042a8e6741dc6fa74`.
+
+| File | Bytes | SHA-256 |
+|---|---:|---|
+| Adept.UI-1.1.5-terminal-r9-win-x64.zip | 370906600 | ed9232d3b2cf408bd78af63d58464afbc34de877b7a17eba5c1928146e827d56 |
+| Adept.UI-1.1.5-terminal-r9-linux-x64.zip | 578060874 | 05e82aa4f4959da3e0daccacf895e1db15afabc285e62e519889d68b5117fc65 |
+| Adept.UI-1.1.5-terminal-r9-mac-arm64.zip | 430808440 | afbcd18b9f88a223388776153020c8852df2a5eac6873cb36588df720d808339 |
+
+The unpublished r8 archives are not in the catalog. Linux build https://github.com/bradjohnson79/adeptui/actions/runs/38977990264. Windows build https://github.com/bradjohnson79/adeptui/actions/runs/38978008508. macOS build https://github.com/bradjohnson79/adeptui/actions/runs/38978011224. Build commit `e8347712`.
+
+Catalog SHA-256 `e08e2b23470f367271fe3c3636ca5b873d36f1ed7200cf6b42e370b9a6ea8e3a`. Signature SHA-256 `9dd371b58b63ca54b7e185b46468dca5c4e7f8e851dd5d0b2db3c2676a675837`. Catalog deployment `dpl_DUnvJuEMmLBHqUvXQ3Xjw2BxFJE3`. Current production deployment `dpl_9tvb97A7ZEJXvQQFGNLbCPCeE9rm` on adeptui.org.
+
+Public installation gate https://github.com/bradjohnson79/adeptui/actions/runs/38979729580 succeeded against the live catalog. Windows reported `INSTALLATION: PASS`, `SHORTCUT: PASS`, `STUDIO_WINDOW: PASS Adept UI Studio`, `UPDATE: PASS`, `PREVIOUS_VERSION_PRESERVED: PASS`, and `SAME_VERSION_REVISION: PASS 5`. Ubuntu and Fedora reported `INSTALLATION: PASS`, `REINSTALL_AND_USER_DATA: PASS`, `UPDATE: PASS`, and `PREVIOUS_VERSION_PRESERVED: PASS`. Fedora ran in a fedora:41 container. macOS reported `INSTALLATION: PASS`, `REINSTALL_AND_USER_DATA: PASS`, `UPDATE: PASS`, `GRAPHICAL_STARTUP: NOT_VERIFIED`, and `NOTARIZATION: EXTERNAL_BLOCKER`. Those Linux and macOS jobs do not open the Studio window. The same-version check started from recorded revision 0 and finished at published revision 5. It is the launcher revision path, not a separate test that began on a revision 4 installation.
+
+The Setup menu on the local Windows Studio opens the three-choice manager. Inline provider keys are on that page. Legacy setup sections are not mounted. That local window is the owner's machine. It is not a substitute for the virtual-display or container Studio checks.
+
+Studio certification https://github.com/bradjohnson79/adeptui/actions/runs/38980530835 installed from adeptui.org. Windows reported the Studio window, shortcut, restart, and user-data preservation. The Windows frame shows the startup gauge while services are still starting. Ubuntu on Xvfb reported `SETUP_WIZARD: PASS`, `STUDIO_WINDOW_first: PASS`, `RESTART: PASS`, and `UNINSTALL_PRESERVES_USER_DATA: PASS`, labeled `DISPLAY: VIRTUAL_XVFB`. The Ubuntu frame shows Full Local Installation, Hybrid Installation — Local + API, and Full API Installation, with Full API selected. Fedora in a fedora:41 container reported the Studio window title, restart, and user-data preservation, with `SETUP_WIZARD: NOT_VERIFIED`. The Fedora frame is blank. Neither Linux result is a physical desktop. macOS reported `SIGNATURE_STRUCTURE: PASS`, `GATEKEEPER: NOT_ACCEPTED`, `NOTARIZATION: EXTERNAL_BLOCKER`, and `STUDIO_WINDOW: PROCESS_STARTED title not confirmed`. The macOS screenshot of that same run shows the three installation choices and the window title Adept UI Studio. Gatekeeper approval is not claimed.
+
+The publication pin still expected revision 4 archive names, so the failure-recovery job failed while the install and Studio jobs passed. The pin now expects revision 5 and the r9 archive names. Owner certification of the Setup Manager is not granted.
