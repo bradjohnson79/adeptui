@@ -419,7 +419,7 @@ def test_pinned_catalog_signature_matches_the_published_release():
     assert names == {
         f"Adept.UI-{version}-terminal-r3-win-x64.zip",
         f"Adept.UI-{version}-terminal-r3-linux-x64.zip",
-        f"Adept.UI-{version}-terminal-r3-mac-arm64.zip",
+        f"Adept.UI-{version}-terminal-r4-mac-arm64.zip",
     }
     assert body["revision"] == 1
     assert all(item["revision"] == 1 for item in body["artifacts"])

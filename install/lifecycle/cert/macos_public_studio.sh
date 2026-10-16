@@ -89,7 +89,14 @@ if [ "$window_ok" != "1" ]; then
   fi
 else
   echo "ELECTRON: PASS" | tee -a "$evidence/result.txt"
-  titles="$(osascript -e 'tell application "System Events" to get name of every window of every process whose background only is false' 2>/dev/null || true)"
+  titles=""
+  for _ in $(seq 1 15); do
+    titles="$(osascript -e 'tell application "System Events" to get name of every window of every process whose background only is false' 2>/dev/null || true)"
+    if printf '%s\n' "$titles" | grep -q "Adept UI Studio"; then
+      break
+    fi
+    sleep 2
+  done
   printf '%s\n' "$titles" > "$evidence/window-titles.txt"
   if printf '%s\n' "$titles" | grep -q "Adept UI Studio"; then
     echo "STUDIO_WINDOW: PASS Adept UI Studio" | tee -a "$evidence/result.txt"
@@ -97,8 +104,13 @@ else
     echo "STUDIO_WINDOW: PROCESS_STARTED title not confirmed" | tee -a "$evidence/result.txt"
   fi
   screencapture -x "$evidence/studio.png" || true
-  pkill -f "Adept UI.app/Contents/MacOS" || true
-  sleep 2
+  pids="$(pgrep -f "Adept UI.app/Contents/MacOS" || true)"
+  if [ -n "$pids" ]; then
+    kill $pids >/dev/null 2>&1 || true
+    sleep 2
+    kill -9 $pids >/dev/null 2>&1 || true
+  fi
+  sleep 1
   if pgrep -f "Adept UI.app/Contents/MacOS" >/dev/null 2>&1; then
     echo "SHUTDOWN: FAIL" | tee -a "$evidence/result.txt"
     exit 1

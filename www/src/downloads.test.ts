@@ -93,7 +93,7 @@ describe("download configuration", () => {
     expect(platformDownloadHref("windows")).toBe("#download");
     expect(platformDownloadHref("linux")).toBe("#download");
     expect(platformDownloadHref("macos")).toBe("#download");
-    expect(configuredDownloadUrl("macos")).toMatch(/Adept\.UI-1\.1\.5-terminal-r3-mac-arm64\.zip$/);
+    expect(configuredDownloadUrl("macos")).toMatch(/Adept\.UI-1\.1\.5-terminal-r4-mac-arm64\.zip$/);
     expect(configuredDownloadUrl("windows")).toMatch(/Adept\.UI-1\.1\.5-terminal-r3-win-x64\.zip$/);
     expect(readyBuilds("linux").map((build) => build.installerType)).toEqual(["zip"]);
     expect(downloadState("windows")).toBe("available");
