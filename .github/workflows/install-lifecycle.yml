@@ -45,21 +45,22 @@ jobs:
           bash install/bootstrap/install.sh
       - name: Check the installed application
         run: |
-          test -d "$HOME/Applications/Adept UI.app"
-          test -x "$HOME/Applications/Adept UI.app/Contents/MacOS/Adept UI"
-          lipo -info "$HOME/Applications/Adept UI.app/Contents/MacOS/Adept UI" | grep arm64
-          "$HOME/.local/bin/adeptui" --version
-          "$HOME/.local/bin/adeptui" doctor
-          "$HOME/.local/bin/adeptui" --help
+          app="$HOME/.adept-ui/app/Adept UI.app"
+          test -d "$app"
+          test -x "$app/Contents/MacOS/Adept UI"
+          test -x "$app/Contents/MacOS/Adept UI.bin"
+          lipo -info "$app/Contents/MacOS/Adept UI.bin" | grep arm64
+          python3 -c 'import json; from pathlib import Path; record=json.loads((Path.home()/".adept-ui"/"registry.json").read_text()); assert record["installedVersion"]=="1.1.5"'
       - name: Record Gatekeeper and launch
         run: |
+          app="$HOME/.adept-ui/app/Adept UI.app"
           {
             echo "## codesign"
-            codesign -dv --verbose=4 "$HOME/Applications/Adept UI.app" 2>&1 || true
+            codesign -dv --verbose=4 "$app" 2>&1 || true
             echo "## gatekeeper"
-            spctl --assess --type execute --verbose=4 "$HOME/Applications/Adept UI.app" 2>&1 || true
+            spctl --assess --type execute --verbose=4 "$app" 2>&1 || true
             echo "## open"
-            open "$HOME/Applications/Adept UI.app" 2>&1 || true
+            open "$app" 2>&1 || true
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Uninstall and keep a personal project
         run: |
@@ -74,7 +75,6 @@ jobs:
             kill -9 $pids 2>/dev/null || true
             sleep 1
           done
-          ADEPT_CONFIRM_UNINSTALL=1 "$HOME/.local/bin/adeptui" uninstall
-          test ! -d "$HOME/Applications/Adept UI.app"
-          test ! -f "$HOME/.local/bin/adeptui"
+          ADEPT_UNINSTALL=1 bash install/bootstrap/install.sh
+          test ! -d "$HOME/.adept-ui"
           test "$(cat "$HOME/Library/Application Support/Adept UI/projects/keep.txt")" = "keep"
