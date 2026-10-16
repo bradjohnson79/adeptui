@@ -673,11 +673,18 @@ class Lifecycle:
         return Result(True, "UPDATED", f"Adept UI is now {registry['installedVersion']}.", {"updater": str(updater), "previous": previous_version})
 
     def external_updater_dir(self) -> Path:
-        """Copy the lifecycle manager outside the application directory before replacement."""
+        """Keep the updater outside the application directory before replacement.
+
+        A frozen launcher is already that updater. It does not have a source
+        tree to copy, and a missing tree must not abort the archive update.
+        """
         destination = self.layout.root / "updater" / "adept_lifecycle"
+        updater = destination.parent
+        updater.mkdir(parents=True, exist_ok=True)
+        if not PACKAGE_ROOT.is_dir():
+            return updater
         if destination.exists():
             shutil.rmtree(destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(PACKAGE_ROOT, destination)
         if self.layout.app_dir.resolve() in destination.resolve().parents:
             raise OSError("The updater must not live inside the application it replaces.")

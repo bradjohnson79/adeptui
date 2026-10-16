@@ -59,6 +59,18 @@ def lifecycle(tmp: Path, system: SystemProfile, **hooks) -> Lifecycle:
     return Lifecycle(Layout(tmp), system, KEY, Hooks(**hooks))
 
 
+def test_archive_update_does_not_need_a_source_tree(tmp_path: Path, monkeypatch):
+    import adept_lifecycle.manager as manager
+
+    monkeypatch.setattr(manager, "PACKAGE_ROOT", tmp_path / "missing-source")
+    payload = tmp_path / "app.zip"
+    make_zip(payload)
+    app = lifecycle(tmp_path / "root", profile("windows", "x64"))
+    result = app.apply_with_recovery(payload, {"version": "1.1.5", "kind": "zip"}, "1.1.4")
+    assert result.ok
+    assert (tmp_path / "root" / "app" / "Adept UI.exe").read_bytes() == b"adept"
+
+
 def test_linux_families_and_unsupported_mac():
     assert linux_family_from_os_release("ID=fedora") == "fedora"
     assert linux_family_from_os_release("ID=ubuntu") == "debian"
