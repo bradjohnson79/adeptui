@@ -38,6 +38,7 @@ const config = {
   },
   files: [
     "electron/main.cjs",
+    "electron/linux-sandbox.cjs",
     "electron/desktopShortcut.cjs",
     "electron/endpoint.cjs",
     "electron/preload.cjs",
