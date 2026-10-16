@@ -80,6 +80,18 @@ def test_invalid_corrupt_missing_and_wrong_key_fail_closed():
         verify_catalog_rsa(garbage, key)
 
 
+def test_previous_release_signature_does_not_verify_this_catalog():
+    previous = subprocess.check_output(
+        ["git", "show", "78a32164:install/catalog/current.sig"],
+        cwd=ROOT,
+        text=True,
+    ).strip()
+    key = pinned_public_key()
+    assert key is not None
+    assert previous != _sig()
+    assert not verify_sha256(_raw(), "rsa-sha256:" + previous, key)
+
+
 def test_stale_signature_does_not_cover_a_changed_catalog():
     raw = _raw()
     body = json.loads(raw.decode("utf-8"))

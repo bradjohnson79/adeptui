@@ -231,6 +231,12 @@ def test_failure_injection(tmp_path: Path):
 
     interrupted = lifecycle(home, system, download=boom).update(offered, newer, apply=True)
     assert interrupted.code == "DOWNLOAD_INTERRUPTED"
+    mismatched = tmp_path / "mismatched.zip"
+    expected = make_zip(mismatched)
+    mismatched.write_bytes(b"not-the-approved-bytes")
+    rejected = lifecycle(tmp_path / "fresh-home", system).install(catalog("1.2.1", digest=expected), mismatched)
+    assert rejected.code == "CHECKSUM_MISMATCH"
+    assert not mismatched.exists()
 
 
 def test_doctor_repair_and_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
