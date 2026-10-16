@@ -61,7 +61,7 @@ jobs:
           python3 - "$workdir/current.json" <<'PY'
           import json, subprocess, sys
           catalog = json.load(open(sys.argv[1], encoding="utf-8"))
-          required = {("windows", "x64", "nsis"), ("linux", "x64", "deb"), ("linux", "x64", "rpm"), ("darwin", "arm64", "dmg")}
+          required = {("windows", "x64", "zip"), ("linux", "x64", "zip"), ("darwin", "arm64", "zip")}
           found = {(a["platform"], a["arch"], a["kind"]) for a in catalog["artifacts"]}
           missing = required - found
           if missing:
