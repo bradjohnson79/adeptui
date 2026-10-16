@@ -19,6 +19,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from adept_lifecycle.cli import _download_release, _fetch_official_catalog
@@ -253,12 +254,61 @@ def _launch_app(lifecycle: Lifecycle, executable: Path) -> None:
     subprocess.Popen(electron_command(executable), **kwargs)
 
 
+def _update_only() -> bool:
+    return os.environ.get("ADEPT_UPDATE_ONLY") == "1"
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_previous_process() -> None:
+    """The desktop selector quits Studio before this launcher replaces its files."""
+    raw = os.environ.get("ADEPT_WAIT_PID", "").strip()
+    if not raw:
+        return
+    try:
+        pid = int(raw)
+    except ValueError:
+        return
+    deadline = time.time() + 30
+    while time.time() < deadline and _pid_alive(pid):
+        time.sleep(0.2)
+
+
+def _report_update(lifecycle: Lifecycle, code: str, version: str, message: str) -> None:
+    if _update_only():
+        recorded = read_registry(lifecycle.layout.registry_path) or {}
+        from adept_lifecycle.release import release_revision
+
+        revision = release_revision(recorded.get("installedRevision"))
+        print(f"ADEPT_UPDATE_RESULT code={code} version={version} revision={revision}")
+    print(message)
+
+
 def _continue(lifecycle: Lifecycle, executable: Path, code: str, version: str, message: str) -> int:
     status = {"action": "continue", "code": code, "version": version}
     atomic_write(lifecycle.layout.root / "startup-update.json", status)
-    _launch_app(lifecycle, executable)
+    if not _update_only():
+        _launch_app(lifecycle, executable)
     lifecycle.log(f"launch {code}")
-    print(message)
+    _report_update(lifecycle, code, version, message)
     return 0
 
 
@@ -278,6 +328,7 @@ def run(argv: list[str] | None = None) -> int:
     if args.apply_update:
         return _worker_main(args)
 
+    _wait_for_previous_process()
     _apply_brand_env()
     root = args.root or _default_root()
     layout = Layout(root)
@@ -389,6 +440,10 @@ def run(argv: list[str] | None = None) -> int:
             lifecycle._obtain_payload(artifact, payload, version, target)
             lifecycle._emit(phase="checksum", installedVersion=version, targetVersion=target, operation="Checking the download", indeterminate=True)
             verify_file(payload, str(artifact["sha256"]))
+            if _update_only():
+                print(f"ADEPT_UPDATE_RESULT code=UPDATE_READY version={target} revision={artifact['revision']}")
+                print("Adept UI will install the update after it restarts.")
+                return 0
         except (ReleaseError, OSError) as exc:
             code = getattr(exc, "code", "INSTALL_INTERRUPTED")
             message = getattr(exc, "message", str(exc))
@@ -437,9 +492,10 @@ def run(argv: list[str] | None = None) -> int:
             },
         )
         new_executable = lifecycle._executable() or executable
-        _launch_app(lifecycle, new_executable)
+        if not _update_only():
+            _launch_app(lifecycle, new_executable)
         lifecycle.log(f"launch UPDATED {version} -> {target}")
-        print(f"Adept UI is now {target}.")
+        _report_update(lifecycle, "UPDATED", target, f"Adept UI is now {target}.")
         return 0
     finally:
         lifecycle._release_update_lock()

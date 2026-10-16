@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const require = createRequire(import.meta.url);
-const { selectDesktopArtifact, loadFixtureCatalog } = require("./bridge.cjs");
+const { selectDesktopArtifact, loadFixtureCatalog, parseUpdateResult, applySharedUpdate } = require("./bridge.cjs");
 const { classifyNavigation, ALLOWED_CHANNELS } = require("../security.cjs");
 const { parseListeningPids } = require("../platform/process.cjs");
 
@@ -63,6 +63,32 @@ test("a Windows artifact is never selected for macOS or Linux", () => {
   });
   assert.equal(wrongArch.selected, null);
   assert.equal(wrongArch.code, "NO_UPDATE");
+});
+
+test("the desktop selector confirms the launcher result and does not trust a renderer catalog", async () => {
+  const parsed = parseUpdateResult("ADEPT_UPDATE_RESULT code=UPDATE_READY version=1.1.5 revision=2\n");
+  assert.deepEqual(parsed, { code: "UPDATE_READY", version: "1.1.5", revision: 2 });
+  const home = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixture-home");
+  const launcher = path.join(home, "Adept Launcher.exe");
+  const fs = require("node:fs");
+  fs.mkdirSync(path.join(home, ".adept-ui"), { recursive: true });
+  fs.writeFileSync(launcher, "");
+  fs.writeFileSync(path.join(home, ".adept-ui", "registry.json"), JSON.stringify({ installedRevision: 2 }));
+  let spawned = null;
+  const result = await applySharedUpdate({
+    home,
+    launcher,
+    spawnUpdate: async (command, env) => {
+      spawned = { command, updateOnly: env.ADEPT_UPDATE_ONLY };
+      return { status: 0, output: "ADEPT_UPDATE_RESULT code=UPDATE_READY version=1.1.5 revision=2\n" };
+    },
+  });
+  assert.equal(spawned.command, launcher);
+  assert.equal(spawned.updateOnly, "1");
+  assert.equal(result.ok, true);
+  assert.equal(result.code, "UPDATE_READY");
+  assert.equal(result.revision, 2);
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 test("navigation keeps loopback in the app and sends public http outside", () => {

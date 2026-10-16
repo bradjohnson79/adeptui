@@ -86,6 +86,11 @@ test -f "$version_file"
 cp "$version_file" "$evidence/version.json"
 grep -q '"version": "1.1.5"' "$version_file"
 echo "INSTALLED_VERSION: 1.1.5" | tee -a "$evidence/result.txt"
+if [ -e "$HOME/.adept-ui/app/chrome-sandbox" ]; then
+  stat "$HOME/.adept-ui/app/chrome-sandbox" | tee "$evidence/chrome-sandbox.txt"
+else
+  echo "chrome-sandbox missing" | tee "$evidence/chrome-sandbox.txt"
+fi
 
 keep="$HOME/.config/Adept UI/project-keep.txt"
 mkdir -p "$HOME/.config/Adept UI"
@@ -161,6 +166,7 @@ launch_and_prove() {
   done
   if [ "$window_ok" != "1" ]; then
     echo "STUDIO_WINDOW_$label: FAIL" | tee -a "$evidence/result.txt"
+    import -window root "$evidence/studio-$label.png" >/dev/null 2>&1 || true
     xwininfo -root -tree >"$evidence/xwin-$label-final.txt" 2>&1 || true
     tail -n 40 "$evidence/xwin-$label-final.txt" || true
     tail -n 80 "$evidence/launcher-$label.log" || true

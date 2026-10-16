@@ -1,7 +1,9 @@
 "use strict";
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const { resolveStudioApiEndpoint } = require("../endpoint.cjs");
 
 function parseVersion(value) {
@@ -70,6 +72,77 @@ function selectDesktopArtifact(catalog, request) {
   };
 }
 
+function launcherExecutable(home = os.homedir()) {
+  const root = path.join(home, ".adept-ui");
+  if (process.platform === "win32") return path.join(root, "bin", "Adept Launcher.exe");
+  if (process.platform === "darwin") {
+    return path.join(root, "app", "Adept UI.app", "Contents", "MacOS", "Adept UI");
+  }
+  return path.join(root, "bin", "Adept UI");
+}
+
+function parseUpdateResult(text) {
+  const match = /ADEPT_UPDATE_RESULT code=(\S+) version=(\S+) revision=(\S+)/.exec(String(text || ""));
+  if (!match) return null;
+  return { code: match[1], version: match[2], revision: Number(match[3]) };
+}
+
+function readInstalledRevision(registryPath) {
+  try {
+    const body = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+    const revision = Number(body.installedRevision);
+    return Number.isFinite(revision) ? revision : 0;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask the Universal Launcher to run the shared updater.
+ * The renderer does not supply a catalog. The launcher checks the signed
+ * catalog, verifies the archive, and applies it with the existing rollback.
+ */
+function applySharedUpdate(options = {}) {
+  const home = options.home || os.homedir();
+  const launcher = options.launcher || launcherExecutable(home);
+  const spawnUpdate = options.spawnUpdate;
+  if (!fs.existsSync(launcher)) {
+    return Promise.resolve({ ok: false, code: "LAUNCHER_MISSING", version: null, revision: null });
+  }
+  const run = spawnUpdate || ((command, env) => new Promise((resolve) => {
+    const child = spawn(command, [], { env, windowsHide: true });
+    let output = "";
+    child.stdout?.on("data", (chunk) => { output += chunk.toString(); });
+    child.stderr?.on("data", (chunk) => { output += chunk.toString(); });
+    child.on("error", () => resolve({ status: 1, output }));
+    child.on("close", (status) => resolve({ status: status ?? 1, output }));
+  }));
+  const env = { ...process.env, ADEPT_UPDATE_ONLY: "1" };
+  return run(launcher, env).then((completed) => {
+    const parsed = parseUpdateResult(completed.output);
+    const registryRevision = readInstalledRevision(path.join(home, ".adept-ui", "registry.json"));
+    if (!parsed) {
+      return { ok: false, code: "UPDATE_UNCONFIRMED", version: null, revision: registryRevision };
+    }
+    if (parsed.code === "UPDATE_READY") {
+      return {
+        ok: completed.status === 0 && Number.isFinite(parsed.revision),
+        code: parsed.code,
+        version: parsed.version,
+        revision: parsed.revision,
+      };
+    }
+    const revision = registryRevision === null ? parsed.revision : registryRevision;
+    const confirmed = parsed.code === "NO_UPDATE" || (parsed.code === "UPDATED" && revision === parsed.revision);
+    return {
+      ok: completed.status === 0 && confirmed,
+      code: parsed.code,
+      version: parsed.version,
+      revision,
+    };
+  });
+}
+
 function readInstalledVersion(versionFile) {
   const body = JSON.parse(fs.readFileSync(versionFile, "utf8"));
   if (!body.version) throw new Error("desktop version missing");
@@ -86,4 +159,7 @@ module.exports = {
   selectDesktopArtifact,
   readInstalledVersion,
   loadFixtureCatalog,
+  launcherExecutable,
+  parseUpdateResult,
+  applySharedUpdate,
 };

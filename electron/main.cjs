@@ -6,13 +6,35 @@ const { app, BrowserWindow, ipcMain, shell, screen } = require("electron");
 const { readDesktopVersion, packagedLayout, pathTouchesDevRepo } = require("./platform/paths.cjs");
 const { buildMenu } = require("./platform/menu.cjs");
 const { classifyNavigation, isHttpUrl } = require("./security.cjs");
-const { selectDesktopArtifact } = require("./update/bridge.cjs");
 const { preparePackagedApi, DESKTOP_API } = require("./runtime.cjs");
 const { collisionMessage } = require("./endpoint.cjs");
 const { portAccepts } = require("./platform/process.cjs");
 const { startRendererServer } = require("./renderer-server.cjs");
+const { rendererSandboxEnabled } = require("./linux-sandbox.cjs");
+const { applySharedUpdate, launcherExecutable } = require("./update/bridge.cjs");
+const { spawn } = require("node:child_process");
 
 const DEV_REPO = path.resolve(__dirname, "..");
+
+function linuxSandboxStat() {
+  if (process.platform !== "linux") return null;
+  try {
+    return fs.statSync(path.join(path.dirname(process.execPath), "chrome-sandbox"));
+  } catch {
+    return null;
+  }
+}
+
+const useRendererSandbox = rendererSandboxEnabled({
+  platform: process.platform,
+  argv: process.argv,
+  env: process.env,
+  sandboxStat: linuxSandboxStat(),
+});
+if (!useRendererSandbox) {
+  app.commandLine.appendSwitch("no-sandbox");
+  console.error("Adept UI is starting without the Linux sandbox helper because it is not usable from this install.");
+}
 
 // Virtual displays have no working GPU. A hidden window waits for ready-to-show,
 // and a dead GPU process never reaches it. Real desktops do not set this.
@@ -125,7 +147,7 @@ function createWindow(startUrl) {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: useRendererSandbox,
       webSecurity: true,
       allowRunningInsecureContent: false,
     },
@@ -267,15 +289,16 @@ function registerIpc() {
     if (choice.action !== "external") return { ok: false };
     return shell.openExternal(choice.url).then(() => ({ ok: true }));
   });
-  ipcMain.handle("adept:selectUpdateArtifact", (_event, catalog) => {
-    if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) {
-      return { ok: false, code: "INVALID_CATALOG", selected: null };
+  ipcMain.handle("adept:selectUpdateArtifact", async () => {
+    const result = await applySharedUpdate();
+    if (result.ok && result.code === "UPDATE_READY") {
+      const env = { ...process.env, ADEPT_WAIT_PID: String(process.pid) };
+      delete env.ADEPT_UPDATE_ONLY;
+      const child = spawn(launcherExecutable(), [], { detached: true, stdio: "ignore", env, windowsHide: true });
+      child.unref();
+      app.quit();
     }
-    return selectDesktopArtifact(catalog, {
-      platform: process.platform,
-      arch: process.arch,
-      installedVersion: identity.version,
-    });
+    return result;
   });
 }
 

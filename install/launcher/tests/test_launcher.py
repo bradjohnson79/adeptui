@@ -343,6 +343,22 @@ def test_newer_release_applies_the_verified_archive(monkeypatch, tmp_path, keys)
     assert keep.read_text(encoding="utf-8") == "keep"
 
 
+def test_desktop_update_uses_the_launcher_without_starting_the_app(monkeypatch, tmp_path, keys, capsys):
+    _, private = keys
+    monkeypatch.setenv("ADEPT_UPDATE_ONLY", "1")
+    install_app(tmp_path, "1.1.5", revision=1)
+    payload = tmp_path / "incoming" / "Adept.UI-1.1.5-terminal.zip"
+    digest = make_payload(payload)
+    catalog = signed_catalog(private, "1.1.5", digest, file_name=payload.name, revision=2)
+    rc, launched = run_launcher(monkeypatch, tmp_path, catalog, payload)
+    assert rc == 0
+    assert launched == []
+    output = capsys.readouterr().out
+    assert "ADEPT_UPDATE_RESULT code=UPDATE_READY version=1.1.5 revision=2" in output
+    assert read_json(tmp_path / "registry.json")["installedRevision"] == 1
+    assert (tmp_path / "app" / EXE_NAME).read_bytes() == b"installed"
+
+
 def test_same_version_revision_updates_through_the_launcher(monkeypatch, tmp_path, keys):
     _, private = keys
     install_app(tmp_path, "1.1.5")
