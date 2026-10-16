@@ -183,6 +183,49 @@ jobs:
           test -x "$app/Contents/MacOS/Adept UI"
           test "$(cat "$HOME/Library/Application Support/Adept UI/projects/keep.txt")" = "keep"
           echo "REINSTALL_AND_USER_DATA: PASS"
+          python3 - <<'PY'
+import json
+from pathlib import Path
+root = Path.home() / ".adept-ui"
+(root / "registry.json").write_text(
+    json.dumps({"installedVersion": "1.1.4", "channel": "beta", "health": "ok", "updateFailures": {}}),
+    encoding="utf-8",
+)
+status = root / "startup-update.json"
+if status.exists():
+    status.unlink()
+PY
+          "$app/Contents/MacOS/Adept UI" >/tmp/adept-update.log 2>&1 &
+          update_pid="$!"
+          i=0
+          while [ "$i" -lt 120 ]; do
+            if [ -f "$HOME/.adept-ui/startup-update.json" ]; then
+              break
+            fi
+            sleep 2
+            i=$((i + 1))
+          done
+          kill "$update_pid" >/dev/null 2>&1 || true
+          if [ ! -f "$HOME/.adept-ui/startup-update.json" ]; then
+            echo "UPDATE: EXTERNAL_BLOCKER"
+            echo "The macOS launcher did not write an update result. Gatekeeper is not bypassed."
+            exit 0
+          fi
+          python3 - <<'PY'
+import json
+from pathlib import Path
+root = Path.home() / ".adept-ui"
+status = json.loads((root / "startup-update.json").read_text(encoding="utf-8"))
+registry = json.loads((root / "registry.json").read_text(encoding="utf-8"))
+if status.get("code") != "UPDATED":
+    raise SystemExit(f"UPDATE: FAIL {status}")
+if registry.get("installedVersion") != "1.1.5":
+    raise SystemExit(f"UPDATE_VERSION: FAIL {registry.get('installedVersion')}")
+if not (root / "previous-app").exists():
+    raise SystemExit("PREVIOUS_VERSION: FAIL")
+print("UPDATE: PASS")
+print("PREVIOUS_VERSION_PRESERVED: PASS")
+PY
 
   install-windows-production:
     name: Public Windows install
@@ -243,3 +286,23 @@ jobs:
           Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\.adept-ui\*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           if (-not $title) { throw "STUDIO_WINDOW: FAIL" }
           Write-Host "STUDIO_WINDOW: PASS $title"
+          $registryPath = Join-Path $root "registry.json"
+          Set-Content -Path $registryPath -Value '{"installedVersion":"1.1.4","channel":"beta","health":"ok","updateFailures":{}}' -Encoding ascii
+          Remove-Item (Join-Path $root "startup-update.json") -ErrorAction SilentlyContinue
+          Start-Process -FilePath $launcher -WindowStyle Normal | Out-Null
+          $updated = $false
+          foreach ($i in 1..120) {
+            Start-Sleep -Seconds 2
+            $statusPath = Join-Path $root "startup-update.json"
+            if (Test-Path $statusPath) {
+              $status = Get-Content $statusPath -Raw | ConvertFrom-Json
+              if ($status.code -eq "UPDATED") { $updated = $true; break }
+            }
+          }
+          Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "*\.adept-ui\*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          if (-not $updated) { throw "UPDATE: FAIL" }
+          $registry = Get-Content $registryPath -Raw | ConvertFrom-Json
+          if ($registry.installedVersion -ne "1.1.5") { throw "UPDATE_VERSION: FAIL $($registry.installedVersion)" }
+          if (-not (Test-Path (Join-Path $root "previous-app"))) { throw "PREVIOUS_VERSION: FAIL" }
+          Write-Host "UPDATE: PASS"
+          Write-Host "PREVIOUS_VERSION_PRESERVED: PASS"

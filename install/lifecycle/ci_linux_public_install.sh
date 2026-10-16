@@ -35,3 +35,42 @@ test -x "$launcher"
 test -x "$electron"
 test "$(cat "$keep")" = "keep"
 echo "REINSTALL_AND_USER_DATA: PASS"
+
+python3 - <<'PY'
+import json
+from pathlib import Path
+root = Path.home() / ".adept-ui"
+(root / "registry.json").write_text(
+    json.dumps({"installedVersion": "1.1.4", "channel": "beta", "health": "ok", "updateFailures": {}}),
+    encoding="utf-8",
+)
+status = root / "startup-update.json"
+if status.exists():
+    status.unlink()
+PY
+"$HOME/.adept-ui/bin/Adept UI" >/tmp/adept-update.log 2>&1 &
+update_pid="$!"
+i=0
+while [ "$i" -lt 120 ]; do
+  if [ -f "$HOME/.adept-ui/startup-update.json" ]; then
+    break
+  fi
+  sleep 2
+  i=$((i + 1))
+done
+kill "$update_pid" >/dev/null 2>&1 || true
+python3 - <<'PY'
+import json
+from pathlib import Path
+root = Path.home() / ".adept-ui"
+status = json.loads((root / "startup-update.json").read_text(encoding="utf-8"))
+registry = json.loads((root / "registry.json").read_text(encoding="utf-8"))
+if status.get("code") != "UPDATED":
+    raise SystemExit(f"UPDATE: FAIL {status}")
+if registry.get("installedVersion") != "1.1.5":
+    raise SystemExit(f"UPDATE_VERSION: FAIL {registry.get('installedVersion')}")
+if not (root / "previous-app").exists():
+    raise SystemExit("PREVIOUS_VERSION: FAIL")
+print("UPDATE: PASS")
+print("PREVIOUS_VERSION_PRESERVED: PASS")
+PY
