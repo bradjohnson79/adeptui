@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import __version__
 from .detect import SystemProfile, live_profile
-from .manager import Hooks, Layout, Lifecycle, package_install_plan
+from .manager import Hooks, Layout, Lifecycle
 from .registry import read_registry
 
 
@@ -116,12 +116,9 @@ def _fetch_official_catalog() -> dict | None:
 
 
 def _install_native(payload: Path, artifact: dict) -> None:
-    import subprocess
+    from .manager import install_native_package
 
-    plan = package_install_plan(str(artifact.get("kind") or ""), payload)
-    if not plan or plan[0] == "hdiutil":
-        raise OSError("This package is not replaced by a second installer. Gatekeeper is left unchanged.")
-    subprocess.run(plan, check=True)
+    install_native_package(payload, str(artifact.get("kind") or ""))
 
 
 def _launch_hooks() -> Hooks:

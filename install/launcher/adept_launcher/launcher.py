@@ -134,6 +134,7 @@ def _run_worker(layout: Layout, catalog: dict, artifact: dict, payload: Path, pr
     worker re-verifies defensively before mutating any files.
     """
     staged = _stage_worker(layout)
+    source = _frozen_exe()
     args = [
         "--apply-update",
         "--root",
@@ -144,6 +145,12 @@ def _run_worker(layout: Layout, catalog: dict, artifact: dict, payload: Path, pr
         str(artifact.get("version") or ""),
         "--previous",
         previous,
+        "--kind",
+        str(artifact.get("kind") or "zip"),
+        "--sha256",
+        str(artifact.get("sha256") or ""),
+        "--install-exe",
+        str(source or ""),
     ]
     if staged is not None:
         argv = [str(staged), *args]
@@ -152,7 +159,17 @@ def _run_worker(layout: Layout, catalog: dict, artifact: dict, payload: Path, pr
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         completed = subprocess.run(argv, **kwargs)
         return completed.returncode
-    return _worker_main(argparse.Namespace(root=layout.root, payload=payload, target=str(artifact.get("version") or ""), previous=previous))
+    return _worker_main(
+        argparse.Namespace(
+            root=layout.root,
+            payload=payload,
+            target=str(artifact.get("version") or ""),
+            previous=previous,
+            kind=str(artifact.get("kind") or "zip"),
+            sha256=str(artifact.get("sha256") or ""),
+            install_exe=str(source or ""),
+        )
+    )
 
 
 def _worker_main(args: argparse.Namespace) -> int:
@@ -169,10 +186,26 @@ def _worker_main(args: argparse.Namespace) -> int:
     lifecycle = Lifecycle(layout, profile, None, Hooks())
     payload = Path(args.payload)
     registry = read_registry(layout.registry_path) or {}
-    artifact = {"version": args.target, "fileName": payload.name}
+    kind = str(getattr(args, "kind", "") or "zip")
+    artifact = {"version": args.target, "fileName": payload.name, "kind": kind, "sha256": getattr(args, "sha256", "")}
     try:
+        expected = str(getattr(args, "sha256", "") or "")
+        if expected:
+            from adept_lifecycle.release import verify_file
+
+            verify_file(payload, expected)
+        if kind in {"nsis", "deb", "rpm", "dmg"}:
+            from adept_lifecycle.manager import install_native_package
+
+            install_exe = str(getattr(args, "install_exe", "") or "")
+            install_native_package(payload, kind, Path(install_exe) if install_exe else None)
+            registry["installedVersion"] = args.target
+            registry["health"] = "updated"
+            registry["recovery"] = {"lastGoodVersion": args.previous}
+            lifecycle._save(registry)
+            return 0
         result = lifecycle.apply_with_recovery(payload, artifact, args.previous)
-    except OSError as exc:
+    except (OSError, ReleaseError) as exc:
         lifecycle._emit(
             phase="error",
             installedVersion=args.previous,
@@ -219,6 +252,9 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--payload", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--target", default="", help=argparse.SUPPRESS)
     parser.add_argument("--previous", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--kind", default="zip", help=argparse.SUPPRESS)
+    parser.add_argument("--sha256", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--install-exe", default="", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     if args.apply_update:

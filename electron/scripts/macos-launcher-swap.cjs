@@ -17,6 +17,7 @@
  * Support/Adept UI/updater) so the running process is never overwritten.
  */
 
+const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -72,4 +73,25 @@ module.exports = async function macosLauncherSwap(context) {
   );
 
   console.log(`macOS launcher swap: ${productName} -> ${ELECTRON_RENAMED}, launcher installed as ${productName}`);
+  resignMacBundle(appPath);
 };
+
+function resignMacBundle(appPath) {
+  // The launcher is copied in after Electron's own signature. Sign the bundle
+  // again so the main executable and the bundle resources agree. This is an
+  // ad-hoc signature. It does not notarize the app or disable Gatekeeper.
+  const macosDir = path.join(appPath, "Contents", "MacOS");
+  for (const name of ["Adept UI", "Adept UI.bin"]) {
+    const binary = path.join(macosDir, name);
+    if (!fs.existsSync(binary)) continue;
+    try {
+      execFileSync("codesign", ["--remove-signature", binary], { stdio: "inherit" });
+    } catch {
+      /* an unsigned binary is already in the state we need */
+    }
+  }
+  execFileSync("codesign", ["--force", "--deep", "--sign", "-", appPath], { stdio: "inherit" });
+  execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath], { stdio: "inherit" });
+}
+
+module.exports.resignMacBundle = resignMacBundle;

@@ -38,6 +38,76 @@ def package_install_plan(kind: str, payload: Path) -> list[str] | None:
     return None
 
 
+def _with_admin(command: list[str]) -> list[str]:
+    """Run a package command as root when this process is not already root."""
+    if os.name == "nt":
+        return command
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is not None and geteuid() == 0:
+        return command
+    return ["sudo", "-n", *command]
+
+
+def _app_bundle(app_path: Path | None) -> Path:
+    if app_path is not None:
+        resolved = app_path.resolve()
+        candidates = [resolved, *resolved.parents]
+        for candidate in candidates:
+            if candidate.suffix == ".app":
+                return candidate
+    return Path.home() / "Applications" / "Adept UI.app"
+
+
+def install_native_package(payload: Path, kind: str, app_path: Path | None = None) -> None:
+    """Install a signed catalog artifact with the platform installer.
+
+    User data lives outside the install directory. This does not remove
+    quarantine or change Gatekeeper.
+    """
+    if kind == "dmg":
+        _install_dmg(payload, _app_bundle(app_path))
+        return
+    plan = package_install_plan(kind, payload)
+    if not plan:
+        raise OSError(f"The {kind} package has no installer.")
+    command = _with_admin(plan) if kind in {"deb", "rpm"} else plan
+    completed = subprocess.run(command, check=False)
+    if completed.returncode != 0:
+        raise OSError(f"The {kind} installer exited {completed.returncode}.")
+
+
+def _install_dmg(payload: Path, destination: Path) -> None:
+    import tempfile
+
+    mount = Path(tempfile.mkdtemp(prefix="adept-dmg-"))
+    attached = False
+    try:
+        attach = subprocess.run(
+            ["hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(payload)],
+            check=False,
+        )
+        if attach.returncode != 0:
+            raise OSError(f"The disk image could not be opened ({attach.returncode}).")
+        attached = True
+        found = next(iter(mount.glob("*.app")), None)
+        if found is None:
+            nested = list(mount.glob("*/*.app"))
+            found = nested[0] if nested else None
+        if found is None:
+            raise OSError("The disk image does not contain Adept UI.")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            shutil.rmtree(destination)
+        copied = subprocess.run(["ditto", str(found), str(destination)], check=False)
+        if copied.returncode != 0:
+            raise OSError(f"The application could not be copied ({copied.returncode}).")
+    finally:
+        if attached:
+            subprocess.run(["hdiutil", "detach", str(mount)], check=False)
+        if mount.exists():
+            shutil.rmtree(mount, ignore_errors=True)
+
+
 @dataclass
 class Hooks:
     disk_free: Callable[[Path], int] | None = None

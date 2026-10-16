@@ -51,7 +51,7 @@ def make_payload(path: Path, exe_name: str = EXE_NAME) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def signed_catalog(private, version: str, digest: str, file_name: str = "AdeptUI.zip") -> dict:
+def signed_catalog(private, version: str, digest: str, file_name: str = "AdeptUI.zip", kind: str = "zip") -> dict:
     body = {
         "approved": True,
         "channel": "beta",
@@ -62,7 +62,7 @@ def signed_catalog(private, version: str, digest: str, file_name: str = "AdeptUI
                 "version": version,
                 "sha256": digest,
                 "bytes": 100,
-                "kind": "zip",
+                "kind": kind,
                 "fileName": file_name,
                 "distributions": ["fedora", "debian"] if OS_NAME == "linux" else None,
             }
@@ -315,6 +315,35 @@ def test_first_launch_records_packaged_version_before_catalog_check(monkeypatch,
     assert registry["installedVersion"] == "1.1.4"
     status = read_json(tmp_path / "startup-update.json")
     assert status["code"] == "NO_UPDATE"
+
+
+def test_newer_release_uses_the_platform_installer(monkeypatch, tmp_path, keys):
+    _, private = keys
+    install_app(tmp_path, "1.1.5")
+    keep = tmp_path / "user-data" / "project.txt"
+    keep.parent.mkdir(parents=True)
+    keep.write_text("keep", encoding="utf-8")
+    payload = tmp_path / "incoming" / "Adept.UI-Setup.exe"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"installer-bytes")
+    digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+    kind = {"windows": "nsis", "darwin": "dmg"}.get(OS_NAME, "deb")
+    catalog = signed_catalog(private, "1.1.6", digest, file_name=payload.name, kind=kind)
+    calls: list[tuple[str, str]] = []
+
+    def fake_install(package: Path, package_kind: str, app_path: Path | None = None) -> None:
+        calls.append((package_kind, package.name))
+        assert package.read_bytes() == b"installer-bytes"
+
+    monkeypatch.setattr("adept_lifecycle.manager.install_native_package", fake_install)
+    rc, launched = run_launcher(monkeypatch, tmp_path, catalog, payload)
+    assert rc == 0
+    assert calls == [(kind, payload.name)]
+    assert len(launched) == 1
+    assert read_json(tmp_path / "registry.json")["installedVersion"] == "1.1.6"
+    assert read_json(tmp_path / "startup-update.json")["code"] == "UPDATED"
+    assert keep.read_text(encoding="utf-8") == "keep"
+    assert not (tmp_path / "app" / payload.name).exists()
 
 
 def test_launcher_forwards_local_electron_args(monkeypatch):

@@ -66,7 +66,7 @@ test("AppStream names Adept UI and ANOINT Inc.", () => {
   assert.match(metainfo, /<release version="1\.1\.2"/);
   assert.match(metainfo, /<release version="1\.1\.1"/);
   assert.match(metainfo, /<release version="1\.1\.5"/);
-  assert.equal(identity.version, "1.1.5");
+  assert.equal(identity.version, "1.1.6");
   assert.equal(config.linux.desktop.entry.Icon, "app.adeptui.desktop");
   for (const size of [48, 64, 128, 256, 512]) {
     const source = path.join(root, "icons", "png", `${size}x${size}.png`);

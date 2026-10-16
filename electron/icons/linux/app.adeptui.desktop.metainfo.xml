@@ -43,6 +43,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.1.6" date="2026-10-15">
+      <description>
+        <p>The Universal Launcher installs a newer signed release with the platform installer and keeps personal projects.</p>
+      </description>
+    </release>
     <release version="1.1.5" date="2026-10-15">
       <description>
         <p>The first launch records the installed version, so Adept UI checks the signed release catalog before opening.</p>
