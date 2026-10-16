@@ -59,9 +59,18 @@ const config = {
       ? [{ from: "electron/build/studio-api", to: "studio-api" }]
       : []),
     ...(fs.existsSync(pyDir) ? [{ from: pyDir, to: "python" }] : []),
-    // Ship the launcher beside the Electron binary so shortcuts/entry points can
-    // invoke it as the pre-boot update authority.
-    ...(fs.existsSync(launcherBinary) ? [{ from: launcherBinary, to: launcherName }] : []),
+    // macOS and Linux install the launcher via afterPack. Windows must not use
+    // extraResources: that hides Adept Launcher.exe under resources\, where the
+    // NSIS shortcut retarget cannot see it and the launcher cannot find the
+    // sibling Adept UI.exe.
+    ...(process.platform !== "win32" && fs.existsSync(launcherBinary)
+      ? [{ from: launcherBinary, to: launcherName }]
+      : []),
+  ],
+  extraFiles: [
+    ...(process.platform === "win32" && fs.existsSync(launcherBinary)
+      ? [{ from: launcherBinary, to: launcherName }]
+      : []),
   ],
   asar: true,
   npmRebuild: false,

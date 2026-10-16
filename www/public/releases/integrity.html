@@ -45,7 +45,7 @@
       document.getElementById("reason").textContent = reason;
       const rows = integrity && integrity.checks ? Object.entries(integrity.checks) : [];
       document.getElementById("checks").innerHTML = rows.map(([name, value]) => {
-        const shown = historical ? "STALE" : value;
+        const shown = historical ? value + " (not current)" : value;
         return "<tr><td>" + name + "</td><td>" + shown + "</td></tr>";
       }).join("");
       const meta = [];
