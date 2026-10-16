@@ -21,7 +21,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from adept_lifecycle.cli import _fetch_official_catalog
+from adept_lifecycle.cli import _download_release, _fetch_official_catalog
 from adept_lifecycle.detect import live_profile
 from adept_lifecycle.manager import FAILURE_LIMIT, Hooks, Layout, Lifecycle
 from adept_lifecycle.registry import atomic_write, read_registry
@@ -85,8 +85,8 @@ def _packaged_version(executable: Path) -> str | None:
 
 
 def _build_hooks() -> Hooks:
-    """Launch hooks: official signed catalog, no second package installer."""
-    return Hooks(fetch_catalog=_fetch_official_catalog)
+    """Launch hooks: signed catalog and the published release file."""
+    return Hooks(fetch_catalog=_fetch_official_catalog, download=_download_release)
 
 
 def _apply_brand_env() -> None:

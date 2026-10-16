@@ -346,6 +346,36 @@ def test_newer_release_uses_the_platform_installer(monkeypatch, tmp_path, keys):
     assert not (tmp_path / "app" / payload.name).exists()
 
 
+def test_launcher_downloads_only_published_releases(tmp_path, monkeypatch):
+    from adept_lifecycle.cli import _download_release
+
+    with pytest.raises(OSError):
+        _download_release("https://example.com/Adept.UI.exe", tmp_path / "bad.exe")
+
+    class Response:
+        def __enter__(self):
+            self.done = False
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, _size):
+            if self.done:
+                return b""
+            self.done = True
+            return b"installer"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response())
+    dest = tmp_path / "Adept.UI.exe"
+    _download_release(
+        "https://github.com/bradjohnson79/adeptui/releases/download/v1.1.7/Adept.UI.exe",
+        dest,
+    )
+    assert dest.read_bytes() == b"installer"
+    assert launcher._build_hooks().download is _download_release
+
+
 def test_launcher_forwards_local_electron_args(monkeypatch):
     monkeypatch.setenv("ADEPT_ELECTRON_ARGS", "--user-data-dir=C:\\adept-isolated")
     assert launcher.electron_command(Path("Adept UI.exe")) == [

@@ -32,7 +32,7 @@ def package_install_plan(kind: str, payload: Path) -> list[str] | None:
     if kind == "deb":
         return ["dpkg", "-i", str(payload)]
     if kind == "rpm":
-        return ["rpm", "-Uvh", str(payload)]
+        return ["rpm", "-Uvh", "--replacepkgs", str(payload)]
     if kind == "dmg":
         return ["hdiutil", "attach", "-nobrowse", "-readonly", str(payload)]
     return None
@@ -71,9 +71,11 @@ def install_native_package(payload: Path, kind: str, app_path: Path | None = Non
     if not plan:
         raise OSError(f"The {kind} package has no installer.")
     command = _with_admin(plan) if kind in {"deb", "rpm"} else plan
-    completed = subprocess.run(command, check=False)
+    completed = subprocess.run(command, check=False, capture_output=True, text=True)
     if completed.returncode != 0:
-        raise OSError(f"The {kind} installer exited {completed.returncode}.")
+        detail = (completed.stderr or completed.stdout or "").strip().splitlines()
+        tail = detail[-1] if detail else ""
+        raise OSError(f"The {kind} installer exited {completed.returncode}. {tail}".strip())
 
 
 def _install_dmg(payload: Path, destination: Path) -> None:

@@ -108,6 +108,29 @@ def _release_ssl_context():
     return context
 
 
+def _download_release(url: str, dest: Path) -> None:
+    """Save a published release artifact. The catalog was already signature-checked."""
+    import urllib.request
+
+    if not url.startswith("https://github.com/bradjohnson79/adeptui/releases/download/v"):
+        raise OSError("The update address is not a published Adept UI release.")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_name(dest.name + ".partial")
+    request = urllib.request.Request(url, headers={"User-Agent": "AdeptUI-Launcher"})
+    try:
+        with urllib.request.urlopen(request, timeout=120, context=_release_ssl_context()) as response, partial.open("wb") as handle:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                handle.write(chunk)
+        partial.replace(dest)
+    except OSError:
+        if partial.exists():
+            partial.unlink()
+        raise
+
+
 def _fetch_official_catalog() -> dict | None:
     import urllib.request
 
@@ -141,7 +164,7 @@ def _install_native(payload: Path, artifact: dict) -> None:
 
 
 def _launch_hooks() -> Hooks:
-    return Hooks(fetch_catalog=_fetch_official_catalog, show_updater=True, install_package=_install_native)
+    return Hooks(fetch_catalog=_fetch_official_catalog, download=_download_release, show_updater=True, install_package=_install_native)
 
 
 def _confirm(prompt: str, *, default_no: bool) -> bool:

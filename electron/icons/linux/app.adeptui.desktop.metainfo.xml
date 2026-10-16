@@ -43,6 +43,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.1.7" date="2026-10-16">
+      <description>
+        <p>The Universal Launcher downloads the signed release and installs it with the platform installer.</p>
+      </description>
+    </release>
     <release version="1.1.6" date="2026-10-15">
       <description>
         <p>The Universal Launcher installs a newer signed release with the platform installer and keeps personal projects.</p>
