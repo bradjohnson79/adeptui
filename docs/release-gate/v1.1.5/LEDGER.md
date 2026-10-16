@@ -74,9 +74,9 @@ Build commit for the archives: `0f53d5fc`. Runs:
 - Windows: https://github.com/bradjohnson79/adeptui/actions/runs/38867952750
 - macOS: https://github.com/bradjohnson79/adeptui/actions/runs/38867955516
 
-## Terminal-only installation (2026-10-16, current)
+## Terminal-only installation (2026-10-16, revision 1)
 
-Package installers are no longer the installation path. The public command installs one signed zip. Visible version remains 1.1.5. Internal revision is 1. The architecture is not locked.
+Package installers are no longer the installation path. The public command installs one signed zip. Visible version remains 1.1.5. This section records internal revision 1. It is not the current archive.
 
 Current archives:
 
@@ -92,4 +92,28 @@ Public gate https://github.com/bradjohnson79/adeptui/actions/runs/38938192171 at
 
 macOS bundle check `SIGNATURE_STRUCTURE: PASS`. `spctl` remains `NOT_ACCEPTED`. A screenshot from https://github.com/bradjohnson79/adeptui/actions/runs/38938192203 shows the window titled Adept UI Studio and the setup choices. The System Events title probe did not read that title. Notarization remains an external blocker.
 
-Ubuntu and Fedora virtual displays started the application and showed an Error window, not Adept UI Studio. That is not a physical-desktop pass.
+Ubuntu and Fedora virtual displays for revision 1 started the application and showed an Error window, not Adept UI Studio. That is not a physical-desktop pass.
+
+## Universal Terminal Installer — OWNER-LOCK READY (2026-10-16)
+
+Visible version remains 1.1.5. Internal revision is 3. The public catalog points at new archives and does not replace the revision 1 files above.
+
+| File | Bytes | SHA-256 |
+|---|---:|---|
+| Adept.UI-1.1.5-terminal-r6-win-x64.zip | 370940940 | 8acab679869e3742afd3f0ae10bbcae9e76225c114baff36bafa5f9fd96a04e8 |
+| Adept.UI-1.1.5-terminal-r6-linux-x64.zip | 578096251 | e6fe2d1997028511478802e8f33bc30d2f531b09ee752074299eab335003744b |
+| Adept.UI-1.1.5-terminal-r6-mac-arm64.zip | 430838384 | 6af1c85f9f5efce69e365ecc8feb50d934e7d42596136573a9f5cfa9cd1a0bc2 |
+
+Catalog SHA-256 `d742bf531b88b6c7cead962b4f1aa05e33790d5557efa74fc92f9522c8c01fe2`. Signature SHA-256 `063fe09301553d2384b1c09ead7aa0f182c0dec4ab3bbba3a5e2714c7078b8b8`. Live deployment `dpl_DRvfMsySJNzxf6pZrMk2mxWSzpB1`.
+
+Linux Studio was failing because the packaged Python runtime was extracted without its executable bit. The main process then showed “A JavaScript error occurred in the main process” (`spawn .../python EACCES`). Startup now marks that runtime executable. The terminal installer was not changed.
+
+Public installation gate https://github.com/bradjohnson79/adeptui/actions/runs/38951351797 at `1c8fafdf` succeeded. Windows reported `INSTALLATION: PASS`, `SHORTCUT: PASS`, `STUDIO_WINDOW: PASS Adept UI Studio`, `UPDATE: PASS`, `PREVIOUS_VERSION_PRESERVED: PASS`, and `SAME_VERSION_REVISION: PASS 3`.
+
+Studio certification https://github.com/bradjohnson79/adeptui/actions/runs/38951351688 succeeded. Ubuntu on Xvfb reported `STUDIO_WINDOW_first: PASS`, `SETUP_WIZARD: PASS`, `RESTART: PASS`, and `UNINSTALL_PRESERVES_USER_DATA: PASS`, labeled `DISPLAY: VIRTUAL_XVFB`. Fedora in a container on Xvfb reported the same window, restart, and user-data results, with `SETUP_WIZARD: NOT_VERIFIED`. Neither Linux result is a physical-desktop verification.
+
+macOS reported `INSTALLATION: PASS`, `SIGNATURE_STRUCTURE: PASS`, `SHUTDOWN: PASS`, `RESTART: PASS`, and `UNINSTALL_PRESERVES_USER_DATA: PASS`. `GATEKEEPER: NOT_ACCEPTED`. `NOTARIZATION: EXTERNAL_BLOCKER`. The System Events title probe printed `STUDIO_WINDOW: PROCESS_STARTED title not confirmed`.
+
+The desktop update selector calls the existing Universal Launcher. It does not contain a second updater. The launcher checks the signed catalog, verifies the archive, and applies the update after Studio exits.
+
+Do not modify this architecture without explicit owner authorization.
