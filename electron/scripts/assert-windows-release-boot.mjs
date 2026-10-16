@@ -45,6 +45,9 @@ for (const name of setupNames) {
 }
 if (!["PRESENT", "ABSENT"].includes(unpacked.setupGates?.["COMFY DETECTED WHEN REACHABLE"])) failures.push("unpacked comfy detection");
 if (installed.setupGates?.["DESKTOP SHORTCUT"] !== "PASS") failures.push("desktop shortcut");
+if (installed.setupGates?.["LAUNCHER BESIDE ELECTRON"] !== "PASS") failures.push("launcher is not beside Electron");
+if (installed.setupGates?.["SHORTCUT TARGETS LAUNCHER"] !== "PASS") failures.push("desktop shortcut does not target the launcher");
+if (installed.setupGates?.["STUDIO WINDOW"] !== "PASS") failures.push("studio window was not visible");
 
 if (failures.length) {
   console.error(failures.join("\n"));

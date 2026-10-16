@@ -63,6 +63,7 @@ function runInstaller(args) {
 }
 const installA = runInstaller(["/S", `/D=${installDir}`]);
 const exe = path.join(installDir, "Adept UI.exe");
+const launcherExe = path.join(installDir, "Adept Launcher.exe");
 const exeAfterA = fs.existsSync(exe);
 fs.mkdirSync(markerDir, { recursive: true });
 fs.writeFileSync(marker, "disposable-project-marker");
@@ -72,7 +73,17 @@ const exeAfterB = fs.existsSync(exe);
 const userData = path.join(process.env.TEMP, "adept-ui-installed-profile");
 fs.rmSync(userData, { recursive: true, force: true });
 fs.mkdirSync(userData, { recursive: true });
-const child = spawn(exe, [`--user-data-dir=${userData}`], { cwd: installDir, windowsHide: false, stdio: "ignore" });
+const launcherBesideElectron = fs.existsSync(launcherExe) && path.dirname(launcherExe) === path.dirname(exe);
+const launchTarget = launcherBesideElectron ? launcherExe : exe;
+const launchArgs = launcherBesideElectron
+  ? ["--root", path.join(userData, "launcher-root")]
+  : [`--user-data-dir=${userData}`];
+const child = spawn(launchTarget, launchArgs, {
+  cwd: installDir,
+  windowsHide: false,
+  stdio: "ignore",
+  env: { ...process.env, ADEPT_ELECTRON_ARGS: `--user-data-dir=${userData}` },
+});
 const statusFile = path.join(userData, "desktop-status.json");
 const statusDeadline = Date.now() + 150000;
 while (Date.now() < statusDeadline && !fs.existsSync(statusFile)) {
@@ -108,14 +119,35 @@ const setupProbe = installedHealth.status === 200
   ? await probePackagedSetup("http://127.0.0.1:8760", { tempRoot: userData })
   : { gates: {}, evidence: { skipped: true } };
 const desktopShortcut = path.join(process.env.USERPROFILE || "", "Desktop", "Adept UI.lnk");
+function shortcutTarget(lnk) {
+  if (!fs.existsSync(lnk)) return "";
+  const escaped = lnk.replace(/'/g, "''");
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", `(New-Object -ComObject WScript.Shell).CreateShortcut('${escaped}').TargetPath`], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return String(result.stdout || "").trim();
+}
+const desktopShortcutTarget = shortcutTarget(desktopShortcut);
+const windowProbe = spawnSync("powershell.exe", ["-NoProfile", "-Command", "Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } | ForEach-Object { $_.ProcessName + '|' + $_.MainWindowTitle }"], {
+  encoding: "utf8",
+  windowsHide: true,
+});
+const windowTitles = String(windowProbe.stdout || "");
 const setupGates = {
   ...setupProbe.gates,
   "RENDERER SHIPS COMFY PREREQUISITE": rendererShipsComfyPrerequisite(path.join(installDir, "resources", "renderer")) ? "PASS" : "FAIL",
   "DESKTOP SHORTCUT": fs.existsSync(desktopShortcut) ? "PASS" : "FAIL",
+  "LAUNCHER BESIDE ELECTRON": launcherBesideElectron ? "PASS" : "FAIL",
+  "SHORTCUT TARGETS LAUNCHER": desktopShortcutTarget.toLowerCase().endsWith("adept launcher.exe") ? "PASS" : "FAIL",
+  "STUDIO WINDOW": /adept ui/i.test(windowTitles) ? "PASS" : "FAIL",
 };
 const installedStatus = fs.existsSync(path.join(userData, "desktop-status.json"))
   ? JSON.parse(fs.readFileSync(path.join(userData, "desktop-status.json"), "utf8"))
   : null;
+spawnSync("powershell.exe", ["-NoProfile", "-Command",
+  "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '*adept-install-a*' -or $_.ExecutablePath -like '*adept-ui-installed-profile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+], { windowsHide: true });
 spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true });
 const uninstaller = path.join(installDir, "Uninstall Adept UI.exe");
 const uninstall = fs.existsSync(uninstaller)
@@ -165,6 +197,9 @@ const result = {
   setupGates,
   setupEvidence: setupProbe.evidence,
   desktopShortcut,
+  desktopShortcutTarget,
+  launcherBesideElectron,
+  windowTitles: windowTitles.trim(),
 };
 fs.writeFileSync(path.join(root, "electron", "build", "installer-cert.json"), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));

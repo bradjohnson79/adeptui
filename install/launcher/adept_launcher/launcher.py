@@ -167,13 +167,22 @@ def _worker_main(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def electron_command(executable: Path) -> list[str]:
+    """Electron argv. ADEPT_ELECTRON_ARGS is one local override, never catalog data."""
+    command = [str(executable)]
+    extra = os.environ.get("ADEPT_ELECTRON_ARGS", "").strip()
+    if extra:
+        command.append(extra)
+    return command
+
+
 def _launch_app(lifecycle: Lifecycle, executable: Path) -> None:
     env = os.environ.copy()
     env["ADEPT_LAUNCHED_BY_UPDATER"] = "1"
     kwargs = {"close_fds": True, "env": env}
     if sys.platform == "win32":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    subprocess.Popen([str(executable)], **kwargs)
+    subprocess.Popen(electron_command(executable), **kwargs)
 
 
 def _continue(lifecycle: Lifecycle, executable: Path, code: str, version: str, message: str) -> int:

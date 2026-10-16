@@ -29,9 +29,15 @@ run(process.execPath, [builder, "--win", "--config", "electron/builder.config.cj
 });
 const version = JSON.parse(fs.readFileSync(path.join(root, "electron", "version.json"), "utf8")).version;
 const setup = path.join(root, "electron", "dist", `Adept UI-Setup-${version}-win-x64.exe`);
-const unpacked = path.join(root, "electron", "dist", "win-unpacked", "Adept UI.exe");
+const unpackedDir = path.join(root, "electron", "dist", "win-unpacked");
+const unpacked = path.join(unpackedDir, "Adept UI.exe");
+const launcher = path.join(unpackedDir, "Adept Launcher.exe");
 if (!fs.existsSync(unpacked)) {
   console.error("unpacked exe missing");
+  process.exit(1);
+}
+if (!fs.existsSync(launcher)) {
+  console.error("Adept Launcher.exe is not beside Adept UI.exe. Refusing a Windows build that hides the launcher under resources.");
   process.exit(1);
 }
 console.log(`unpacked ${unpacked}`);

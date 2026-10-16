@@ -292,3 +292,13 @@ def test_production_active_defers_update(monkeypatch, tmp_path, keys):
     assert status["code"] == "DEFERRED"
     assert len(launched) == 1
     assert (app_dir / EXE_NAME).read_bytes() == original
+
+
+def test_launcher_forwards_local_electron_args(monkeypatch):
+    monkeypatch.setenv("ADEPT_ELECTRON_ARGS", "--user-data-dir=C:\\adept-isolated")
+    assert launcher.electron_command(Path("Adept UI.exe")) == [
+        "Adept UI.exe",
+        "--user-data-dir=C:\\adept-isolated",
+    ]
+    monkeypatch.delenv("ADEPT_ELECTRON_ARGS")
+    assert launcher.electron_command(Path("Adept UI.exe")) == ["Adept UI.exe"]

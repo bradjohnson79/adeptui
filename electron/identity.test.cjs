@@ -32,6 +32,19 @@ test("the visible product stays Adept UI and the package id stays stable", () =>
   assert.equal(config.mac.notarize, false);
 });
 
+test("Windows ships the Universal Launcher beside Electron", () => {
+  const configText = fs.readFileSync(path.join(root, "builder.config.cjs"), "utf8");
+  const nsis = fs.readFileSync(path.join(root, "nsis", "installer.nsh"), "utf8");
+  assert.match(configText, /extraFiles:\s*\[/);
+  assert.match(configText, /process\.platform === "win32" && fs\.existsSync\(launcherBinary\)/);
+  assert.match(configText, /process\.platform !== "win32" && fs\.existsSync\(launcherBinary\)/);
+  assert.match(nsis, /\$INSTDIR\\Adept Launcher\.exe/);
+  const extraFiles = configText.slice(configText.indexOf("extraFiles:"));
+  const resourcesOnly = configText.slice(0, configText.indexOf("extraFiles:"));
+  assert.match(extraFiles, /process\.platform === "win32"/);
+  assert.doesNotMatch(resourcesOnly, /process\.platform === "win32" && fs\.existsSync\(launcherBinary\)/);
+});
+
 test("package icons are resized from the official Adept Sun master", () => {
   const script = fs.readFileSync(path.join(root, "scripts", "make-icons.mjs"), "utf8");
   assert.match(script, /adept-sun-master\.jpg/);
@@ -52,7 +65,8 @@ test("AppStream names Adept UI and ANOINT Inc.", () => {
   assert.doesNotMatch(metainfo, /type="stock"/);
   assert.match(metainfo, /<release version="1\.1\.2"/);
   assert.match(metainfo, /<release version="1\.1\.1"/);
-  assert.equal(identity.version, "1.1.3");
+  assert.match(metainfo, /<release version="1\.1\.4"/);
+  assert.equal(identity.version, "1.1.4");
   assert.equal(config.linux.desktop.entry.Icon, "app.adeptui.desktop");
   for (const size of [48, 64, 128, 256, 512]) {
     const source = path.join(root, "icons", "png", `${size}x${size}.png`);
