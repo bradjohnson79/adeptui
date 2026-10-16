@@ -1,12 +1,12 @@
 {
   "schema": 1,
   "status": "PASS",
-  "version": "1.1.4",
-  "catalogSha256": "341c7f98549af5be4330a2d93c7d01b3e94e85b0d838e5150617e437ea38e468",
-  "signatureSha256": "eb84d9474309d3d628db7ef3c47c0bad48609644227af8d79f7c5ad1e3fb1f23",
-  "verifiedAt": "2026-10-16T03:55:00Z",
-  "gitSha": "60d7c397d2bd8cb3c2ae11676af86c952a3b9adf",
-  "workflowRunUrl": "https://github.com/bradjohnson79/adeptui/actions/runs/38847177899",
+  "version": "1.1.5",
+  "catalogSha256": "0347483535888ee752bbffbb639a89745f8a864b6b18d42b3d4d037feb18b588",
+  "signatureSha256": "014ab3e9d2f232092f55030f070bfe93ec4f881df98e234568135a40644396f0",
+  "verifiedAt": "2026-10-16T04:46:00Z",
+  "gitSha": "d663ddd06eb59a066438d76c8a235640038f5cd8",
+  "workflowRunUrl": "https://github.com/bradjohnson79/adeptui/actions/runs/38851577000",
   "checks": {
     "catalogSignature": "PASS",
     "windowsInstall": "PASS",

@@ -1,6 +1,6 @@
 # Adept UI 1.1.4 evidence ledger
 
-Phase: 1.1.5 artifacts are built and the GitHub release exists. The signed catalog is ready to deploy.
+Phase: 1.1.5 public install gate passed. Integrity record is ready to deploy.
 
 ## Passing
 
