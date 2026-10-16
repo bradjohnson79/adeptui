@@ -43,6 +43,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.1.5" date="2026-10-15">
+      <description>
+        <p>The first launch records the installed version, so Adept UI checks the signed release catalog before opening.</p>
+      </description>
+    </release>
     <release version="1.1.4" date="2026-10-15">
       <description>
         <p>The Windows installer starts Adept UI through the Universal Launcher, which now sits beside the application instead of inside its resources folder.</p>

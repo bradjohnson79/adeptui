@@ -294,6 +294,29 @@ def test_production_active_defers_update(monkeypatch, tmp_path, keys):
     assert (app_dir / EXE_NAME).read_bytes() == original
 
 
+def test_first_launch_records_packaged_version_before_catalog_check(monkeypatch, tmp_path, keys):
+    _, private = keys
+    app = tmp_path / "app"
+    resources = app / ("Resources" if sys.platform == "darwin" else "resources")
+    if sys.platform == "darwin":
+        exe = app / "MacOS" / "Adept UI.bin"
+    else:
+        exe = app / EXE_NAME
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    resources.mkdir(parents=True, exist_ok=True)
+    exe.write_bytes(b"installed")
+    (resources / "version.json").write_text('{"version":"1.1.4"}', encoding="utf-8")
+    monkeypatch.setenv("ADEPT_APP_EXECUTABLE", str(exe))
+    catalog = signed_catalog(private, "1.1.4", digest="0" * 64)
+    rc, launched = run_launcher(monkeypatch, tmp_path, catalog, tmp_path / "unused.zip")
+    assert rc == 0
+    assert len(launched) == 1
+    registry = read_json(tmp_path / "registry.json")
+    assert registry["installedVersion"] == "1.1.4"
+    status = read_json(tmp_path / "startup-update.json")
+    assert status["code"] == "NO_UPDATE"
+
+
 def test_launcher_forwards_local_electron_args(monkeypatch):
     monkeypatch.setenv("ADEPT_ELECTRON_ARGS", "--user-data-dir=C:\\adept-isolated")
     assert launcher.electron_command(Path("Adept UI.exe")) == [

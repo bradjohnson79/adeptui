@@ -1,6 +1,6 @@
 # Adept UI 1.1.4 evidence ledger
 
-Phase: public install gate passed for 1.1.4. Integrity record is ready to deploy.
+Phase: 1.1.4 is the live public release. 1.1.5 is building so the first launch records the installed version and checks the catalog.
 
 ## Passing
 
@@ -52,6 +52,10 @@ Run `38847177899` completed success. Live catalog verification returned PASS bef
 - Fedora container: installation, the same Electron sibling, reinstall and user data. Not a physical desktop.
 - macOS: public install and reinstall. The desktop smoke of the same disk image showed the window. Notarization is an external blocker.
 
+## Remaining
+
+The published 1.1.4 launcher starts the app when no version is recorded, and it never writes that version. The catalog check therefore does not run. The repair records `resources/version.json` on first launch and then checks the catalog. That repair is 1.1.5 and is not in the live installer yet.
+
 ## Next
 
-Deploy the integrity record. Do not claim macOS notarization or a physical Fedora desktop.
+Build Windows, macOS, and Linux 1.1.5. Sign and publish only after those artifacts exist. Do not claim macOS notarization or a physical Fedora desktop.

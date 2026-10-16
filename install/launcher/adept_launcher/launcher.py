@@ -66,6 +66,24 @@ def _sibling_app_executable() -> Path | None:
     return None
 
 
+def _packaged_version(executable: Path) -> str | None:
+    """Version shipped beside Electron. A first launch records this so the next check is real."""
+    import json
+
+    if sys.platform == "darwin":
+        candidate = executable.parent.parent / "Resources" / "version.json"
+    else:
+        candidate = executable.parent / "resources" / "version.json"
+    if not candidate.is_file():
+        return None
+    try:
+        data = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    version = data.get("version") if isinstance(data, dict) else None
+    return str(version) if version else None
+
+
 def _build_hooks() -> Hooks:
     """Launch hooks: official signed catalog, no second package installer."""
     return Hooks(fetch_catalog=_fetch_official_catalog)
@@ -222,6 +240,10 @@ def run(argv: list[str] | None = None) -> int:
 
     registry = read_registry(layout.registry_path)
     remembered = os.environ.get("ADEPT_INSTALLED_VERSION")
+    if not registry or not registry.get("installedVersion"):
+        packaged = _packaged_version(lifecycle._executable()) if lifecycle._executable() else None
+        if packaged and not remembered:
+            remembered = packaged
     if (not registry or not registry.get("installedVersion")) and remembered:
         from adept_lifecycle.registry import empty_registry
 
